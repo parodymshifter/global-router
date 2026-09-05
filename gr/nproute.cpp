@@ -40,6 +40,18 @@
 // idea, not another sweep of these same knobs; recording that honestly
 // rather than continuing to tune them past where they're paying off.
 //
+// One idea that was tried and didn't pay off: varying the threshold across
+// rounds instead of holding it fixed, hoping a later relaxation would let
+// nets that took a defensive detour find something shorter once the worst
+// congestion had already been resolved. See thresholdForRound's comment for
+// the full result -- in short, both directions (rising and falling) come
+// out worse than holding still, and not for a reason specific to either
+// direction: any schedule needs to give up selective rip-up to let already-
+// legal nets react at all, and full reroute every round is worse regardless
+// of what threshold policy accompanies it. The wirelength question that was
+// built to answer never got answered, because the overflow cost of the
+// mechanism needed to ask it dominates first.
+//
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o nproute nproute.cpp
 //
@@ -58,7 +70,19 @@
 //     NPROUTE_ROUNDS=<int>       max rounds, default 30
 //     NPROUTE_PATIENCE=<int>     rounds without improvement before giving
 //                                up, default 20
-//     NPROUTE_TRACE=1            print each round's overflow to stderr
+//     NPROUTE_SCHEDULE=rising|falling
+//                                vary the threshold across rounds instead of
+//                                holding it fixed (see thresholdForRound's
+//                                comment) -- measured worse than not setting
+//                                this in every variant tried; kept for the
+//                                record and in case a future idea revisits
+//                                the mechanism rather than just the policy.
+//     NPROUTE_SCHEDULE_START, NPROUTE_SCHEDULE_END, NPROUTE_SCHEDULE_ROUNDS
+//                                override the schedule's bounds and ramp
+//                                length (rounds); only meaningful with
+//                                NPROUTE_SCHEDULE set
+//     NPROUTE_TRACE=1            print each round's overflow (and, while a
+//                                schedule is active, its threshold) to stderr
 
 #include <algorithm>
 #include <chrono>
@@ -374,11 +398,11 @@ void undoCharge(const RoutingGrid &g, Usage &u, const ChargeRecord &c) {
 //     (0 to 1 in steps of 0.05-0.1, power 0.5 to 4); the result is a broad,
 //     stable plateau roughly in threshold [0.15, 0.45] x power [2, 3], not
 //     a knife-edge optimum -- 0.2/2.5 sits comfortably inside it.
-double priceExponentTerm(double usage, double cap) {
-  static const double threshold = [] {
-    const char *t = std::getenv("NPROUTE_THRESHOLD");
-    return t ? std::atof(t) : 0.2;
-  }();
+// `threshold` is now a parameter rather than a fixed static lookup, so a
+// per-round schedule (see thresholdForRound below) can vary it call to
+// call; the static default (env var or 0.2) lives in defaultThreshold()
+// for callers that aren't scheduling anything.
+double priceExponentTerm(double usage, double cap, double threshold) {
   static const double power = [] {
     const char *p = std::getenv("NPROUTE_POWER");
     return p ? std::atof(p) : 2.5;
@@ -390,15 +414,23 @@ double priceExponentTerm(double usage, double cap) {
   return std::pow(r, power);
 }
 
+double defaultThreshold() {
+  static const double threshold = [] {
+    const char *t = std::getenv("NPROUTE_THRESHOLD");
+    return t ? std::atof(t) : 0.2;
+  }();
+  return threshold;
+}
+
 void negotiate(const RoutingGrid &g, Prices &pr, const Usage &u, const ChargeRecord &c,
-               double epsilon) {
+               double epsilon, double threshold) {
   if (c.horizontal) {
     for (int x = c.a; x < c.b; ++x) {
       size_t i = g.hIndex(x, c.cross, c.layer);
       if (g.hcap[i] <= 0)
         pr.h[i] = kForbiddenPrice;
       else
-        pr.h[i] *= std::exp(epsilon * priceExponentTerm(u.h[i], g.hcap[i]));
+        pr.h[i] *= std::exp(epsilon * priceExponentTerm(u.h[i], g.hcap[i], threshold));
     }
   } else {
     for (int y = c.a; y < c.b; ++y) {
@@ -406,7 +438,7 @@ void negotiate(const RoutingGrid &g, Prices &pr, const Usage &u, const ChargeRec
       if (g.vcap[i] <= 0)
         pr.v[i] = kForbiddenPrice;
       else
-        pr.v[i] *= std::exp(epsilon * priceExponentTerm(u.v[i], g.vcap[i]));
+        pr.v[i] *= std::exp(epsilon * priceExponentTerm(u.v[i], g.vcap[i], threshold));
     }
   }
 }
@@ -436,7 +468,7 @@ struct RoutedNet {
 };
 
 void routeNet(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPlan &lp,
-              double epsilon, RoutedNet &rn) {
+              double epsilon, double threshold, RoutedNet &rn) {
   for (const ChargeRecord &c : rn.charges)
     undoCharge(g, usage, c);
   rn.segs.clear();
@@ -461,7 +493,7 @@ void routeNet(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPla
     EdgeResult r = commitCandidate(candidates[bestIdx], bestPriced.legLayer, g, usage,
                                     rn.net->minWidth, rn.segs, rn.charges);
     for (size_t i = chargesBefore; i < rn.charges.size(); ++i)
-      negotiate(g, prices, usage, rn.charges[i], epsilon);
+      negotiate(g, prices, usage, rn.charges[i], epsilon, threshold);
 
     reconcile(nodeLayer, e.first, r.layerAtP1, p1, rn.segs);
     reconcile(nodeLayer, e.second, r.layerAtP2, p2, rn.segs);
@@ -516,6 +548,76 @@ struct RunReport {
   bool stalled = false;
 };
 
+// EXPERIMENTAL: a round-varying threshold, for testing whether relaxing (or
+// tightening) the early-warning curve over time changes the wirelength/
+// overflow trade-off -- see the tuning notes above route() for what this
+// measured. Returns -1 (a sentinel, not a valid threshold) when
+// NPROUTE_SCHEDULE isn't set, meaning "use the static default everywhere."
+//
+//   NPROUTE_SCHEDULE=rising   ramps threshold up: cautious early (catches
+//                             the worst congestion while nothing has
+//                             committed to anything yet), relaxed later
+//                             (once things have stabilized, let nets that
+//                             took a defensive detour reconsider under a
+//                             calmer landscape). Default 0.0 -> 0.9.
+//   NPROUTE_SCHEDULE=falling  the reverse: relaxed early, cautious late.
+//                             Default 0.9 -> 0.0.
+//   NPROUTE_SCHEDULE_START, NPROUTE_SCHEDULE_END, NPROUTE_SCHEDULE_ROUNDS
+//                             override the bounds and the ramp length
+//                             (rounds to go from start to end; holds at end
+//                             afterward). Default ramp length 10 rounds.
+//
+// A schedule only makes sense if nets that are already legal get a chance
+// to react to the changing landscape too, so route() reroutes every net
+// every round while one is active, not just currently-overflowed ones.
+//
+// Measured result on adaptec1 (static baseline: 299304): rising (0.0 ->
+// 0.9 over 10 rounds) bottoms out at 310720 in round 1, at threshold
+// barely above 0 -- then gets monotonically worse every single round as
+// the threshold climbs, reaching 645944 by round 29. Falling (0.9 -> 0.0)
+// is worse from round 0 (531694, vs. rising's round-0 446004: starting
+// cautious matters even before anything else happens) and, once it
+// reaches threshold 0, plateaus around 410-412K -- still 37% worse than
+// the static baseline. Neither schedule beat holding still.
+//
+// The isolating experiment: NPROUTE_SCHEDULE=falling with START=END=0.2 --
+// a *constant* threshold, but run through this same code path, meaning
+// full reroute every round instead of selective rip-up. Round 1 gives
+// 307114, close to the static baseline's 299304 (both are, after all,
+// pricing everything the same way at that point) -- then it drifts to
+// 392306 by round 14, reproducing the exact churn selective rip-up was
+// built to fix. That is the actual finding: it is not that rising is bad
+// or falling is bad, it is that *any* schedule requires giving up
+// selective rip-up to let already-legal nets react at all, and full
+// reroute every round is a strictly worse dynamic than selective rip-up
+// regardless of what threshold policy rides on top of it. The wirelength
+// question this was built to answer never got a clean answer, because
+// the overflow cost of the mechanism needed to ask it dominates before
+// any wirelength effect has a chance to show up.
+double thresholdForRound(int round) {
+  static const std::string schedule = [] {
+    const char *s = std::getenv("NPROUTE_SCHEDULE");
+    return s ? std::string(s) : std::string();
+  }();
+  if (schedule.empty())
+    return -1.0;
+  static const bool rising = schedule == "rising";
+  static const double start = [] {
+    const char *s = std::getenv("NPROUTE_SCHEDULE_START");
+    return s ? std::atof(s) : (rising ? 0.0 : 0.9);
+  }();
+  static const double end = [] {
+    const char *s = std::getenv("NPROUTE_SCHEDULE_END");
+    return s ? std::atof(s) : (rising ? 0.9 : 0.0);
+  }();
+  static const int rampRounds = [] {
+    const char *s = std::getenv("NPROUTE_SCHEDULE_ROUNDS");
+    return s ? std::atoi(s) : 10;
+  }();
+  double t = rampRounds > 0 ? std::min(1.0, static_cast<double>(round) / rampRounds) : 1.0;
+  return start + (end - start) * t;
+}
+
 // With the early-warning curve, convergence is fast (round 1 on all three
 // benchmarks tested) rather than the slow multi-round burn the flat
 // overflow-only formula needed. Patience stays well above 1 anyway as a
@@ -555,28 +657,44 @@ RunReport route(const Design &d, int maxRounds, double epsilon) {
     nets.push_back(std::move(rn));
   }
 
+  double staticThreshold = defaultThreshold();
+
   // Giant nets: route once, negotiating as they go same as everyone else on
-  // this first touch, then frozen -- never revisited by later rounds.
+  // this first touch, then frozen -- never revisited by later rounds. Always
+  // priced at the static threshold regardless of any schedule -- they are
+  // never revisited anyway, so there is no "later, relaxed round" for them
+  // to benefit from.
   for (RoutedNet &rn : nets)
     if (rn.giant)
-      routeNet(g, prices, usage, lp, epsilon, rn);
+      routeNet(g, prices, usage, lp, epsilon, staticThreshold, rn);
 
   int roundsSinceImprovement = 0;
   for (int round = 0; round < maxRounds; ++round) {
-    // Round 0 gives every net its first route. After that, only nets
-    // currently sitting on an overflowed edge get ripped up and rerouted --
-    // matching proute's rip-up discipline. Rerouting an already-legal net
-    // every round bought nothing but churn: measured on adaptec1, "reroute
-    // everyone always" drifts from a round-1 low of 473K up past 530K over
-    // the following rounds, since a net with a perfectly good route can get
-    // shaken loose by *other* nets' price changes even though nothing about
-    // its own situation changed.
+    double scheduled = thresholdForRound(round);
+    bool scheduling = scheduled >= 0.0;
+    double threshold = scheduling ? scheduled : staticThreshold;
+    if (scheduling && std::getenv("NPROUTE_TRACE"))
+      std::cerr << "round " << round << " threshold " << threshold << "\n";
+
+    // Round 0 gives every net its first route. After that, with no schedule
+    // running, only nets currently sitting on an overflowed edge get ripped
+    // up and rerouted -- matching proute's rip-up discipline. Rerouting an
+    // already-legal net every round bought nothing but churn: measured on
+    // adaptec1, "reroute everyone always" drifts from a round-1 low of 473K
+    // up past 530K over the following rounds, since a net with a perfectly
+    // good route can get shaken loose by *other* nets' price changes even
+    // though nothing about its own situation changed.
+    //
+    // A schedule changes that calculus: the whole point of relaxing (or
+    // tightening) the threshold over rounds is to let nets that are already
+    // legal reconsider under the new landscape, so while one is running,
+    // every net is rerouted every round, not just overflowed ones.
     for (RoutedNet &rn : nets) {
       if (rn.giant)
         continue;
-      if (round > 0 && !netOverflowed(g, usage, rn))
+      if (!scheduling && round > 0 && !netOverflowed(g, usage, rn))
         continue;
-      routeNet(g, prices, usage, lp, epsilon, rn);
+      routeNet(g, prices, usage, lp, epsilon, threshold, rn);
     }
 
     long long overflow = totalOverflow(g, usage);
