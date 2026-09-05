@@ -6,6 +6,7 @@ nproute
 mroute
 hroute
 droute
+croute
 *.o
 bench/
 *.gr
