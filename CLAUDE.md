@@ -98,7 +98,53 @@ most edges. Run RUDY or a cheap pattern route first.
 
 **Decompose giant nets.** A 200-terminal net should be split at the coarse
 level into subnets, not routed as a monolith. Also removes a parallelism
-serialization point.
+serialization point. A giant net that skips the search entirely for
+performance must still charge usage for whatever route it emits — omitting
+that silently hides real capacity consumption from every other net's pricing
+decisions, and the bug won't show up in that net's own routability, only as
+an unexplained mismatch against an independent overflow count.
+
+**Bound maze search with a fixed margin, not one scaled to net span.** Cap the
+search box around a tree edge's two endpoints at a small absolute constant,
+and only expand it (doubling) if that fails to connect. A margin scaled to
+point separation lets a handful of long nets search close to the entire grid —
+one call needed a 629856-cell region (the whole 324x324x6 grid) against a
+4184-cell average, enough on its own to make a round take 105 seconds. A
+direct sweep of the cap found overflow flat across the whole range while
+runtime scaled smoothly with it, so the extra search breadth was never buying
+anything. Once real shortest-path search is in play, use A* over plain
+Dijkstra: a Manhattan-distance heuristic (ignoring layer) is admissible, since
+every H/V/via edge costs at least 1, so it changes nothing about which path is
+found and roughly halves the work again.
+
+**Combine a cheap solver and an expensive solver by escalating individual
+nets, not by choosing one algorithm for the whole design.** A real per-tree-
+edge shortest-path search finds routes a fixed pattern menu structurally
+cannot, but at an order of magnitude more runtime, and which whole design
+benefits is not predictable in advance from a handful of benchmarks — one
+router beat another outright on one benchmark and lost clearly on the other
+two. Run the cheap tier to convergence first; escalate to the expensive tier
+only the nets still overflowed afterward, and once a net escalates, leave it
+there for the rest of the run — no reason to downgrade after paying for a real
+search.
+
+**Escalation, or any switch to a more powerful mode, must be supervised per
+net — never accepted as an unconditional batch.** Reroute, check the overflow
+delta local to the edges that net touches (not a full grid rescan), and revert
+on the spot if it made things worse — the same rule a post-convergence cleanup
+pass should already follow. This is not a hypothetical guard: accepting every
+escalated net's reroute unconditionally in one pass put 30% of a design's nets
+on the expensive tier at once, spiked overflow to roughly 25x the cheap tier's
+own result, and never recovered past it even after further rounds.
+
+**The per-round pricing threshold is fixed, not a scheduled or excused one.**
+Ramping it up or down across rounds, or permanently excusing nets that stayed
+under it, were both tried directly and both made results monotonically worse
+the more aggressively they relaxed. The common cause: once already-routed
+nets must react to a moving threshold, the loop has to reroute everyone every
+round, which reintroduces exactly the churn selective rip-up exists to
+prevent. Relaxation only pays off as a one-time, supervised, post-convergence
+pass — never as a moving target inside the main loop.
 
 ## Net typing: detour slack
 
@@ -248,6 +294,16 @@ overflow, max overflow, and wirelength must agree. If they diverge, assume our
 code is wrong first: theirs scored an actual contest. Note that 2008-era Perl
 may fail on modern interpreters, usually `defined(@array)`, removed in 5.22.
 
+**Run the Perl evaluator every time, not just when something looks wrong.**
+After any round that produces a new result on all three ISPD benchmarks
+(adaptec1, newblue1, bigblue1) — a new router, a tuning change, a bug fix —
+run the downloaded Perl evaluator against each of the three solution files
+and compare its total overflow, max overflow, and wirelength against
+`gr_verify`'s numbers for the same file before recording the result as
+settled. A result only checked against our own verifier is checked against
+our own possible bug; agreement with the independent scorer is what makes a
+number trustworthy enough to compare across commits.
+
 **Provenance tracking.** Record, for every committed edge, which net asked for
 it, which constraint permitted it, and which input record supplied that
 constraint. Then a verifier hit resolves in one step instead of a debugging
@@ -258,6 +314,33 @@ only. Add this at the verification stage; it is painful to retrofit.
 
 Limit worth knowing: provenance identifies which input record was involved. It
 cannot tell you whether that record reflects what the designer meant.
+
+## Testing arithmetic edge cases
+
+Every formula in this project divides, exponentiates, or takes a log of a
+quantity that can legitimately be zero, negative, or huge. Wrong behavior
+there doesn't crash — it silently produces a worse route, which is the
+failure mode "Verification principles" above already warns about. Any code
+implementing one of these needs a test for its edge case, not just its
+happy path:
+
+- `cost = length + lambda_e * width_i / w_i` — `w_i == 0` (unset or
+  zero priority weight).
+- `lambda_e <- lambda_e * exp(epsilon * usage_e / capacity_e)` —
+  `capacity_e == 0` (a `.gr` reduced-capacity adjustment can zero an edge),
+  and `lambda_e` overflowing after many rounds on a persistently congested
+  edge.
+- `L_slack = slack_i / (dd/dL)` — `dd/dL == 0` or negative (a slack sign
+  flip, or a driver/load combination that degenerates the Elmore term).
+- `F_i = L_slack_i * log(route_count_i)` — `route_count_i <= 1`, where
+  `log` is undefined or zero.
+- `log C(dx+dy, dx)` for bounding-box entropy — `dx == 0` or `dy == 0`
+  (a net whose pins share a row or column).
+- `alpha * cap` nested capacity budgets — `alpha == 0`, and integer overflow
+  when `width_i` or `cap_e` values are summed across many nets on one edge.
+
+Write the test to fail on the current code before fixing it, per the
+self-test pattern in `gr_verify.cpp`.
 
 ## Porting seam
 
