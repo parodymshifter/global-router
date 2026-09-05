@@ -81,8 +81,19 @@
 //                                override the schedule's bounds and ramp
 //                                length (rounds); only meaningful with
 //                                NPROUTE_SCHEDULE set
+//     NPROUTE_EXCUSE_THRESHOLD=<float>
+//                                in schedule mode, permanently exempt a net
+//                                from rip-up once it completes a route
+//                                without any edge it touches reaching this
+//                                fraction of capacity from other nets
+//                                (default 0.2) -- see markExcusedIfClear's
+//                                comment. Measured worse the higher it's
+//                                set; kept for the record alongside the
+//                                schedule mechanism it was built to rescue.
 //     NPROUTE_TRACE=1            print each round's overflow (and, while a
 //                                schedule is active, its threshold) to stderr
+//     NPROUTE_TRACE_EXCUSED=1    with NPROUTE_TRACE and a schedule active,
+//                                also print how many nets are excused so far
 
 #include <algorithm>
 #include <chrono>
@@ -465,6 +476,11 @@ struct RoutedNet {
   std::vector<Seg> segs;
   std::vector<ChargeRecord> charges;
   bool giant = false;
+  // Set once a net completes a route while every edge it touches was still
+  // under the exclusion threshold (see markExcusedIfClear), from usage
+  // contributed by everything else -- never cleared once set. Only
+  // meaningful in schedule mode; see the schedule comment above route().
+  bool excused = false;
 };
 
 void routeNet(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPlan &lp,
@@ -507,6 +523,63 @@ void routeNet(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPla
       }
     }
   }
+}
+
+// EXPERIMENTAL, schedule mode only: a net that completes while every edge
+// it touches is still under this threshold, counting only what everything
+// else has charged there, didn't have to make any congestion-influenced
+// choice -- it just took the geometrically obvious path through open space.
+// Rerouting it later can only make it react to a threshold it never had a
+// reason to think about, so once a net earns this it's excused from rip-up
+// for the rest of the run, schedule or no schedule. This is a fixed
+// reference point, independent of wherever the schedule's own threshold
+// currently sits -- otherwise a net routed at the far end of a rising
+// schedule would need to clear its way against a much higher bar than one
+// routed at round 0, for no principled reason.
+//
+// Measured result on adaptec1: at the default 0.2, only ~17% of nets
+// (30822 of 176716) ever earn the excuse after round 0 -- most nets, by the
+// time ~177K of them have been placed sequentially in a real, busy design,
+// have already brushed against *some* edge at 20%+ utilization, so 20% is
+// a low bar for "didn't encounter congestion" here. That alone didn't
+// change either schedule's outcome much (rising: 310720 -> 323708 at round
+// 1 -- very slightly *worse*, not better). Raising the excuse threshold
+// does protect far more nets (86% at 0.9) but makes results worse, not
+// better, and monotonically so: rising's round-1 best goes 323708 (0.2) ->
+// 344802 (0.5) -> 366760 (0.7) -> 376250 (0.9); falling shows the same
+// pattern. The counterintuitive but consistent lesson: nets that only
+// brushed moderate usage are often exactly the ones with the slack needed
+// to absorb a shift when the threshold moves, so excusing more of them
+// doesn't reduce churn usefully, it just removes the flexibility a
+// schedule needs to resolve overflow at all. No setting of this threshold,
+// in either schedule direction, beat the static baseline (299304).
+constexpr double kExcuseThresholdDefault = 0.2;
+
+void markExcusedIfClear(const RoutingGrid &g, const Usage &usage, RoutedNet &rn) {
+  if (rn.excused)
+    return;
+  static const double excuseThreshold = [] {
+    const char *e = std::getenv("NPROUTE_EXCUSE_THRESHOLD");
+    return e ? std::atof(e) : kExcuseThresholdDefault;
+  }();
+  for (const ChargeRecord &c : rn.charges) {
+    if (c.horizontal) {
+      for (int x = c.a; x < c.b; ++x) {
+        size_t i = g.hIndex(x, c.cross, c.layer);
+        double preUsage = static_cast<double>(usage.h[i]) - c.amount;
+        if (preUsage / g.hcap[i] >= excuseThreshold)
+          return;
+      }
+    } else {
+      for (int y = c.a; y < c.b; ++y) {
+        size_t i = g.vIndex(c.cross, y, c.layer);
+        double preUsage = static_cast<double>(usage.v[i]) - c.amount;
+        if (preUsage / g.vcap[i] >= excuseThreshold)
+          return;
+      }
+    }
+  }
+  rn.excused = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -688,19 +761,40 @@ RunReport route(const Design &d, int maxRounds, double epsilon) {
     // A schedule changes that calculus: the whole point of relaxing (or
     // tightening) the threshold over rounds is to let nets that are already
     // legal reconsider under the new landscape, so while one is running,
-    // every net is rerouted every round, not just overflowed ones.
+    // every net is rerouted every round -- except ones excused because they
+    // completed without ever having to react to any real congestion (see
+    // markExcusedIfClear). Excusing those is what makes a schedule's
+    // "reroute everyone" different from the plain version that measured
+    // worse: a net that took the obvious open-space path has no reason to
+    // reconsider just because the threshold moved, and protecting it from
+    // that churn is exactly the selective-rip-up discipline, applied using
+    // a criterion a schedule can actually use (unlike "is it overflowed
+    // right now," which excuses nothing while a threshold is deliberately
+    // being made more permissive).
     for (RoutedNet &rn : nets) {
       if (rn.giant)
         continue;
       if (!scheduling && round > 0 && !netOverflowed(g, usage, rn))
         continue;
+      if (scheduling && rn.excused)
+        continue;
       routeNet(g, prices, usage, lp, epsilon, threshold, rn);
+      if (scheduling)
+        markExcusedIfClear(g, usage, rn);
     }
 
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun = round + 1;
-    if (std::getenv("NPROUTE_TRACE"))
+    if (std::getenv("NPROUTE_TRACE")) {
       std::cerr << "round " << round << " overflow " << overflow << "\n";
+      if (scheduling && std::getenv("NPROUTE_TRACE_EXCUSED")) {
+        long long excusedCount = 0;
+        for (const RoutedNet &rn : nets)
+          if (rn.excused)
+            ++excusedCount;
+        std::cerr << "  excused so far: " << excusedCount << " / " << nets.size() << "\n";
+      }
+    }
 
     if (overflow < rep.bestOverflow) {
       rep.bestOverflow = overflow;
