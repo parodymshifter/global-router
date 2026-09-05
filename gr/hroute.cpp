@@ -63,6 +63,29 @@
 // everywhere, continuing the same overflow-for-wirelength trade every
 // router since the early-warning curve has made.
 //
+// Later ported from mroute.cpp: negotiateWire's price update was unclamped
+// and could compound std::exp(...) past DBL_MAX to literal infinity under
+// sustained deep overflow on one edge -- inf is never "<" a search
+// region's own infinity sentinel, so the slow tier's Dijkstra can't relax
+// that edge, finds no path, and mroute's version of this bug called
+// fail(), exiting the whole process. hroute shares the identical
+// price-update code, so the same failure was reachable here too (see
+// testPriceClampPreventsInfinity), even though it was mroute's own layer-
+// range experiment that first exposed it on real data. Fixed the same
+// way: clamp growth at kForbiddenPrice, the same finite deterrent a
+// hard-blocked edge already gets. Effect on the three benchmarks was
+// small and mixed, as expected from a correctness fix that only fires on
+// edges already deep in pathological overflow, not a tuning change:
+//
+//   benchmark   hroute (before)    hroute (clamped)
+//   adaptec1    178320 / 7194312   174186 / 7152894   -- improves
+//   newblue1     42982 / 6635438    42642 / 6628179   -- improves
+//   bigblue1    301296 / 7558074   302770 / 7476917   -- slightly worse
+//
+// All three re-verified legal via gr_verify and cross-checked against the
+// official eval2008.pl evaluator (exact agreement on total overflow and
+// wirelength in every case).
+//
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o hroute hroute.cpp
 //
@@ -414,7 +437,19 @@ void negotiateWire(const RoutingGrid &g, Prices &pr, const Usage &u, const Charg
       if (g.hcap[i] <= 0)
         pr.h[i] = kForbiddenPrice;
       else
-        pr.h[i] *= std::exp(epsilon * priceExponentTerm(u.h[i], g.hcap[i], threshold));
+        // Clamped at kForbiddenPrice, the same finite deterrent a
+        // hard-blocked edge already gets: ported from mroute.cpp, where an
+        // edge under sustained deep overflow for enough rounds was found to
+        // compound std::exp(...) past DBL_MAX to literal infinity. inf is
+        // never "<" a search's own infinity sentinel, so the slow tier's
+        // Dijkstra can't relax that edge at all -- and if every alternative
+        // is in the same state, the search reports no path on a grid that
+        // is in fact still connected. See mroute.cpp's negotiateWire
+        // comment and testPriceClampPreventsInfinity for the full story;
+        // the bug is in the shared price-update pattern, not anything
+        // mroute-specific, so it applies here too even though the fast
+        // tier's own routeNetFast doesn't route by real search.
+        pr.h[i] = std::min(kForbiddenPrice, pr.h[i] * std::exp(epsilon * priceExponentTerm(u.h[i], g.hcap[i], threshold)));
     }
   } else {
     for (int y = c.a; y < c.b; ++y) {
@@ -422,7 +457,7 @@ void negotiateWire(const RoutingGrid &g, Prices &pr, const Usage &u, const Charg
       if (g.vcap[i] <= 0)
         pr.v[i] = kForbiddenPrice;
       else
-        pr.v[i] *= std::exp(epsilon * priceExponentTerm(u.v[i], g.vcap[i], threshold));
+        pr.v[i] = std::min(kForbiddenPrice, pr.v[i] * std::exp(epsilon * priceExponentTerm(u.v[i], g.vcap[i], threshold)));
     }
   }
 }
@@ -1260,10 +1295,47 @@ void testEscalationSolvesWhatFastTierCannot() {
   check(segsConnected(rep.nets[0].segs), "netZigzag is one connected component");
 }
 
+// Ported from mroute.cpp's testPriceClampPreventsInfinity: a single-layer,
+// single-track (capacity 1) corridor with a very wide net (minWidth 1000)
+// blows usage/capacity to ~1000 the moment the net's own first commit
+// charges it, sending negotiateWire's price toward literal infinity within
+// a handful of rounds. With only one layer and one possible path, the fast
+// tier can never legalize this net either, so it escalates to the slow
+// tier -- exercising the exact code path (a real Dijkstra search relaxing a
+// poisoned edge) where mroute's own version of this bug turned into a
+// process-ending fail(). Proves the clamp ported into this file's
+// negotiateWire actually prevents the same failure here, not just in
+// mroute.cpp.
+const char *kPriceOverflowGr = R"(grid 5 1 1
+vertical capacity 0
+horizontal capacity 1
+minimum width 1
+minimum spacing 0
+via spacing 0
+0 0 10 10
+num net 1
+netWide 0 2 1000
+5 5 1
+45 5 1
+0
+)";
+
+void testPriceClampPreventsInfinity() {
+  Design d = parse("hroute_selftest_priceoverflow.gr", kPriceOverflowGr);
+  RunReport rep = route(d, 5, 5, 0.5);
+  check(rep.nets.size() == 1,
+        "netWide still finds a route across multiple rounds on both tiers "
+        "even though its own width alone drives its one shared edge far "
+        "enough past capacity to overflow price to infinity without the "
+        "clamp");
+  check(segsConnected(rep.nets[0].segs), "netWide is one connected component");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
   testEscalationSolvesWhatFastTierCannot();
+  testPriceClampPreventsInfinity();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
