@@ -1,0 +1,139 @@
+name: Build and validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    name: Build + self-test (${{ matrix.router }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        router:
+          - lroute
+          - proute
+          - groute
+          - nproute
+          - mroute
+          - hroute
+          - droute
+          - croute
+          - eroute
+          - troute
+          - sroute
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.router }}
+        working-directory: gr
+        run: g++ -std=c++17 -O2 -Wall -Wextra -o ${{ matrix.router }} ${{ matrix.router }}.cpp
+
+      - name: Run self-test
+        working-directory: gr
+        run: ./${{ matrix.router }} --selftest
+
+  gr-verify-selftest:
+    name: Build + self-test gr_verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build gr_verify
+        working-directory: gr
+        run: g++ -std=c++17 -O2 -Wall -Wextra -o gr_verify gr_verify.cpp
+      - name: Run self-test
+        working-directory: gr
+        run: ./gr_verify --selftest
+
+  benchmark:
+    name: Full ISPD benchmark validation (sroute)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sroute and gr_verify
+        working-directory: gr
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -o sroute sroute.cpp
+          g++ -std=c++17 -O2 -Wall -Wextra -o gr_verify gr_verify.cpp
+
+      - name: Download ISPD benchmarks
+        working-directory: gr
+        run: |
+          mkdir -p bench
+          curl -fsSL -o bench/adaptec1.capo70.3d.35.50.90.gr.gz \
+            https://www.ispd.cc/contests/07/rcontest/benchmark/adaptec1.capo70.3d.35.50.90.gr.gz
+          curl -fsSL -o bench/newblue1.ntup50.3d.30.50.90.gr.gz \
+            https://www.ispd.cc/contests/07/rcontest/benchmark/newblue1.ntup50.3d.30.50.90.gr.gz
+          curl -fsSL -o bench/bigblue1.capo60.3d.50.10.100.gr.gz \
+            https://www.ispd.cc/contests/08/benchmark/bigblue1.capo60.3d.50.10.100.gr.gz
+          gunzip bench/*.gz
+
+      - name: Route each benchmark
+        working-directory: gr
+        run: |
+          ./sroute bench/adaptec1.capo70.3d.35.50.90.gr adaptec1.route
+          ./sroute bench/newblue1.ntup50.3d.30.50.90.gr newblue1.route
+          ./sroute bench/bigblue1.capo60.3d.50.10.100.gr bigblue1.route
+
+      - name: Verify legality
+        working-directory: gr
+        run: |
+          ./gr_verify bench/adaptec1.capo70.3d.35.50.90.gr adaptec1.route | tee adaptec1.verify
+          ./gr_verify bench/newblue1.ntup50.3d.30.50.90.gr newblue1.route | tee newblue1.verify
+          ./gr_verify bench/bigblue1.capo60.3d.50.10.100.gr bigblue1.route | tee bigblue1.verify
+
+      - name: Cross-check with eval2008.pl
+        working-directory: gr
+        run: |
+          perl eval2008/eval2008.pl bench/adaptec1.capo70.3d.35.50.90.gr adaptec1.route | tee adaptec1.eval
+          perl eval2008/eval2008.pl bench/newblue1.ntup50.3d.30.50.90.gr newblue1.route | tee newblue1.eval
+          perl eval2008/eval2008.pl bench/bigblue1.capo60.3d.50.10.100.gr bigblue1.route | tee bigblue1.eval
+
+      - name: Check legality, cross-check agreement, and reproducibility
+        working-directory: gr
+        run: |
+          set -e
+
+          check_one() {
+            name=$1
+            expected_of=$2
+            expected_wl=$3
+
+            malformed=$(grep 'malformed segments' "$name.verify" | awk '{print $NF}')
+            oob=$(grep 'out of bounds' "$name.verify" | awk '{print $NF}')
+            disc=$(grep 'disconnected nets' "$name.verify" | awk '{print $NF}')
+            incomplete=$(grep 'incomplete nets' "$name.verify" | awk '{print $NF}')
+            unrouted=$(grep 'unrouted nets' "$name.verify" | awk '{print $NF}')
+
+            if [ "$malformed" != "0" ] || [ "$oob" != "0" ] || [ "$disc" != "0" ] || \
+               [ "$incomplete" != "0" ] || [ "$unrouted" != "0" ]; then
+              echo "FAIL: $name has illegal output (malformed=$malformed oob=$oob disc=$disc incomplete=$incomplete unrouted=$unrouted)"
+              exit 1
+            fi
+
+            verify_of=$(grep 'total overflow' "$name.verify" | awk '{print $NF}')
+            verify_wl=$(grep 'scored wirelength' "$name.verify" | awk '{print $3}')
+            eval_line=$(tail -n 1 "$name.eval")
+            eval_of=$(echo "$eval_line" | awk '{print $(NF-2)}')
+            eval_wl=$(echo "$eval_line" | awk '{print $NF}')
+
+            if [ "$verify_of" != "$eval_of" ] || [ "$verify_wl" != "$eval_wl" ]; then
+              echo "FAIL: $name gr_verify ($verify_of/$verify_wl) disagrees with eval2008.pl ($eval_of/$eval_wl)"
+              exit 1
+            fi
+
+            if [ "$verify_of" != "$expected_of" ] || [ "$verify_wl" != "$expected_wl" ]; then
+              echo "FAIL: $name overflow/wirelength on this platform ($verify_of/$verify_wl) does not match the recorded baseline ($expected_of/$expected_wl) -- possible platform-dependent divergence (libm, floating point, compiler)"
+              exit 1
+            fi
+
+            echo "OK: $name overflow=$verify_of wirelength=$verify_wl matches gr_verify, eval2008.pl, and the recorded baseline"
+          }
+
+          check_one adaptec1 176682 7126695
+          check_one newblue1 43516 6611807
+          check_one bigblue1 310340 7423152
