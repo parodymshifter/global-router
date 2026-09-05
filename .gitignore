@@ -2,6 +2,7 @@ gr_verify
 lroute
 proute
 groute
+nproute
 *.o
 bench/
 *.gr
