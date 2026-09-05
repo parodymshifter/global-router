@@ -18,9 +18,13 @@
 //      reconcile integration before adding new pricing dimensions.
 //   2. Via pricing, using a capacity derived from the .gr file's own "via
 //      spacing" field (see viaCapacityAt's comment).
-//   3. Layer-range pre-assignment (short nets restricted to lower layers,
-//      long nets get the whole stack), per CLAUDE.md's design note that
-//      most layer conflict disappears by construction this way.
+//   3. Layer-range pre-assignment -- attempted and reverted. See the step 3
+//      section below: it regressed overflow on all three real benchmarks at
+//      every restriction level tried, with no sign of a beneficial middle
+//      ground, so it was taken back out rather than kept as a documented
+//      loss. The two bugs it surfaced along the way (via's baseline cost,
+//      and price growth overflowing to literal infinity) are permanent
+//      fixes and stayed.
 //
 // Everything else is carried over from nproute.cpp, the strongest prior
 // architecture: MST decomposition, sequential per-net negotiation with
@@ -87,6 +91,48 @@
 // with no added length term, so lambda=1.0 reproduces step 1's flat cost
 // exactly and only rises above it once congestion appears. See
 // viaEdgeCost's comment.
+//
+// Step 3, attempted and reverted: layer-range pre-assignment. CLAUDE.md:
+// "long nets to thick upper metal, short nets to lower layers for pin
+// access... most conflict disappears by construction." Built as: each
+// net's HPWL over its distinct pin tiles buckets it into a cumulative
+// layer band (short = bottom third of layers only, medium = bottom
+// two-thirds, long = all), computed once per run and enforced inside
+// boundedDijkstra's own search (both the free-layer seeding and the via
+// neighbor step), not just at candidate-generation time.
+//
+// First version thresholded HPWL against a fixed fraction of the grid's
+// own half-perimeter, per the plan's original wording. Measured on
+// adaptec1's real netlist: median HPWL is 2 tiles and p90 is 38, against a
+// 648-tile half-perimeter -- any threshold big enough to matter caught
+// 90%+ of the whole netlist as "short", cramming nearly the entire design
+// onto 2 of 6 layers holding under 9% of total wire capacity. Overflow
+// went from 216792 to 2775542.
+//
+// Rebuilt rank-based -- bottom third of *this design's own nets by HPWL*
+// short, next third medium, top third long, self-normalizing to whatever
+// span distribution a netlist actually has instead of assuming it matches
+// a fraction of chip geometry -- and re-measured. Still a regression on
+// all three real benchmarks: adaptec1 +4.7%, bigblue1 +1.4%, newblue1
+// +79%. Tried two much gentler splits (8%/25% and 2%/8% of the population
+// by rank) hoping for a middle ground: the regression shrank (down to
+// +1.9%/+1.3%/+5.4%) but never crossed zero, and the two gentle splits
+// produced numerically identical results -- adaptec1's netlist has 30% of
+// all nets sharing the exact HPWL value 1, so there is no rank threshold
+// between "restrict nothing" and "restrict at least that 30%" to even
+// probe. Four configurations, two independently-designed threshold
+// schemes, consistently negative with no accessible middle ground: mroute's
+// per-net Dijkstra search already makes a good dynamic layer choice for
+// each net, and a static pre-assignment can only take options away from
+// it, never add any -- CLAUDE.md's premise ("most conflict disappears by
+// construction") assumes cutting off upper layers costs short nets
+// nothing they needed, which doesn't hold here since a meaningful fraction
+// of them use exactly that freedom to dodge local congestion mid-route
+// (see testMidRouteLayerHop). Reverted rather than kept as a documented
+// loss; the two bugs it surfaced (via's baseline cost, above, and price
+// growth overflowing to literal infinity under sustained deep congestion,
+// see negotiateWire's comment on the clamp and testPriceClampPreventsInfinity)
+// are genuine, permanent fixes and stayed.
 //
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o mroute mroute.cpp
@@ -563,7 +609,17 @@ void negotiateWire(const RoutingGrid &g, Prices &pr, const Usage &u, const Charg
       if (g.hcap[i] <= 0)
         pr.h[i] = kForbiddenPrice;
       else
-        pr.h[i] *= std::exp(epsilon * wireExponentTerm(u.h[i], g.hcap[i]));
+        // Clamped at kForbiddenPrice, the same finite deterrent a hard-blocked
+        // edge already gets: without this, an edge under sustained deep
+        // overflow for enough rounds compounds std::exp(...) past DBL_MAX to
+        // literal infinity, and inf is never "<" the region's own inf
+        // sentinel -- Dijkstra then can't relax that edge at all, and if
+        // every alternative near a genuine hotspot is in the same state, the
+        // whole search reports no path on a grid that is in fact still fully
+        // connected. Found via step 3 (layer-range pre-assignment), which
+        // removed the upper-layer escape valve that had kept any real net
+        // from ever being forced across a fully-poisoned edge before.
+        pr.h[i] = std::min(kForbiddenPrice, pr.h[i] * std::exp(epsilon * wireExponentTerm(u.h[i], g.hcap[i])));
     }
   } else {
     for (int y = c.a; y < c.b; ++y) {
@@ -571,7 +627,7 @@ void negotiateWire(const RoutingGrid &g, Prices &pr, const Usage &u, const Charg
       if (g.vcap[i] <= 0)
         pr.v[i] = kForbiddenPrice;
       else
-        pr.v[i] *= std::exp(epsilon * wireExponentTerm(u.v[i], g.vcap[i]));
+        pr.v[i] = std::min(kForbiddenPrice, pr.v[i] * std::exp(epsilon * wireExponentTerm(u.v[i], g.vcap[i])));
     }
   }
 }
@@ -582,7 +638,9 @@ void negotiateWire(const RoutingGrid &g, Prices &pr, const Usage &u, const Charg
 void negotiateVia(const RoutingGrid &g, const std::vector<int> &viaCap, Prices &pr,
                    const Usage &u, int x, int y, int lowerLayer, double epsilon) {
   size_t i = viaIndex(g, x, y, lowerLayer);
-  pr.via[i] *= std::exp(epsilon * viaExponentTerm(u.via[i], viaCap[lowerLayer]));
+  // Same clamp as negotiateWire, same reason: keeps a saturated via site's
+  // price a finite deterrent instead of a literal Dijkstra dead end.
+  pr.via[i] = std::min(kForbiddenPrice, pr.via[i] * std::exp(epsilon * viaExponentTerm(u.via[i], viaCap[lowerLayer])));
 }
 
 void reconcile(std::vector<int> &nodeLayer, int idx, int layer, Point at,
@@ -1072,6 +1130,52 @@ void testMidRouteLayerHop() {
   check(segsConnected(rep.nets[0].segs), "netHop is one connected component");
 }
 
+// Caught while building and testing stage 5 step 3 (layer-range
+// pre-assignment, since reverted -- see this file's header for why): a
+// single-layer, single-track (capacity 1) corridor with a very wide net
+// (minWidth 1000) blows usage/capacity to ~1000 the moment the net's own
+// first commit charges it, which sends wireExponentTerm's r^2.5 term past
+// ~1400 -- exp(0.5 * that) overflows a double straight to infinity in one
+// negotiateWire call, no compounding across rounds required. On round 1's
+// reroute (the net still overflows, so it's retried), the corridor's only
+// edge then costs literal infinity, which is never "<" the search region's
+// own infinity sentinel -- boundedDijkstra can't relax it, finds no
+// alternative (single layer, no via escape), and mroute calls fail(), which
+// exits the whole process. Step 3's layer-range restriction is what first
+// exposed this on real adaptec1 data, by removing the upper-layer escape
+// that had kept any real net from ever being forced across a
+// fully-poisoned edge before -- but the underlying bug is general (any
+// edge under sustained-enough overflow can hit this, band restriction or
+// not), so the fix and this regression test both stay even though step 3
+// itself didn't. Reproduced here in under a millisecond instead of a
+// 5-minute benchmark run. The fix clamps price growth at kForbiddenPrice,
+// the same finite deterrent a hard-blocked (capacity <= 0) edge already
+// gets, so this net still finds its (very expensive, still overflowing)
+// path instead of the whole run dying.
+const char *kPriceOverflowGr = R"(grid 5 1 1
+vertical capacity 0
+horizontal capacity 1
+minimum width 1
+minimum spacing 0
+via spacing 0
+0 0 10 10
+num net 1
+netWide 0 2 1000
+5 5 1
+45 5 1
+0
+)";
+
+void testPriceClampPreventsInfinity() {
+  Design d = parse("mroute_selftest_priceoverflow.gr", kPriceOverflowGr);
+  RunReport rep = route(d, 3, 0.5);
+  check(rep.nets.size() == 1,
+        "netWide still finds a route across multiple rounds even though its "
+        "own width alone drives its one shared edge far enough past capacity "
+        "to overflow price to infinity without the clamp");
+  check(segsConnected(rep.nets[0].segs), "netWide is one connected component");
+}
+
 bool hasViaAt(const std::vector<Seg> &segs, int x, int y) {
   for (const Seg &s : segs)
     if (s.x1 == x && s.y1 == y && s.x2 == x && s.y2 == y && s.l1 != s.l2)
@@ -1125,6 +1229,7 @@ int run() {
   std::cout << "self test\n";
   testBasicShapes();
   testMidRouteLayerHop();
+  testPriceClampPreventsInfinity();
   testViaPricingAvoidsSharedSite();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
