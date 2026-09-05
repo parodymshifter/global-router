@@ -1,5 +1,6 @@
 gr_verify
 lroute
+proute
 *.o
 bench/
 *.gr
