@@ -4,6 +4,7 @@ proute
 groute
 nproute
 mroute
+hroute
 *.o
 bench/
 *.gr
