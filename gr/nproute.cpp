@@ -48,9 +48,33 @@
 // out worse than holding still, and not for a reason specific to either
 // direction: any schedule needs to give up selective rip-up to let already-
 // legal nets react at all, and full reroute every round is worse regardless
-// of what threshold policy accompanies it. The wirelength question that was
-// built to answer never got answered, because the overflow cost of the
-// mechanism needed to ask it dominates first.
+// of what threshold policy accompanies it. A follow-up tried excusing more
+// nets from that reroute -- either by the criterion in markExcusedIfClear's
+// comment, or, loosened further, excusing a net once *any single* edge it
+// touches (not all of them) is clear -- and both directions got worse the
+// more nets were protected, not better (rising's round-1 best: 323708 at
+// the default all-clear rule, 413088 with the any-clear rule, both worse
+// than not excusing anything at all, 310720). The wirelength question a
+// schedule was built to answer never got answered by any variant of it,
+// because the overflow cost of the mechanism needed to ask it dominates
+// first.
+//
+// A different idea did pay off, though not the way it was aimed: instead of
+// relaxing the threshold *during* the main loop, relaxedCleanup makes one
+// supervised pass *after* it converges, giving each net one chance to
+// reroute under a much more relaxed threshold and keeping the change only
+// if it doesn't increase overflow (measured locally, so this scales to
+// every net without rescanning the whole grid each time). Hoped-for result:
+// lower wirelength. Actual result: overflow drops substantially instead
+// (adaptec1 299K -> 267K in one pass, -> 227K over 20 passes -- closing in
+// on proute's 221K; newblue1 88K -> 55K, beating proute's 59K outright) and
+// wirelength goes *up* a little, the opposite of the goal, at every
+// relaxation level tried (0.3 through 1.0). Given how close repeated passes
+// get to proute's own numbers, this has likely reinvented a version of
+// proute's rip-up loop -- supervised one-net-at-a-time relaxation under
+// repetition resembles negotiated rip-up more than it resembles a "cleanup."
+// Kept as NPROUTE_CLEANUP, off by default: it is a real, useful trade, just
+// not the trade it was built to find.
 //
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o nproute nproute.cpp
@@ -84,14 +108,42 @@
 //     NPROUTE_EXCUSE_THRESHOLD=<float>
 //                                in schedule mode, permanently exempt a net
 //                                from rip-up once it completes a route
-//                                without any edge it touches reaching this
-//                                fraction of capacity from other nets
-//                                (default 0.2) -- see markExcusedIfClear's
-//                                comment. Measured worse the higher it's
-//                                set; kept for the record alongside the
-//                                schedule mechanism it was built to rescue.
+//                                without its edges reaching this fraction of
+//                                capacity from other nets (default 0.2) --
+//                                see markExcusedIfClear's comment. Measured
+//                                worse the higher it's set; kept for the
+//                                record alongside the schedule mechanism it
+//                                was built to rescue.
+//     NPROUTE_EXCUSE_MODE=all|any
+//                                "all" (default) requires every edge a net
+//                                touches to clear the threshold; "any"
+//                                excuses it if even one edge does, even if
+//                                others are heavily loaded. Measured worse
+//                                than "all" in every schedule direction.
+//     NPROUTE_CLEANUP=1          after the main loop, run relaxedCleanup: a
+//                                one-shot, per-net-supervised pass under a
+//                                relaxed threshold (see relaxedCleanup's
+//                                comment). Off by default -- it substantially
+//                                improves overflow (adaptec1 299K -> 267K in
+//                                one pass; newblue1 88K -> 55K, beating
+//                                proute outright) but *increases* wirelength
+//                                a little every time, which was the opposite
+//                                of what it was built to test for.
+//     NPROUTE_CLEANUP_THRESHOLD=<float>
+//                                the cleanup pass's relaxed threshold,
+//                                default 1.0 (fully relaxed: price only
+//                                actual overflow, nothing short of it)
+//     NPROUTE_CLEANUP_PASSES=<int>
+//                                how many full sweeps the cleanup pass
+//                                makes, default 1. More passes keep
+//                                improving overflow with diminishing
+//                                returns (adaptec1: 267K at 1 pass, 227K at
+//                                20, 227K-ish plateauing by 60) at roughly
+//                                linear extra cost in runtime.
 //     NPROUTE_TRACE=1            print each round's overflow (and, while a
-//                                schedule is active, its threshold) to stderr
+//                                schedule is active, its threshold; while a
+//                                cleanup pass runs, its before/after) to
+//                                stderr
 //     NPROUTE_TRACE_EXCUSED=1    with NPROUTE_TRACE and a schedule active,
 //                                also print how many nets are excused so far
 
@@ -555,6 +607,21 @@ void routeNet(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPla
 // in either schedule direction, beat the static baseline (299304).
 constexpr double kExcuseThresholdDefault = 0.2;
 
+// NPROUTE_EXCUSE_MODE selects how many of a net's edges need to be clear:
+//   all (default) -- every edge the net touches must be under threshold.
+//   any            -- at least one edge under threshold is enough, even if
+//                     others are heavily loaded. A much easier bar to
+//                     clear, so far more nets qualify; see the measured
+//                     result in kExcuseThresholdDefault's comment for
+//                     whether that's actually better.
+bool excuseModeAny() {
+  static const bool any = [] {
+    const char *m = std::getenv("NPROUTE_EXCUSE_MODE");
+    return m && std::string(m) == "any";
+  }();
+  return any;
+}
+
 void markExcusedIfClear(const RoutingGrid &g, const Usage &usage, RoutedNet &rn) {
   if (rn.excused)
     return;
@@ -562,24 +629,41 @@ void markExcusedIfClear(const RoutingGrid &g, const Usage &usage, RoutedNet &rn)
     const char *e = std::getenv("NPROUTE_EXCUSE_THRESHOLD");
     return e ? std::atof(e) : kExcuseThresholdDefault;
   }();
+  bool any = excuseModeAny();
+  bool sawAnyEdge = false;
   for (const ChargeRecord &c : rn.charges) {
     if (c.horizontal) {
       for (int x = c.a; x < c.b; ++x) {
         size_t i = g.hIndex(x, c.cross, c.layer);
         double preUsage = static_cast<double>(usage.h[i]) - c.amount;
-        if (preUsage / g.hcap[i] >= excuseThreshold)
+        bool clear = preUsage / g.hcap[i] < excuseThreshold;
+        sawAnyEdge = true;
+        if (any && clear) {
+          rn.excused = true;
+          return;
+        }
+        if (!any && !clear)
           return;
       }
     } else {
       for (int y = c.a; y < c.b; ++y) {
         size_t i = g.vIndex(c.cross, y, c.layer);
         double preUsage = static_cast<double>(usage.v[i]) - c.amount;
-        if (preUsage / g.vcap[i] >= excuseThreshold)
+        bool clear = preUsage / g.vcap[i] < excuseThreshold;
+        sawAnyEdge = true;
+        if (any && clear) {
+          rn.excused = true;
+          return;
+        }
+        if (!any && !clear)
           return;
       }
     }
   }
-  rn.excused = true;
+  // "all" mode: every edge passed (or there were none). "any" mode falling
+  // through here means no edge ever qualified.
+  if (!any || !sawAnyEdge)
+    rn.excused = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -612,6 +696,41 @@ bool netOverflowed(const RoutingGrid &g, const Usage &u, const RoutedNet &rn) {
   return false;
 }
 
+// Total overflow, but restricted to the union of edges two charge lists
+// touch, deduplicated. Used by the cleanup pass to judge whether rerouting
+// one net made things worse without rescanning the whole grid: every edge
+// outside this union has unchanged usage before and after that net's
+// re-route, so the delta computed here over just its own edges equals the
+// true delta in global total overflow.
+long long overflowOverUnion(const RoutingGrid &g, const Usage &u,
+                             const std::vector<ChargeRecord> &a,
+                             const std::vector<ChargeRecord> &b) {
+  std::vector<std::pair<bool, size_t>> edges;
+  auto add = [&](const std::vector<ChargeRecord> &charges) {
+    for (const ChargeRecord &c : charges) {
+      if (c.horizontal)
+        for (int x = c.a; x < c.b; ++x)
+          edges.push_back({true, g.hIndex(x, c.cross, c.layer)});
+      else
+        for (int y = c.a; y < c.b; ++y)
+          edges.push_back({false, g.vIndex(c.cross, y, c.layer)});
+    }
+  };
+  add(a);
+  add(b);
+  std::sort(edges.begin(), edges.end());
+  edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+  long long total = 0;
+  for (auto &e : edges) {
+    if (e.first)
+      total += std::max(0, u.h[e.second] - g.hcap[e.second]);
+    else
+      total += std::max(0, u.v[e.second] - g.vcap[e.second]);
+  }
+  return total;
+}
+
+
 struct RunReport {
   std::vector<RoutedNet> nets;
   long long bestOverflow = std::numeric_limits<long long>::max();
@@ -620,6 +739,61 @@ struct RunReport {
   bool convergedToZero = false;
   bool stalled = false;
 };
+
+// A one-shot, safe attempt to shrink wirelength after the main loop has
+// already resolved overflow: reroute every non-giant net once more under a
+// far more relaxed threshold (the schedule experiments' failure mode was
+// giving *every* net a reason to reconsider every round, forever; this
+// gives each net exactly one supervised chance instead). Each net's change
+// is checked against overflowOverUnion immediately -- if it made things
+// worse, even locally, it's reverted before moving to the next net, so a
+// bad trade never has a chance to compound the way the schedule's
+// unsupervised full reroute did.
+void relaxedCleanup(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPlan &lp,
+                     double epsilon, RunReport &rep) {
+  double relaxedThreshold = [] {
+    const char *t = std::getenv("NPROUTE_CLEANUP_THRESHOLD");
+    return t ? std::atof(t) : 1.0;
+  }();
+  int passes = [] {
+    const char *p = std::getenv("NPROUTE_CLEANUP_PASSES");
+    return p ? std::atoi(p) : 1;
+  }();
+  bool trace = std::getenv("NPROUTE_TRACE") != nullptr;
+  long long before = rep.bestOverflow;
+
+  for (int pass = 0; pass < passes; ++pass) {
+    for (RoutedNet &rn : rep.nets) {
+      if (rn.giant)
+        continue;
+      std::vector<ChargeRecord> oldCharges = rn.charges;
+      std::vector<Seg> oldSegs = rn.segs;
+      long long localBefore = overflowOverUnion(g, usage, oldCharges, oldCharges);
+
+      routeNet(g, prices, usage, lp, epsilon, relaxedThreshold, rn);
+
+      long long localAfter = overflowOverUnion(g, usage, oldCharges, rn.charges);
+      if (localAfter > localBefore) {
+        for (const ChargeRecord &c : rn.charges)
+          undoCharge(g, usage, c);
+        rn.charges = oldCharges;
+        rn.segs = oldSegs;
+        for (const ChargeRecord &c : rn.charges) {
+          if (c.horizontal)
+            for (int x = c.a; x < c.b; ++x)
+              usage.h[g.hIndex(x, c.cross, c.layer)] += c.amount;
+          else
+            for (int y = c.a; y < c.b; ++y)
+              usage.v[g.vIndex(c.cross, y, c.layer)] += c.amount;
+        }
+      }
+    }
+  }
+
+  rep.bestOverflow = totalOverflow(g, usage);
+  if (trace)
+    std::cerr << "cleanup pass: overflow " << before << " -> " << rep.bestOverflow << "\n";
+}
 
 // EXPERIMENTAL: a round-varying threshold, for testing whether relaxing (or
 // tightening) the early-warning curve over time changes the wirelength/
@@ -814,6 +988,27 @@ RunReport route(const Design &d, int maxRounds, double epsilon) {
       break;
     }
   }
+
+  if (std::getenv("NPROUTE_CLEANUP") && !rep.nets.empty()) {
+    // rep.nets is the best round found, which is not necessarily the round
+    // the loop actually ended on (a later round can regress after finding
+    // the best one). `usage` and `nets` above reflect wherever the loop
+    // stopped, not necessarily rep.nets, so usage is rebuilt from rep.nets'
+    // own charges before the cleanup pass touches anything, rather than
+    // trusting state that might belong to a different, worse configuration.
+    Usage cleanupUsage(g);
+    for (const RoutedNet &rn : rep.nets)
+      for (const ChargeRecord &c : rn.charges) {
+        if (c.horizontal)
+          for (int x = c.a; x < c.b; ++x)
+            cleanupUsage.h[g.hIndex(x, c.cross, c.layer)] += c.amount;
+        else
+          for (int y = c.a; y < c.b; ++y)
+            cleanupUsage.v[g.vIndex(c.cross, y, c.layer)] += c.amount;
+      }
+    relaxedCleanup(g, prices, cleanupUsage, lp, epsilon, rep);
+  }
+
   return rep;
 }
 
