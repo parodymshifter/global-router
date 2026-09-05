@@ -76,6 +76,16 @@
 // up fractionally on newblue1) -- consistent with rerouting around
 // congestion rather than a directional bias.
 //
+// Numbers above are from a macOS/clang build. CI (Linux/g++, x86_64)
+// reproduces all three within <0.15% overflow/wirelength, sign-mixed
+// (e.g. adaptec1 176470/7120648, slightly better than macOS's 176682/
+// 7126695) -- legal per gr_verify and exactly cross-checked against
+// eval2008.pl on that platform too, so this is ordinary floating-point/
+// libm divergence across compilers (exp/log/lgamma and FP-contraction
+// choices under -O2 aren't required to be bit-identical), not a bug.
+// "Reproducible run to run" holds per compiler/platform; CI does not
+// assert exact agreement with the macOS numbers above for that reason.
+//
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o sroute sroute.cpp
 //
