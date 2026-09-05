@@ -213,9 +213,12 @@ Report verify(const Design &d, const std::vector<RoutedNet> &sol) {
   for (const RoutedNet &rn : sol) {
     routed.insert(rn.name);
 
-    // Per net edge sets. A net that traverses the same edge twice consumes it
-    // once, which matters because routers do emit overlapping segments.
-    std::unordered_set<size_t> hEdges, vEdges;
+    // Per net edge lists, charged once per occurrence rather than deduplicated:
+    // the official ISPD scorer (eval2008.pl) charges every segment as written,
+    // so a net that emits overlapping segments pays for the overlap. Verified
+    // against eval2008.pl's total-overflow and wirelength output directly --
+    // deduplicating here silently undercounted both.
+    std::vector<size_t> hEdges, vEdges;
     std::unordered_set<long long> nodes;
     std::vector<std::pair<long long, long long>> links;
     long long netVias = 0;
@@ -256,7 +259,7 @@ Report verify(const Design &d, const std::vector<RoutedNet> &sol) {
       if (s.y1 == s.y2) { // horizontal
         int a = std::min(s.x1, s.x2), b = std::max(s.x1, s.x2);
         for (int x = a; x < b; ++x)
-          hEdges.insert(g.hIndex(x, s.y1, s.l1));
+          hEdges.push_back(g.hIndex(x, s.y1, s.l1));
         for (int x = a; x <= b; ++x)
           nodes.insert(tileKey(x, s.y1, s.l1));
         for (int x = a; x < b; ++x)
@@ -265,7 +268,7 @@ Report verify(const Design &d, const std::vector<RoutedNet> &sol) {
       } else { // vertical
         int a = std::min(s.y1, s.y2), b = std::max(s.y1, s.y2);
         for (int y = a; y < b; ++y)
-          vEdges.insert(g.vIndex(s.x1, y, s.l1));
+          vEdges.push_back(g.vIndex(s.x1, y, s.l1));
         for (int y = a; y <= b; ++y)
           nodes.insert(tileKey(s.x1, y, s.l1));
         for (int y = a; y < b; ++y)
@@ -334,22 +337,15 @@ Report verify(const Design &d, const std::vector<RoutedNet> &sol) {
     int root = -1;
     bool missing = false, split = false;
     for (const Pin &p : net->pins) {
+      // The route must reach the pin's exact declared layer, not merely its
+      // tile on some other layer. The official ISPD scorer checks reachability
+      // this way (eval2008.pl does the BFS keyed on the pin's own layer with
+      // no fallback), so a looser check here would pass solutions the real
+      // scorer rejects.
       int pid = idOf(tileKey(p.x, p.y, p.layer));
       if (pid < 0) {
-        // The route may reach the pin's tile on another layer. ISPD solutions
-        // are commonly given without pin layer detail, so accept any layer.
-        bool found = false;
-        for (int l = 0; l < g.nLayers && !found; ++l) {
-          int alt = idOf(tileKey(p.x, p.y, l));
-          if (alt >= 0) {
-            pid = alt;
-            found = true;
-          }
-        }
-        if (!found) {
-          missing = true;
-          continue;
-        }
+        missing = true;
+        continue;
       }
       int r = ds.find(pid);
       if (root < 0)
@@ -489,7 +485,9 @@ netC 2 2 1
 0
 )";
 
-// Clean: three nets, each within capacity, each connected.
+// Clean: three nets, each within capacity, each connected. netC's pins are
+// declared on layer 1 but the run is on layer 2, so it needs a via at each
+// end down to the pin's actual layer.
 const char *kGood = R"(netA 0
 (5,5,1)-(35,5,1)
 !
@@ -497,7 +495,9 @@ netB 1
 (5,15,1)-(35,15,1)
 !
 netC 2
+(5,25,1)-(5,25,2)
 (5,25,2)-(5,35,2)
+(5,35,2)-(5,35,1)
 !
 )";
 

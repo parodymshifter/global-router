@@ -34,7 +34,13 @@
 //      any later edge landing on a different layer gets an explicit
 //      reconciling via there. Leaf nodes (touched once) never pay for this;
 //      only branch points do.
-//   6. Usage is charged immediately, so later nets see earlier ones -- the
+//   6. The tree never otherwise touches a pin's own declared layer -- each
+//      run just takes whichever layer has capacity in that direction. After
+//      the tree is built, every pin gets the same reconciling-via treatment
+//      as a branch point, down to its declared layer. Required: both the
+//      verifier and the official ISPD scorer check that the route reaches
+//      each pin's exact layer, not just its tile.
+//   7. Usage is charged immediately, so later nets see earlier ones -- the
 //      router is greedy and sequential, never revisits a decision.
 
 #include <algorithm>
@@ -338,6 +344,19 @@ std::vector<RoutedNet> routeDesign(const Design &d) {
       reconcile(nodeLayer, e.first, r.layerAtP1, pts[e.first], rn.segs);
       reconcile(nodeLayer, e.second, r.layerAtP2, pts[e.second], rn.segs);
     }
+
+    // The tree above only lands on whichever layer had capacity in each
+    // run's direction; it never touches a pin's own declared layer. The
+    // verifier (and the real ISPD scorer) require the route to reach that
+    // exact layer, so via down to it at every pin's tile.
+    for (const Pin &p : n.pins) {
+      for (size_t i = 0; i < pts.size(); ++i) {
+        if (pts[i].x == p.x && pts[i].y == p.y) {
+          reconcile(nodeLayer, static_cast<int>(i), p.layer, pts[i], rn.segs);
+          break;
+        }
+      }
+    }
     result.push_back(std::move(rn));
   }
   return result;
@@ -483,8 +502,11 @@ int run() {
   // horizontal-capable layer: no bend, no via needed.
   check(nets[0].segs.size() == 1, "netA is a single straight run, no via");
   check(nets[1].segs.size() == 1, "netB is a single straight run, no via");
-  // netC is pure vertical, same reasoning.
-  check(nets[2].segs.size() == 1, "netC is a single straight run, no via");
+  // netC is pure vertical, so its run must go on layer 2 (0 vertical
+  // capacity on layer 1), but both its pins are declared on layer 1 -- each
+  // end needs a reconciling via down to the pin's actual layer.
+  check(nets[2].segs.size() == 3, "netC gets a via at each pin down to layer 1");
+  check(segsConnected(nets[2].segs), "netC stays one component after the vias");
 
   // netD is a 3 pin net whose MST has a branch point at (5,5): one edge runs
   // to (35,5) [horizontal], the other to (5,35) [vertical]. Each edge picks
