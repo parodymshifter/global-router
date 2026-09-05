@@ -65,16 +65,43 @@
 // reroute under a much more relaxed threshold and keeping the change only
 // if it doesn't increase overflow (measured locally, so this scales to
 // every net without rescanning the whole grid each time). Hoped-for result:
-// lower wirelength. Actual result: overflow drops substantially instead
-// (adaptec1 299K -> 267K in one pass, -> 227K over 20 passes -- closing in
-// on proute's 221K; newblue1 88K -> 55K, beating proute's 59K outright) and
-// wirelength goes *up* a little, the opposite of the goal, at every
-// relaxation level tried (0.3 through 1.0). Given how close repeated passes
-// get to proute's own numbers, this has likely reinvented a version of
-// proute's rip-up loop -- supervised one-net-at-a-time relaxation under
-// repetition resembles negotiated rip-up more than it resembles a "cleanup."
-// Kept as NPROUTE_CLEANUP, off by default: it is a real, useful trade, just
-// not the trade it was built to find.
+// lower wirelength. Actual result: overflow drops substantially instead,
+// and wirelength goes *up* a little, the opposite of the goal, at every
+// relaxation level tried. Given how close repeated passes get to proute's
+// own numbers, this has likely reinvented a version of proute's rip-up
+// loop -- supervised one-net-at-a-time relaxation under repetition
+// resembles negotiated rip-up more than it resembles a "cleanup."
+//
+// A follow-up sweep of the cleanup pass's own threshold and pass count
+// (0.3 to 1.0, 1 to 60 passes) found overflow keeps improving with more
+// passes regardless of exactly which threshold drives it -- 0.3 through
+// 0.6 all converge to within 1% of each other by 60 passes -- but the
+// *combination* of threshold and wirelength mattered: 0.5 beat the
+// original 1.0 (fully relaxed) on both overflow and wirelength at every
+// pass count compared head to head, so it is not simply "more relaxed is
+// more thorough." Settled on threshold 0.5, 30 passes as the point where
+// most of the achievable improvement has landed without the diminishing
+// returns of pushing toward 60. This is now the default, not an opt-in:
+// the whole point of the per-net safety check is that it cannot make
+// things worse, so there was no reason to gate it behind a flag once it
+// was tuned. Final numbers, this router's whole progression on total
+// overflow / scored wirelength:
+//
+//   benchmark   lroute            proute            groute
+//   adaptec1    708474 / 6827491  221352 / 6111546  484580 / 6076308
+//   newblue1    226840 / 6534376   58584 / 5546098  142670 / 5536176
+//   bigblue1    728510 / 7270346  309822 / 6445711  547062 / 6398617
+//
+//   benchmark   nproute (pricing only)   nproute (+ cleanup, this version)
+//   adaptec1    299304 / 6763811         227468 / 6871155
+//   newblue1     87600 / 6322719          51426 / 6528216
+//   bigblue1    376366 / 7178090         324554 / 7293465
+//
+// newblue1 now beats proute's overflow outright; adaptec1 and bigblue1 are
+// within a few percent of it. Wirelength across all three stays
+// consistently higher than proute's -- the trade this whole router keeps
+// making, from the early-warning curve onward, is overflow for wirelength,
+// and the cleanup pass continues that trade rather than reversing it.
 //
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o nproute nproute.cpp
@@ -120,26 +147,29 @@
 //                                excuses it if even one edge does, even if
 //                                others are heavily loaded. Measured worse
 //                                than "all" in every schedule direction.
-//     NPROUTE_CLEANUP=1          after the main loop, run relaxedCleanup: a
-//                                one-shot, per-net-supervised pass under a
-//                                relaxed threshold (see relaxedCleanup's
-//                                comment). Off by default -- it substantially
-//                                improves overflow (adaptec1 299K -> 267K in
-//                                one pass; newblue1 88K -> 55K, beating
-//                                proute outright) but *increases* wirelength
-//                                a little every time, which was the opposite
-//                                of what it was built to test for.
+//     NPROUTE_CLEANUP=0          skip the post-convergence cleanup pass
+//                                (relaxedCleanup). On by default: its
+//                                per-net safety check means it cannot make
+//                                overflow worse than the main loop already
+//                                found, so there's no real reason to run
+//                                without it -- this flag exists mainly for
+//                                A/B comparison against the pricing-only
+//                                numbers quoted above.
 //     NPROUTE_CLEANUP_THRESHOLD=<float>
 //                                the cleanup pass's relaxed threshold,
-//                                default 1.0 (fully relaxed: price only
-//                                actual overflow, nothing short of it)
+//                                default 0.5 -- swept 0.3 to 1.0 (fully
+//                                relaxed) and 0.5 won on both overflow and
+//                                wirelength at every pass count compared
+//                                head to head, so "more relaxed" is not
+//                                simply "more thorough."
 //     NPROUTE_CLEANUP_PASSES=<int>
 //                                how many full sweeps the cleanup pass
-//                                makes, default 1. More passes keep
+//                                makes, default 30. More passes keep
 //                                improving overflow with diminishing
-//                                returns (adaptec1: 267K at 1 pass, 227K at
-//                                20, 227K-ish plateauing by 60) at roughly
-//                                linear extra cost in runtime.
+//                                returns (adaptec1 at threshold 0.5: 227K at
+//                                30 passes, 226K at 60) at roughly linear
+//                                extra cost in runtime; 30 was chosen as
+//                                where the returns clearly start flattening.
 //     NPROUTE_TRACE=1            print each round's overflow (and, while a
 //                                schedule is active, its threshold; while a
 //                                cleanup pass runs, its before/after) to
@@ -753,11 +783,11 @@ void relaxedCleanup(const RoutingGrid &g, Prices &prices, Usage &usage, const La
                      double epsilon, RunReport &rep) {
   double relaxedThreshold = [] {
     const char *t = std::getenv("NPROUTE_CLEANUP_THRESHOLD");
-    return t ? std::atof(t) : 1.0;
+    return t ? std::atof(t) : 0.5;
   }();
   int passes = [] {
     const char *p = std::getenv("NPROUTE_CLEANUP_PASSES");
-    return p ? std::atoi(p) : 1;
+    return p ? std::atoi(p) : 30;
   }();
   bool trace = std::getenv("NPROUTE_TRACE") != nullptr;
   long long before = rep.bestOverflow;
@@ -989,7 +1019,11 @@ RunReport route(const Design &d, int maxRounds, double epsilon) {
     }
   }
 
-  if (std::getenv("NPROUTE_CLEANUP") && !rep.nets.empty()) {
+  bool doCleanup = [] {
+    const char *c = std::getenv("NPROUTE_CLEANUP");
+    return !c || (std::string(c) != "0" && std::string(c) != "false");
+  }();
+  if (doCleanup && !rep.nets.empty()) {
     // rep.nets is the best round found, which is not necessarily the round
     // the loop actually ended on (a later round can regress after finding
     // the best one). `usage` and `nets` above reflect wherever the loop
