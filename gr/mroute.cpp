@@ -59,6 +59,35 @@
 // independent count (214920 vs 219288 on adaptec1) -- fixed, and the two
 // now agree exactly on all three benchmarks.
 //
+// Step 2 result, total overflow / scored wirelength:
+//
+//   benchmark   mroute (step 1)      mroute (step 2, via pricing)
+//   adaptec1    218650 / 6837420     216792 / 6670426   -- both improve
+//   newblue1     94060 / 6079307      94814 / 6134955   -- slightly worse
+//   bigblue1    346494 / 7008322     345480 / 7010610   -- slightly better
+//
+// Close to a wash on wire overflow, as expected: via congestion was never
+// the bottleneck on these designs (derived via capacity is 35 per site on
+// adaptec1, against per-layer wire capacities as low as 6), so the pricing
+// signal rarely fires. The point of this step was making the router
+// via-congestion-aware for designs where it would matter, not chasing
+// overflow here -- see testViaPricingAvoidsSharedSite for proof the
+// mechanism itself works on a design where via capacity is the bottleneck.
+//
+// Caught here: the first version priced a via as edgeCost(lambda, 1), i.e.
+// 1.0 + lambda*1, reusing wire's edge-cost formula. With lambda seeded at
+// 1.0 (the standard multiplicative-weights start), that made an
+// *uncongested* via cost 2.0 -- double step 1's flat 1.0, and no longer
+// matching the "+1 per via" scoring convention a via is supposed to mirror.
+// It regressed adaptec1 to 229558, and crucially the regression barely
+// moved (229558 -> 228994) when the congestion-response term was
+// neutralized via an extreme threshold -- proof the damage was from the
+// baseline cost shift, not from the pricing mechanism responding to real
+// congestion. Fixed by giving vias their own cost function, lambda*amount
+// with no added length term, so lambda=1.0 reproduces step 1's flat cost
+// exactly and only rises above it once congestion appears. See
+// viaEdgeCost's comment.
+//
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o mroute mroute.cpp
 //
@@ -95,19 +124,62 @@ constexpr double kForbiddenPrice = 1e9;
 // whole run.
 // ---------------------------------------------------------------------------
 
+// Via sites, per adjacent layer pair (l, l+1), indexed by the *lower*
+// layer: nLayers-1 planes of nx*ny tiles each. Dense, same convention as
+// gr_io.h's own hIndex/vIndex.
+size_t viaIndex(const RoutingGrid &g, int x, int y, int lowerLayer) {
+  return (static_cast<size_t>(lowerLayer) * g.ny + y) * g.nx + x;
+}
+size_t viaCount(const RoutingGrid &g) {
+  return static_cast<size_t>(std::max(g.nLayers - 1, 0)) * g.ny * g.nx;
+}
+
+// The .gr format has no via capacity field -- derived from its "via
+// spacing" field instead. A via consumes a footprint; treating a tile as a
+// square region, roughly min(tileW,tileH)/spacing via bodies fit across it,
+// the same kind of 1D cross-section approximation the format itself uses
+// for wire capacity (a track count, not a real 2D layout). The stricter of
+// the two layers' spacing rules governs, since a via has to satisfy both.
+// Capacity is uniform across every (x,y) for a given layer pair -- spacing
+// and tile size are both grid-wide constants, not per-tile -- so this is
+// one value per layer pair, not a dense per-tile array; only *usage* needs
+// to vary by tile.
+std::vector<int> viaCapacityPerLayerPair(const RoutingGrid &g) {
+  std::vector<int> cap;
+  for (int l = 0; l + 1 < g.nLayers; ++l) {
+    long long spacing = std::max(g.viaSpacing[l], g.viaSpacing[l + 1]);
+    long long dim = std::min(g.tileW, g.tileH);
+    cap.push_back(spacing > 0 ? static_cast<int>(std::max(1LL, dim / spacing))
+                               : std::numeric_limits<int>::max() / 4);
+  }
+  return cap;
+}
+
 struct Prices {
-  std::vector<double> h, v;
-  explicit Prices(const RoutingGrid &g) : h(g.hCount(), 1.0), v(g.vCount(), 1.0) {}
+  std::vector<double> h, v, via;
+  explicit Prices(const RoutingGrid &g)
+      : h(g.hCount(), 1.0), v(g.vCount(), 1.0), via(viaCount(g), 1.0) {}
 };
 struct Usage {
-  std::vector<int> h, v;
-  explicit Usage(const RoutingGrid &g) : h(g.hCount(), 0), v(g.vCount(), 0) {}
+  std::vector<int> h, v, via;
+  explicit Usage(const RoutingGrid &g) : h(g.hCount(), 0), v(g.vCount(), 0), via(viaCount(g), 0) {}
 };
 
-// Same curve as nproute.cpp's priceExponentTerm: flat below the threshold,
-// escalating faster than linearly as usage approaches and passes capacity.
-// See nproute.cpp for the measured history of why this shape won out.
-double priceExponentTerm(double usage, double cap) {
+// Same curve shape for both wires and vias -- flat below the threshold,
+// escalating faster than linearly as usage approaches and passes capacity
+// (see nproute.cpp for the measured history of why this shape won out for
+// wires) -- but with independently tunable constants, since there is no
+// reason the right threshold/power for via congestion has to match wires'
+// tuned 0.2/2.5; that needs its own empirical check, which is exactly what
+// separate environment variables are for.
+double priceExponentTerm(double usage, double cap, double threshold, double power) {
+  if (threshold >= 1.0)
+    return std::max(0.0, usage / cap - 1.0);
+  double ratio = usage / cap;
+  double r = std::max(0.0, (ratio - threshold) / (1.0 - threshold));
+  return std::pow(r, power);
+}
+double wireExponentTerm(double usage, double cap) {
   static const double threshold = [] {
     const char *t = std::getenv("MROUTE_THRESHOLD");
     return t ? std::atof(t) : 0.2;
@@ -116,14 +188,31 @@ double priceExponentTerm(double usage, double cap) {
     const char *p = std::getenv("MROUTE_POWER");
     return p ? std::atof(p) : 2.5;
   }();
-  if (threshold >= 1.0)
-    return std::max(0.0, usage / cap - 1.0);
-  double ratio = usage / cap;
-  double r = std::max(0.0, (ratio - threshold) / (1.0 - threshold));
-  return std::pow(r, power);
+  return priceExponentTerm(usage, cap, threshold, power);
+}
+double viaExponentTerm(double usage, double cap) {
+  static const double threshold = [] {
+    const char *t = std::getenv("MROUTE_VIA_THRESHOLD");
+    return t ? std::atof(t) : 0.2;
+  }();
+  static const double power = [] {
+    const char *p = std::getenv("MROUTE_VIA_POWER");
+    return p ? std::atof(p) : 2.5;
+  }();
+  return priceExponentTerm(usage, cap, threshold, power);
 }
 
 double edgeCost(double lambda, int amount) { return 1.0 + lambda * amount; }
+
+// Vias don't get wire's separate "+1.0 length" term added on top of the
+// price: a via's own base/scoring cost of 1 tile-equivalent (see the "+1 per
+// via" scoring rule) IS the lambda_via baseline of 1.0, not an addition to
+// it. Reusing edgeCost() here would silently double an uncongested via's
+// cost relative to step 1's flat 1.0 -- measured to regress adaptec1's wire
+// overflow by ~5% (229558 vs 218650) even with the congestion-response term
+// neutralized, since it changes vias' relative attractiveness as a
+// congestion escape valve everywhere, not just at hot via sites.
+double viaEdgeCost(double lambda, int amount) { return lambda * amount; }
 
 struct LayerPlan {
   std::vector<int> hLayers, vLayers;
@@ -387,7 +476,8 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
     for (int nl : {l - 1, l + 1}) {
       if (nl < 0 || nl >= g.nLayers)
         continue;
-      double w = 1.0; // via base cost only, step 1 -- no via price yet
+      int lowerLayer = std::min(l, nl);
+      double w = viaEdgeCost(prices.via[viaIndex(g, x, y, lowerLayer)], 1);
       int ni = region.idx(x, y, nl);
       if (d + w < region.distAt(ni)) {
         region.setDist(ni, d + w, i);
@@ -473,7 +563,7 @@ void negotiateWire(const RoutingGrid &g, Prices &pr, const Usage &u, const Charg
       if (g.hcap[i] <= 0)
         pr.h[i] = kForbiddenPrice;
       else
-        pr.h[i] *= std::exp(epsilon * priceExponentTerm(u.h[i], g.hcap[i]));
+        pr.h[i] *= std::exp(epsilon * wireExponentTerm(u.h[i], g.hcap[i]));
     }
   } else {
     for (int y = c.a; y < c.b; ++y) {
@@ -481,9 +571,18 @@ void negotiateWire(const RoutingGrid &g, Prices &pr, const Usage &u, const Charg
       if (g.vcap[i] <= 0)
         pr.v[i] = kForbiddenPrice;
       else
-        pr.v[i] *= std::exp(epsilon * priceExponentTerm(u.v[i], g.vcap[i]));
+        pr.v[i] *= std::exp(epsilon * wireExponentTerm(u.v[i], g.vcap[i]));
     }
   }
+}
+
+// A via site's capacity, per the derived model above, can never be zero
+// (viaCapacityPerLayerPair floors at 1), so there is no forbidden-price
+// case to guard here the way wire edges need one.
+void negotiateVia(const RoutingGrid &g, const std::vector<int> &viaCap, Prices &pr,
+                   const Usage &u, int x, int y, int lowerLayer, double epsilon) {
+  size_t i = viaIndex(g, x, y, lowerLayer);
+  pr.via[i] *= std::exp(epsilon * viaExponentTerm(u.via[i], viaCap[lowerLayer]));
 }
 
 void reconcile(std::vector<int> &nodeLayer, int idx, int layer, Point at,
@@ -500,23 +599,39 @@ void reconcile(std::vector<int> &nodeLayer, int idx, int layer, Point at,
 // Routing one net
 // ---------------------------------------------------------------------------
 
+// A single via crossing at (x,y) between layer lowerLayer and lowerLayer+1.
+// Kept separate from ChargeRecord (which describes a wire *range*) rather
+// than folding a via in as a degenerate zero-length range -- a via is a
+// point event with its own capacity model, not a wire run.
+struct ViaCharge {
+  int x, y, lowerLayer;
+};
+
 struct RoutedNet {
   const Net *net = nullptr;
   std::vector<Point> pts;
   std::vector<std::pair<int, int>> mst;
   std::vector<Seg> segs;
   std::vector<ChargeRecord> charges;
+  std::vector<ViaCharge> viaCharges;
   bool giant = false;
 };
+
+void undoViaCharge(const RoutingGrid &g, Usage &u, const ViaCharge &vc) {
+  u.via[viaIndex(g, vc.x, vc.y, vc.lowerLayer)] -= 1;
+}
 
 // Charges and emits one already-found path (a sequence of PathNodes),
 // negotiating each wire edge's price immediately after charging it, exactly
 // as nproute does per candidate leg. Runs of consecutive same-layer,
 // same-direction steps are merged into one segment rather than one per
-// tile, matching every prior router's output convention.
-void commitPath(const RoutingGrid &g, Prices &prices, Usage &usage, double epsilon, int width,
-                const std::vector<PathNode> &path, std::vector<Seg> &segs,
-                std::vector<ChargeRecord> &charges) {
+// tile, matching every prior router's output convention. Vias get the same
+// immediate-negotiation treatment (see negotiateVia) using the derived
+// per-layer-pair capacity in viaCap.
+void commitPath(const RoutingGrid &g, Prices &prices, Usage &usage, const std::vector<int> &viaCap,
+                double epsilon, int width, const std::vector<PathNode> &path,
+                std::vector<Seg> &segs, std::vector<ChargeRecord> &charges,
+                std::vector<ViaCharge> &viaCharges) {
   size_t i = 0;
   while (i + 1 < path.size()) {
     const PathNode &a = path[i];
@@ -524,6 +639,10 @@ void commitPath(const RoutingGrid &g, Prices &prices, Usage &usage, double epsil
     if (a.l != b.l) {
       // Via: exactly one step, no run to extend (layer changes are never
       // batched together as multi-layer jumps by this search).
+      int lowerLayer = std::min(a.l, b.l);
+      usage.via[viaIndex(g, a.x, a.y, lowerLayer)] += 1;
+      viaCharges.push_back({a.x, a.y, lowerLayer});
+      negotiateVia(g, viaCap, prices, usage, a.x, a.y, lowerLayer, epsilon);
       segs.push_back({a.x, a.y, a.l, b.x, b.y, b.l});
       ++i;
       continue;
@@ -555,11 +674,15 @@ void commitPath(const RoutingGrid &g, Prices &prices, Usage &usage, double epsil
 }
 
 void routeNet(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPlan &lp,
-              SearchRegion &region, double epsilon, RoutedNet &rn) {
+              const std::vector<int> &viaCap, SearchRegion &region, double epsilon,
+              RoutedNet &rn) {
   for (const ChargeRecord &c : rn.charges)
     undoCharge(g, usage, c);
+  for (const ViaCharge &vc : rn.viaCharges)
+    undoViaCharge(g, usage, vc);
   rn.segs.clear();
   rn.charges.clear();
+  rn.viaCharges.clear();
   std::vector<int> nodeLayer(rn.pts.size(), -1);
 
   for (auto &e : rn.mst) {
@@ -570,7 +693,8 @@ void routeNet(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPla
       fail("mroute: no path found between tree points even after margin expansion -- "
            "this should not happen on a fully connected grid");
 
-    commitPath(g, prices, usage, epsilon, rn.net->minWidth, r.path, rn.segs, rn.charges);
+    commitPath(g, prices, usage, viaCap, epsilon, rn.net->minWidth, r.path, rn.segs, rn.charges,
+               rn.viaCharges);
     reconcile(nodeLayer, e.first, r.path.front().l, p1, rn.segs);
     reconcile(nodeLayer, e.second, r.path.back().l, p2, rn.segs);
   }
@@ -629,8 +753,16 @@ void routeGiantNet(const RoutingGrid &g, Usage &usage, const LayerPlan &lp, Rout
       layerAtP1 = layerAtP2 = (ya != yb) ? vl : hl;
     }
     if (ya != yb) {
-      if (xa != xb)
-        rn.segs.push_back({p2.x, p1.y, hl, p2.x, p1.y, vl}); // via at the bend
+      if (xa != xb) {
+        // via at the bend -- usage charged (so other nets see it as real
+        // congestion, same as the wire-usage fix above), but never priced:
+        // routeGiantNet has no access to a mutable Prices, on purpose, per
+        // the same exemption every prior router gives giant nets (no
+        // search, no negotiation, just a cheap fixed shape).
+        usage.via[viaIndex(g, p2.x, p1.y, std::min(hl, vl))] += 1;
+        rn.viaCharges.push_back({p2.x, p1.y, std::min(hl, vl)});
+        rn.segs.push_back({p2.x, p1.y, hl, p2.x, p1.y, vl});
+      }
       chargeV(p2.x, ya, yb, vl);
       rn.segs.push_back({p2.x, ya, vl, p2.x, yb, vl});
     }
@@ -707,6 +839,7 @@ RunReport route(const Design &d, int maxRounds, double epsilon) {
   Prices prices(g);
   Usage usage(g);
   LayerPlan lp(g);
+  std::vector<int> viaCap = viaCapacityPerLayerPair(g);
   SearchRegion region; // one reusable scratch buffer for every Dijkstra call
   int kPatience = kDefaultPatience;
   if (const char *p = std::getenv("MROUTE_PATIENCE"); p)
@@ -746,7 +879,7 @@ RunReport route(const Design &d, int maxRounds, double epsilon) {
         continue;
       if (round > 0 && !netOverflowed(g, usage, rn))
         continue;
-      routeNet(g, prices, usage, lp, region, epsilon, rn);
+      routeNet(g, prices, usage, lp, viaCap, region, epsilon, rn);
     }
 
     long long overflow = totalOverflow(g, usage);
@@ -939,10 +1072,60 @@ void testMidRouteLayerHop() {
   check(segsConnected(rep.nets[0].segs), "netHop is one connected component");
 }
 
+bool hasViaAt(const std::vector<Seg> &segs, int x, int y) {
+  for (const Seg &s : segs)
+    if (s.x1 == x && s.y1 == y && s.x2 == x && s.y2 == y && s.l1 != s.l2)
+      return true;
+  return false;
+}
+
+// Step 2's own version of nproute's stampede test: two nets with identical
+// L-shaped geometry (pin 1 needs layer 1, pin 2 needs layer 2, forcing
+// exactly one bend and one via -- not one a free pin-layer reconciliation
+// via could absorb, since both pins already declare the layer their own
+// straight run naturally lands on). Via spacing is set so every site's
+// derived capacity is exactly 1. Net 1 (routed first) takes the "obvious"
+// HV bend, via-ing at the corner (2,0). Net 2, if via pricing did nothing,
+// would want the identical path and collide there. With it working, net 2's
+// mirror-image VH candidate -- via-ing at (0,2), untouched -- becomes
+// cheaper once (2,0)'s price has risen, and it takes that one instead.
+const char *kViaStampedeGr = R"(grid 5 5 2
+vertical capacity 0 4
+horizontal capacity 4 0
+minimum width 1 1
+minimum spacing 0 0
+via spacing 10 10
+0 0 10 10
+num net 2
+netViaA 0 2 1
+5 5 1
+25 25 2
+netViaB 1 2 1
+5 5 1
+25 25 2
+0
+)";
+
+void testViaPricingAvoidsSharedSite() {
+  Design d = parse("mroute_selftest_via.gr", kViaStampedeGr);
+  RunReport rep = route(d, 5, 0.5);
+  check(rep.nets.size() == 2, "both via-stampede nets produced a route");
+  check(rep.bestOverflow == 0, "no wire overflow -- this test is entirely about via pricing");
+  check(segsConnected(rep.nets[0].segs), "netViaA is one connected component");
+  check(segsConnected(rep.nets[1].segs), "netViaB is one connected component");
+  check(hasViaAt(rep.nets[0].segs, 2, 0),
+        "netViaA (routed first, sees an untouched grid) takes the obvious "
+        "HV bend, via-ing at the corner");
+  check(!hasViaAt(rep.nets[1].segs, 2, 0) && hasViaAt(rep.nets[1].segs, 0, 2),
+        "netViaB avoids netViaA's now-priced via site and takes the "
+        "mirror-image VH bend instead, via-ing at the opposite corner");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapes();
   testMidRouteLayerHop();
+  testViaPricingAvoidsSharedSite();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
