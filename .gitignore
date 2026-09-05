@@ -8,6 +8,7 @@ hroute
 droute
 croute
 eroute
+troute
 *.o
 bench/
 *.gr
