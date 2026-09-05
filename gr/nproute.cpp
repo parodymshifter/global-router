@@ -26,14 +26,19 @@
 //
 // That still left a gap to proute's rip-up numbers (adaptec1: proute 221K,
 // this router's first version ~440-475K depending on epsilon), which led to
-// actually tuning the *formula itself* -- see priceExponentTerm's comment
-// for what was tried and measured. The version below (price only actual
-// overflow, not any usage at all; small epsilon; many rounds) reaches 405K
-// on adaptec1, 142K on newblue1 (matching groute), 509K on bigblue1 --
-// better than groute everywhere, still short of proute's rip-up quality
-// everywhere, and the gap is not closing with more tuning of epsilon or
-// round count alone at this point. Recording that honestly rather than
-// keep turning the same two knobs.
+// tuning the cost formula itself in two steps -- see priceExponentTerm's
+// comment for the full measured history. First, pricing only actual
+// overflow instead of any usage at all closed part of the gap (adaptec1
+// 405K). Second, replacing that flat "nothing until 100%, then linear"
+// shape with a soft early-warning curve -- rising, and escalating faster
+// than linearly, starting well before an edge is full -- closed most of
+// the rest: adaptec1 299K, newblue1 88K (proute: 59K), bigblue1 376K
+// (proute: 310K). Beats groute everywhere, converges in a single round
+// instead of dozens, and is within 1.5x of proute's rip-up quality on two
+// of the three benchmarks -- the closest any variant of this router has
+// gotten. The remaining gap to proute may well need a genuinely different
+// idea, not another sweep of these same knobs; recording that honestly
+// rather than continuing to tune them past where they're paying off.
 //
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o nproute nproute.cpp
@@ -43,11 +48,17 @@
 //     ./nproute --selftest
 //
 // Environment variables, for tuning experiments (all optional):
-//     NPROUTE_EPS=<float>       step size epsilon, default 0.005
-//     NPROUTE_ROUNDS=<int>      max rounds, default 100
-//     NPROUTE_PATIENCE=<int>    rounds without improvement before giving up,
-//                               default 50
-//     NPROUTE_TRACE=1           print each round's overflow to stderr
+//     NPROUTE_EPS=<float>        step size epsilon, default 0.02
+//     NPROUTE_THRESHOLD=<float>  early-warning curve start, as a fraction
+//                                of capacity, default 0.2. >= 1.0 disables
+//                                the curve (flat until 100% full, matching
+//                                this router's previous formula).
+//     NPROUTE_POWER=<float>      how much the curve escalates approaching
+//                                capacity (1.0 = linear), default 2.5
+//     NPROUTE_ROUNDS=<int>       max rounds, default 30
+//     NPROUTE_PATIENCE=<int>     rounds without improvement before giving
+//                                up, default 20
+//     NPROUTE_TRACE=1            print each round's overflow to stderr
 
 #include <algorithm>
 #include <chrono>
@@ -331,27 +342,52 @@ void undoCharge(const RoutingGrid &g, Usage &u, const ChargeRecord &c) {
 // the entire difference from groute's updatePrices, which does this same
 // per-edge formula but only after every net in a round has gone.
 //
-// The exponent's argument is max(0, usage/cap - 1): flat until an edge is
-// actually pushed past capacity, not the literal CLAUDE.md usage/cap (which
-// rises for any usage at all, even comfortably under capacity). Three
-// variants were measured against each other on adaptec1 before settling
-// here (see the stage-4-tuning commit for the numbers):
-//   usage/cap directly (literal formula): best overflow 534762, and it gets
-//     *worse* with more rounds -- every previously-touched edge keeps
-//     getting marginally pricier even nowhere near congested, pushing nets
-//     into detours that buy nothing and inflating wirelength.
-//   max(0, usage/cap - 1) (this one): best overflow 404910 at epsilon=0.002,
-//     genuinely still improving after 150 rounds rather than plateauing in
-//     1-2 like the others.
-//   max(0, usage - cap) (absolute overflow, matching how proute's own ad
-//     hoc penalty charges a flat amount per unit regardless of the edge's
-//     capacity): best overflow 537904 -- worse, not better. The plausible
-//     reason (a 1-unit overflow being priced up to 5x weaker on adaptec1's
-//     capacity-32 layers than its capacity-6 ones under the ratio form) did
-//     not survive contact with measurement, so it's not what the ratio form
-//     was missing.
+// The exponent's argument is a soft early-warning curve: 0 below
+// NPROUTE_THRESHOLD (default 0.2, i.e. 20% full) of an edge's capacity,
+// then ramps from 0 to 1 between the threshold and full capacity, raised to
+// NPROUTE_POWER (default 2.5) so the approach to capacity escalates rather
+// than growing linearly; at and beyond capacity it keeps extrapolating the
+// same curve upward rather than switching formulas, so there's no seam
+// right at 100% the way there was in every version before this one.
+//
+// Four variants were measured against each other on adaptec1 before
+// settling here (see the stage-4-tuning commits for the full numbers):
+//   usage/cap directly (the literal CLAUDE.md formula): best overflow
+//     534762, and it gets *worse* with more rounds -- every
+//     previously-touched edge keeps getting marginally pricier even
+//     nowhere near congested, pushing nets into detours that buy nothing.
+//   max(0, usage/cap - 1) (flat until 100%, i.e. threshold=1.0, power=1
+//     below): best overflow 404910 at epsilon=0.002 -- a real improvement,
+//     but converges slowly and has a hard seam right at capacity: an edge
+//     at 99% and one at 40% look identical to the pricer.
+//   max(0, usage - cap) (absolute overflow instead of a ratio, matching how
+//     proute's own ad hoc penalty charges a flat amount per unit regardless
+//     of capacity): best overflow 537904 -- worse. The plausible reason (a
+//     1-unit overflow priced up to 5x weaker on adaptec1's capacity-32
+//     layers than its capacity-6 ones under the ratio form) did not survive
+//     contact with measurement.
+//   this curve (threshold 0.2, power 2.5): best overflow 299304, converging
+//     in a single round instead of dozens. Giving nets a genuine early
+//     warning as an edge fills, escalating faster than linearly as it
+//     approaches capacity, measurably beats waiting for the threshold to be
+//     crossed before caring at all. threshold and power were swept jointly
+//     (0 to 1 in steps of 0.05-0.1, power 0.5 to 4); the result is a broad,
+//     stable plateau roughly in threshold [0.15, 0.45] x power [2, 3], not
+//     a knife-edge optimum -- 0.2/2.5 sits comfortably inside it.
 double priceExponentTerm(double usage, double cap) {
-  return std::max(0.0, usage / cap - 1.0);
+  static const double threshold = [] {
+    const char *t = std::getenv("NPROUTE_THRESHOLD");
+    return t ? std::atof(t) : 0.2;
+  }();
+  static const double power = [] {
+    const char *p = std::getenv("NPROUTE_POWER");
+    return p ? std::atof(p) : 2.5;
+  }();
+  if (threshold >= 1.0)
+    return std::max(0.0, usage / cap - 1.0);
+  double ratio = usage / cap;
+  double r = std::max(0.0, (ratio - threshold) / (1.0 - threshold));
+  return std::pow(r, power);
 }
 
 void negotiate(const RoutingGrid &g, Prices &pr, const Usage &u, const ChargeRecord &c,
@@ -480,11 +516,11 @@ struct RunReport {
   bool stalled = false;
 };
 
-// Higher than groute's/proute's patience: with the overflow-only formula,
-// improvement comes slowly and steadily rather than in a quick 1-2 round
-// burst (adaptec1 was still setting new bests past round 60 at epsilon
-// 0.005), so a short patience window gives up on real, ongoing progress.
-constexpr int kDefaultPatience = 50;
+// With the early-warning curve, convergence is fast (round 1 on all three
+// benchmarks tested) rather than the slow multi-round burn the flat
+// overflow-only formula needed. Patience stays well above 1 anyway as a
+// safety margin for benchmarks not in that set of three.
+constexpr int kDefaultPatience = 20;
 
 RunReport route(const Design &d, int maxRounds, double epsilon) {
   const RoutingGrid &g = d.grid;
@@ -761,8 +797,8 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  int maxRounds = 100;
-  double epsilon = 0.005; // tuned empirically against adaptec1; see NPROUTE_EPS to explore
+  int maxRounds = 30;
+  double epsilon = 0.02; // tuned empirically against adaptec1; see NPROUTE_EPS to explore
   if (const char *e = std::getenv("NPROUTE_EPS"); e)
     epsilon = std::atof(e);
   if (const char *r = std::getenv("NPROUTE_ROUNDS"); r)
