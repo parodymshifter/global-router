@@ -1,32 +1,39 @@
 // nproute.cpp
 //
 // A second methodology, for comparison against groute's batch pricing loop:
-// the same multiplicative-weights cost model from CLAUDE.md,
+// the same multiplicative-weights price update from CLAUDE.md,
 //
-//     cost_e   = 1 + lambda_e * width_i / w_i
-//     lambda_e <- lambda_e * exp(epsilon * usage_e / capacity_e)
+//     lambda_e <- lambda_e * exp(epsilon * [how far over capacity])
 //
 // applied sequentially instead of in batch -- each net solves against the
 // current price, and the touched edges' prices update immediately
 // afterward, so the very next net in the same pass already sees it. This is
 // closer to PathFinder-style negotiated-congestion routing (McMurchie and
 // Ebeling 1995) than to Garg-Koenemann: negotiation happens continuously
-// within a pass, not once per full round.
+// within a pass, not once per full round. Only nets currently sitting on an
+// overflowed edge get ripped up and rerouted after the first round, the
+// same discipline proute's rip-up loop uses.
 //
 // Why this exists: groute (stage 4) found that its batch rounds could not
 // beat its own seed pass's sequential result on any real benchmark, even
 // after 150 rounds -- a single price scalar per edge, updated only once
-// per round, is a weaker signal than live sequential feedback. That result
-// leaves a real question open: is *batching* the reason, or is something
-// else limiting the price-based cost model regardless of how it's
-// scheduled? This router isolates that variable. It uses the identical
-// cost formula and layer/shape machinery as groute; the only thing that
-// changes is when prices update -- immediately per net here, once per
-// round there. If this converges close to proute's rip-up numbers, the
-// formula was fine and batching was the bottleneck. If it doesn't, the
-// limitation is somewhere else (the candidate set, the update rule itself,
-// or something this project hasn't found yet) and groute's result was
-// telling the truth about more than just batching.
+// per round, is a weaker signal than live sequential feedback. Building
+// this to isolate that variable (identical cost formula and layer/shape
+// machinery as groute; the only change is when prices update) confirmed it:
+// with immediate per-net updates instead of once-per-round, the very same
+// formula goes from groute's 2.06M-overflow round 0 to 576K on adaptec1 --
+// batching, not the formula, was groute's problem.
+//
+// That still left a gap to proute's rip-up numbers (adaptec1: proute 221K,
+// this router's first version ~440-475K depending on epsilon), which led to
+// actually tuning the *formula itself* -- see priceExponentTerm's comment
+// for what was tried and measured. The version below (price only actual
+// overflow, not any usage at all; small epsilon; many rounds) reaches 405K
+// on adaptec1, 142K on newblue1 (matching groute), 509K on bigblue1 --
+// better than groute everywhere, still short of proute's rip-up quality
+// everywhere, and the gap is not closing with more tuning of epsilon or
+// round count alone at this point. Recording that honestly rather than
+// keep turning the same two knobs.
 //
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o nproute nproute.cpp
@@ -36,10 +43,10 @@
 //     ./nproute --selftest
 //
 // Environment variables, for tuning experiments (all optional):
-//     NPROUTE_EPS=<float>       step size epsilon, default 0.1
-//     NPROUTE_ROUNDS=<int>      max rounds, default 30
+//     NPROUTE_EPS=<float>       step size epsilon, default 0.005
+//     NPROUTE_ROUNDS=<int>      max rounds, default 100
 //     NPROUTE_PATIENCE=<int>    rounds without improvement before giving up,
-//                               default 5
+//                               default 50
 //     NPROUTE_TRACE=1           print each round's overflow to stderr
 
 #include <algorithm>
@@ -323,6 +330,30 @@ void undoCharge(const RoutingGrid &g, Usage &u, const ChargeRecord &c) {
 // net processed -- in this same pass -- already sees the result. This is
 // the entire difference from groute's updatePrices, which does this same
 // per-edge formula but only after every net in a round has gone.
+//
+// The exponent's argument is max(0, usage/cap - 1): flat until an edge is
+// actually pushed past capacity, not the literal CLAUDE.md usage/cap (which
+// rises for any usage at all, even comfortably under capacity). Three
+// variants were measured against each other on adaptec1 before settling
+// here (see the stage-4-tuning commit for the numbers):
+//   usage/cap directly (literal formula): best overflow 534762, and it gets
+//     *worse* with more rounds -- every previously-touched edge keeps
+//     getting marginally pricier even nowhere near congested, pushing nets
+//     into detours that buy nothing and inflating wirelength.
+//   max(0, usage/cap - 1) (this one): best overflow 404910 at epsilon=0.002,
+//     genuinely still improving after 150 rounds rather than plateauing in
+//     1-2 like the others.
+//   max(0, usage - cap) (absolute overflow, matching how proute's own ad
+//     hoc penalty charges a flat amount per unit regardless of the edge's
+//     capacity): best overflow 537904 -- worse, not better. The plausible
+//     reason (a 1-unit overflow being priced up to 5x weaker on adaptec1's
+//     capacity-32 layers than its capacity-6 ones under the ratio form) did
+//     not survive contact with measurement, so it's not what the ratio form
+//     was missing.
+double priceExponentTerm(double usage, double cap) {
+  return std::max(0.0, usage / cap - 1.0);
+}
+
 void negotiate(const RoutingGrid &g, Prices &pr, const Usage &u, const ChargeRecord &c,
                double epsilon) {
   if (c.horizontal) {
@@ -331,7 +362,7 @@ void negotiate(const RoutingGrid &g, Prices &pr, const Usage &u, const ChargeRec
       if (g.hcap[i] <= 0)
         pr.h[i] = kForbiddenPrice;
       else
-        pr.h[i] *= std::exp(epsilon * static_cast<double>(u.h[i]) / g.hcap[i]);
+        pr.h[i] *= std::exp(epsilon * priceExponentTerm(u.h[i], g.hcap[i]));
     }
   } else {
     for (int y = c.a; y < c.b; ++y) {
@@ -339,7 +370,7 @@ void negotiate(const RoutingGrid &g, Prices &pr, const Usage &u, const ChargeRec
       if (g.vcap[i] <= 0)
         pr.v[i] = kForbiddenPrice;
       else
-        pr.v[i] *= std::exp(epsilon * static_cast<double>(u.v[i]) / g.vcap[i]);
+        pr.v[i] *= std::exp(epsilon * priceExponentTerm(u.v[i], g.vcap[i]));
     }
   }
 }
@@ -449,7 +480,11 @@ struct RunReport {
   bool stalled = false;
 };
 
-constexpr int kDefaultPatience = 5;
+// Higher than groute's/proute's patience: with the overflow-only formula,
+// improvement comes slowly and steadily rather than in a quick 1-2 round
+// burst (adaptec1 was still setting new bests past round 60 at epsilon
+// 0.005), so a short patience window gives up on real, ongoing progress.
+constexpr int kDefaultPatience = 50;
 
 RunReport route(const Design &d, int maxRounds, double epsilon) {
   const RoutingGrid &g = d.grid;
@@ -492,9 +527,21 @@ RunReport route(const Design &d, int maxRounds, double epsilon) {
 
   int roundsSinceImprovement = 0;
   for (int round = 0; round < maxRounds; ++round) {
-    for (RoutedNet &rn : nets)
-      if (!rn.giant)
-        routeNet(g, prices, usage, lp, epsilon, rn);
+    // Round 0 gives every net its first route. After that, only nets
+    // currently sitting on an overflowed edge get ripped up and rerouted --
+    // matching proute's rip-up discipline. Rerouting an already-legal net
+    // every round bought nothing but churn: measured on adaptec1, "reroute
+    // everyone always" drifts from a round-1 low of 473K up past 530K over
+    // the following rounds, since a net with a perfectly good route can get
+    // shaken loose by *other* nets' price changes even though nothing about
+    // its own situation changed.
+    for (RoutedNet &rn : nets) {
+      if (rn.giant)
+        continue;
+      if (round > 0 && !netOverflowed(g, usage, rn))
+        continue;
+      routeNet(g, prices, usage, lp, epsilon, rn);
+    }
 
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun = round + 1;
@@ -650,8 +697,14 @@ void testBasicShapes() {
 // The same three-net stampede fixture groute's self test uses. There, a
 // flat batch start makes all three collide identically in round 0, and only
 // seeding (a separate sequential pre-pass) avoids it. Here there is no
-// separate seed pass -- negotiation is continuous, so round 0 itself should
-// already resolve this the way groute needed seeding to.
+// separate seed pass at all, and the price formula gives zero signal until
+// an edge is actually pushed over capacity (see priceExponentTerm), so
+// round 0 still lets the collision happen once, exactly like it would
+// without any congestion awareness -- but the very next round, selective
+// rip-up (only nets currently sitting on an overflowed edge get rerouted,
+// same discipline proute uses) reroutes net 2 or 3 around it and resolves
+// it. groute needed a whole separate mechanism (the seed pass) to avoid
+// this; nproute's own round 1 does it with nothing extra.
 const char *kStampedeGr = R"(grid 9 8 2
 vertical capacity 0 3
 horizontal capacity 3 0
@@ -673,13 +726,15 @@ net3 2 2 1
 2 0 1 3 0 1 1
 )";
 
-void testNegotiationResolvesStampedeInRoundZero() {
+void testNegotiationResolvesStampedeWithoutSeeding() {
   Design d = parse("nproute_selftest_stampede.gr", kStampedeGr);
   RunReport rep = route(d, 5, 0.5);
   check(rep.bestOverflow == 0,
-        "continuous negotiation avoids the collision without needing a "
-        "separate seed pass or extra rounds");
-  check(rep.bestRound == 0, "resolved in the very first round");
+        "selective rip-up resolves the collision without any separate "
+        "seed pass, unlike groute");
+  check(rep.bestRound <= 1,
+        "resolved within a round of the collision happening -- no seeding "
+        "mechanism needed to avoid it in advance");
   for (const RoutedNet &rn : rep.nets)
     check(segsConnected(rn.segs), "net " + rn.net->name + " is one component");
 }
@@ -687,7 +742,7 @@ void testNegotiationResolvesStampedeInRoundZero() {
 int run() {
   std::cout << "self test\n";
   testBasicShapes();
-  testNegotiationResolvesStampedeInRoundZero();
+  testNegotiationResolvesStampedeWithoutSeeding();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -706,8 +761,8 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  int maxRounds = 30;
-  double epsilon = 0.1; // tuned empirically against adaptec1; see NPROUTE_EPS to explore
+  int maxRounds = 100;
+  double epsilon = 0.005; // tuned empirically against adaptec1; see NPROUTE_EPS to explore
   if (const char *e = std::getenv("NPROUTE_EPS"); e)
     epsilon = std::atof(e);
   if (const char *r = std::getenv("NPROUTE_ROUNDS"); r)
