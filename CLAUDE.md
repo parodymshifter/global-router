@@ -15,6 +15,48 @@ Target: results in the same range as published academic routers on the ISPD
 global routing benchmarks, reproducible run to run, with at least one novel
 contribution.
 
+## Zero-overflow mandate (2026-09-05 addendum)
+
+The Target line above was superseded, then partially restored. Full record
+in `ZERO_OVERFLOW_AGENT_PROMPT.md` and `ZERO_OVERFLOW_CONVERGENCE_EXPERIMENT.md`
+at the repo root; short version:
+
+A session decided the single success metric should be **total overflow on
+the three real ISPD benchmarks, and the goal is zero** -- not "in range of
+published routers." First it measured (not assumed) that every router in
+the `lroute`-through-`sroute` lineage plateaus well short of zero even with
+3.3x more rounds (hroute: 174186/42642/302770 at default rounds ->
+168644/41504/298682 at 172 rounds -- 1-3% further, and two of three
+benchmarks going flat before the extended cap). Diagnosis: every router
+here prices edges with exactly one reactive, current-round-only mechanism
+(`lambda_e <- lambda_e * exp(epsilon * usage_e / capacity_e)`), which has no
+memory of how long an edge has been congested, letting a net drift back
+onto a recently-congested edge once some other edge's still-climbing price
+overtakes it.
+
+The prescribed fix, from the negotiated-congestion literature (Pathfinder,
+FastRoute, NCTU-GR): a permanent, monotonically non-decreasing history-cost
+term per edge, combined with the existing reactive price. Built as
+`gr/iroute.cpp`, forked from `hroute.cpp` -- see that file's header for the
+mechanism and `gr/iroute.cpp`'s own results table for what was actually
+measured on all three benchmarks (gr_verify- and eval2008.pl-cross-checked).
+**Read that table before assuming history-cost accumulation is either the
+fix or a dead end** -- outcome, now measured: a real but modest win once
+correctly tuned (a naive default growth rate made every benchmark worse;
+a gentle one, combined with a much longer round budget than any prior
+router here uses, beat hroute's own extended-round plateau on all three:
+adaptec1 -2.70%, newblue1 -0.46%, bigblue1 -0.59%). Total overflow is
+still in the tens of thousands (newblue1) to hundreds of thousands
+(adaptec1, bigblue1) -- this is one validated technique on the path
+toward zero, not the destination.
+
+What did not change: the "Target" line above is stale (kept for history,
+not deleted) but the discipline below it -- verification first, cross-check
+against eval2008.pl, supervised escalation, empirical tuning over reasoned
+guesses -- is exactly what made this mandate answerable with real
+measurements instead of argument, and still governs every router added
+after this point.
+
 ## Build order
 
 Each stage must pass the benchmarks before the next begins.

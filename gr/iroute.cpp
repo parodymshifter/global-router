@@ -56,10 +56,59 @@
 // through, not just to add more usage to, which is what stops it from
 // becoming attractive again the instant its *current* usage happens to dip.
 //
-// Measured result (see the results table further down, filled in after
-// running all three real ISPD benchmarks with gr_verify and eval2008.pl
-// cross-checked): [FILLED IN BELOW]
+// Measured result, total overflow / scored wirelength, against hroute's own
+// EXTENDED-round result (not hroute's default 52-round number -- the
+// comparison that actually answers the mandate's question, since both
+// numbers below use the same ~172-round budget; see
+// ZERO_OVERFLOW_CONVERGENCE_EXPERIMENT.md for hroute's extended-round
+// numbers and how they were obtained). Both legal per gr_verify (0
+// disconnected/incomplete/unrouted/malformed), both cross-checked exactly
+// against eval2008.pl:
 //
+//   benchmark   hroute (172 rounds, no history)   iroute (172 rounds, hist=0.02)
+//   adaptec1    168644 / n/a                      164094 / 7249294   -- overflow -2.70%
+//   newblue1     41504 / n/a                       41314 / 6646498   -- overflow -0.46%
+//   bigblue1    298682 / n/a                      296914 / 7520461   -- overflow -0.59%
+//
+// A genuine win on all three, and the important comparison is *not* against
+// hroute's own default-round-cap numbers (174186/42642/302770) -- iroute at
+// the SAME 172-round budget beats hroute's own 172-round plateau, which is
+// what actually proves the history-cost term compounds usefully over time
+// rather than just reaching the same ceiling faster. Wirelength rose
+// correspondingly (permanent history cost pushes long-congested nets onto
+// real detours instead of letting them return once current usage dips), the
+// same overflow-for-wirelength trade every congestion-aware change in this
+// project has made.
+//
+// Two things had to be tuned before this worked, neither of them
+// discoverable by reasoning alone -- both found by measuring, per this
+// project's whole discipline:
+//
+//   1. Growth rate. The naive first attempt used IROUTE_HIST_STEP=1.0,
+//      matching every other per-round multiplicative step already in this
+//      codebase (lambda's own exp(epsilon*...) update). It made EVERY
+//      benchmark worse than plain hroute: newblue1 48414 (+13.5%), bigblue1
+//      312672 (+3.3%). Diagnosis: growing the permanent term that fast
+//      overprices contested edges so quickly that far more nets escalate to
+//      the slow tier (47257 vs 42153 on newblue1) and the router spends its
+//      round budget thrashing rather than converging. A gentle step
+//      (0.02, tried alongside 0.1 -- both beat the baseline, 0.02 won on
+//      2 of 3 benchmarks) was the fix. This is the single most important
+//      finding in this file: a mechanism this project had never tried
+//      before was almost abandoned as a dead end after the first (default-
+//      shaped) parameter choice made things worse.
+//   2. Round budget. At hroute's own default 52-round cap, gentle
+//      history-cost already helps (adaptec1 170304-170900 vs 174186,
+//      newblue1 42392-42524 vs 42642, bigblue1 300450-300942 vs 302770 --
+//      roughly 1-2% at equal, unextended rounds) but the real payoff only
+//      shows up with a much longer budget, because the permanent term needs
+//      many rounds to accumulate meaningfully on the edges that matter.
+//      Both IROUTE_FAST_ROUNDS and IROUTE_SLOW_ROUNDS default higher here
+//      than every prior router in this lineage as a direct result --
+//      runtime is correspondingly much longer (bigblue1 alone took roughly
+//      3100s here, versus ~580s at hroute's default cap).
+//
+
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o iroute iroute.cpp
 //
@@ -73,8 +122,15 @@
 //     IROUTE_THRESHOLD=<float>    fast-tier early-warning curve start,
 //                                 default 0.2
 //     IROUTE_POWER=<float>        fast-tier curve escalation power, default 2.5
-//     IROUTE_FAST_ROUNDS=<int>    max phase-A (fast tier) rounds, default 30
-//     IROUTE_SLOW_ROUNDS=<int>    max phase-B (escalation) rounds, default 30
+//     IROUTE_FAST_ROUNDS=<int>    max phase-A (fast tier) rounds, default 60
+//                                 (every prior router in this lineage
+//                                 defaults to 30 -- raised here because the
+//                                 measured result below only shows up with
+//                                 a much longer round budget; see Measured
+//                                 result)
+//     IROUTE_SLOW_ROUNDS=<int>    max phase-B (escalation) rounds, default
+//                                 150 (same reason as IROUTE_FAST_ROUNDS
+//                                 above)
 //     IROUTE_CLEANUP_THRESHOLD=<float>, IROUTE_CLEANUP_PASSES=<int>
 //                                 phase A's cleanup pass, same as nproute's
 //                                 (defaults 0.5 / 30)
@@ -85,9 +141,15 @@
 //                                 accepted/rejected counts, to stderr
 //     IROUTE_HIST_STEP=<float>    per-round additive growth applied to an
 //                                 over-capacity edge's history term,
-//                                 default [FILLED IN BELOW] (0 reproduces
-//                                 hroute's pricing exactly -- history
-//                                 becomes a permanent no-op multiplier of 1)
+//                                 default 0.02 (0 reproduces hroute's
+//                                 pricing exactly -- history becomes a
+//                                 permanent no-op multiplier of 1). The
+//                                 first value tried, 1.0 (matching every
+//                                 other per-round multiplicative step in
+//                                 this codebase), made every benchmark
+//                                 WORSE -- see Measured result below --
+//                                 so this default is the empirically
+//                                 tuned one, not the naive one.
 //     IROUTE_HIST_MODE=add|mult   growth rule: "add" (default) does
 //                                 histH += IROUTE_HIST_STEP; "mult" does
 //                                 histH *= IROUTE_HIST_FACTOR instead
@@ -1560,9 +1622,9 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  int maxFastRounds = 30, maxSlowRounds = 30;
+  int maxFastRounds = 60, maxSlowRounds = 150;
   double epsilon = 0.02;
-  double histStep = 1.0;
+  double histStep = 0.02;
   double histFactor = 1.1;
   HistMode histMode = HistMode::kAdditive;
   if (const char *e = std::getenv("IROUTE_EPS"); e)
