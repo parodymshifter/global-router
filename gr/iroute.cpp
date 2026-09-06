@@ -65,10 +65,10 @@
 // disconnected/incomplete/unrouted/malformed), both cross-checked exactly
 // against eval2008.pl:
 //
-//   benchmark   hroute (172 rounds, no history)   iroute (172 rounds, hist=0.02)
-//   adaptec1    168644 / n/a                      164094 / 7249294   -- overflow -2.70%
-//   newblue1     41504 / n/a                       41314 / 6646498   -- overflow -0.46%
-//   bigblue1    298682 / n/a                      296914 / 7520461   -- overflow -0.59%
+//   benchmark   hroute (172 rounds, no history)   iroute (172 rounds, hist=0.05)
+//   adaptec1    168644 / n/a                      163594 / 7249475   -- overflow -2.99%
+//   newblue1     41504 / n/a                       41272 / 6646549   -- overflow -0.56%
+//   bigblue1    298682 / n/a                      296534 / 7514613   -- overflow -0.72%
 //
 // A genuine win on all three, and the important comparison is *not* against
 // hroute's own default-round-cap numbers (174186/42642/302770) -- iroute at
@@ -107,6 +107,22 @@
 //      than every prior router in this lineage as a direct result --
 //      runtime is correspondingly much longer (bigblue1 alone took roughly
 //      3100s here, versus ~580s at hroute's default cap).
+//   3. Growth rate, round two. A follow-up design-space sweep (streak-
+//      gated growth, growth scaled by how far over capacity an edge is,
+//      a multiplicative growth mode -- all implemented and swept, see
+//      HISTORY_COST_SWEEP.md at the repo root for the full 9-config
+//      table) found streak-gating (delaying growth until N consecutive
+//      over-capacity rounds) made things WORSE in every variant tried --
+//      letting a net drift back onto a recently-congested edge for
+//      longer before the penalty kicks in costs more than it saves, the
+//      same drift-back failure this whole mechanism exists to prevent.
+//      Overflow-magnitude scaling was middling, no clear win over a
+//      well-chosen flat step. A plain flat step of 0.05 (larger than
+//      0.02, tried directly against it at the full 172-round budget, not
+//      just a faster reduced-budget screen -- see HISTORY_COST_SWEEP.md's
+//      own note on why the screen's predicted margin was larger than
+//      what actually held up at full scale) won cleanly, if modestly, on
+//      all three benchmarks and is this file's current default.
 //
 
 // Build:
@@ -141,15 +157,20 @@
 //                                 accepted/rejected counts, to stderr
 //     IROUTE_HIST_STEP=<float>    per-round additive growth applied to an
 //                                 over-capacity edge's history term,
-//                                 default 0.02 (0 reproduces hroute's
+//                                 default 0.05 (0 reproduces hroute's
 //                                 pricing exactly -- history becomes a
 //                                 permanent no-op multiplier of 1). The
 //                                 first value tried, 1.0 (matching every
 //                                 other per-round multiplicative step in
 //                                 this codebase), made every benchmark
-//                                 WORSE -- see Measured result below --
-//                                 so this default is the empirically
-//                                 tuned one, not the naive one.
+//                                 WORSE. 0.02 (this router's default for
+//                                 a time) was the fix for that, but a
+//                                 follow-up sweep (see HISTORY_COST_SWEEP.md
+//                                 at the repo root, and Measured result
+//                                 below) found 0.05 beats it slightly on
+//                                 all three real benchmarks at the same
+//                                 172-round budget -- both empirically
+//                                 tuned values, not the naive one.
 //     IROUTE_HIST_MODE=add|mult   growth rule: "add" (default) does
 //                                 histH += IROUTE_HIST_STEP; "mult" does
 //                                 histH *= IROUTE_HIST_FACTOR instead
@@ -1772,7 +1793,7 @@ int main(int argc, char **argv) {
 
   int maxFastRounds = 60, maxSlowRounds = 150;
   double epsilon = 0.02;
-  double histStep = 0.02;
+  double histStep = 0.05;
   double histFactor = 1.1;
   HistMode histMode = HistMode::kAdditive;
   int streakThreshold = 1;
