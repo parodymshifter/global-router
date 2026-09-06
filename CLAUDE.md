@@ -405,3 +405,28 @@ helps.
   at the reader boundary.
 - Prefer dense arrays over hash maps for per-edge data. The access pattern
   determines the parallel ceiling later.
+
+## Long-running work and background agents
+
+Learned the hard way during the zero-overflow effort: a background agent
+that goes idle waiting on a long-running experiment cannot always be woken
+back up to continue -- `SendMessage` to resume it is not reliably available,
+and when it isn't, the parent session ends up re-deriving everything the
+agent knew from scratch just to keep going. Two rules follow from that:
+
+- **Write each step's state to a file, not just conversation context.**
+  Tuning sweeps, convergence experiments, and multi-run comparisons should
+  land their raw numbers in a file (a trace log, a small results table) as
+  they're produced, not only summarized in a chat turn. A stuck or
+  unresumable agent's work is still usable if the next session can read
+  what it already measured off disk instead of starting over. `ZERO_OVERFLOW_CONVERGENCE_EXPERIMENT.md`
+  is the pattern to follow: raw traces first, conclusion written up once
+  they're in.
+- **Cap concurrent background processes at 3.** A tuning sweep that
+  launches one process per parameter value is tempting to run all at once
+  (this project ran 6-7 router processes in parallel at one point, on the
+  reasoning that there were enough CPU cores) -- but more concurrent runs
+  means more of them finish while no one is watching, which is exactly
+  when an unresumable agent's progress goes unobserved the longest. Batch
+  sweeps in groups of 3 or fewer, even when hardware headroom would allow
+  more.
