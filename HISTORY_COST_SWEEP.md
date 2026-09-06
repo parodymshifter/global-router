@@ -82,3 +82,36 @@ only a full-budget validation run settles whether a lead is real and by
 how much. Adopted step=0.05 as iroute's new default; see `gr/iroute.cpp`'s
 header for the updated Result section and reasoning.
 
+## Part 2: jroute -- rip-up-reroute of already-committed nets
+
+Updated jroute's own inherited `histStep` default from a stale 0.02 to
+0.05 before measuring anything, so its rip-up-reroute mechanism is tested
+on top of iroute's actual current best, not an outdated setting. Self-test
+passes with decisive fixtures (a net with no current reason to move gets
+picked and rerouted purely because of accumulated history on its edges;
+uniform scarring proves the accept/reject bookkeeping never accepts a
+regression).
+
+First real-benchmark run launched 2026-09-06 ~1:31PM, default settings
+(`JROUTE_RIPUP_INTERVAL=4`, `JROUTE_RIPUP_COUNT=200`, hist step=0.05,
+60/150 round budget -- same budget as iroute's own comparison basis).
+
+Bar to beat (iroute at hist=0.05, same 172-round budget, its current best):
+adaptec1 163594, newblue1 41272, bigblue1 296534.
+
+| benchmark | iroute (bar, hist=0.05) | jroute (default ripup settings) | delta |
+|---|---|---|---|
+| adaptec1 | 163594 | 163154 | -0.27% |
+| newblue1 | 41272 | 41318 | +0.11% |
+| bigblue1 | 296534 | 296170 | -0.12% |
+
+All legal per gr_verify, all cross-checked exactly against eval2008.pl.
+A genuinely mixed result -- two benchmarks improve modestly, newblue1
+regresses slightly -- reported as-is rather than averaged into a single
+verdict. All three deltas are small (under 0.3%). No trace instrumentation
+exists yet for the rip-up pass's own accept/reject counts, so it isn't
+possible to tell whether the pass is finding real local improvements that
+wash out in aggregate, or mostly doing little -- add that before spending
+a tuning pass on JROUTE_RIPUP_INTERVAL/JROUTE_RIPUP_COUNT. See
+`gr/jroute.cpp`'s header for the full writeup.
+

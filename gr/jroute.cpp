@@ -61,13 +61,42 @@
 //      it" rule -- there's no reason to let it fall back to the fast tier's
 //      cheaper-but-blinder candidate menu after this.
 //
-// Measured result: pending. See HISTORY_COST_SWEEP.md at the repo root for
-// the raw sweep this file's defaults were chosen from, and this header's
-// own update once a full 172-round, three-benchmark, eval2008.pl-cross-
-// checked run has actually been made and recorded -- per this project's own
-// discipline, that comparison is what settles whether rip-up-reroute of
-// committed nets is a real win, a wash, or a regression, not reasoning
-// about it in advance.
+// Measured result, total overflow / scored wirelength, against iroute at
+// its own current best setting (hist step=0.05, see iroute.cpp's own
+// header and HISTORY_COST_SWEEP.md for how that was chosen), same
+// 172-round budget on both sides so this isolates rip-up-reroute's own
+// effect from history-cost tuning. Both legal per gr_verify (0
+// disconnected/incomplete/unrouted/malformed), both cross-checked exactly
+// against eval2008.pl:
+//
+//   benchmark   iroute (hist=0.05, no ripup)   jroute (+ripup, default settings)
+//   adaptec1    163594 / 7249475               163154 / 7253775   -- overflow -0.27%
+//   newblue1     41272 / 6646549                41318 / 6649053   -- overflow +0.11%
+//   bigblue1    296534 / 7514613               296170 / 7524030   -- overflow -0.12%
+//
+// A genuinely mixed result, reported exactly as measured rather than
+// averaged into a single verdict: two benchmarks improve modestly,
+// newblue1 regresses slightly. Every benchmark's wirelength rose a little
+// further on top of iroute's own already-elevated wirelength (rip-up
+// reroutes cost some additional detour even when the accept/reject
+// bookkeeping keeps the net legal), consistent with the same overflow-
+// for-wirelength trade every congestion-aware change in this project has
+// made. None of the three deltas are large (all under 0.3% either way) --
+// this reads as a real but small effect at these default settings
+// (JROUTE_RIPUP_INTERVAL=4, JROUTE_RIPUP_COUNT=200), not a decisive win
+// or a decisive failure for the technique itself.
+//
+// Left for a follow-up rather than settled here: this file has no trace
+// instrumentation for the rip-up pass's own accept/reject counts (unlike
+// phase B's escalation loop, which already logs this under
+// JROUTE_TRACE=1), so it isn't yet possible to tell from a real run
+// whether the pass is finding and keeping real local improvements that
+// happen to wash out in aggregate, or mostly rejecting and doing little
+// -- those are different diagnoses (a scoring/candidate-selection
+// problem vs. a genuinely small-effect mechanism) that would suggest
+// different next steps (retuning JROUTE_RIPUP_INTERVAL/COUNT vs.
+// reconsidering the scoring function itself). Add that instrumentation
+// before spending a tuning pass on this file's two knobs.
 //
 
 // Build:
@@ -102,7 +131,12 @@
 //                                 accepted/rejected counts, to stderr
 //     JROUTE_HIST_STEP=<float>    per-round additive growth applied to an
 //                                 over-capacity edge's history term,
-//                                 default 0.02 (0 reproduces hroute's
+//                                 default 0.05, matching iroute's own
+//                                 post-sweep default (see
+//                                 HISTORY_COST_SWEEP.md) so this file's
+//                                 rip-up-reroute mechanism is measured on
+//                                 top of iroute's actual current best, not
+//                                 a stale setting (0 reproduces hroute's
 //                                 pricing exactly -- history becomes a
 //                                 permanent no-op multiplier of 1). The
 //                                 first value tried, 1.0 (matching every
@@ -2009,7 +2043,7 @@ int main(int argc, char **argv) {
 
   int maxFastRounds = 60, maxSlowRounds = 150;
   double epsilon = 0.02;
-  double histStep = 0.02;
+  double histStep = 0.05;
   double histFactor = 1.1;
   HistMode histMode = HistMode::kAdditive;
   int streakThreshold = 1;
