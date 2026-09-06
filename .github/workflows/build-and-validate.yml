@@ -26,6 +26,7 @@ jobs:
           - troute
           - sroute
           - iroute
+          - jroute
     steps:
       - uses: actions/checkout@v4
 

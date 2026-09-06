@@ -11,6 +11,7 @@ eroute
 troute
 sroute
 iroute
+jroute
 *.o
 bench/
 *.gr
