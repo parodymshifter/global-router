@@ -10,6 +10,7 @@ croute
 eroute
 troute
 sroute
+iroute
 *.o
 bench/
 *.gr
