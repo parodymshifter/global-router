@@ -155,6 +155,23 @@
 //                                 histH *= IROUTE_HIST_FACTOR instead
 //     IROUTE_HIST_FACTOR=<float>  multiplicative growth factor, only used
 //                                 when IROUTE_HIST_MODE=mult, default 1.1
+//     IROUTE_HIST_STREAK=<int>    require this many *consecutive*
+//                                 round-boundary over-capacity observations
+//                                 before history grows at all, default 1
+//                                 (grow on every over-capacity round, the
+//                                 original unconditional behavior -- see
+//                                 updateHistory's comment and the "Growth
+//                                 trigger and magnitude" section below for
+//                                 the swept results)
+//     IROUTE_HIST_SCALE=flat|overflow
+//                                 "flat" (default) applies the same step
+//                                 (or factor) to every over-capacity edge;
+//                                 "overflow" scales it by that edge's
+//                                 current usage/capacity ratio, so an edge
+//                                 3x over capacity accumulates 3x as fast
+//                                 as one just barely over -- the one
+//                                 asymmetry history previously had against
+//                                 lambda's own usage-proportional update
 
 #include <algorithm>
 #include <chrono>
@@ -195,11 +212,21 @@ constexpr double kForbiddenPrice = 1e9;
 // both terms together, and threading two structs through the same call
 // chains that already thread one is a needless chance to pass the wrong
 // pair.
+// `streakH`/`streakV` count consecutive round-boundary over-capacity
+// observations per edge -- reset to 0 the instant an edge reads clear,
+// incremented (never decremented, unlike history itself which never
+// decreases even across a clear round) whenever it's still over. Added to
+// support IROUTE_HIST_STREAK, which gates history growth behind N
+// consecutive over-capacity rounds instead of every single one -- see the
+// file header's "Growth trigger" section for why this was worth trying:
+// the default (N=1) reproduces every prior call site's behavior exactly.
 struct Prices {
   std::vector<double> h, v;
   std::vector<double> histH, histV;
+  std::vector<int> streakH, streakV;
   explicit Prices(const RoutingGrid &g)
-      : h(g.hCount(), 1.0), v(g.vCount(), 1.0), histH(g.hCount(), 1.0), histV(g.vCount(), 1.0) {}
+      : h(g.hCount(), 1.0), v(g.vCount(), 1.0), histH(g.hCount(), 1.0), histV(g.vCount(), 1.0),
+        streakH(g.hCount(), 0), streakV(g.vCount(), 0) {}
 };
 struct Usage {
   std::vector<int> h, v;
@@ -268,21 +295,61 @@ constexpr double kHistoryCap = 1e6; // defensive ceiling; never reached in
                                      // negotiateWire's kForbiddenPrice
                                      // clamp already applies to lambda.
 
+// `streakThreshold` (IROUTE_HIST_STREAK, default 1): an edge must be over
+// capacity for this many *consecutive* round boundaries before growth is
+// applied at all -- not merely "was over capacity this round," which is
+// what every call site did before this parameter existed. Threshold 1
+// reproduces that exact prior behavior (every over-capacity round grows
+// immediately), so this is a strict generalization, never a behavior
+// change at its default. Below threshold, the streak counter still
+// advances -- it just doesn't unlock growth yet.
+//
+// `scaleByOverflow` (IROUTE_HIST_SCALE=overflow): instead of a flat step
+// (or a flat factor) applied uniformly to every over-capacity edge
+// regardless of how far over it is, scale by the current round's
+// usage/capacity ratio -- an edge at 3x capacity accumulates history three
+// times as fast as one just barely over. This is the one asymmetry between
+// history's update and lambda's own: lambda already scales with
+// usage/capacity via priceExponentTerm; history previously did not. Ratio
+// is computed from THIS round's usage even when growth is gated by a
+// multi-round streak, matching "how bad is it right now that finally
+// triggered growth," not an average over the streak.
 void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double histStep,
-                    HistMode mode, double histFactor) {
+                    HistMode mode, double histFactor, int streakThreshold = 1,
+                    bool scaleByOverflow = false) {
   for (size_t i = 0; i < u.h.size(); ++i) {
     if (g.hcap[i] <= 0)
       continue;
-    if (u.h[i] > g.hcap[i])
-      pr.histH[i] = std::min(kHistoryCap, mode == HistMode::kAdditive ? pr.histH[i] + histStep
-                                                                       : pr.histH[i] * histFactor);
+    if (u.h[i] > g.hcap[i]) {
+      ++pr.streakH[i];
+      if (pr.streakH[i] < streakThreshold)
+        continue;
+      double ratio = scaleByOverflow ? static_cast<double>(u.h[i]) / g.hcap[i] : 1.0;
+      if (mode == HistMode::kAdditive)
+        pr.histH[i] = std::min(kHistoryCap, pr.histH[i] + histStep * ratio);
+      else
+        pr.histH[i] =
+            std::min(kHistoryCap, pr.histH[i] * (1.0 + (histFactor - 1.0) * ratio));
+    } else {
+      pr.streakH[i] = 0;
+    }
   }
   for (size_t i = 0; i < u.v.size(); ++i) {
     if (g.vcap[i] <= 0)
       continue;
-    if (u.v[i] > g.vcap[i])
-      pr.histV[i] = std::min(kHistoryCap, mode == HistMode::kAdditive ? pr.histV[i] + histStep
-                                                                       : pr.histV[i] * histFactor);
+    if (u.v[i] > g.vcap[i]) {
+      ++pr.streakV[i];
+      if (pr.streakV[i] < streakThreshold)
+        continue;
+      double ratio = scaleByOverflow ? static_cast<double>(u.v[i]) / g.vcap[i] : 1.0;
+      if (mode == HistMode::kAdditive)
+        pr.histV[i] = std::min(kHistoryCap, pr.histV[i] + histStep * ratio);
+      else
+        pr.histV[i] =
+            std::min(kHistoryCap, pr.histV[i] * (1.0 + (histFactor - 1.0) * ratio));
+    } else {
+      pr.streakV[i] = 0;
+    }
   }
 }
 
@@ -1049,7 +1116,8 @@ constexpr int kFastPatience = 20;
 constexpr int kSlowPatience = 5;
 
 RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double epsilon,
-                 double histStep, HistMode histMode, double histFactor) {
+                 double histStep, HistMode histMode, double histFactor,
+                 int streakThreshold = 1, bool scaleByOverflow = false) {
   const RoutingGrid &g = d.grid;
   RunReport rep;
   Prices prices(g);
@@ -1101,7 +1169,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     // may run -- never mid-round, never per-net, so "over capacity" always
     // means "over capacity in the fully negotiated state of this round,"
     // not a transient partial-round reading.
-    updateHistory(g, prices, usage, histStep, histMode, histFactor);
+    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun = round + 1;
     if (trace)
@@ -1158,7 +1226,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   // too rather than either 30 times (noisy, mid-cleanup) or not at all
   // (would let a net that the fast tier never resolved but cleanup also
   // couldn't fix sit at history 1.0 right up to escalation).
-  updateHistory(g, prices, usage, histStep, histMode, histFactor);
+  updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow);
 
   if (rep.bestOverflow == 0) {
     rep.convergedToZero = true;
@@ -1232,7 +1300,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     // Same round-boundary rule as phase A: the supervised accept/reject
     // decisions for every escalated net this round are final by this
     // point, so this is the settled state to judge "over capacity" against.
-    updateHistory(g, prices, usage, histStep, histMode, histFactor);
+    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun += 1;
     if (trace)
@@ -1596,6 +1664,84 @@ void testHistoryNeverDecreases() {
         "capacity -- it only ever grows or holds, by construction");
 }
 
+// IROUTE_HIST_STREAK: growth must be gated behind N *consecutive*
+// over-capacity round boundaries, and a single clear round must reset the
+// count to zero rather than merely pausing it -- otherwise an edge that
+// flickers over/under/over capacity every other round would still
+// eventually accumulate growth from unrelated non-consecutive rounds,
+// which defeats the entire point of requiring a *streak*.
+void testHistoryStreakRequiresConsecutiveOvercapacityRounds() {
+  Design d = parse("iroute_selftest_basic.gr", kBasicGr);
+  const RoutingGrid &g = d.grid;
+  Prices pr(g);
+  size_t idx = g.hIndex(0, 0, 0); // layer 0, horizontal capacity 2
+  Usage over(g);
+  over.h[idx] = 5;
+  Usage under(g);
+  under.h[idx] = 0;
+
+  const int streakThreshold = 3;
+  // Two consecutive over-capacity rounds -- short of the threshold.
+  updateHistory(g, pr, over, 1.0, HistMode::kAdditive, 1.0, streakThreshold, false);
+  updateHistory(g, pr, over, 1.0, HistMode::kAdditive, 1.0, streakThreshold, false);
+  check(pr.histH[idx] == 1.0,
+        "two consecutive over-capacity rounds is still short of a streak "
+        "threshold of 3: no growth yet");
+
+  // A single clear round in between breaks the streak entirely.
+  updateHistory(g, pr, under, 1.0, HistMode::kAdditive, 1.0, streakThreshold, false);
+  updateHistory(g, pr, over, 1.0, HistMode::kAdditive, 1.0, streakThreshold, false);
+  updateHistory(g, pr, over, 1.0, HistMode::kAdditive, 1.0, streakThreshold, false);
+  check(pr.histH[idx] == 1.0,
+        "2 over + 1 clear + 2 over never reaches 3 *consecutive* "
+        "over-capacity rounds -- the interruption resets the streak, so "
+        "history still hasn't grown even though 4 of 5 rounds were over "
+        "capacity");
+
+  // The third consecutive over-capacity round finally unlocks growth.
+  updateHistory(g, pr, over, 1.0, HistMode::kAdditive, 1.0, streakThreshold, false);
+  check(pr.histH[idx] > 1.0,
+        "the 3rd consecutive over-capacity round reaches the streak "
+        "threshold and history finally grows");
+}
+
+// IROUTE_HIST_SCALE=overflow: an edge sitting further over capacity should
+// accumulate history faster than one just barely over, unlike the default
+// flat step which treats "1 unit over" and "10x over" identically.
+void testHistoryScalesWithOverflowMagnitude() {
+  Design d = parse("iroute_selftest_basic.gr", kBasicGr);
+  const RoutingGrid &g = d.grid;
+  Prices prFlat(g), prScaled(g);
+  size_t idx = g.hIndex(0, 0, 0); // layer 0, horizontal capacity 2
+  Usage barelyOver(g);
+  barelyOver.h[idx] = 3; // capacity 2 -> ratio 1.5x
+  Usage wayOver(g);
+  wayOver.h[idx] = 20; // capacity 2 -> ratio 10x
+
+  updateHistory(g, prFlat, barelyOver, 1.0, HistMode::kAdditive, 1.0, 1, false);
+  double flatBarely = prFlat.histH[idx];
+  Prices prFlat2(g);
+  updateHistory(g, prFlat2, wayOver, 1.0, HistMode::kAdditive, 1.0, 1, false);
+  double flatWayOver = prFlat2.histH[idx];
+  check(flatBarely == flatWayOver,
+        "flat scaling (the default) grows a barely-over edge and a "
+        "way-over edge by the identical step -- it does not distinguish "
+        "overflow magnitude at all");
+
+  updateHistory(g, prScaled, barelyOver, 1.0, HistMode::kAdditive, 1.0, 1, true);
+  double scaledBarely = prScaled.histH[idx];
+  Prices prScaled2(g);
+  updateHistory(g, prScaled2, wayOver, 1.0, HistMode::kAdditive, 1.0, 1, true);
+  double scaledWayOver = prScaled2.histH[idx];
+  check(scaledWayOver > scaledBarely,
+        "IROUTE_HIST_SCALE=overflow makes the 10x-over edge accumulate "
+        "history faster than the 1.5x-over edge in the very same round -- "
+        "the decisive behavioral change this mode is supposed to buy");
+  check(scaledWayOver > flatWayOver,
+        "the way-over edge grows faster under overflow-scaling than it "
+        "would have under the flat default");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -1604,6 +1750,8 @@ int run() {
   testHistoryCostPreventsDriftBackToPreviouslyCongestedEdge();
   testHistoryIgnoresZeroCapacityEdges();
   testHistoryNeverDecreases();
+  testHistoryStreakRequiresConsecutiveOvercapacityRounds();
+  testHistoryScalesWithOverflowMagnitude();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -1627,6 +1775,8 @@ int main(int argc, char **argv) {
   double histStep = 0.02;
   double histFactor = 1.1;
   HistMode histMode = HistMode::kAdditive;
+  int streakThreshold = 1;
+  bool scaleByOverflow = false;
   if (const char *e = std::getenv("IROUTE_EPS"); e)
     epsilon = std::atof(e);
   if (const char *r = std::getenv("IROUTE_FAST_ROUNDS"); r)
@@ -1639,10 +1789,15 @@ int main(int argc, char **argv) {
     histFactor = std::atof(f);
   if (const char *m = std::getenv("IROUTE_HIST_MODE"); m && std::string(m) == "mult")
     histMode = HistMode::kMultiplicative;
+  if (const char *s = std::getenv("IROUTE_HIST_STREAK"); s)
+    streakThreshold = std::max(1, std::atoi(s));
+  if (const char *s = std::getenv("IROUTE_HIST_SCALE"); s && std::string(s) == "overflow")
+    scaleByOverflow = true;
 
   auto t0 = std::chrono::steady_clock::now();
   Design d = readGr(argv[1]);
-  RunReport rep = route(d, maxFastRounds, maxSlowRounds, epsilon, histStep, histMode, histFactor);
+  RunReport rep = route(d, maxFastRounds, maxSlowRounds, epsilon, histStep, histMode, histFactor,
+                         streakThreshold, scaleByOverflow);
   writeSolution(argv[2], d.grid, rep.nets);
   auto t1 = std::chrono::steady_clock::now();
 
