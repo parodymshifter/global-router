@@ -641,3 +641,17 @@ the honest result, not a metric worth chasing a peak of). The ablation
 launch above is the first run under this wrapper; see CLAUDE.md for the
 new standing practice.
 
+**User-directed follow-up, for every subsequent ablation in this Part**:
+raise `XROUTE_BARRIER_START` from its default 0.6 to 0.8 and re-check the
+slow-tier escalation rate (77899/270715 = 28.8% at the default-config
+30/40 screen above). Hypothesis: the barrier's own cost stays flat below
+`XROUTE_BARRIER_START`, so pushing that point out from 60% to 80% gives
+the fast tier's cheap candidate search more room before anything looks
+expensive enough to force escalation -- directly testing whether the
+regression's cause (per iroute.cpp's own documented failure mode:
+too-aggressive pricing over-escalates nets within a fixed round budget)
+is the barrier starting too early, not the barrier's existence at all.
+Does not apply to the `XROUTE_BARRIER=0` ablation already launched
+(barrier fully disabled there, so its start threshold is moot) -- applies
+to whichever barrier-on run follows it.
+
