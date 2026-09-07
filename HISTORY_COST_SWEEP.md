@@ -397,8 +397,21 @@ per-round cost (kroute's own escalated count shrinks further as later
 rounds stabilize, while rroute's stays at ~100% every round), a full
 172-round, 3-benchmark validation at kroute's own committed budget could
 plausibly take many hours per benchmark -- not attempted without first
-seeing a real signal at a proper screen. 30/40-round screen on newblue1
-(the cheapest benchmark) launched to get that signal; adaptec1/bigblue1
-screens deliberately not started yet given the cost risk. Results
-pending -- see this file's next update.
+seeing a real signal at a proper screen.
+
+**30/40-round screen on newblue1** (same budget both routers, identical
+env vars otherwise):
+
+| router | overflow (62 rounds) | wall time |
+|---|---|---|
+| kroute | 41956 | 203.1s |
+| rroute | 41800 | 741.1s |
+
+A genuine reversal from the tiny-budget probe: rroute now WINS on
+quality (-0.37%), not loses. The cost gap persists and is large (~3.65x
+slower). This is a real screen win (even if modest) and, per this
+project's own methodology, needs confirmation before drawing a
+conclusion -- proceeding cautiously to an adaptec1 screen too, time-
+boxed given the cost (extrapolating from the observed 3.65x ratio
+against kroute's own ~958s adaptec1 screen, expect roughly an hour).
 
