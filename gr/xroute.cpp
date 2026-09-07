@@ -252,9 +252,14 @@
 //                                 overflow-only trace. Unset by default:
 //                                 even the cheap O(segments) wirelength
 //                                 pass is needless work on a run nobody's
-//                                 charting. XROUTE_TRACE's own stderr
-//                                 lines report the same two numbers live,
-//                                 whether or not this is also set.
+//                                 charting. Every row is flushed
+//                                 immediately, not buffered until exit --
+//                                 the file is meant to be watched (tail
+//                                 -f, or read mid-run) on a long job, not
+//                                 just read once it's already done.
+//                                 XROUTE_TRACE's own stderr lines report
+//                                 the same two numbers live, whether or
+//                                 not this is also set.
 
 #include <algorithm>
 #include <chrono>
@@ -1535,9 +1540,17 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
         if (trace)
           std::cerr << phase << " round " << globalRound << " overflow " << overflow
                      << " wirelength " << wirelength << "\n";
-        if (logging)
+        if (logging) {
+          // Flushed every row, not just on close: the whole point of this
+          // log is to watch a run's progress while it's still running (a
+          // 172-round full-budget run can take hours), and an unflushed
+          // ofstream buffer would leave the file looking empty or stale
+          // until the process exits -- exactly the case this feature
+          // exists to avoid.
           roundLogFile << globalRound << "," << phase << "," << overflow << "," << wirelength << ","
                        << elapsed << "\n";
+          roundLogFile.flush();
+        }
         ++globalRound;
       };
 
