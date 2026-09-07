@@ -133,6 +133,25 @@
 //                                 reproduce iroute's exact permanent,
 //                                 never-decreasing behavior for direct
 //                                 comparison.
+//     KROUTE_HIST_RATIO_EXPONENT=<float>
+//                                 only used when KROUTE_HIST_MODE=ratio;
+//                                 raises the usage/capacity ratio to this
+//                                 power before multiplying, default 1.0
+//                                 (plain ratio, iroute's original "ratio"
+//                                 formula). A user-proposed follow-up:
+//                                 exponent 2 punishes a badly-over edge far
+//                                 harder (10x capacity -> multiply by 100,
+//                                 not 10) while barely changing a
+//                                 barely-over edge (1.01x -> 1.0201, not
+//                                 1.01) -- worth trying specifically here
+//                                 rather than in iroute, since relaxation
+//                                 can undo an overshoot on the very next
+//                                 clean round, changing the risk profile of
+//                                 an aggressive formula that overshot badly
+//                                 without relaxation (see iroute's own
+//                                 IROUTE_HIST_MODE=ratio result, which
+//                                 lost clearly at exponent 1 with no
+//                                 relaxation available to recover from it).
 
 #include <algorithm>
 #include <chrono>
@@ -311,7 +330,8 @@ constexpr double kHistoryCap = 1e6; // defensive ceiling; never reached in
 // reproduces iroute's exact permanent, non-decreasing behavior.
 void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double histStep,
                     HistMode mode, double histFactor, int streakThreshold = 1,
-                    bool scaleByOverflow = false, bool relaxEnabled = true) {
+                    bool scaleByOverflow = false, bool relaxEnabled = true,
+                    double ratioExponent = 1.0) {
   for (size_t i = 0; i < u.h.size(); ++i) {
     if (g.hcap[i] <= 0)
       continue;
@@ -330,8 +350,10 @@ void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double hist
         if (relaxEnabled)
           pr.histOpsH[i].push_back({pr.histH[i] / before, true});
       } else {
-        pr.histH[i] =
-            std::min(kHistoryCap, pr.histH[i] * (static_cast<double>(u.h[i]) / g.hcap[i]));
+        pr.histH[i] = std::min(
+            kHistoryCap,
+            pr.histH[i] *
+                std::pow(static_cast<double>(u.h[i]) / g.hcap[i], ratioExponent));
         if (relaxEnabled)
           pr.histOpsH[i].push_back({pr.histH[i] / before, true});
       }
@@ -363,8 +385,10 @@ void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double hist
         if (relaxEnabled)
           pr.histOpsV[i].push_back({pr.histV[i] / before, true});
       } else {
-        pr.histV[i] =
-            std::min(kHistoryCap, pr.histV[i] * (static_cast<double>(u.v[i]) / g.vcap[i]));
+        pr.histV[i] = std::min(
+            kHistoryCap,
+            pr.histV[i] *
+                std::pow(static_cast<double>(u.v[i]) / g.vcap[i], ratioExponent));
         if (relaxEnabled)
           pr.histOpsV[i].push_back({pr.histV[i] / before, true});
       }
@@ -1145,7 +1169,7 @@ constexpr int kSlowPatience = 5;
 RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double epsilon,
                  double histStep, HistMode histMode, double histFactor,
                  int streakThreshold = 1, bool scaleByOverflow = false,
-                 bool relaxEnabled = true) {
+                 bool relaxEnabled = true, double ratioExponent = 1.0) {
   const RoutingGrid &g = d.grid;
   RunReport rep;
   Prices prices(g);
@@ -1197,7 +1221,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     // may run -- never mid-round, never per-net, so "over capacity" always
     // means "over capacity in the fully negotiated state of this round,"
     // not a transient partial-round reading.
-    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled);
+    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun = round + 1;
     if (trace)
@@ -1254,7 +1278,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   // too rather than either 30 times (noisy, mid-cleanup) or not at all
   // (would let a net that the fast tier never resolved but cleanup also
   // couldn't fix sit at history 1.0 right up to escalation).
-  updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled);
+  updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent);
 
   if (rep.bestOverflow == 0) {
     rep.convergedToZero = true;
@@ -1328,7 +1352,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     // Same round-boundary rule as phase A: the supervised accept/reject
     // decisions for every escalated net this round are final by this
     // point, so this is the settled state to judge "over capacity" against.
-    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled);
+    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun += 1;
     if (trace)
@@ -1868,6 +1892,35 @@ void testHistoryRatioModeMultipliesByUsageOverCapacityExactly() {
         "history term, not just a single isolated call");
 }
 
+// KROUTE_HIST_RATIO_EXPONENT: squaring the ratio should punish a badly-over
+// edge much harder while barely changing a barely-over one -- the decisive
+// property the user proposed this for.
+void testHistoryRatioExponentSquaresTheRatio() {
+  Design d = parse("kroute_selftest_basic.gr", kBasicGr);
+  const RoutingGrid &g = d.grid;
+  size_t idx = g.hIndex(0, 0, 0); // layer 0, horizontal capacity 2
+  Prices prBarely(g);
+  Usage barelyOver(g);
+  barelyOver.h[idx] = 3; // capacity 2 -> ratio 1.5
+  updateHistory(g, prBarely, barelyOver, 0.0, HistMode::kRatio, 0.0, 1, false, true,
+                /*ratioExponent=*/2.0);
+  check(std::abs(prBarely.histH[idx] - 2.25) < 1e-9,
+        "exponent 2 on a 1.5x-over edge multiplies history by exactly "
+        "1.5^2=2.25, not the plain 1.5 exponent-1 would give");
+
+  Prices prWayOver(g);
+  Usage tenXOver(g);
+  tenXOver.h[idx] = 20; // capacity 2 -> ratio 10
+  updateHistory(g, prWayOver, tenXOver, 0.0, HistMode::kRatio, 0.0, 1, false, true,
+                /*ratioExponent=*/2.0);
+  check(std::abs(prWayOver.histH[idx] - 100.0) < 1e-9,
+        "exponent 2 on a 10x-over edge multiplies history by exactly "
+        "10^2=100 -- squaring punishes the badly-over edge far more "
+        "aggressively relative to the barely-over one (100/2.25=44.4x "
+        "apart) than plain ratio mode would (10/1.5=6.7x apart), the "
+        "decisive behavioral difference this parameter is supposed to buy");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -1881,6 +1934,7 @@ int run() {
   testHistoryStreakRequiresConsecutiveOvercapacityRounds();
   testHistoryScalesWithOverflowMagnitude();
   testHistoryRatioModeMultipliesByUsageOverCapacityExactly();
+  testHistoryRatioExponentSquaresTheRatio();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -1927,11 +1981,14 @@ int main(int argc, char **argv) {
   bool relaxEnabled = true;
   if (const char *r = std::getenv("KROUTE_HIST_RELAX"); r)
     relaxEnabled = std::string(r) != "0";
+  double ratioExponent = 1.0;
+  if (const char *r = std::getenv("KROUTE_HIST_RATIO_EXPONENT"); r)
+    ratioExponent = std::atof(r);
 
   auto t0 = std::chrono::steady_clock::now();
   Design d = readGr(argv[1]);
   RunReport rep = route(d, maxFastRounds, maxSlowRounds, epsilon, histStep, histMode, histFactor,
-                         streakThreshold, scaleByOverflow, relaxEnabled);
+                         streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent);
   writeSolution(argv[2], d.grid, rep.nets);
   auto t1 = std::chrono::steady_clock::now();
 
