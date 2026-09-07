@@ -171,9 +171,18 @@
 //                                 all three real benchmarks at the same
 //                                 172-round budget -- both empirically
 //                                 tuned values, not the naive one.
-//     IROUTE_HIST_MODE=add|mult   growth rule: "add" (default) does
+//     IROUTE_HIST_MODE=add|mult|ratio   growth rule: "add" (default) does
 //                                 histH += IROUTE_HIST_STEP; "mult" does
-//                                 histH *= IROUTE_HIST_FACTOR instead
+//                                 histH *= IROUTE_HIST_FACTOR instead;
+//                                 "ratio" does histH *= usage_e/capacity_e
+//                                 directly (no separate step or factor at
+//                                 all -- an edge at 150% of capacity
+//                                 multiplies its history by 1.5 that
+//                                 round, unconditionally). This
+//                                 is the direct multiplicative analogue of
+//                                 IROUTE_HIST_SCALE=overflow's *(1 + (factor-1)*ratio)
+//                                 -- see the file header's Measured result
+//                                 for why this specific formula was tried.
 //     IROUTE_HIST_FACTOR=<float>  multiplicative growth factor, only used
 //                                 when IROUTE_HIST_MODE=mult, default 1.1
 //     IROUTE_HIST_STREAK=<int>    require this many *consecutive*
@@ -305,7 +314,7 @@ double edgeCost(double lambda, double hist, int amount) { return hist * (1.0 + l
 // usage > capacity comparison), but the *reason* to skip is the same one:
 // nothing meaningful to accumulate against an edge that was never usable
 // in the first place. See testHistoryIgnoresZeroCapacityEdges.
-enum class HistMode { kAdditive, kMultiplicative };
+enum class HistMode { kAdditive, kMultiplicative, kRatio };
 
 constexpr double kHistoryCap = 1e6; // defensive ceiling; never reached in
                                      // practice at realistic round counts,
@@ -348,9 +357,12 @@ void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double hist
       double ratio = scaleByOverflow ? static_cast<double>(u.h[i]) / g.hcap[i] : 1.0;
       if (mode == HistMode::kAdditive)
         pr.histH[i] = std::min(kHistoryCap, pr.histH[i] + histStep * ratio);
-      else
+      else if (mode == HistMode::kMultiplicative)
         pr.histH[i] =
             std::min(kHistoryCap, pr.histH[i] * (1.0 + (histFactor - 1.0) * ratio));
+      else
+        pr.histH[i] =
+            std::min(kHistoryCap, pr.histH[i] * (static_cast<double>(u.h[i]) / g.hcap[i]));
     } else {
       pr.streakH[i] = 0;
     }
@@ -365,9 +377,12 @@ void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double hist
       double ratio = scaleByOverflow ? static_cast<double>(u.v[i]) / g.vcap[i] : 1.0;
       if (mode == HistMode::kAdditive)
         pr.histV[i] = std::min(kHistoryCap, pr.histV[i] + histStep * ratio);
-      else
+      else if (mode == HistMode::kMultiplicative)
         pr.histV[i] =
             std::min(kHistoryCap, pr.histV[i] * (1.0 + (histFactor - 1.0) * ratio));
+      else
+        pr.histV[i] =
+            std::min(kHistoryCap, pr.histV[i] * (static_cast<double>(u.v[i]) / g.vcap[i]));
     } else {
       pr.streakV[i] = 0;
     }
@@ -1763,6 +1778,34 @@ void testHistoryScalesWithOverflowMagnitude() {
         "would have under the flat default");
 }
 
+// IROUTE_HIST_MODE=ratio: histH *= usage/capacity directly, no separate
+// step or factor. A user-proposed formula, n2 = n1*(1 + overflow_percent/100),
+// which is algebraically exactly usage/capacity when "overflow_percent" is
+// the excess over capacity as a percentage (e.g. usage=150,cap=100 -> 50%
+// -> 1 + 0.5 = 1.5 = 150/100).
+void testHistoryRatioModeMultipliesByUsageOverCapacityExactly() {
+  Design d = parse("iroute_selftest_basic.gr", kBasicGr);
+  const RoutingGrid &g = d.grid;
+  size_t idx = g.hIndex(0, 0, 0); // layer 0, horizontal capacity 2
+  Prices pr(g);
+  Usage fiftyOver(g);
+  fiftyOver.h[idx] = 3; // capacity 2 -> ratio exactly 1.5
+  updateHistory(g, pr, fiftyOver, /*histStep=*/0.0, HistMode::kRatio, /*histFactor=*/0.0);
+  check(std::abs(pr.histH[idx] - 1.5) < 1e-9,
+        "IROUTE_HIST_MODE=ratio on a 50%-over edge (usage 3, capacity 2) "
+        "multiplies history by exactly 1.5 -- histStep/histFactor play no "
+        "role at all in this mode, only the live usage/capacity ratio");
+
+  Usage tenXOver(g);
+  tenXOver.h[idx] = 20; // capacity 2 -> ratio exactly 10.0
+  updateHistory(g, pr, tenXOver, 0.0, HistMode::kRatio, 0.0);
+  check(std::abs(pr.histH[idx] - 15.0) < 1e-9,
+        "a second round at 10x capacity multiplies the already-1.5 history "
+        "by exactly 10 more (1.5*10=15) -- confirms this mode compounds "
+        "multiplicatively round over round against the real production "
+        "history term, not just a single isolated call");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -1773,6 +1816,7 @@ int run() {
   testHistoryNeverDecreases();
   testHistoryStreakRequiresConsecutiveOvercapacityRounds();
   testHistoryScalesWithOverflowMagnitude();
+  testHistoryRatioModeMultipliesByUsageOverCapacityExactly();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -1810,6 +1854,8 @@ int main(int argc, char **argv) {
     histFactor = std::atof(f);
   if (const char *m = std::getenv("IROUTE_HIST_MODE"); m && std::string(m) == "mult")
     histMode = HistMode::kMultiplicative;
+  else if (const char *m = std::getenv("IROUTE_HIST_MODE"); m && std::string(m) == "ratio")
+    histMode = HistMode::kRatio;
   if (const char *s = std::getenv("IROUTE_HIST_STREAK"); s)
     streakThreshold = std::max(1, std::atoi(s));
   if (const char *s = std::getenv("IROUTE_HIST_SCALE"); s && std::string(s) == "overflow")

@@ -12,6 +12,7 @@ troute
 sroute
 iroute
 jroute
+kroute
 *.o
 bench/
 *.gr
