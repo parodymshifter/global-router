@@ -38,15 +38,35 @@
 // below), rather than an approximate exponential decay that would need its
 // own separate tuning.
 //
-// Measured result: pending. See HISTORY_COST_SWEEP.md at the repo root for
-// the raw sweep this file's defaults were chosen from, and this header's
-// own update once a full 172-round, three-benchmark, eval2008.pl-cross-
-// checked run has actually been made against iroute's own current best
-// (163594/41272/296534) -- per this project's own discipline, that
-// comparison is what settles whether relaxable penalties are a real win, a
-// wash, or a regression relative to iroute's strictly-permanent version,
-// not reasoning about it in advance.
+// Measured result, total overflow / scored wirelength, against iroute's own
+// current best (flat step=0.05, same 172-round budget on both sides). Both
+// legal per gr_verify (0 disconnected/incomplete/unrouted/malformed), both
+// cross-checked exactly against eval2008.pl:
 //
+//   benchmark   iroute (172 rounds, permanent)   kroute (172 rounds, relaxable, default)
+//   adaptec1    163594 / 7249475                 162584 / 7254167   -- overflow -0.62%
+//   newblue1     41272 / 6646549                  41014 / 6644362   -- overflow -0.63%
+//   bigblue1    296534 / 7514613                 292420 / 7535653   -- overflow -1.39%
+//
+// A clean, unanimous win -- the first mechanism in the whole history-cost
+// design-space sweep (10+ configs tried across iroute and kroute both, see
+// HISTORY_COST_SWEEP.md at the repo root) to beat iroute on all three real
+// benchmarks. And unlike iroute's own step=0.05 tuning (where a screen's
+// predicted margin overstated what held up at full scale), kroute's
+// bigblue1 margin at full scale is *larger* than the screen predicted --
+// relaxable penalties are not just a faster path to the same ceiling
+// iroute reaches, they let the router find a genuinely lower one. kroute
+// is the current-best router in this lineage as of this measurement.
+//
+// Why relaxation helps, in one sentence: iroute's history term can only
+// ever grow, so once an edge earns a penalty it stays fully expensive
+// forever even after the congestion that caused it is long resolved,
+// permanently foreclosing routes through that edge that might be perfectly
+// good again -- kroute's LIFO undo lets a genuinely-recovered edge earn
+// its way back to usability, while an edge that keeps re-overflowing never
+// gets the chance to relax in the first place (its stack never empties).
+//
+
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o kroute kroute.cpp
@@ -152,6 +172,32 @@
 //                                 IROUTE_HIST_MODE=ratio result, which
 //                                 lost clearly at exponent 1 with no
 //                                 relaxation available to recover from it).
+//     KROUTE_HIST_EXPONENT_ESCALATION=<float>
+//                                 only used when KROUTE_HIST_MODE=ratio;
+//                                 default 0.0 (no escalation, exponent stays
+//                                 fixed at KROUTE_HIST_RATIO_EXPONENT).
+//                                 User-proposed: an edge's *effective*
+//                                 exponent for this round's growth is
+//                                 KROUTE_HIST_RATIO_EXPONENT plus this value
+//                                 times how many still-unrelaxed penalties
+//                                 are already on that edge's stack -- so an
+//                                 edge penalized once uses the base
+//                                 exponent, penalized a second time (without
+//                                 an intervening clean round to relax it)
+//                                 uses base+escalation, a third time
+//                                 base+2*escalation, and so on. Reuses the
+//                                 relaxation stack's own size as the "how
+//                                 many times has this been penalized"
+//                                 count -- deliberately, so an edge that's
+//                                 been relaxed back down also automatically
+//                                 drops back to a gentler exponent for its
+//                                 next penalty, not just a gentler history
+//                                 value. Only takes effect when
+//                                 KROUTE_HIST_RELAX=1 (the default): with
+//                                 relax disabled the stack is never
+//                                 populated, so there is no count to
+//                                 escalate from. Try 0.5 or 1.0 as starting
+//                                 points per the user's own suggestion.
 
 #include <algorithm>
 #include <chrono>
@@ -331,7 +377,7 @@ constexpr double kHistoryCap = 1e6; // defensive ceiling; never reached in
 void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double histStep,
                     HistMode mode, double histFactor, int streakThreshold = 1,
                     bool scaleByOverflow = false, bool relaxEnabled = true,
-                    double ratioExponent = 1.0) {
+                    double ratioExponent = 1.0, double exponentEscalation = 0.0) {
   for (size_t i = 0; i < u.h.size(); ++i) {
     if (g.hcap[i] <= 0)
       continue;
@@ -350,10 +396,11 @@ void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double hist
         if (relaxEnabled)
           pr.histOpsH[i].push_back({pr.histH[i] / before, true});
       } else {
+        double effExponent =
+            ratioExponent + exponentEscalation * static_cast<double>(pr.histOpsH[i].size());
         pr.histH[i] = std::min(
             kHistoryCap,
-            pr.histH[i] *
-                std::pow(static_cast<double>(u.h[i]) / g.hcap[i], ratioExponent));
+            pr.histH[i] * std::pow(static_cast<double>(u.h[i]) / g.hcap[i], effExponent));
         if (relaxEnabled)
           pr.histOpsH[i].push_back({pr.histH[i] / before, true});
       }
@@ -385,10 +432,11 @@ void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double hist
         if (relaxEnabled)
           pr.histOpsV[i].push_back({pr.histV[i] / before, true});
       } else {
+        double effExponent =
+            ratioExponent + exponentEscalation * static_cast<double>(pr.histOpsV[i].size());
         pr.histV[i] = std::min(
             kHistoryCap,
-            pr.histV[i] *
-                std::pow(static_cast<double>(u.v[i]) / g.vcap[i], ratioExponent));
+            pr.histV[i] * std::pow(static_cast<double>(u.v[i]) / g.vcap[i], effExponent));
         if (relaxEnabled)
           pr.histOpsV[i].push_back({pr.histV[i] / before, true});
       }
@@ -1169,7 +1217,8 @@ constexpr int kSlowPatience = 5;
 RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double epsilon,
                  double histStep, HistMode histMode, double histFactor,
                  int streakThreshold = 1, bool scaleByOverflow = false,
-                 bool relaxEnabled = true, double ratioExponent = 1.0) {
+                 bool relaxEnabled = true, double ratioExponent = 1.0,
+                 double exponentEscalation = 0.0) {
   const RoutingGrid &g = d.grid;
   RunReport rep;
   Prices prices(g);
@@ -1221,7 +1270,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     // may run -- never mid-round, never per-net, so "over capacity" always
     // means "over capacity in the fully negotiated state of this round,"
     // not a transient partial-round reading.
-    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent);
+    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent, exponentEscalation);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun = round + 1;
     if (trace)
@@ -1278,7 +1327,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   // too rather than either 30 times (noisy, mid-cleanup) or not at all
   // (would let a net that the fast tier never resolved but cleanup also
   // couldn't fix sit at history 1.0 right up to escalation).
-  updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent);
+  updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent, exponentEscalation);
 
   if (rep.bestOverflow == 0) {
     rep.convergedToZero = true;
@@ -1352,7 +1401,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     // Same round-boundary rule as phase A: the supervised accept/reject
     // decisions for every escalated net this round are final by this
     // point, so this is the settled state to judge "over capacity" against.
-    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent);
+    updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent, exponentEscalation);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun += 1;
     if (trace)
@@ -1921,6 +1970,67 @@ void testHistoryRatioExponentSquaresTheRatio() {
         "decisive behavioral difference this parameter is supposed to buy");
 }
 
+// KROUTE_HIST_EXPONENT_ESCALATION: the effective exponent for a round's
+// growth should climb with how many still-unrelaxed penalties are already
+// on the stack, and a relaxed edge should use a *lower* effective exponent
+// for its next penalty than an edge that stayed dirty continuously -- not
+// merely end up at a lower history value, the escalation level itself must
+// have dropped. Uses a fixed usage/capacity=2.0 throughout (capacity 2,
+// usage 4) so every factor is an exact power of 2, checkable exactly.
+void testExponentEscalationTracksStackSizeAndRelaxesWithIt() {
+  Design d = parse("kroute_selftest_basic.gr", kBasicGr);
+  const RoutingGrid &g = d.grid;
+  size_t idx = g.hIndex(0, 0, 0); // layer 0, horizontal capacity 2
+  Usage over(g);
+  over.h[idx] = 4; // ratio exactly 2.0
+  Usage under(g);
+  under.h[idx] = 0;
+  constexpr double base = 1.0, escalation = 1.0;
+
+  // Edge A: three straight dirty rounds, no relaxation in between.
+  // exponents used: 1.0 (stack 0), 2.0 (stack 1), 3.0 (stack 2) ->
+  // history: 2 -> 2*4=8 -> 8*8=64.
+  Prices prA(g);
+  for (int i = 0; i < 3; ++i)
+    updateHistory(g, prA, over, 0.0, HistMode::kRatio, 0.0, 1, false, true, base, escalation);
+  check(std::abs(prA.histH[idx] - 64.0) < 1e-6,
+        "three straight dirty rounds with escalation=1.0 produce exactly "
+        "2*4*8=64 (exponents 1,2,3 in turn) -- confirms escalation climbs "
+        "with consecutive, unrelaxed penalties");
+
+  // Edge B: same three dirty rounds, then two clean rounds (relaxes the
+  // stack from 3 down to 1), then a fourth dirty round.
+  Prices prB(g);
+  for (int i = 0; i < 3; ++i)
+    updateHistory(g, prB, over, 0.0, HistMode::kRatio, 0.0, 1, false, true, base, escalation);
+  updateHistory(g, prB, under, 0.0, HistMode::kRatio, 0.0, 1, false, true, base, escalation);
+  updateHistory(g, prB, under, 0.0, HistMode::kRatio, 0.0, 1, false, true, base, escalation);
+  check(std::abs(prB.histH[idx] - 2.0) < 1e-6,
+        "two clean rounds after the same three dirty ones relax the stack "
+        "from size 3 down to 1 (64 -> /8 -> 8 -> /4 -> 2), exactly "
+        "mirroring testRelaxationFullyRestoresBaselineAfterEqualCleanRounds' "
+        "own LIFO-undo arithmetic");
+  updateHistory(g, prB, over, 0.0, HistMode::kRatio, 0.0, 1, false, true, base, escalation);
+  check(std::abs(prB.histH[idx] - 8.0) < 1e-6,
+        "edge B's fourth dirty round, with only 1 unrelaxed penalty on its "
+        "stack, uses effective exponent 1.0+1.0*1=2.0 (2^2=4, 2*4=8)");
+
+  Usage overStill(g); // fourth straight dirty round for edge A, no relax
+  overStill.h[idx] = 4;
+  updateHistory(g, prA, overStill, 0.0, HistMode::kRatio, 0.0, 1, false, true, base, escalation);
+  check(std::abs(prA.histH[idx] - 1024.0) < 1e-3,
+        "edge A's fourth dirty round, having never relaxed (stack still "
+        "at 3), uses effective exponent 1.0+1.0*3=4.0 (2^4=16, 64*16=1024)");
+  check(prA.histH[idx] > prB.histH[idx] * 100,
+        "the decisive comparison: two edges on their 4th dirty round each, "
+        "but the one that got two clean rounds in between (edge B, "
+        "history=8) ends up over 100x lower than the one that never "
+        "relaxed (edge A, history=1024) -- relaxation lowers the "
+        "escalation level itself, not just the raw history value, exactly "
+        "the property KROUTE_HIST_EXPONENT_ESCALATION's header claims by "
+        "reusing the stack's own size as the escalation count");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -1935,6 +2045,7 @@ int run() {
   testHistoryScalesWithOverflowMagnitude();
   testHistoryRatioModeMultipliesByUsageOverCapacityExactly();
   testHistoryRatioExponentSquaresTheRatio();
+  testExponentEscalationTracksStackSizeAndRelaxesWithIt();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -1984,11 +2095,15 @@ int main(int argc, char **argv) {
   double ratioExponent = 1.0;
   if (const char *r = std::getenv("KROUTE_HIST_RATIO_EXPONENT"); r)
     ratioExponent = std::atof(r);
+  double exponentEscalation = 0.0;
+  if (const char *r = std::getenv("KROUTE_HIST_EXPONENT_ESCALATION"); r)
+    exponentEscalation = std::atof(r);
 
   auto t0 = std::chrono::steady_clock::now();
   Design d = readGr(argv[1]);
   RunReport rep = route(d, maxFastRounds, maxSlowRounds, epsilon, histStep, histMode, histFactor,
-                         streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent);
+                         streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent,
+                         exponentEscalation);
   writeSolution(argv[2], d.grid, rep.nets);
   auto t1 = std::chrono::steady_clock::now();
 

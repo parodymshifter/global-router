@@ -191,9 +191,31 @@ Bar to beat at full scale (iroute's current adopted default, flat
 step=0.05, 172 rounds): adaptec1 163594, newblue1 41272, bigblue1
 296534.
 
-| benchmark | kroute (relaxable, default settings) |
-|---|---|
-| adaptec1 | (pending) |
-| newblue1 | (pending) |
-| bigblue1 | (pending) |
+| benchmark | iroute (bar) | kroute (relaxable, default settings) | improvement |
+|---|---|---|---|
+| adaptec1 | 163594 | 162584 | -0.62% |
+| newblue1 | 41272 | 41014 | -0.63% |
+| bigblue1 | 296534 | 292420 | -1.39% |
+
+All legal per gr_verify, all cross-checked exactly against eval2008.pl.
+**A clean, unanimous win** -- the first mechanism in this entire sweep
+(10+ configs) to beat iroute on all three benchmarks, and bigblue1's
+margin is even larger than the screen predicted (unlike the earlier
+step=0.05-vs-0.02 case, where the screen overstated its win). This
+validates the user's relaxable-penalty idea as a genuine improvement
+over iroute's permanent-only mechanism, not just a faster path to the
+same ceiling. kroute is now the current-best router in this lineage.
+See `gr/kroute.cpp`'s header for the full writeup.
+
+Per the user's explicit condition ("if the majority improve, adjust the
+penalty formula to..."), this unanimous win triggers the next round of
+experiments: sweeping `KROUTE_HIST_MODE=ratio` at various
+`KROUTE_HIST_RATIO_EXPONENT` values (including the user-proposed
+exponent=2, i.e. n2=n1*(usage/capacity)^2), and separately
+`KROUTE_HIST_EXPONENT_ESCALATION` (also user-proposed: the effective
+exponent climbs with how many still-unrelaxed penalties are on an
+edge's stack, so a chronically-dirty edge gets punished progressively
+harder while a relaxed edge drops back to a gentler exponent). Both are
+now env-controlled and self-tested (commits f98ec69 and the escalation
+commit following it) -- see this file's next update for sweep results.
 

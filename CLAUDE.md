@@ -50,6 +50,22 @@ still in the tens of thousands (newblue1) to hundreds of thousands
 (adaptec1, bigblue1) -- this is one validated technique on the path
 toward zero, not the destination.
 
+**2026-09-07 update**: `gr/kroute.cpp`, forked from iroute, replaced
+iroute's permanent (monotonically non-decreasing) history term with a
+LIFO-relaxable one -- every growth operation is pushed onto a per-edge
+stack and popped/undone on a later clean round, so a genuinely-recovered
+edge can earn its way back to usability instead of staying expensive
+forever. A user-proposed refinement to their own proposed mechanism,
+and both empirically validated: kroute beats iroute cleanly on all three
+real benchmarks (adaptec1 -0.62%, newblue1 -0.63%, bigblue1 -1.39%, same
+172-round budget both sides) -- the first mechanism in the whole
+history-cost sweep (10+ configs) to win unanimously. **kroute is the
+current-best router in this lineage.** Total overflow remains in the
+tens to hundreds of thousands on every benchmark; see `gr/kroute.cpp`'s
+header and `HISTORY_COST_SWEEP.md` at the repo root for the full record,
+including a follow-up sweep of the growth formula's exponent (in
+progress as of this update).
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned
