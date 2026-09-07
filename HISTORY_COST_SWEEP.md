@@ -845,3 +845,92 @@ alone, which comparatively few edges reach on any given round -- rather
 than applying real bite across the whole mid-range where it broadly
 destabilizes the fast tier.
 
+## Part 10: yroute -- post-convergence rescue pass with decaying length weight
+
+Built directly from the user's own question, after the barrier work
+above stalled out: "what isn't getting used in the available space to
+bring overflow down to zero, and what are some options for using it
+better?" Measured first (see the per-tile/per-layer analysis this
+prompted): bigblue1's aggregate layer utilization sits at 65.7% overall
+-- over a third of all physical capacity idle somewhere on the die --
+while every hot tile has all 6 layers simultaneously overloaded, so
+there's no idle layer sitting right at the contested spot. Combined with
+the ISPD ranking being lexicographic (overflow first, wirelength only as
+tiebreak) while every router here blends both into one scalar cost, the
+diagnosis was: a per-round pricing curve structurally can't fully commit
+to "spend arbitrary wirelength to kill remaining overflow," because
+there's always some length savings large enough to still look cheaper at
+any finite lambda.
+
+**Mechanism** (`gr/yroute.cpp`, forked from kroute, commit 6306a56):
+Phase C, run once after the main loop stops. For each net still touching
+an overflowed edge, individually, retry it at a decaying schedule of
+length weights (`YROUTE_RESCUE_WEIGHTS`, default
+1.0,0.3,0.1,0.03,0.01,0.003,0.001,0) via `edgeCost = hist * (lengthWeight
++ lambda*amount)`, stopping at the first weight whose local overflow
+delta doesn't get worse. User's own explicit requirement: tunable, not a
+hard-set-to-zero, with the actual "does it need to go fully negligible"
+question left as something to measure, not assume.
+
+**A real bug, twice** (commits 5323ec6 and the one before it): the first
+real run self-reported overflow=442 while gr_verify/eval2008.pl both
+independently disagreed at 304106 -- off by ~688x, caught immediately by
+this project's cross-check discipline before anything was believed. Root
+cause: the retry loop's mid-attempt manual undo left `usage` permanently
+short of a rejected attempt's own pre-rescue baseline once routeNetSlow's
+own undo-at-start ran again on the next weight. A first attempted fix
+corrected only half of the bug (the charge-tracking bookkeeping, not
+usage itself); a synthetic regression test built specifically to catch
+this class of bug
+(`testRescuePassLeavesUsageConsistentWithFinalCommittedCharges`, which
+required building a genuinely-congested fixture since the existing one
+converged to zero too easily to exercise Phase C at all) caught a
+*second*, smaller discrepancy immediately afterward. The final,
+correct fix is simpler than either patch: don't touch usage/rn.charges
+between attempts at all, since routeNetSlow's own undo-at-start already
+chains correctly attempt to attempt on its own. 47 checks pass.
+
+**Verified result, 30/40-round newblue1 screen (same budget as the
+xroute isolation matrix)**: **41860**, 238.1s. Legal per gr_verify, cross-
+checked exactly against eval2008.pl (41860 / max 22 / wirelength 6639112,
+all three -- self-report, gr_verify, eval2008.pl -- agree exactly this
+time). Against kroute-equivalent (41956): **-0.46%**, a real but modest
+win, not the dramatic number the bug produced.
+
+**The actual research question, answered from `YROUTE_RESCUE_LOG`'s real
+data** (23108 nets attempted, all still-overflowed after phase B):
+
+| outcome | count | % of attempted |
+|---|---|---|
+| never succeeded, even at weight=0 | 19866 | 86.0% |
+| succeeded, at weight=1.0 (no length-indifference needed at all) | 2562 | 11.1% |
+| succeeded, at some weight in (0, 1) | 554 | 2.4% |
+| succeeded, only at weight=0 (fully length-indifferent) | 126 | 0.5% |
+
+Two honest, somewhat humbling findings, reported as directly as the win
+above:
+
+1. **86% of holdout nets could not be rescued at any weight, including
+   fully length-indifferent (weight=0).** Spending unlimited wirelength
+   doesn't help most remaining overflow -- consistent with the earlier
+   per-tile finding that hot tiles have *every* layer and direction
+   simultaneously overloaded. A single net retrying its own path alone,
+   however indifferent to length, can't fix a resource that's jointly
+   oversubscribed by many nets at once; that needs the nets to move
+   together, not one at a time (option 2 from that earlier discussion,
+   not yet built).
+2. **Of the nets the mechanism *did* help, most (79%) needed no length-
+   weight change at all** -- weight=1.0 (an ordinary reroute against the
+   current price state) was already enough, meaning most of this
+   mechanism's real, measured win is just "retry once more," not the
+   length-decay idea specifically. Only 2.4% of all attempted nets needed
+   any actual weight below 1.0 to succeed, and among *those*, there is no
+   comfortable low sweet spot -- the weights that worked are spread
+   fairly evenly across the whole schedule, with weight=0 itself used
+   *more* than several of the intermediate values (126 nets at 0 vs.
+   35-81 at each of 0.001-0.03). The honest answer to "optimal low
+   proportion, or does it need to go fully negligible": **neither
+   cleanly** -- for the narrow slice of nets this mechanism actually
+   reaches, no single value dominates, and a meaningful share need it at
+   its most extreme (0) rather than some gentle intermediate compromise.
+
