@@ -771,3 +771,28 @@ alone, with the barrier fully off, recovers something close to kroute's
 41956 (expected, given the pattern above) or reveals its own separate
 issue.
 
+**Ordering-only result (`XROUTE_BARRIER=0 XROUTE_ORDER=combined`, same
+30/40-round budget)**: **41514**, 210.1s. Legal per gr_verify, cross-
+checked exactly against eval2008.pl (41514 / max 22 / wirelength
+6626874, both tools agree). Escalation: 41816/270715 = **15.4%**.
+
+**Isolation matrix complete.** Five data points, same 30/40 newblue1
+budget:
+
+| config | overflow | vs kroute | escalation |
+|---|---|---|---|
+| kroute-equivalent (baseline) | 41956 | -- | 15.8% |
+| **ordering-only (RUDY+centrality)** | **41514** | **-1.05%** | **15.4%** |
+| default (barrier@0.6 + combined order) | 63494 | +51.4% | 28.8% |
+| barrier-only @0.6 | 65322 | +55.7% | 30.0% |
+| barrier-only @0.8 | 68206 | +62.6% | 33.0% |
+
+Clean, unambiguous attribution: **the RUDY/centrality ordering is a real,
+if modest, standalone win** -- droute's own RUDY result carried forward
+correctly, and the new centrality signal doesn't hurt it. **The price
+barrier, in every configuration tried, is a clear regression**, and nothing
+about *where* its threshold sits explains the gap -- 0.6, 0.8, combined
+with or without ordering, all land in the same 60-65% cost range. The
+barrier's fundamental shape (near-zero signal below its start threshold,
+then a sudden climb) is the problem, not a specific constant.
+
