@@ -655,3 +655,31 @@ Does not apply to the `XROUTE_BARRIER=0` ablation already launched
 (barrier fully disabled there, so its start threshold is moot) -- applies
 to whichever barrier-on run follows it.
 
+**Ablation result (`XROUTE_BARRIER=0 XROUTE_ORDER=none`, i.e.
+kroute-equivalent pricing and ordering through xroute's own binary, same
+30/40-round budget)**: **41956**, 205.5s -- an *exact* match to kroute's
+own recorded 30/40 screen (line 407). Legal per gr_verify, cross-checked
+exactly against eval2008.pl (41956 / max 22 / wirelength 6634017, both
+tools agree). This confirms two things at once: the ablation fixture and
+methodology are sound (xroute's "everything off" configuration truly
+reproduces kroute's exact behavior, not some unrelated fork bug), and the
+regression measured above is *entirely* attributable to the barrier
+and/or combined ordering, not noise. Escalation rate here: 42887/270715
+= **15.8%**, well under the default config's 28.8% -- directly
+implicating the new mechanisms as the cause of the extra slow-tier
+escalation, not a coincidence.
+
+Also added `XROUTE_ROUND_LOG=<path>` this round (per-round CSV: overflow
++ wirelength together, so a run's full trajectory can be charted
+afterward, not just watched live) and fixed a real bug in
+`run_tracked.sh` found using it for the first time: `$!` after
+backgrounding `/usr/bin/time -l router...` captures time's own PID, not
+the router process it execs as a child, so the VSZ/RSS poll was silently
+watching the wrapper (a few hundred KB, forever) while `time -l`'s own
+authoritative report said the actual router peaked at 635MB. Fixed via
+`pgrep -P` to find the real child PID before polling.
+
+Next: barrier-only (`XROUTE_BARRIER=1 XROUTE_ORDER=none`) at
+`XROUTE_BARRIER_START=0.8` per the user's own follow-up above, now with
+the fixed memory wrapper and round-log enabled.
+
