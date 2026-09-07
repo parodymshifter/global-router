@@ -443,3 +443,34 @@ escalation -- touching only nets that need it -- captures effectively
 all the available benefit at a fraction of the cost. See gr/rroute.cpp's
 header for the full writeup.
 
+## Part 7: vroute -- multi-source multi-sink (MSMV) maze routing
+
+Highest-leverage gap identified against real ISPD-contest-winning
+routers (FastRoute, NTHU-Route -- see this session's research summary):
+every router here builds a net's Steiner topology once, up front, from
+an abstract Manhattan-distance MST, then routes each fixed tree edge
+independently. MSMV grows the tree incrementally instead -- every
+committed tile is a simultaneous source, every unconnected pin a
+simultaneous sink, one real Dijkstra wave finds the genuinely cheapest
+next connection each step, which can tap into the middle of already-
+built wire, not just fixed pin endpoints. Built as `gr/vroute.cpp`
+(commit 6a15721), self-tested with two decisive, exact-arithmetic
+fixtures proving genuine multi-source and multi-sink selection, plus
+kroute's full inherited suite.
+
+**Cost/quality probe** (newblue1, tiny 5 fast / 3 slow round budget,
+identical env vars otherwise):
+
+| router | overflow (8 rounds) | wall time |
+|---|---|---|
+| kroute | 45708 | 32.8s |
+| vroute | 41662 | 173.2s |
+
+A dramatically larger effect than anything else tried this session:
+vroute is ~8.9% better than kroute at this tiny budget -- and 41662 at
+just 8 rounds is already close to kroute's own *committed 172-round*
+result (41014). Cost is real (~5.3x slower at this budget) but the
+quality signal is an order of magnitude bigger than any prior
+experiment's. Proper 30/40 screen launched to confirm before deciding
+on full validation.
+
