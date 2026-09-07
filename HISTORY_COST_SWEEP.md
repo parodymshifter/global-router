@@ -796,3 +796,52 @@ with or without ordering, all land in the same 60-65% cost range. The
 barrier's fundamental shape (near-zero signal below its start threshold,
 then a sudden climb) is the problem, not a specific constant.
 
+**User-directed redesign** (commit d0dd11a): restore kroute's own proven
+early, gradual onset (20% threshold, power 2.5) instead of the invented
+late one, scaled to reach a genuinely high ceiling (10.0, vs kroute's own
+implicit max of 1.0) by a 90% watermark, then the same sharp rational-
+blowup rise from there to 100%.
+
+**Result: 62550**, 206.8s, escalation 74641/270715 = **27.6%**. Legal
+per gr_verify, cross-checked exactly against eval2008.pl (62550 / max 42
+/ wirelength 6418513, both tools agree). **Only a marginal improvement**
+over the old late-onset barrier (62550 vs 63494-68206 in the four earlier
+configs) -- still a **+49.1% regression** against kroute's 41956, and the
+XROUTE_ROUND_LOG trajectory shows the same sawtooth almost unchanged:
+fast-tier overflow still climbs to 744166 by round 19, nearly 7.3x its
+round-0 value (vs the old barrier's 795706 peak -- only ~6% lower).
+
+**Mechanistic diagnosis, computed directly rather than guessed**:
+restoring kroute's own onset *shape* mattered far less than expected
+because the ceiling (10.0) makes this curve a **blanket 14x multiplier**
+of kroute's own curve at every ratio from 20% up to 90%, not just near
+the top -- confirmed by direct calculation:
+
+| ratio | kroute's term | this barrier's term | multiple |
+|---|---|---|---|
+| 0.3 | 0.0055 | 0.0771 | 14.0x |
+| 0.5 | 0.0861 | 1.2024 | 14.0x |
+| 0.7 | 0.3088 | 4.3120 | 14.0x |
+| 0.9 | 0.7162 | 10.0000 | 14.0x |
+| 0.95 | 0.8510 | 25.0000 | 29.4x |
+| 0.99 | 0.9690 | 145.0000 | 149.6x |
+
+The "gradual" phase isn't gentle in absolute terms at all -- it's
+kroute's exact proven curve uniformly amplified 14x across its entire
+range, which is a milder version of the exact failure iroute.cpp's own
+header already documented once (a naive, much-larger single-step
+constant overprices contested edges broadly enough that far more nets
+escalate to the slow tier than the round budget can converge). The
+lesson isn't "shape doesn't matter" -- it's that the *ceiling* value is
+what determines whether the mid-range stays close to kroute's own
+working scale or becomes a second copy of the same over-aggressive-step
+mistake, regardless of how smoothly it's reached.
+
+**Next test**: a much smaller mid-range ceiling (close to kroute's own
+~1.0, tried at 1.5 first) so the 20-90% segment stays near-identical to
+kroute's already-proven curve, concentrating essentially all of the
+"rapid rise to cutoff" the user wants into the narrow 90-100% segment
+alone, which comparatively few edges reach on any given round -- rather
+than applying real bite across the whole mid-range where it broadly
+destabilizes the fast tier.
+
