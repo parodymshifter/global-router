@@ -115,3 +115,48 @@ wash out in aggregate, or mostly doing little -- add that before spending
 a tuning pass on JROUTE_RIPUP_INTERVAL/JROUTE_RIPUP_COUNT. See
 `gr/jroute.cpp`'s header for the full writeup.
 
+## Part 3: overflow-percentage scaling at significant magnitude, then relaxable penalties
+
+User-proposed refinement, arrived at independently from first principles
+and matching iroute's existing mechanism almost exactly, with two open
+questions worth testing directly rather than assuming an answer:
+
+1. Overflow-scaling (`IROUTE_HIST_SCALE=overflow`) was only ever tried
+   once before, paired with the smallest step (0.005), where it was
+   "middling" (see Part 1). Untested: overflow-scaling combined with a
+   *significant* base step, the actual combination proposed. Screening
+   now at step=0.05/0.1/0.2, all with `IROUTE_HIST_SCALE=overflow`,
+   adaptec1 only, reduced 70-round budget (same methodology as Part 1).
+   Bar to beat: flat step=0.05's own screen result, 167724 (Part 1).
+
+| config | env vars | overflow (62-70 rounds, adaptec1) |
+|---|---|---|
+| scaleoverflow_050 | `IROUTE_HIST_STEP=0.05 IROUTE_HIST_SCALE=overflow` | 168672 |
+| scaleoverflow_100 | `IROUTE_HIST_STEP=0.1 IROUTE_HIST_SCALE=overflow` | 168728 |
+| scaleoverflow_200 | `IROUTE_HIST_STEP=0.2 IROUTE_HIST_SCALE=overflow` | 171070 (worst of this batch) |
+
+**Conclusion**: none of these beat flat step=0.05's own screen result (167724),
+and the loss gets worse as magnitude increases (168672 -> 168728 -> 171070)
+-- the same overshoot shape the original naive step=1.0 showed. No full
+172-round validation needed: per Part 1's own lesson, a screen result only
+needs full-scale confirmation when it *wins* the screen (since full-scale
+margins can be smaller than a screen predicts) -- a screen *loss* this
+clear doesn't need re-checking. **Overflow-percentage scaling does not
+help at any magnitude tried, small or significant; a plain flat step
+remains the best mechanism found.** iroute's default (flat step=0.05)
+is unchanged.
+
+2. Separately, per the user's explicit request: build a new router with
+   **relaxable** history penalties, a genuinely different mechanism from
+   iroute's current permanent/monotonic one. Design: each edge keeps a
+   stack (not just a running total) of every penalty increment it was
+   ever charged, in the order charged. On a round where that edge is
+   *not* over capacity and its stack is non-empty, pop and undo the most
+   recently added increment (LIFO -- "relax... in reverse order"). An
+   edge that was dirty for N rounds needs N consecutive clean rounds to
+   fully return to baseline. This is deliberately tested *after* item 1
+   settles, and *after* confirming the permanent version's own behavior
+   first, per the user's own instructions ("try permanent first... after
+   that try another version that allows the penalty to relax").
+   Not yet started -- see this file's next update.
+
