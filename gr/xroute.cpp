@@ -209,15 +209,24 @@
 //                                 (see costExponentTerm), which keeps
 //                                 kroute's gentler curve regardless.
 //     XROUTE_BARRIER_START=<float>       ratio where the barrier starts
-//                                 rising above zero, default 0.6
+//                                 rising above zero, default 0.2 -- matches
+//                                 kroute's own KROUTE_THRESHOLD default
+//                                 deliberately (see barrierExponentTerm's
+//                                 own comment for why an invented later
+//                                 start, tried first, was a regression)
 //     XROUTE_BARRIER_MUST=<float>        ratio where the "must-go" rational
-//                                 blowup segment begins, default 0.95
-//     XROUTE_BARRIER_MID_POWER=<float>   power of the 60%-95% ramp,
-//                                 default 3.0
-//     XROUTE_BARRIER_MID_CEILING=<float> exponent value the 60%-95% ramp
+//                                 blowup segment begins, default 0.9
+//     XROUTE_BARRIER_MID_POWER=<float>   power of the 20%-90% ramp,
+//                                 default 2.5 -- matches kroute's own
+//                                 KROUTE_POWER default
+//     XROUTE_BARRIER_MID_CEILING=<float> exponent value the 20%-90% ramp
 //                                 reaches by XROUTE_BARRIER_MUST, and the
-//                                 95-100% segment's own starting point,
-//                                 default 20.0
+//                                 90-100% segment's own starting point,
+//                                 default 10.0 -- higher than kroute's own
+//                                 curve ever reaches (1.0, only at 100%
+//                                 exactly), by design
+//     XROUTE_BARRIER_FINAL_SCALE=<float> steepness of the 90-100%
+//                                 rational blowup, default 15.0
 //     XROUTE_BARRIER_OVERCAP_TERM=<float> fixed exponent used for any
 //                                 ratio >= 1.0 (actual overflow), default
 //                                 1000.0 -- deliberately large enough that
@@ -225,7 +234,7 @@
 //                                 existing kForbiddenPrice clamp on the
 //                                 very first touch, at any reasonable
 //                                 epsilon
-//     All five XROUTE_BARRIER_* constants are a first empirically-motivated
+//     All XROUTE_BARRIER_* constants are a first empirically-motivated
 //     starting point, not a tuned result -- exactly like
 //     KROUTE_THRESHOLD/KROUTE_POWER before them, this curve needs its own
 //     sweep once real numbers come in.
@@ -369,57 +378,74 @@ double defaultThreshold() {
   return threshold;
 }
 
-// This file's own new price curve, user-specified directly: near-zero cost
-// below 60% of capacity, escalating rapidly from there so an edge is
-// already "VERY expensive" well before it's full, and a 95-100% zone that's
-// only ever worth entering when nothing cheaper exists anywhere -- "100%
-// full is fine, even one net's overflow is not." kroute's own
-// priceExponentTerm curve above reaches only a normal, single-step
-// multiplier (exponent 1.0) exactly at 100% capacity -- this file's whole
-// premise, per the user's own diagnosis, is that this is nowhere near
-// aggressive enough to actually deter a net that would otherwise take a
-// cheap central path.
+// This file's own price curve, revised after the isolation matrix in
+// HISTORY_COST_SWEEP.md's Part 8 identified the *first* version of this
+// curve (flat below 60%, then a sharp climb) as the dominant cause of a
+// real regression against kroute (65322-68206 vs kroute's 41956, every
+// threshold from 0.6 to 0.8 tried, every one a clear loss). The diagnosis,
+// visible directly in that run's own XROUTE_ROUND_LOG trajectory: below
+// whatever the start threshold was, there was *zero* price signal at all,
+// so many nets could pile onto the same edge with no deterrent whatsoever
+// -- fast-tier overflow didn't plateau, it climbed in a sawtooth to nearly
+// 8x its starting value before the slow tier had to claw it back down over
+// 40 rounds. kroute's own inherited curve never has this failure mode
+// because it starts nudging price at just 20% utilization and rises
+// smoothly the *entire* way to 100% -- continuous, widely-distributed
+// feedback, never a sudden "free, then suddenly expensive" cliff.
 //
-// Two segments, not one smooth curve throughout: a single power law steep
-// enough to matter by 95% is far too flat to have moved at all by 70%, and
-// one gentle enough to start rising at 60% barely reaches anything by 95%.
-// The user's spec needs both a real (if moderate) ramp through the middle
-// band and a much sharper final one, not a single compromise curve.
+// User-directed redesign: keep kroute's own proven early onset (20%) and
+// smooth power shape instead of inventing a new late one, but let the ramp
+// reach a genuinely high value (not just kroute's max of 1.0) by a high
+// watermark around 85-90%, *then* add a much sharper final rise from there
+// to 100% -- "gradual escalation starting from 20% up to a high level...
+// then a rapid rise to the cutoff." Same two-segment shape as before
+// (a single curve can't be both gradual over a wide range and sharp at the
+// end), just anchored at kroute's own already-validated start instead of
+// an invented late one:
 //
-//   ratio < XROUTE_BARRIER_START (0.6):  term = 0 (unchanged from baseline)
-//   START <= ratio < XROUTE_BARRIER_MUST (0.95):
-//       term rises 0 -> XROUTE_BARRIER_MID_CEILING along a power curve
+//   ratio < XROUTE_BARRIER_START (0.2, kroute's own default threshold):
+//       term = 0 (unchanged from baseline)
+//   START <= ratio < XROUTE_BARRIER_MUST (0.9):
+//       term rises 0 -> XROUTE_BARRIER_MID_CEILING along a power curve,
+//       same power (2.5) as kroute's own inherited curve -- this segment
+//       is deliberately kroute's own proven shape, just scaled to reach
+//       further than kroute's max of 1.0
 //   MUST <= ratio < 1.0:
-//       term rises from MID_CEILING toward a very large value via a
-//       rational (1/(1-u)) blowup -- deliberately not clamped here, since
-//       the call site's existing min(kForbiddenPrice, ...) is exactly the
-//       safety net this codebase already built for this purpose (see
-//       negotiateWire's own comment on the mroute-era exp-to-infinity bug).
+//       term rises from MID_CEILING toward a much larger value via a
+//       rational (1/(1-u)) blowup, scaled by XROUTE_BARRIER_FINAL_SCALE --
+//       deliberately not clamped here, since the call site's existing
+//       min(kForbiddenPrice, ...) is exactly the safety net this codebase
+//       already built for this purpose (see negotiateWire's own comment
+//       on the mroute-era exp-to-infinity bug)
 //   ratio >= 1.0 (actual overflow): term = a fixed, deliberately huge
 //       constant -- this needs to saturate toward kForbiddenPrice on the
 //       very first touch, not build up gradually over many rounds, because
-//       even one net's overflow is the thing this curve exists to prevent.
+//       even one net's overflow is the thing this curve exists to prevent
 //
-// All four constants are a first empirically-motivated starting point, not
-// a tuned result -- exactly like KROUTE_THRESHOLD/KROUTE_POWER before them,
+// All constants are a first empirically-motivated starting point, not a
+// tuned result -- exactly like KROUTE_THRESHOLD/KROUTE_POWER before them,
 // this needs its own sweep (see XROUTE_BARRIER=0 for a direct A/B against
 // the unmodified kroute curve at equal round budgets).
 double barrierExponentTerm(double usage, double cap) {
   static const double start = [] {
     const char *s = std::getenv("XROUTE_BARRIER_START");
-    return s ? std::atof(s) : 0.6;
+    return s ? std::atof(s) : 0.2;
   }();
   static const double must = [] {
     const char *s = std::getenv("XROUTE_BARRIER_MUST");
-    return s ? std::atof(s) : 0.95;
+    return s ? std::atof(s) : 0.9;
   }();
   static const double midPower = [] {
     const char *p = std::getenv("XROUTE_BARRIER_MID_POWER");
-    return p ? std::atof(p) : 3.0;
+    return p ? std::atof(p) : 2.5;
   }();
   static const double midCeiling = [] {
     const char *c = std::getenv("XROUTE_BARRIER_MID_CEILING");
-    return c ? std::atof(c) : 20.0;
+    return c ? std::atof(c) : 10.0;
+  }();
+  static const double finalScale = [] {
+    const char *f = std::getenv("XROUTE_BARRIER_FINAL_SCALE");
+    return f ? std::atof(f) : 15.0;
   }();
   static const double overCapTerm = [] {
     const char *o = std::getenv("XROUTE_BARRIER_OVERCAP_TERM");
@@ -435,7 +461,7 @@ double barrierExponentTerm(double usage, double cap) {
     return midCeiling * std::pow(u, midPower);
   }
   double u = (ratio - must) / (1.0 - must); // 0 at MUST, -> 1 as ratio -> 1.0
-  return midCeiling + 10.0 * (u / std::max(1e-9, 1.0 - u));
+  return midCeiling + finalScale * (u / std::max(1e-9, 1.0 - u));
 }
 
 // Dispatches between the new barrier (this file's default) and kroute's
@@ -2444,23 +2470,23 @@ void testExponentEscalationTracksStackSizeAndRelaxesWithIt() {
 // ---------------------------------------------------------------------------
 
 void testBarrierIsFlatBelowStartThreshold() {
-  check(barrierExponentTerm(30.0, 100.0) == 0.0,
-        "barrier term is exactly zero well under the 60% start threshold");
-  check(barrierExponentTerm(59.0, 100.0) == 0.0,
+  check(barrierExponentTerm(10.0, 100.0) == 0.0,
+        "barrier term is exactly zero well under the 20% start threshold");
+  check(barrierExponentTerm(19.0, 100.0) == 0.0,
         "barrier term is exactly zero just under the start threshold");
 }
 
 void testBarrierMonotonicallyIncreasesTowardCapacity() {
+  double at20 = barrierExponentTerm(20.0, 100.0);
   double at60 = barrierExponentTerm(60.0, 100.0);
-  double at80 = barrierExponentTerm(80.0, 100.0);
-  double at95 = barrierExponentTerm(95.0, 100.0);
+  double at90 = barrierExponentTerm(90.0, 100.0);
   double at99 = barrierExponentTerm(99.0, 100.0);
-  check(at60 <= at80 && at80 < at95 && at95 < at99,
-        "barrier term rises monotonically from the 60% start threshold "
+  check(at20 <= at60 && at60 < at90 && at90 < at99,
+        "barrier term rises monotonically from the 20% start threshold "
         "toward 100% capacity");
-  check(at99 > at95 * 2.0,
-        "the 95-100% 'must-go' band accelerates sharply, not just "
-        "linearly, past the 60-95% ramp's own rate of increase");
+  check(at99 > at90 * 2.0,
+        "the 90-100% 'must-go' band accelerates sharply, not just "
+        "linearly, past the 20-90% ramp's own rate of increase");
 }
 
 void testBarrierSaturatesAtAndAboveCapacity() {
@@ -2476,10 +2502,15 @@ void testBarrierSaturatesAtAndAboveCapacity() {
 }
 
 void testBarrierIsFarSteeperThanBaselineCurveNearCapacity() {
-  // kroute's own inherited curve (threshold 0.2, power 2.5) reaches only a
-  // normal, single-step exponent of 1.0 exactly at 100% capacity -- this
-  // file's whole premise is that this is nowhere near aggressive enough.
-  // At 90% utilization the difference should already be dramatic.
+  // The 20%-90% segment deliberately shares kroute's own threshold and
+  // power (0.2, 2.5) -- the redesign's whole point is to keep that proven
+  // early, gradual shape rather than inventing a new one. What differs is
+  // the ceiling: kroute's own curve only ever reaches exponent 1.0, at
+  // 100% exactly, while this file's ramp is scaled to already be at its
+  // higher XROUTE_BARRIER_MID_CEILING by 90% -- and 90% is exactly this
+  // file's own MUST boundary, so this checks the two curves at the one
+  // point where the gap between "capped at 1.0" and "still climbing
+  // toward the must-go segment" should already be dramatic.
   double oldTerm = priceExponentTerm(90.0, 100.0, defaultThreshold());
   double newTerm = barrierExponentTerm(90.0, 100.0);
   check(newTerm > oldTerm * 5.0,
