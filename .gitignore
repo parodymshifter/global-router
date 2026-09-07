@@ -21,3 +21,4 @@ xroute
 bench/
 *.gr
 *.route
+*.csv

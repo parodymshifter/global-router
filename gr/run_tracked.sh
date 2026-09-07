@@ -40,21 +40,39 @@ shift
 : > "${prefix}.vsz"
 
 /usr/bin/time -l "$@" > "${prefix}.stdout" 2> "${prefix}.stderr.tmp" &
-router_pid=$!
+time_pid=$!
+
+# `time_pid` is /usr/bin/time itself, not the router it execs as a child --
+# polling that PID directly measures the wrapper (a few hundred KB, forever)
+# and silently reports nothing about the router at all. Found this the hard
+# way: the first run under this script logged RSS readings under 1.2MB for
+# a process /usr/bin/time's own -l report said peaked at 635MB. Wait for
+# the real child to appear under time_pid, then poll *that* PID instead.
+router_pid=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  router_pid=$(pgrep -P "$time_pid" | head -1)
+  [ -n "$router_pid" ] && break
+  sleep 0.2
+done
 
 # Poll while the router runs. ps exits nonzero once the pid is gone, which
-# ends the loop without needing to track completion separately.
-while ps -o vsz=,rss= -p "$router_pid" > /tmp/run_tracked_sample.$$ 2>/dev/null; do
-  sample=$(cat /tmp/run_tracked_sample.$$)
-  if [ -n "$sample" ]; then
-    echo "$(date +%H:%M:%S) $sample" >> "${prefix}.vsz"
-  fi
+# ends the loop without needing to track completion separately. If the
+# child was never found (router exited faster than the 2s search window,
+# or pgrep isn't available), fall back to waiting on time_pid directly with
+# no samples rather than silently polling the wrong process.
+if [ -n "$router_pid" ]; then
+  while ps -o vsz=,rss= -p "$router_pid" > /tmp/run_tracked_sample.$$ 2>/dev/null; do
+    sample=$(cat /tmp/run_tracked_sample.$$)
+    if [ -n "$sample" ]; then
+      echo "$(date +%H:%M:%S) $sample" >> "${prefix}.vsz"
+    fi
+    rm -f /tmp/run_tracked_sample.$$
+    sleep 5
+  done
   rm -f /tmp/run_tracked_sample.$$
-  sleep 5
-done
-rm -f /tmp/run_tracked_sample.$$
+fi
 
-wait "$router_pid"
+wait "$time_pid"
 router_exit=$?
 
 # /usr/bin/time -l writes its report to stderr, interleaved with whatever

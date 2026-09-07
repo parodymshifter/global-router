@@ -59,6 +59,10 @@
 // which net wins a shared contested resource, not just that it computes a
 // score.
 //
+// Also new: XROUTE_ROUND_LOG=<path> writes a per-round CSV (overflow AND
+// wirelength together, not just overflow) so a run's whole first-to-last-
+// round trajectory can be charted after the fact, not just watched live.
+//
 // Measured result: pending. All three new mechanisms are self-tested and
 // individually toggleable; a 3-benchmark sweep against kroute's own
 // committed baseline (adaptec1 162584, newblue1 41014, bigblue1 292420)
@@ -237,6 +241,20 @@
 //                                 rank (not raw score -- the two signals
 //                                 have very different natural scales) and
 //                                 is this file's default.
+//     XROUTE_ROUND_LOG=<path>     write a CSV (round,phase,overflow,
+//                                 wirelength,elapsed_s) with one row per
+//                                 round boundary (fast, slow, and the
+//                                 cleanup pass's single checkpoint) --
+//                                 overflow AND wirelength together, since a
+//                                 run trading one for the other (the trade
+//                                 every congestion-aware mechanism in this
+//                                 project makes) is invisible in an
+//                                 overflow-only trace. Unset by default:
+//                                 even the cheap O(segments) wirelength
+//                                 pass is needless work on a run nobody's
+//                                 charting. XROUTE_TRACE's own stderr
+//                                 lines report the same two numbers live,
+//                                 whether or not this is also set.
 
 #include <algorithm>
 #include <chrono>
@@ -247,6 +265,7 @@
 #include <iostream>
 #include <limits>
 #include <queue>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1345,6 +1364,26 @@ long long totalOverflow(const RoutingGrid &g, const Usage &u) {
   return total;
 }
 
+// Scored wirelength, matching gr_verify.cpp's own convention exactly (unit
+// tile-edges traversed, plus one per layer crossed on a via segment -- an
+// M1-to-M5 change costs 4, per CLAUDE.md's ISPD spec notes) so a mid-run
+// number here is directly comparable to the final number gr_verify and
+// eval2008.pl report on the written solution. O(total committed segments),
+// the same order as totalOverflow above -- cheap enough to call every
+// round, not just at the end.
+long long totalWirelength(const std::vector<RoutedNet> &nets) {
+  long long total = 0;
+  for (const RoutedNet &rn : nets) {
+    for (const Seg &s : rn.segs) {
+      if (s.l1 == s.l2)
+        total += std::abs(s.x2 - s.x1) + std::abs(s.y2 - s.y1);
+      else
+        total += std::abs(s.l2 - s.l1);
+    }
+  }
+  return total;
+}
+
 bool netOverflowed(const RoutingGrid &g, const Usage &u, const RoutedNet &rn) {
   for (const ChargeRecord &c : rn.charges) {
     if (c.horizontal) {
@@ -1406,7 +1445,8 @@ struct RunReport {
 // for escalation once the fast tier's best effort, cleanup included, still
 // couldn't legalize it.
 void relaxedCleanup(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPlan &lp,
-                     double epsilon, RunReport &rep) {
+                     double epsilon, RunReport &rep,
+                     const std::function<void(const char *, long long, long long)> &logRound = {}) {
   double relaxedThreshold = [] {
     const char *t = std::getenv("XROUTE_CLEANUP_THRESHOLD");
     return t ? std::atof(t) : 0.5;
@@ -1449,6 +1489,8 @@ void relaxedCleanup(const RoutingGrid &g, Prices &prices, Usage &usage, const La
   rep.bestOverflow = totalOverflow(g, usage);
   if (trace)
     std::cerr << "cleanup pass: overflow " << before << " -> " << rep.bestOverflow << "\n";
+  if (logRound)
+    logRound("cleanup", rep.bestOverflow, totalWirelength(rep.nets));
 }
 
 constexpr int kFastPatience = 20;
@@ -1466,6 +1508,38 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   LayerPlan lp(g);
   SearchRegion region;
   bool trace = std::getenv("XROUTE_TRACE") != nullptr;
+
+  // Per-round progress log: overflow AND wirelength together, not just
+  // overflow -- a run that's trading wirelength for overflow reduction (the
+  // trade every congestion-aware mechanism in this project makes) is
+  // invisible in an overflow-only trace. Written as CSV so a run's whole
+  // first-to-last-round trajectory can be charted afterward, not just
+  // watched live; XROUTE_TRACE's own stderr line gets the same two numbers
+  // for anyone just watching a live run. Off by default (XROUTE_ROUND_LOG
+  // unset) since even the cheap O(segments) wirelength pass is needless
+  // work on a run nobody's tracking round-by-round.
+  std::ofstream roundLogFile;
+  bool logging = false;
+  if (const char *path = std::getenv("XROUTE_ROUND_LOG"); path) {
+    roundLogFile.open(path);
+    if (!roundLogFile)
+      fail("xroute: could not open XROUTE_ROUND_LOG path for writing");
+    roundLogFile << "round,phase,overflow,wirelength,elapsed_s\n";
+    logging = true;
+  }
+  int globalRound = 0;
+  auto t0 = std::chrono::steady_clock::now();
+  std::function<void(const char *, long long, long long)> logRound =
+      [&](const char *phase, long long overflow, long long wirelength) {
+        double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        if (trace)
+          std::cerr << phase << " round " << globalRound << " overflow " << overflow
+                     << " wirelength " << wirelength << "\n";
+        if (logging)
+          roundLogFile << globalRound << "," << phase << "," << overflow << "," << wirelength << ","
+                       << elapsed << "\n";
+        ++globalRound;
+      };
 
   std::vector<RoutedNet> nets;
   for (const Net &n : d.nets) {
@@ -1591,8 +1665,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent, exponentEscalation);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun = round + 1;
-    if (trace)
-      std::cerr << "fast round " << round << " overflow " << overflow << "\n";
+    if (trace || logging)
+      logRound("fast", overflow, totalWirelength(nets));
     if (overflow < rep.bestOverflow) {
       rep.bestOverflow = overflow;
       rep.bestRound = round;
@@ -1627,7 +1701,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
           usage.v[g.vIndex(c.cross, y, c.layer)] += c.amount;
     }
 
-  relaxedCleanup(g, prices, usage, lp, epsilon, rep);
+  relaxedCleanup(g, prices, usage, lp, epsilon, rep, (trace || logging) ? logRound : std::function<void(const char *, long long, long long)>{});
   nets = rep.nets;
   usage = Usage(g);
   for (const RoutedNet &rn : nets)
@@ -1722,8 +1796,9 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun += 1;
     if (trace)
-      std::cerr << "slow round " << round << " overflow " << overflow << " (accepted "
-                << accepted << ", rejected " << rejected << ")\n";
+      std::cerr << "slow round " << round << " accepted " << accepted << " rejected " << rejected << "\n";
+    if (trace || logging)
+      logRound("slow", overflow, totalWirelength(nets));
     if (overflow < rep.bestOverflow) {
       rep.bestOverflow = overflow;
       rep.nets = nets;
@@ -2563,6 +2638,54 @@ void testCentralityOrderingInvertsWhoClaimsSharedCorridor() {
         "ordering visits it first instead");
 }
 
+// New in this file: per-round progress logging (XROUTE_ROUND_LOG), so a
+// run's whole first-to-last-round trajectory can be charted afterward, not
+// just watched live via XROUTE_TRACE. Decisive check: the logged wirelength
+// for the final row must match totalWirelength() computed independently
+// against the same run's own returned nets -- proving the log reflects the
+// real, current state of routing at each round boundary, not a stale or
+// disconnected number.
+void testRoundLogRecordsRealOverflowAndWirelengthPerRound() {
+  Design d = parse("xroute_selftest_roundlog.gr", kCentralityOrderGr);
+  const char *logPath = "xroute_selftest_roundlog.csv";
+  setenv("XROUTE_ROUND_LOG", logPath, 1);
+  RunReport rep = route(d, 3, 3, 0.5, 0.0, HistMode::kAdditive, 0.0);
+  unsetenv("XROUTE_ROUND_LOG");
+
+  std::ifstream in(logPath);
+  check(static_cast<bool>(in), "XROUTE_ROUND_LOG path was opened and written");
+  std::string header;
+  std::getline(in, header);
+  check(header == "round,phase,overflow,wirelength,elapsed_s",
+        "log file starts with the expected CSV header");
+
+  std::vector<std::string> rows;
+  std::string line;
+  while (std::getline(in, line))
+    if (!line.empty())
+      rows.push_back(line);
+  check(!rows.empty(), "at least one round was logged");
+
+  // Parse the final row and check its wirelength against the real,
+  // independently-computed total for this run's own final nets -- the
+  // decisive proof the log reflects real state, not placeholder numbers.
+  std::istringstream lastRow(rows.back());
+  std::string roundStr, phase, overflowStr, wirelengthStr, elapsedStr;
+  std::getline(lastRow, roundStr, ',');
+  std::getline(lastRow, phase, ',');
+  std::getline(lastRow, overflowStr, ',');
+  std::getline(lastRow, wirelengthStr, ',');
+  std::getline(lastRow, elapsedStr, ',');
+  long long loggedWirelength = std::stoll(wirelengthStr);
+  long long realWirelength = totalWirelength(rep.nets);
+  check(loggedWirelength == realWirelength,
+        "the final logged row's wirelength (" + std::to_string(loggedWirelength) +
+        ") matches totalWirelength() computed independently against this "
+        "run's own final nets (" + std::to_string(realWirelength) + ")");
+  check(std::stod(elapsedStr) >= 0.0, "elapsed time is a non-negative real number");
+  check(!phase.empty(), "phase column is populated (fast/slow/cleanup)");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -2587,6 +2710,7 @@ int run() {
   testCentralityScoreIsLowWhenPinsClusterAtCenter();
   testCentralityScoreIsZeroForDegenerateBbox();
   testCentralityOrderingInvertsWhoClaimsSharedCorridor();
+  testRoundLogRecordsRealOverflowAndWirelengthPerRound();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
