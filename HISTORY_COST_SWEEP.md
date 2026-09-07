@@ -236,6 +236,24 @@ far -- consistent with iroute's own earlier finding that ratio mode
 (without relaxation available) also failed outright. Relaxation changes
 *how badly* ratio mode fails (166890-200744 here vs iroute's 184730 at
 plain exponent=1, no relaxation available) but does not make it
-competitive. Remaining configs (exponent=3.0, escalation 0.5/1.0)
-screening now to complete the picture -- results below.
+competitive. Remaining configs:
+
+| config | env vars | overflow |
+|---|---|---|
+| ratio_exp30 | `KROUTE_HIST_RATIO_EXPONENT=3.0` | 202356 (worst overall) |
+| escalation_05 | `KROUTE_HIST_RATIO_EXPONENT=1.0 KROUTE_HIST_EXPONENT_ESCALATION=0.5` | 176782 |
+| escalation_10 | `KROUTE_HIST_RATIO_EXPONENT=1.0 KROUTE_HIST_EXPONENT_ESCALATION=1.0` | 177268 |
+
+**Part 4 conclusion**: all 6 configs across both batches lose to the
+additive-mode default (166890), by margins ranging from ~1.7% (exponent
+0.5) to ~21% (exponent 3.0). The escalation mechanism (base exponent=1.0,
+climbing with consecutive unrelaxed penalties) sits in the middle of the
+pack -- clearly better than the highest fixed exponents (2.0, 3.0) but
+still solidly worse than plain flat-additive growth. **Ratio-based
+multiplicative growth, escalated or not, does not compete with flat
+additive growth for kroute at any setting tried.** No full-scale
+validation needed for any of these -- all are clear screen losses.
+kroute's committed default (additive, step=0.05) remains unbeaten and
+is the best-known setting in this whole design-space sweep (16+ configs
+tried across iroute and kroute combined).
 
