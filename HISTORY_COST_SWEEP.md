@@ -509,5 +509,22 @@ last check): adaptec1 at 118202 (-29.2% vs kroute's own 166890 screen,
 still declining ~700-800/round), bigblue1 at 245546 (-16.0% vs kroute's
 committed 292420, still declining ~600-900/round). Both consistent with
 newblue1's finding -- this looks like a real, generalizable property of
-MSMV routing, not a benchmark-specific fluke. Results pending for both.
+MSMV routing, not a benchmark-specific fluke.
+
+**Both screens finished, verified**:
+
+| benchmark | kroute bar | vroute screen (62 rounds) | wall time | improvement |
+|---|---|---|---|---|
+| adaptec1 | 166890 (screen) | 114826 | 8231.7s (~2.3hr) | **-31.2%** |
+| bigblue1 | 292420 (committed) | 241096 | 9196.2s (~2.6hr) | **-17.5%** |
+
+Both legal per gr_verify (0 disconnected/incomplete/unrouted/malformed),
+both cross-checked exactly against eval2008.pl. Combined with newblue1's
+already-verified full-budget result (-25.2%), all three benchmarks show
+large, consistent double-digit-percent improvements -- this is a real,
+generalizable property of MSMV routing, not a fluke of one benchmark's
+structure. Launching full-budget (60/150 round) validation runs on both
+adaptec1 and bigblue1 now for the real head-to-head against kroute's
+committed numbers (162584, 292420) -- given the cost multiplier and
+these benchmarks' larger size, expect several hours each.
 
