@@ -1329,6 +1329,33 @@ void negotiateRescue(const RoutingGrid &g, Prices &prices, Usage &usage, const L
     std::vector<Seg> oldSegs = rn.segs;
     long long localBefore = overflowOverUnion(g, usage, oldCharges, oldCharges);
 
+    // Deliberately does NOT undo/restore anything between attempts.
+    // routeNetSlow's own first line always undoes whatever rn.charges
+    // *currently* holds before committing a new attempt -- so as long as
+    // rn.charges accurately tracks "whatever is presently reflected in
+    // usage for this net" at the start of each call, that self-undo chains
+    // correctly from one attempt straight into the next with no manual
+    // bookkeeping needed in between. The only state that ever needs
+    // explicit restoring is oldCharges itself, if every weight in the
+    // schedule fails -- and only once, after the loop, not per rejection.
+    //
+    // An earlier version of this loop manually undid each rejected
+    // attempt and reset rn.charges/segs back to oldCharges mid-loop,
+    // reasoning (wrongly) that each attempt needed "a clean slate." That
+    // broke the invariant above: routeNetSlow's *next* call would then
+    // undo oldCharges a second time (it was already removed from usage
+    // when the very first attempt started) without ever restoring
+    // oldCharges' actual contribution to usage, silently driving usage
+    // below its true value with every rejection. gr_verify caught the
+    // result by disagreeing with this file's own self-reported overflow
+    // by a factor of ~688x (304106 vs 442) on the first real run. A first
+    // fix corrected the rn.charges/segs half of that but missed that usage
+    // itself still needed restoring, which a synthetic regression test
+    // built immediately afterward
+    // (testRescuePassLeavesUsageConsistentWithFinalCommittedCharges) caught
+    // by finding a second, smaller discrepancy (4 vs 1) even after that
+    // first fix -- this version removes the mid-loop manual undo entirely
+    // rather than trying to patch it a third time.
     bool succeeded = false;
     double succeededAt = weights.empty() ? 0.0 : weights.back();
     long long localAfter = localBefore;
@@ -1340,10 +1367,6 @@ void negotiateRescue(const RoutingGrid &g, Prices &prices, Usage &usage, const L
         succeededAt = w;
         break;
       }
-      // Undo this attempt's charges before trying the next (smaller)
-      // weight -- each attempt needs a clean slate, not a compounding one.
-      for (const ChargeRecord &c : rn.charges)
-        undoCharge(g, usage, c);
     }
 
     if (succeeded) {
@@ -1352,8 +1375,11 @@ void negotiateRescue(const RoutingGrid &g, Prices &prices, Usage &usage, const L
         std::cerr << "rescue " << rn.net->name << " succeeded at weight " << succeededAt
                    << " (local overflow " << localBefore << " -> " << localAfter << ")\n";
     } else {
-      // Nothing worked even at the floor -- restore the pre-rescue route
-      // exactly, matching every other rejected reroute in this codebase.
+      // Nothing worked even at the floor -- undo whatever the last
+      // attempt left charged, then restore oldCharges exactly, both the
+      // bookkeeping (rn.charges/segs) and usage itself.
+      for (const ChargeRecord &c : rn.charges)
+        undoCharge(g, usage, c);
       rn.charges = oldCharges;
       rn.segs = oldSegs;
       for (const ChargeRecord &c : rn.charges) {
@@ -2327,6 +2353,81 @@ void testRescuePassRecordsOutcomeAndLeavesUnrescuableNetsReverted() {
   check(rep.rescueAttempted >= 0, "rescue pass ran without crashing on a real end-to-end route()");
 }
 
+// The decisive regression guard for a real bug found on the very first
+// real-data run: gr_verify disagreed with this file's own self-reported
+// overflow by a factor of ~688x (304106 vs 442) on newblue1, because a
+// rejected rescue attempt undid its own charges from `usage` but left
+// `rn.charges` pointing at that same now-undone attempt -- the next
+// weight's routeNetSlow call (which always starts by undoing whatever
+// rn.charges currently holds) double-undid the same charges, silently
+// driving usage below its true value. Fixed by also resetting
+// rn.charges/rn.segs to the pre-rescue state on every rejection, not
+// just the final give-up case.
+//
+// kRescueGr's own generous capacity converges to zero overflow trivially
+// (Phase C never even runs on it -- negotiateRescue is skipped whenever
+// rep.convergedToZero), so it can't exercise this bug at all; an earlier
+// version of this test used it anyway and would have passed unchanged
+// with the bug still present, catching nothing. This fixture instead
+// forces real, persistent overflow into Phase C: two nets sharing one
+// capacity-1 corridor (same construction xroute's own centrality-ordering
+// test uses), routed at a round budget of 1/1 so phase A/B has no chance
+// to resolve the contention on its own and Phase C must actually attempt
+// real rescues, not just confirm a no-op.
+const char *kRescueCongestedGr = R"(grid 7 5 1
+vertical capacity 1
+horizontal capacity 1
+minimum width 1
+minimum spacing 0
+via spacing 0
+0 0 10 10
+num net 4
+netA 0 2 1
+5 25 1
+65 25 1
+netB 1 2 1
+5 25 1
+65 25 1
+netC 2 2 1
+5 5 1
+65 45 1
+netD 3 2 1
+5 45 1
+65 5 1
+0
+)";
+
+void testRescuePassLeavesUsageConsistentWithFinalCommittedCharges() {
+  Design d = parse("yroute_selftest_rescue3.gr", kRescueCongestedGr);
+  const RoutingGrid &g = d.grid;
+  RunReport rep = route(d, 1, 1, 0.5, 0.0, HistMode::kAdditive, 0.0);
+  check(rep.rescueAttempted > 0,
+        "the fixture actually forced Phase C to attempt at least one real "
+        "rescue, not just confirm a no-op -- otherwise this test would "
+        "pass even with the bug it exists to catch still present");
+
+  Usage rebuilt(g);
+  for (const RoutedNet &rn : rep.nets)
+    for (const ChargeRecord &c : rn.charges) {
+      if (c.horizontal)
+        for (int x = c.a; x < c.b; ++x)
+          rebuilt.h[g.hIndex(x, c.cross, c.layer)] += c.amount;
+      else
+        for (int y = c.a; y < c.b; ++y)
+          rebuilt.v[g.vIndex(c.cross, y, c.layer)] += c.amount;
+    }
+
+  long long rebuiltOverflow = totalOverflow(g, rebuilt);
+  check(rebuiltOverflow == rep.bestOverflow,
+        "overflow recomputed independently from rep.nets' own final "
+        "committed charges (" + std::to_string(rebuiltOverflow) + ") exactly "
+        "matches this file's own self-reported bestOverflow (" +
+        std::to_string(rep.bestOverflow) + ") -- the decisive proof the "
+        "rescue pass's in-memory usage never diverges from what was "
+        "actually committed, the exact property whose violation caused "
+        "the 304106-vs-442 discrepancy this test guards against");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -2344,6 +2445,7 @@ int run() {
   testExponentEscalationTracksStackSizeAndRelaxesWithIt();
   testLengthWeightFlipsWhichPathTheRealSearchPicks();
   testRescuePassRecordsOutcomeAndLeavesUnrescuableNetsReverted();
+  testRescuePassLeavesUsageConsistentWithFinalCommittedCharges();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
