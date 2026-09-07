@@ -534,3 +534,84 @@ per-round cost grows as more nets escalate over the run): roughly
 7-8 hours for adaptec1, 8-9 hours for bigblue1. This is the last piece
 needed to complete vroute's full 3-benchmark validation.
 
+## Part 8: xroute -- price barrier + RUDY/centrality net ordering
+
+While vroute's two full-budget runs were in progress, the user asked why
+peripheral capacity was sitting idle while the die's center overflowed,
+and proposed forcing nets away from near-full areas with a much more
+aggressive cost curve, plus reordering nets by bounding-box geometry.
+
+**Diagnosis first, before any new mechanism** (`rudy_vs_congestion.cpp`,
+scratch tool, not committed): computed a pure RUDY bounding-box demand
+estimate straight from bigblue1's netlist -- no router involved at all --
+and compared it to kroute's actual committed usage. RUDY barely
+correlates with real usage (r=0.03): 93% of all non-giant nets span
+under 10% of the die, so this design is almost entirely short local
+connections, not long-haul crossers threading through the middle. Raw
+*pin density* by radial band, unweighted by HPWL, tells the real story:
+
+| band (0=center...4=corner) | pins/tile | capacity | utilization | overflow |
+|---|---|---|---|---|
+| 0 | 30.1 | 439.7 | 107.5% | 44.5 |
+| 1 | 31.1 | 439.9 | 99.0% | 28.9 |
+| 2 | 25.1 | 437.0 | 77.0% | 10.2 |
+| 3 | 17.1 | 433.2 | 42.9% | 0.08 |
+| 4 | 7.4 | 425.8 | 15.3% | 0.00 |
+
+Capacity is nearly flat (440->426, ~3% dip at the far corners); pin
+density varies 4x. This is a placement fact upstream of any pricing
+mechanism -- bigblue1's center is packed with ~4x the corner's cell
+density, and since the design is almost entirely short local nets, a
+pin-density gradient becomes a wiring-density gradient directly. No
+pricing scheme relocates demand to tiles that were never placed there;
+the actual lever is forcing the router to find better topology *within*
+the crowded region once nets are genuinely forced to share it (exactly
+what vroute's MSMV already does) plus making sure nothing voluntarily
+overflows when a legal, if expensive, alternative exists.
+
+**Built** (`gr/xroute.cpp`, forked from kroute.cpp), three independently
+toggleable mechanisms -- see the file's own header for full detail:
+
+1. `barrierExponentTerm`: real barrier replacing kroute's smooth
+   threshold/power curve (which only reaches a normal step-1.0 exponent
+   *at* 100% capacity) for all normal routing. Flat below 60%, a power
+   ramp to "VERY expensive" by 95%, a rational must-go blowup from 95% to
+   100%, and a fixed huge exponent for actual overflow that saturates the
+   existing `kForbiddenPrice` clamp on the first touch. `XROUTE_BARRIER=0`
+   reproduces kroute's exact curve.
+2. RUDY-based net ordering, revived verbatim from droute.cpp -- a real,
+   modest win (adaptec1 -2.2%, bigblue1 -1.4%) proven years before
+   kroute's history-cost mechanism existed, never actually combined with
+   it until now.
+3. Net centrality ordering, new: `netCentralityScore` measures how
+   clustered a net's pins are toward its own bounding box's center
+   (0=centroid, ~1=corners) and schedules low-score (inflexible, no room
+   to avoid the middle) nets first, high-score (flexible, many equal-cost
+   boundary-hugging paths) nets last. **A real reasoning error was caught
+   and fixed mid-design**: an initial pass used a corner-anchored 2-pin-
+   plus-interior-cluster example and concluded the opposite direction
+   (flexible-first); the user caught this directly and the general case
+   (all pins on the perimeter vs. all pins at the center) supports the
+   direction actually implemented.
+
+`XROUTE_ORDER=none|rudy|centrality|combined` selects the ordering mode,
+each independently measurable. All three mechanisms self-tested (59
+checks, 0 failures), including a decisive end-to-end fixture
+(`testCentralityOrderingInvertsWhoClaimsSharedCorridor`) proving
+reordering actually flips which of two nets claims a shared capacity-1
+corridor, not just that it computes a different score. One real bug
+found while building that fixture: `RoutedNet::segs` are tile
+coordinates throughout -- only the final written `.route` file converts
+to real coordinates -- and an early version of the fixture's check
+compared tile-coordinate segments against a real-coordinate threshold
+and silently failed for that reason.
+
+Committed as `a1e0334` (build + selftest only, not yet measured).
+
+**Status**: a 30/40-round screen on newblue1 (default config: barrier
+on, combined ordering) launched 2026-09-07 ~4:11PM in
+`/tmp/xroute_screen/newblue1_default.route`, running alongside vroute's
+two full-budget jobs (all three at the project's 3-concurrent-process
+cap). Not yet complete as of this writing -- see this file's next update
+for the result.
+
