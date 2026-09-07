@@ -733,3 +733,41 @@ whether the barrier mechanism itself, independent of ordering, is
 responsible for the regression at all, before concluding anything about
 where to tune it), not a further threshold sweep in the same direction.
 
+**Barrier-only result at the original XROUTE_BARRIER_START=0.6
+(XROUTE_ORDER=none, same 30/40-round budget)**: **65322**, 211.7s. Legal
+per gr_verify, cross-checked exactly against eval2008.pl (65322 / max 40
+/ wirelength 6250752, both tools agree). Escalation: 81263/270715 =
+**30.0%**.
+
+**This settles the attribution question.** Four data points, all same
+30/40 newblue1 budget:
+
+| config | overflow | escalation |
+|---|---|---|
+| kroute-equivalent (barrier off, plain order) | 41956 | 15.8% |
+| barrier-only @0.6, plain order | 65322 | 30.0% |
+| default (barrier@0.6 + combined order) | 63494 | 28.8% |
+| barrier-only @0.8, plain order | 68206 | 33.0% |
+
+The barrier alone, with *zero* ordering change, already reproduces
+nearly the entire regression (+55.7% vs kroute at 0.6, actually *worse*
+than the "default" combined config's +51.4%). Adding the centrality/RUDY
+ordering on top of the same 0.6 barrier makes things slightly *better*
+(63494 vs 65322) and lowers escalation slightly (28.8% vs 30.0%), not
+worse -- the ordering mechanism is not the problem and appears to be a
+small net positive once the barrier is already in play, mildly
+compensating for it rather than compounding it. **The price barrier
+mechanism itself, independent of threshold placement or the ordering
+question, is the primary and dominant cause of the regression.** No
+threshold value tried so far (0.6 default, 0.8 user-directed) comes
+close to recovering kroute's own baseline behavior -- this looks like a
+problem with the barrier's fundamental shape or its interaction with the
+fast tier's escalation logic, not a tuning problem solvable by sliding
+one constant.
+
+Next: an ordering-only run (`XROUTE_BARRIER=0 XROUTE_ORDER=combined`)
+completes the isolation matrix -- confirms directly whether ordering
+alone, with the barrier fully off, recovers something close to kroute's
+41956 (expected, given the pattern above) or reveals its own separate
+issue.
+
