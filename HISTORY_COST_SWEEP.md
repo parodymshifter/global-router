@@ -219,3 +219,23 @@ harder while a relaxed edge drops back to a gentler exponent). Both are
 now env-controlled and self-tested (commits f98ec69 and the escalation
 commit following it) -- see this file's next update for sweep results.
 
+## Part 4: exponent/escalation sweep on kroute (adaptec1 screen, 62 rounds)
+
+Bar for comparison (kroute's own committed default, additive mode): 166890.
+
+| config | env vars | overflow |
+|---|---|---|
+| ratio_exp05 | `KROUTE_HIST_MODE=ratio KROUTE_HIST_RATIO_EXPONENT=0.5` | 169726 |
+| ratio_exp15 | `KROUTE_HIST_MODE=ratio KROUTE_HIST_RATIO_EXPONENT=1.5` | 174780 |
+| ratio_exp20 | `KROUTE_HIST_MODE=ratio KROUTE_HIST_RATIO_EXPONENT=2.0` (user-proposed squared) | 200744 |
+
+All three lose to the additive-mode default, and the loss worsens
+monotonically with exponent. Ratio-based multiplicative growth
+underperforms flat additive growth for kroute at every exponent tried so
+far -- consistent with iroute's own earlier finding that ratio mode
+(without relaxation available) also failed outright. Relaxation changes
+*how badly* ratio mode fails (166890-200744 here vs iroute's 184730 at
+plain exponent=1, no relaxation available) but does not make it
+competitive. Remaining configs (exponent=3.0, escalation 0.5/1.0)
+screening now to complete the picture -- results below.
+
