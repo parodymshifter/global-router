@@ -29,6 +29,7 @@ jobs:
           - jroute
           - kroute
           - wroute
+          - rroute
     steps:
       - uses: actions/checkout@v4
 
