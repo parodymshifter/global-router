@@ -289,9 +289,26 @@ freed process slot, per the 3-process cap) 2026-09-07 ~2:53AM.
 Bar to beat (kroute's current committed default, 172 rounds): adaptec1
 162584, newblue1 41014, bigblue1 292420.
 
+wroute full-validation results so far:
+
+| benchmark | kroute (bar) | wroute | delta |
+|---|---|---|---|
+| adaptec1 | 162584 | running | -- |
+| newblue1 | 41014 | 41038 | +0.06% (tiny regression) |
+| bigblue1 | 292420 | running | -- |
+
+newblue1 is essentially a wash (slightly worse), unlike adaptec1's
+screen win -- consistent with this project's own established lesson
+that screens don't always predict full-scale direction reliably, in
+either direction. adaptec1 and bigblue1 still running; final verdict
+pending both.
+
 `kroute_headroom` (1.5x round budget, 90/225 vs committed 60/150) still
-running -- at round 46 of 225 slow rounds, overflow 166124, still
-declining steadily (~90-130/round in the visible tail). Too early to
-characterize plateau/headroom yet; more data needed at the round-172-
-equivalent mark and beyond.
+running -- at slow round 104 of 225, overflow 163166, declining at
+roughly 31/round in the recent tail (down from ~90-130/round earlier in
+the run) -- decelerating but not flat. Note the fast-tier budget also
+differs here (90 vs kroute's committed 60), so this run's own slow-round
+numbering isn't directly round-for-round comparable to the committed
+172-round run; the real signal will be the final total once this
+finishes, compared against kroute's committed 162584.
 
