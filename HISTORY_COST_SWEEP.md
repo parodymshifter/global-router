@@ -257,3 +257,19 @@ kroute's committed default (additive, step=0.05) remains unbeaten and
 is the best-known setting in this whole design-space sweep (16+ configs
 tried across iroute and kroute combined).
 
+## Part 5: wroute benchmark validation and kroute round-budget headroom
+
+Two efforts launched in parallel 2026-09-07 ~2:34AM (3-process cap
+respected -- 2 running):
+
+1. `wroute_default` -- first-ever screen of gr/wroute.cpp (kroute +
+   jroute's rip-up-reroute, committed e28282c but never run against real
+   ISPD data) on adaptec1, reduced 30/40 round budget, default settings
+   (WROUTE_RIPUP_INTERVAL=4, WROUTE_RIPUP_COUNT=200).
+2. `kroute_headroom` -- kroute at 1.5x its committed round budget
+   (KROUTE_FAST_ROUNDS=90 KROUTE_SLOW_ROUNDS=225, vs the committed
+   60/150) on adaptec1, traced, to check whether overflow is still
+   declining meaningfully near round 172 or has plateaued.
+
+Results pending -- see this file's next update.
+
