@@ -528,3 +528,9 @@ adaptec1 and bigblue1 now for the real head-to-head against kroute's
 committed numbers (162584, 292420) -- given the cost multiplier and
 these benchmarks' larger size, expect several hours each.
 
+Launched 2026-09-07 ~12:24PM. Estimated duration from newblue1's own
+screen-to-full scaling (3.24x wall time for 2.77x more rounds, since
+per-round cost grows as more nets escalate over the run): roughly
+7-8 hours for adaptec1, 8-9 hours for bigblue1. This is the last piece
+needed to complete vroute's full 3-benchmark validation.
+
