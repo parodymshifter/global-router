@@ -43,11 +43,41 @@
 // rule. Expect substantially longer runtime per round; see Measured result
 // for how this affected wall-clock time in practice.
 //
-// Measured result: pending. See HISTORY_COST_SWEEP.md at the repo root for
-// this file's own update once real benchmark numbers exist -- per this
-// project's own discipline, that comparison is what settles whether full
-// rip-up-reroute is a real win over kroute's selective escalation, a wash,
-// or a regression, not reasoning about it in advance.
+// Measured result: screened (30/40 reduced round budget) against kroute
+// on two benchmarks, same env vars otherwise. Full detail in
+// HISTORY_COST_SWEEP.md at the repo root:
+//
+//   benchmark   kroute (62 rounds)   rroute (62 rounds)   wall time (kroute / rroute)
+//   newblue1    41956                41800  -- -0.37%     203s / 741s   (3.65x)
+//   adaptec1    166890               167450 -- +0.34%     958s / 1417s  (1.48x)
+//
+// A genuinely inconsistent picture: a small win on one benchmark, a small
+// loss on the other, at cost multipliers that themselves vary widely
+// (1.48x-3.65x, tracking how much of each benchmark kroute's own selective
+// rule already escalates -- newblue1 escalates only ~16% under kroute, so
+// full ripup's "touch everyone" rule adds the most relative work there;
+// adaptec1 already escalates ~39%, so there's less headroom left to spend
+// extra cost on). This is not the shape of a real, generalizable
+// improvement -- it reads as noise-scale variation around "about the same
+// quality kroute already gets, at substantially higher and unpredictable
+// cost." No full 172-round, 3-benchmark validation was run: a screen this
+// inconsistent doesn't warrant the expense (plausibly many hours per
+// benchmark at these cost ratios), since only a *consistent* screen signal
+// is worth confirming at full scale, per this project's own methodology.
+//
+// The honest answer to the question this file was built to test --
+// "does touching every net every round, not just ones that need it,
+// help once individual-net supervision is already in place to catch bad
+// moves" -- is no clear evidence that it does. kroute's selective
+// escalation (only reroute nets that are actually overflowed, plus
+// relaxable history pressure to keep already-legal nets from drifting
+// back onto recently-bad edges) appears to already capture effectively
+// all the available benefit, at a small fraction of the compute cost.
+// CLAUDE.md's own caution about reroute-everyone-every-round churn was
+// grounded in an *unsupervised* batch-acceptance incident; this file's
+// result suggests the deeper concern generalizes even with supervision
+// intact -- touching nets that don't need touching is mostly wasted
+// motion, not a source of hidden extra improvement.
 //
 
 // Build:

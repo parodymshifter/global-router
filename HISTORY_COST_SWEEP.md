@@ -415,3 +415,31 @@ conclusion -- proceeding cautiously to an adaptec1 screen too, time-
 boxed given the cost (extrapolating from the observed 3.65x ratio
 against kroute's own ~958s adaptec1 screen, expect roughly an hour).
 
+**adaptec1 screen result**: rroute 167450 vs kroute's bar 166890 (+0.34%,
+a LOSS this time) at 1417.1s vs kroute's ~958s (~1.48x slower -- a much
+smaller cost multiplier than newblue1's 3.65x, likely because kroute's
+own escalation fraction on adaptec1 is already high, ~39% of nets
+(68501/176716), closer to rroute's ~100%, so selective escalation saves
+less there than on newblue1 where kroute only escalates ~16%).
+
+**Part 6 conclusion: a genuinely inconsistent, mixed picture across the
+two benchmarks screened** -- a small win on newblue1 (-0.37%), a small
+loss on adaptec1 (+0.34%), at cost multipliers ranging from ~1.5x to
+~3.65x depending on the benchmark's own baseline escalation rate. This
+is not the shape of a real, generalizable improvement -- it looks like
+noise-scale variation around "roughly the same quality kroute already
+gets, at meaningfully higher and unpredictable cost." Per this project's
+own discipline (a screen needs to show a *consistent* signal worth
+confirming, not just any single win), this does not warrant the
+expense of a full 172-round, 3-benchmark validation (which could run
+many hours per benchmark at these cost ratios). **Closing out Part 6
+without pursuing full validation or a third (bigblue1) screen.**
+
+The honest answer to "does full rip-up-reroute every round help, given
+supervision is already in place": no clear evidence that it does,
+and clear evidence that it costs substantially more compute for an
+inconsistent, roughly wash-level quality effect. kroute's selective
+escalation -- touching only nets that need it -- captures effectively
+all the available benefit at a fraction of the cost. See gr/rroute.cpp's
+header for the full writeup.
+
