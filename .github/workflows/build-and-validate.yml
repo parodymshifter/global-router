@@ -32,6 +32,7 @@ jobs:
           - rroute
           - vroute
           - xroute
+          - yroute
     steps:
       - uses: actions/checkout@v4
 

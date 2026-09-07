@@ -17,6 +17,7 @@ wroute
 rroute
 vroute
 xroute
+yroute
 *.o
 bench/
 *.gr
