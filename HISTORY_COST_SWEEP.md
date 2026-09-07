@@ -300,15 +300,29 @@ wroute full-validation results so far:
 newblue1 is essentially a wash (slightly worse), unlike adaptec1's
 screen win -- consistent with this project's own established lesson
 that screens don't always predict full-scale direction reliably, in
-either direction. adaptec1 and bigblue1 still running; final verdict
-pending both.
+either direction. bigblue1 also finished: **292476** vs bar 292420, a
+tiny +0.02% regression, also essentially a wash. adaptec1 still
+running; final verdict pending.
 
-`kroute_headroom` (1.5x round budget, 90/225 vs committed 60/150) still
-running -- at slow round 104 of 225, overflow 163166, declining at
-roughly 31/round in the recent tail (down from ~90-130/round earlier in
-the run) -- decelerating but not flat. Note the fast-tier budget also
-differs here (90 vs kroute's committed 60), so this run's own slow-round
-numbering isn't directly round-for-round comparable to the committed
-172-round run; the real signal will be the final total once this
-finishes, compared against kroute's committed 162584.
+Two of three benchmarks (newblue1, bigblue1) are now essentially
+neutral for wroute vs kroute -- neither a real win nor a real loss.
+This means adaptec1's screen win (166368 vs 166890, ~0.31% at reduced
+budget) does not appear to generalize as a broad improvement; the
+overall picture is trending toward "wash," not a clear additional win
+on top of kroute's relaxation mechanism, but the final adaptec1 number
+will settle it.
+
+**kroute_headroom final result: 162074** at 247 total rounds (90 fast +
+up to 225 slow, vs the committed 60+150=210), compared to kroute's
+committed 172-round result of 162584 -- a real but modest 0.31%
+improvement from ~1.5x more rounds. The decline rate shrank from
+~90-130/round early in the extended run down to single digits
+(~2-16/round) by the final rounds, clearly approaching a plateau.
+**Conclusion: kroute has some genuine headroom left, but with sharply
+diminishing returns** -- more patience buys a little more, not a
+fundamentally lower ceiling the way going from hroute's default to
+iroute's extended budget did. Not adopting the extended round budget as
+the new default: the runtime cost (4857s here vs ~3400-3600s at the
+committed budget, on adaptec1 alone) is not clearly worth a 0.31% gain
+given diminishing returns.
 
