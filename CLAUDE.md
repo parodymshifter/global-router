@@ -446,3 +446,26 @@ agent knew from scratch just to keep going. Two rules follow from that:
   when an unresumable agent's progress goes unobserved the longest. Batch
   sweeps in groups of 3 or fewer, even when hardware headroom would allow
   more.
+
+## Memory tracking
+
+Every run recorded as a measured result -- not just overflow, max
+overflow, and wirelength -- should also capture memory, the same way
+runtime already gets recorded. `gr/run_tracked.sh benchmark.gr out.route`
+wraps a router invocation: `/usr/bin/time -l` gives the kernel-tracked
+physical peak (maximum resident set size and peak memory footprint,
+tracked over the whole process lifetime, not a poll-based guess), and a
+5-second-interval `ps` poll gives visibility into virtual memory (VSZ)
+over the run. Virtual size has no equivalent kernel-tracked peak on macOS
+-- it is dominated by the dyld shared-cache mapping and reserved-but-
+uncommitted address space, and was observed pinned at essentially the
+same ~435GB across every router process regardless of actual workload
+size or phase. A flat VSZ *is* the honest, complete result in that case,
+not a metric this project needs to chase harder for a peak of; physical
+RSS is where real signal about a router's actual footprint shows up.
+
+Retrofitting memory tracking onto an already-running process does not
+work -- there is no way to recover peak RSS or VSZ after the fact for a
+process that already exited without something watching it while it ran.
+Wrap the launch before starting it, every time, the same discipline
+"write each step's state to a file" already asks for above.

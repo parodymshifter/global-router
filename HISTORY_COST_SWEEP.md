@@ -608,10 +608,36 @@ and silently failed for that reason.
 
 Committed as `a1e0334` (build + selftest only, not yet measured).
 
-**Status**: a 30/40-round screen on newblue1 (default config: barrier
-on, combined ordering) launched 2026-09-07 ~4:11PM in
-`/tmp/xroute_screen/newblue1_default.route`, running alongside vroute's
-two full-budget jobs (all three at the project's 3-concurrent-process
-cap). Not yet complete as of this writing -- see this file's next update
-for the result.
+**30/40-round screen result on newblue1 (default config: barrier on,
+combined ordering)**: **63494**, 223.1s. Legal per gr_verify (0
+disconnected/incomplete/unrouted/malformed), cross-checked exactly
+against eval2008.pl (63494 / max 42 / wirelength 6119006, both tools
+agree). **A clear regression, not a win** -- against kroute's own 30/40
+screen on the same file (41956, HISTORY_COST_SWEEP.md line 407) this is
+**+51.4% worse**, and worse still against kroute's full 172-round
+committed result (41014).
+
+The router's own self-report points at why: **77,899 of 270,715 nets
+(28.8%) escalated to the slow tier** -- a very high escalation rate, and
+exactly the failure mode iroute.cpp's own header already warned about
+(a naive, too-aggressive congestion penalty overprices contested edges
+so fast that far more nets need full search than the round budget can
+actually converge, and the router spends its time thrashing rather than
+finding good detours). Whether the barrier, the ordering, or the
+combination between them is responsible for this is not yet known --
+launched a same-budget ablation (`XROUTE_BARRIER=0 XROUTE_ORDER=none`,
+i.e. kroute-equivalent pricing and ordering through xroute's own binary)
+to isolate it, in the one process slot freed once this screen finished.
+
+Also added `gr/run_tracked.sh` this round: wraps a router invocation
+with `/usr/bin/time -l` for the kernel-tracked physical memory peak
+(maximum resident set size / peak memory footprint) plus a 5s-interval
+VSZ/RSS poll for visibility into virtual memory over the run (macOS has
+no kernel-tracked "peak VSZ" the way it does for RSS -- virtual size
+there is dominated by the dyld shared-cache mapping and reserved-but-
+uncommitted address space, consistently ~435GB flat across every router
+process observed regardless of actual workload, so a flat number *is*
+the honest result, not a metric worth chasing a peak of). The ablation
+launch above is the first run under this wrapper; see CLAUDE.md for the
+new standing practice.
 
