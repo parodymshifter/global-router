@@ -683,3 +683,53 @@ Next: barrier-only (`XROUTE_BARRIER=1 XROUTE_ORDER=none`) at
 `XROUTE_BARRIER_START=0.8` per the user's own follow-up above, now with
 the fixed memory wrapper and round-log enabled.
 
+**Barrier-only result at XROUTE_BARRIER_START=0.8 (XROUTE_ORDER=none,
+same 30/40-round budget)**: **68206**, 220.3s. Legal per gr_verify,
+cross-checked exactly against eval2008.pl (68206 / max 42 / wirelength
+6143222, both tools agree). **The hypothesis was refuted, not
+confirmed**: escalation rose to 89458/270715 = **33.0%**, *higher* than
+both the default-config screen (28.8%) and the barrier-off ablation
+(15.8%) -- pushing the barrier's start point later made the escalation
+problem worse, not better.
+
+Mechanistic read, visible directly in the new per-round log (see the
+published trajectory chart): fast-tier overflow doesn't plateau, it
+climbs in a sawtooth all the way to **795,706** by round 20 (vs 125,414
+at round 0) -- nearly 6.3x the starting overflow, worse than anything
+seen in the barrier-off ablation. Two effects compound: (1) below
+whatever XROUTE_BARRIER_START is set to, there is *zero* price signal at
+all -- kroute's own inherited curve starts nudging price at 20%
+utilization, so moving the barrier's start to 80% actually removes 60
+more percentage points of early warning than the already-too-late 60%
+default did, giving many more nets room to pile onto the same edges with
+no deterrent whatsoever before anything reacts. (2) The "must-go" ceiling
+(XROUTE_BARRIER_MUST) stayed fixed at 0.95, so pushing the start out to
+0.8 compressed the rational-blowup ramp into a narrower 15-point window
+(80-95%) instead of 35 points (60-95%) -- the same rise now happens over
+a third of the distance, making the transition from "cheap" to
+"forbiddingly expensive" more abrupt, not gentler, once it finally
+triggers. Both effects point the same direction: delaying the trigger
+concentrates the problem rather than spreading it out.
+
+The published chart
+(https://claude.ai/code/artifact/5570cf0a-5bb2-43fd-8a72-f4ac67bce1ac)
+shows this directly -- the fast tier's overflow trajectory is a rising
+sawtooth, not a plateau, right up until the cleanup pass and slow tier
+take over and pull it back down to 68206 over 40 rounds. First real use
+of `XROUTE_ROUND_LOG`/the trajectory-chart tooling built this round.
+
+Three data points now on record for this Part, all at the same 30/40
+newblue1 budget:
+
+| config | overflow | escalation rate |
+|---|---|---|
+| kroute-equivalent (barrier off, plain order) | 41956 | 15.8% |
+| default (barrier@0.6 + combined order) | 63494 | 28.8% |
+| barrier-only @0.8, plain order | 68206 | 33.0% |
+
+Moving the threshold later made things worse, not better -- the next
+useful test is barrier-only at the *original* 0.6 start (isolating
+whether the barrier mechanism itself, independent of ordering, is
+responsible for the regression at all, before concluding anything about
+where to tune it), not a further threshold sweep in the same direction.
+
