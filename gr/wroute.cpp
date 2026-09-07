@@ -32,16 +32,43 @@
 // unlike on iroute's base where every historied edge stayed a candidate
 // forever.
 //
-// Measured result: pending. See HISTORY_COST_SWEEP.md at the repo root for
-// this file's own update once a full 172-round, three-benchmark,
-// eval2008.pl-cross-checked run has actually been made against kroute's own
-// current best (162584/41014/292420) -- per this project's own discipline,
-// that comparison is what settles whether rip-up-reroute is a real
-// additional win on top of relaxable penalties, a wash, or a regression,
-// not reasoning about it in advance. (jroute's own measurement against the
-// weaker iroute base was a small, mixed result -- two benchmarks improved,
-// one regressed, all under 0.3% -- so there is a real, open question
-// whether the stronger base changes that picture.)
+// Measured result, total overflow / scored wirelength, against kroute's own
+// current best (same 172-round budget, default settings both sides). Both
+// legal per gr_verify (0 disconnected/incomplete/unrouted/malformed), both
+// cross-checked exactly against eval2008.pl:
+//
+//   benchmark   kroute (172 rounds, no ripup)   wroute (172 rounds, +ripup)
+//   adaptec1    162584 / 7254167                162120 / 7267242   -- overflow -0.29%
+//   newblue1     41014 / 6644362                 41038 / 6651170   -- overflow +0.06%
+//   bigblue1    292420 / 7535653                292476 / 7543870   -- overflow +0.02%
+//
+// Same answer as jroute's own measurement against the weaker iroute base:
+// a genuinely mixed result, reported as-is rather than forced into a single
+// verdict. adaptec1 improves meaningfully; newblue1 and bigblue1 are
+// essentially washes (both regressions under 0.1%, likely within run-to-run
+// noise of the mechanism's own stochastic-feeling interaction with
+// relaxation, though every run in this project is still deterministic).
+// Interestingly, adaptec1's reduced-budget SCREEN result (166368 vs
+// kroute's 167724 without the ripup pass at that budget) predicted almost
+// exactly this full-scale margin (-0.31% predicted vs -0.29% actual) --
+// unlike this project's earlier iroute step=0.05 tuning, where a screen's
+// predicted margin overstated what held up at full scale. Whatever made
+// that earlier prediction unreliable evidently isn't a universal property
+// of this project's screening methodology; it may be specific to how
+// aggressively a given mechanism's effect compounds over rounds.
+//
+// kroute remains the best-known router in this lineage overall: wroute is
+// not a clear win on balance, just a real win on one of three benchmarks.
+// Rip-up-reroute of already-legal, historied nets adds real value when a
+// design has enough residual, hard-to-resolve congestion for the extra
+// search to find something the main escalation loop structurally can't
+// (adaptec1's own ratio of escalated-to-total nets is the highest of the
+// three benchmarks, 68501/176716 ~ 39%, vs newblue1's 44310/270715 ~ 16%
+// and bigblue1's 90543/196887 ~ 46% -- bigblue1's escalation rate is
+// actually higher still, so raw escalation pressure alone doesn't explain
+// why only adaptec1 benefited; what specifically differs about adaptec1's
+// congestion structure that made this pass pay off there is not answered
+// by this measurement and would need its own follow-up).
 //
 
 // Build:

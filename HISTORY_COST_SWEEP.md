@@ -326,3 +326,40 @@ the new default: the runtime cost (4857s here vs ~3400-3600s at the
 committed budget, on adaptec1 alone) is not clearly worth a 0.31% gain
 given diminishing returns.
 
+wroute's final full-scale result (all legal, all cross-checked exactly
+against eval2008.pl):
+
+| benchmark | kroute (bar) | wroute | delta |
+|---|---|---|---|
+| adaptec1 | 162584 | 162120 | -0.29% |
+| newblue1 | 41014 | 41038 | +0.06% |
+| bigblue1 | 292420 | 292476 | +0.02% |
+
+**Conclusion: a genuinely mixed result, same shape as jroute's own
+measurement against the weaker iroute base** -- one real win, two
+essentially-neutral washes, reported as-is rather than forced into a
+single verdict. Notably, adaptec1's screen prediction (-0.31%) landed
+almost exactly on the full-scale result (-0.29%) this time, unlike
+iroute's own step=0.05 screen which overstated its eventual margin --
+screen reliability seems to vary by mechanism, not be a fixed property
+of the methodology itself. **kroute remains the best-known router in
+this lineage overall**; wroute is a legitimate but narrow specialization
+(helps on designs with adaptec1-like congestion structure) rather than a
+strict improvement. See `gr/wroute.cpp`'s header for the full writeup,
+including an open question about what specifically differs about
+adaptec1 that made the ripup pass pay off there and not on the other two
+(raw escalation rate doesn't explain it -- bigblue1's is actually higher).
+
+## Session summary: all three requested efforts complete
+
+1. **Exponent/escalation sweep (Part 4)**: closed, clean negative result.
+   Flat additive growth beats every ratio-based variant tried (6 configs)
+   by 1.7-21%. kroute's committed default (additive, step=0.05) is
+   unbeaten across 16+ configs tried in this whole sweep.
+2. **wroute rip-up-reroute validation (Part 5)**: closed, mixed result.
+   One benchmark improves meaningfully (adaptec1, -0.29%), two are washes.
+   kroute remains the best-known router overall.
+3. **kroute round-budget headroom (Part 5)**: closed. Real but small
+   headroom (-0.31% from 1.5x more rounds), sharply diminishing returns,
+   not adopted as a new default given the runtime cost.
+
