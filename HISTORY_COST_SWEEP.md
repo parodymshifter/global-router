@@ -271,5 +271,27 @@ respected -- 2 running):
    60/150) on adaptec1, traced, to check whether overflow is still
    declining meaningfully near round 172 or has plateaued.
 
-Results pending -- see this file's next update.
+`wroute_default` (screen) result: **166368**, beating kroute_default's
+own screen result (166890) by ~0.31% -- a real win at screen scale, the
+first sign rip-up-reroute helps on the stronger relaxable base (jroute's
+own measurement against the weaker iroute base was a small mixed
+result). Interesting trace detail: most of the periodic ripup passes
+found nothing above the no-op floor to attempt (0 attempted most
+rounds) -- only one pass in this screen (round 36) found real
+candidates (200 attempted, 12 accepted), consistent with kroute's
+relaxation naturally keeping most edges from staying scarred long
+enough to accumulate a ripup-worthy score. Per this project's
+established methodology, this screen win needs full-scale confirmation
+before trusting it. Full 172-round validation launched on all three
+benchmarks (newblue1 and bigblue1 running now; adaptec1 queued for a
+freed process slot, per the 3-process cap) 2026-09-07 ~2:53AM.
+
+Bar to beat (kroute's current committed default, 172 rounds): adaptec1
+162584, newblue1 41014, bigblue1 292420.
+
+`kroute_headroom` (1.5x round budget, 90/225 vs committed 60/150) still
+running -- at round 46 of 225 slow rounds, overflow 166124, still
+declining steadily (~90-130/round in the visible tail). Too early to
+characterize plateau/headroom yet; more data needed at the round-172-
+equivalent mark and beyond.
 
