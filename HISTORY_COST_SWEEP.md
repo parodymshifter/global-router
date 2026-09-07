@@ -363,3 +363,42 @@ adaptec1 that made the ripup pass pay off there and not on the other two
    headroom (-0.31% from 1.5x more rounds), sharply diminishing returns,
    not adopted as a new default given the runtime cost.
 
+## Part 6: rroute -- full rip-up-reroute every round
+
+User-proposed follow-on: reroute every non-giant net every phase-B round
+(not just currently-overflowed nets, kroute's rule, or a scored/capped
+subset, wroute's rule), keeping kroute's flat-additive relaxable history
+mechanism unchanged. Every reroute stays individually supervised
+(accept/reject on local overflow delta), addressing the specific failure
+mode (unsupervised batch acceptance) behind CLAUDE.md's own documented
+caution against reroute-everyone-every-round churn -- what's untested is
+the *selection* rule itself, not supervision. Built as `gr/rroute.cpp`
+(commit 67afa3e), self-tested with a decisive fixture (a never-
+overflowed net gets touched under full ripup, left alone under the
+RROUTE_FULL_RIPUP=0 fallback that reproduces kroute exactly) plus
+kroute's full inherited suite, 54 assertions, all passing.
+
+**Cost probe** (newblue1, tiny 5 fast / 3 slow round budget, identical
+env vars on both routers for a fair comparison):
+
+| router | overflow (8 rounds) | wall time |
+|---|---|---|
+| kroute | 45708 | 32.8s |
+| rroute | 46462 | 67.0s |
+
+At equal tiny budget, kroute is both faster (~2x) and already slightly
+ahead (45708 vs 46462, kroute better by ~1.6%) -- an early discouraging
+signal, though not decisive at just 8 rounds. The cost gap is expected
+and structural: rroute's slow tier searches every net every round
+(~270713 of 270715 nets end up escalated over the run) vs kroute's
+selective rule (~30985 nets escalated at this same tiny budget, roughly
+11%) -- confirmed via each run's own trace. Given this ~2x-and-growing
+per-round cost (kroute's own escalated count shrinks further as later
+rounds stabilize, while rroute's stays at ~100% every round), a full
+172-round, 3-benchmark validation at kroute's own committed budget could
+plausibly take many hours per benchmark -- not attempted without first
+seeing a real signal at a proper screen. 30/40-round screen on newblue1
+(the cheapest benchmark) launched to get that signal; adaptec1/bigblue1
+screens deliberately not started yet given the cost risk. Results
+pending -- see this file's next update.
+
