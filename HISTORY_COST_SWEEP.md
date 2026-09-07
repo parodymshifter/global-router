@@ -158,5 +158,42 @@ is unchanged.
    settles, and *after* confirming the permanent version's own behavior
    first, per the user's own instructions ("try permanent first... after
    that try another version that allows the penalty to relax").
-   Not yet started -- see this file's next update.
+   Built as `gr/kroute.cpp`, self-tested with exact-arithmetic fixtures
+   (a single dirty round then a single clean round returns history to
+   precisely 1.0, not just "lower"; three dirty rounds need exactly
+   three consecutive clean rounds to fully unwind, with a partial run of
+   clean rounds leaving an exact, LIFO-consistent partial penalty).
+
+## Part 3 screen results (adaptec1, 62-70 rounds, reduced budget)
+
+Bar to beat: flat step=0.05's own screen result, 167724.
+
+| config | mechanism | overflow |
+|---|---|---|
+| ratio_mode | iroute, `IROUTE_HIST_MODE=ratio` (histH *= usage/capacity directly) | 184730 (clear loss) |
+| kroute_default | kroute, LIFO-relaxable penalties, default settings (relax on, flat step=0.05) | **166890 (screen win, ~0.5%)** |
+
+`ratio_mode` loses clearly and by a wide margin -- the same overshoot
+failure mode the original naive flat step=1.0 showed: multiplying
+directly by usage/capacity every over-capacity round compounds too fast
+for badly-congested edges (an edge at 10x capacity multiplies its
+history 10-fold in one round). No full-scale validation needed for a
+loss this decisive.
+
+`kroute_default` beats even the flat-additive default's own screen
+result -- the first config in this entire sweep (10 configs across
+Parts 1 and 3) to do so. Per this project's own established lesson
+(screen margins don't reliably transfer to the real 172-round budget),
+this needs full-scale confirmation before being trusted. Full 172-round,
+three-benchmark validation launched 2026-09-07 ~12:43AM; results pending.
+
+Bar to beat at full scale (iroute's current adopted default, flat
+step=0.05, 172 rounds): adaptec1 163594, newblue1 41272, bigblue1
+296534.
+
+| benchmark | kroute (relaxable, default settings) |
+|---|---|
+| adaptec1 | (pending) |
+| newblue1 | (pending) |
+| bigblue1 | (pending) |
 
