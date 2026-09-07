@@ -15,6 +15,7 @@ jroute
 kroute
 wroute
 rroute
+vroute
 *.o
 bench/
 *.gr
