@@ -474,3 +474,23 @@ quality signal is an order of magnitude bigger than any prior
 experiment's. Proper 30/40 screen launched to confirm before deciding
 on full validation.
 
+**30/40 screen result (newblue1)**: **33184** at 2120.7s (~35.3 min, 62
+total rounds run). Legal per gr_verify (0 disconnected/incomplete/
+unrouted/malformed) and cross-checked exactly against eval2008.pl. That
+beats:
+- kroute's own 30/40 screen (41956) by **-20.9%**
+- kroute's *full 172-round committed result* (41014) by **-19.1%** --
+  using only 62 rounds, about a third of kroute's own round budget
+
+Cost is real and grows with round count (~10.4x kroute's own 62-round
+time here, vs ~5.3x at the tiny 8-round probe -- consistent with more
+nets accumulating onto the slow tier as rounds progress, each paying
+MSMV's per-step netFootprint cost). This is by a wide margin the
+largest quality effect found in this entire session (every other
+mechanism tried -- iroute's tuning, kroute's relaxation, the exponent
+sweep, wroute/rroute's rip-up variants -- moved overflow by under 1.5%).
+Full-scale validation launched: vroute at kroute's committed round
+budget (60/150) on newblue1 for the real head-to-head, plus 30/40
+screens on adaptec1 and bigblue1 for a complete picture (3 processes,
+at the cap). Results pending.
+
