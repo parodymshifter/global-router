@@ -492,5 +492,22 @@ sweep, wroute/rroute's rip-up variants -- moved overflow by under 1.5%).
 Full-scale validation launched: vroute at kroute's committed round
 budget (60/150) on newblue1 for the real head-to-head, plus 30/40
 screens on adaptec1 and bigblue1 for a complete picture (3 processes,
-at the cap). Results pending.
+at the cap).
+
+**newblue1 full-budget result (172 rounds, matching kroute's committed
+budget exactly): 30668** at 6865.3s (~1.9 hours). Legal per gr_verify (0
+disconnected/incomplete/unrouted/malformed), cross-checked exactly
+against eval2008.pl. Beats kroute's committed 41014 by **-25.2%** --
+*larger* than the 30/40 screen's -19.1%, meaning the benefit compounds
+with more rounds rather than being a fast-convergence artifact that
+plateaus early. This is the real, apples-to-apples head-to-head number
+and it is the single largest improvement found anywhere in this entire
+session.
+
+adaptec1 and bigblue1 screens still running (round 32/40 and 28/40 at
+last check): adaptec1 at 118202 (-29.2% vs kroute's own 166890 screen,
+still declining ~700-800/round), bigblue1 at 245546 (-16.0% vs kroute's
+committed 292420, still declining ~600-900/round). Both consistent with
+newblue1's finding -- this looks like a real, generalizable property of
+MSMV routing, not a benchmark-specific fluke. Results pending for both.
 
