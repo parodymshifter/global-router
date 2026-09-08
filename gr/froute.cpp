@@ -141,7 +141,20 @@
 // is a strict superset in that sense, though it does not carry Phase D
 // itself forward -- see above.
 //
-// Measured result: pending.
+// Measured result (newblue1, 30/40-round screen, both gr_verify- and
+// eval2008.pl-cross-checked, scope correctly bounded to the 218 clusters'
+// own capped membership -- 1676 unique nets out of 270715 routed):
+// hottocold 41956 -> 110592 internally (rejected), coldtohot 41956 ->
+// 110350 (rejected), alternatehotcold 41956 -> 110544 (rejected). All
+// three reverted to phase B's exact 41956/22/6634017 result -- zero
+// regression, per the supervision gate -- and all three land within 0.2%
+// of each other, meaning cross-cluster ordering is not the missing lever:
+// once both confounds above are controlled for, WHICH cluster goes first
+// barely matters, because the 218 clusters are spatially disjoint by
+// construction and the dominant worsening happens *within* each cluster's
+// own sequential reroute, the same phenomenon broute's own Phase D found
+// and could not fix by capping batch size either. Full tables and
+// discussion: HISTORY_COST_SWEEP.md Part 13.
 //
 
 // Build:

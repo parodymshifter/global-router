@@ -1240,3 +1240,113 @@ independently-reported conditions rather than assuming a direction in
 advance -- this project's empirical-tuning discipline applies exactly as
 much here as anywhere else in the sweep.
 
+## Part 13: froute -- the heat-map reorder rebuild, built and measured
+
+The user gave the explicit go-ahead for the idea parked above, with one
+addition: three tunable orderings rather than just hottest-first and
+coldest-first -- `hottocold`, `coldtohot`, and a third, `alternatehotcold`
+(hottest, coldest, 2nd-hottest, 2nd-coldest, ..., walking inward from both
+ends of the temperature-sorted cluster list). `gr/froute.cpp` (forked from
+broute.cpp; commit 8aa82d5) builds this as a new Phase E, reusing broute's
+own `findOverflowClusters`/`clusterNets`/cap-and-trim machinery for
+cluster discovery and membership, adding a per-cluster `temperature`
+(total overflow amount over that cluster's own edges) and the ordering
+logic itself.
+
+**Two real, measured confounds found and fixed before the result below
+was trustworthy** -- both caught the same way every prior bug in this
+sweep was: the three `FROUTE_ORDER` modes landing on *suspiciously
+identical* numbers, which is not what a mechanism that's actually
+sensitive to processing order should do.
+
+1. **Confound #1 -- unconditional tier upgrade.** The first version routed
+   every net in Phase E's rebuild via `routeNetSlow` (the real-search
+   slow tier), including the ~269,000 never-overflowed "leftover" nets
+   the rebuild loop was, at that point, still touching. Force-migrating
+   essentially the whole design to real search in one unsupervised pass
+   is exactly CLAUDE.md's own documented "unconditional escalation"
+   anti-pattern (there, 30% of a design escalating at once spiked
+   overflow ~25x) and directly violates its escalation-tier stickiness
+   rule. Measured on newblue1: **41956 -> ~1.81 million (~43x)**,
+   identically across all three orderings (1812040 / 1812252 / 1812078,
+   within 0.02% of each other) -- the sameness across modes was the
+   actual tell, not the raw magnitude. Fixed by dispatching each net
+   through whichever tier phase B already settled on for it
+   (`rn.escalated`), never upgrading a fast-tier net just because Phase E
+   touches it.
+2. **Confound #2 -- unbounded rip-up scope.** Fixing (1) alone was not
+   enough. A version that respected tier but still ripped up and rebuilt
+   *every* non-giant net (cluster members and untouched leftovers alike)
+   still exploded overflow to **~872,700 (~20x)**, again nearly identical
+   across all three modes (872742 / 872690 / 872710, within 0.006% of
+   each other). Rerouting ~269,000 nets that were never part of any
+   overflow cluster, sequentially and live -- each one reacting instantly
+   to the immediately preceding net's fresh commit, rather than every net
+   in a round reacting to one shared, frozen price snapshot the way phase
+   A/B's actual round-based scheduler works -- is a fundamentally noisier
+   pricing dynamic than this codebase's architecture is built around, and
+   it visibly destabilized nets that had nothing to do with the heat map
+   at all. Fixed by restricting Phase E's rip-up-and-rebuild scope to
+   genuine cluster members only -- every other net's charges are left
+   completely untouched, never even undone.
+
+Both fixes are backed by dedicated self-tests (`testReorderRebuildRespects
+EachNetsEstablishedTier`, `testReorderLeavesNeverOverflowedNetsCompletely
+Untouched`) and documented in full in `gr/froute.cpp`'s own header, since
+the diagnostic trail -- not just the final number -- is itself a useful
+record of what "rip up everything" actually costs against this
+architecture's round-based pricing assumptions.
+
+**Verified result, same 30/40-round newblue1 screen used throughout this
+comparison, all three `FROUTE_ORDER` modes** (scope now correctly bounded
+to the 218 clusters' own capped membership -- 2510 per-cluster net slots,
+1676 unique nets after cross-cluster dedup, out of 270715 routed nets):
+
+| mode | internal rebuild result | accepted? | final output (gr_verify) | eval2008.pl |
+|---|---|---|---|---|
+| hottocold | 41956 -> 110592 | no | 41956 / max 22 / wl 6634017 | 41956 / 22 / 6634017 (exact match) |
+| coldtohot | 41956 -> 110350 | no | 41956 / max 22 / wl 6634017 | 41956 / 22 / 6634017 (exact match) |
+| alternatehotcold | 41956 -> 110544 | no | 41956 / max 22 / wl 6634017 | 41956 / 22 / 6634017 (exact match) |
+
+All three legal per gr_verify (0 disconnected/incomplete/unrouted/
+malformed), all three cross-checked exactly against eval2008.pl. **All
+three rebuilds were rejected by Phase E's own supervision gate** (each
+made total overflow ~2.6x worse internally: 110592/41956=2.64x,
+110350/41956=2.63x, 110544/41956=2.64x) and correctly reverted, so the
+final output in all three cases is bit-for-bit phase B's own result --
+zero regression, exactly as the supervision gate is supposed to guarantee.
+
+**The three modes are nearly identical to each other** (110592 vs 110350
+vs 110544, a 0.2% spread) even after both confounds were removed and
+scope was correctly bounded to just the contending nets. This is itself
+the headline finding, not a leftover confound: once cross-cluster
+ordering is the *only* variable left (scope and tier are both controlled
+for), it barely moves the outcome. The 218 clusters are spatially disjoint
+by construction (that is what makes them separate clusters), so which one
+gets processed first mostly does not change how any *other* cluster's own
+nets contend with each other -- the small residual spread (0.2%) is
+consistent with the minority of nets that happen to touch more than one
+cluster's tiles (2510 capped per-cluster slots reduce to only 1676 unique
+nets, meaning roughly a third of slots are a net counted against a second
+cluster), which is exactly where cross-cluster order has any lever to
+pull at all. The dominant effect on the ~2.6x internal worsening is
+*within* each cluster's own sequential reroute -- the same phenomenon
+broute's Phase D already found and could not fix by capping batch size
+(HISTORY_COST_SWEEP.md Part 12) -- not which cluster goes first.
+
+**Honest bottom line.** The heat-map reorder rebuild, properly isolated
+from both confounds, does not recover anything broute's own joint/batch
+mechanism didn't already fail to find, and confirms directly (rather than
+by inference) that global cross-cluster ordering is not the missing
+lever: the three tunable orderings the user asked to compare differ from
+each other by noise, not by signal. Combined with Part 12's finding, this
+sweep has now tried four distinct ways of coordinating multiple
+contending nets against each other (broute's uncapped batch, broute's
+capped batch, and now froute's three global orderings) and all four land
+on the identical safe no-op relative to kroute's own baseline. The
+remaining lever this sweep has not yet tried is *genuinely joint*
+optimization within a cluster (something other than sequential
+`routeNetSlow` calls reacting to each other's fresh commits one at a
+time) -- sequential-with-reordering, at every scope tried so far, keeps
+landing in the same place.
+
