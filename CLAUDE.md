@@ -59,12 +59,48 @@ forever. A user-proposed refinement to their own proposed mechanism,
 and both empirically validated: kroute beats iroute cleanly on all three
 real benchmarks (adaptec1 -0.62%, newblue1 -0.63%, bigblue1 -1.39%, same
 172-round budget both sides) -- the first mechanism in the whole
-history-cost sweep (10+ configs) to win unanimously. **kroute is the
-current-best router in this lineage.** Total overflow remains in the
-tens to hundreds of thousands on every benchmark; see `gr/kroute.cpp`'s
-header and `HISTORY_COST_SWEEP.md` at the repo root for the full record,
-including a follow-up sweep of the growth formula's exponent (in
-progress as of this update).
+history-cost sweep (10+ configs) to win unanimously. Total overflow
+remains in the tens to hundreds of thousands on every benchmark; see
+`gr/kroute.cpp`'s header and `HISTORY_COST_SWEEP.md` at the repo root for
+the full record, including a follow-up sweep of the growth formula's
+exponent.
+
+**2026-09-07 update (later the same day): `gr/vroute.cpp` is the new
+current-best router in this lineage, by a wide margin, and it is not
+another pricing-formula variant.** Every router through kroute prices
+congestion on a fixed Steiner topology -- an abstract Manhattan-distance
+MST built once, up front, from the pins alone, before any routing or
+congestion information exists. `vroute` replaces that fixed topology with
+MSMV (multi-source multi-sink) maze growth: at every step, every tile a
+net has *already committed* becomes a simultaneous source and every
+not-yet-connected pin becomes a simultaneous sink, and one real
+congestion-aware search wave finds the genuinely cheapest next
+connection, wherever it attaches -- a technique used by actual
+ISPD-contest-winning routers (FastRoute, NTHU-Route) that nothing in this
+lineage had tried before. Measured, full 172-round budget, against
+kroute's own committed numbers, both legal per gr_verify and both
+cross-checked exactly against eval2008.pl: **adaptec1 -36.55% (162584 ->
+103172), newblue1 -25.23% (41014 -> 30668), bigblue1 -21.32% (292420 ->
+230084)** -- unanimous, double-digit-percent, on all three real
+benchmarks, dwarfing every pricing-formula experiment tried before or
+since (iroute -0.6 to -2.7%, kroute another -0.6 to -1.4%, later
+pricing-curve and net-ordering experiments low single digits at best, one
+a regression -- see `HISTORY_COST_SWEEP.md`'s Parts 8-11). The lesson
+this result actually teaches: the ceiling on how much tuning a *shared
+cost formula's coefficients* can achieve was reached early in this
+lineage; changing what the search is structurally allowed to do (attach
+anywhere on already-built wire, not just fixed tree endpoints) moved the
+number by an order of magnitude more than any coefficient has. Total
+overflow is still real (hundreds of thousands on the two larger
+benchmarks) -- this is a major step, not the destination -- and the cost
+is real too: vroute takes roughly 7.5-8.25 hours per benchmark at this
+round budget, versus kroute's several hundred seconds, a tradeoff a
+production use of this technique would need to make practical. A
+follow-up combining vroute's MSMV search with a post-convergence
+length-weight rescue pass (`gr/zroute.cpp`) is a further, smaller
+improvement on top (-21.36% vs kroute-equivalent on a reduced-round
+screen, only marginally beyond MSMV alone) -- see `HISTORY_COST_SWEEP.md`
+Parts 10-11.
 
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check

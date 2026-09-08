@@ -39,11 +39,43 @@
 // tier's whole point is avoiding one; this only changes the slow tier,
 // exactly where this project already puts real search.
 //
-// Measured result: pending. See HISTORY_COST_SWEEP.md at the repo root for
-// this file's own update once real benchmark numbers exist -- per this
-// project's own discipline, that comparison is what settles whether MSMV
-// growth is a real win over kroute's fixed-topology routing, a wash, or a
-// regression, not reasoning about it in advance.
+// Measured result, full 172-round budget (matching kroute's own committed
+// budget exactly) on all three real ISPD benchmarks, against kroute's own
+// committed numbers. Both legal per gr_verify (0
+// disconnected/incomplete/unrouted/malformed), both cross-checked exactly
+// against eval2008.pl:
+//
+//   benchmark   kroute (committed)   vroute (full budget)   change
+//   adaptec1    162584                103172                -36.55%
+//   newblue1     41014                 30668                -25.23%
+//   bigblue1    292420                230084                -21.32%
+//   total       496018                363924                -26.63%
+//
+// Unanimous, large, double-digit-percent improvement on all three
+// benchmarks -- by a wide margin the single largest result in this
+// project's whole history-cost/pricing-formula lineage (iroute's
+// history-cost: -0.6 to -2.7%; kroute's relaxable version: another -0.6
+// to -1.4%; every later pricing experiment forked from kroute: low single
+// digits at best, one a regression). The reason is structural, not
+// incremental: every prior router in this lineage decides a net's
+// Steiner topology once, up front, from an abstract Manhattan-distance
+// MST built before any routing or congestion information exists, then
+// treats that topology as fixed. MSMV replaces the topology decision
+// itself with a real, congestion-aware search at every step -- the
+// ceiling on how much a shared cost formula (`length + lambda*amount`)
+// can achieve by adjusting its coefficients was reached early in this
+// lineage; changing what the search is allowed to do moved the number
+// far more than any coefficient has.
+//
+// Cost, honestly: dramatically slower than kroute at the same round
+// budget -- roughly 27000-30000s (7.5-8.25 hours) per benchmark at full
+// budget here, versus kroute's own several-hundred-second runs. A real
+// tradeoff a production use of this technique would need to make
+// practical (bounding the search cost, or applying MSMV selectively
+// rather than to every escalated net), not a free win. See
+// HISTORY_COST_SWEEP.md's Part 7 at the repo root for the full record,
+// including the 30/40-round screens that predicted this result before
+// the full-budget runs confirmed it.
 //
 
 // Build:
