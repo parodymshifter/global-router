@@ -1046,3 +1046,70 @@ overflow goal cares about the last few percent enough to pay for it; at
 minimum, it's the correct, measured answer to "should MSMV and the
 rescue pass be combined," not an assumption.
 
+## Part 12: broute -- joint/batch rerouting of contended net clusters
+
+Built from the user's own follow-up to Part 10's closing observation:
+yroute's own rescue log showed 86% of holdout nets couldn't be helped by
+length-weight decay at *any* weight, consistent with the per-tile finding
+that hot tiles have every layer and direction simultaneously overloaded
+-- a jointly-oversubscribed resource, not a single net's own length-vs-
+congestion tradeoff. `gr/broute.cpp` (commit a281b40) tests the natural
+next lever directly: group every currently-overflowed tile into connected
+clusters, collect every overflowed net touching each cluster, reroute
+them together (sequentially, each seeing the others' fresh attempts, not
+their frozen originals), and accept or reject the whole batch as one
+supervised unit.
+
+**Verified result, 30/40-round newblue1 screen (same budget as every
+other data point in this comparison)**: **41956**, 216.2s. Legal per
+gr_verify, cross-checked exactly against eval2008.pl (41956 / max 22 /
+wirelength 6634017, both tools agree) -- an *exact* match to the kroute-
+equivalent baseline. Phase D found and attempted 218 clusters, touching
+29934 net-instances total, and **accepted zero of them.**
+
+**This is a clean, striking, fully-supervised negative result, not a
+bug** -- verified via the batch log directly:
+
+| metric | value |
+|---|---|
+| clusters attempted | 218 |
+| clusters accepted | **0 (0%)** |
+| batches where overflow got worse | **218 (100%)** |
+| nets per cluster (median / mean / max) | 30.5 / 137.3 / **8634** |
+| tiles per cluster (median / mean / max) | 2 / 21.5 / 1602 |
+| median overflow before -> after | 204 -> 1290 |
+| mean worsening multiplier | **~10x** |
+
+Every single batch made things worse, most of them dramatically --
+because the naive tile-adjacency clustering criterion, at a round budget
+still leaving substantial residual overflow (42887 escalated nets),
+doesn't reliably find small local hot pockets: it lets adjacent
+congestion merge into a few enormous clusters (one reached **8634
+nets** -- roughly 3% of the whole design touched in a single batch).
+Unconditionally rerouting thousands of nets at once, in arbitrary net-id
+order, with no smarter coordination, reproduces exactly the "reroute
+everyone every round" thundering-herd failure this project has now
+independently confirmed three separate times: rroute's full-rip-up
+experiment (Part 6), iroute's naive too-aggressive history-step (its own
+header), and this. The common thread across all three: touching many
+nets simultaneously without tightly bounding scope is a repeatedly
+confirmed anti-pattern in this router architecture, regardless of what
+specifically triggers the "many nets at once" -- a round boundary, an
+escalation threshold, or (here) cluster membership.
+
+**The supervision worked exactly as designed** -- every one of those
+218 near-catastrophic batches was caught and fully reverted, so the
+final result is bit-for-bit identical to what phase B alone already
+produced, not a regression. Phase D added real computational cost (218
+failed attempts) for zero actual risk, which is the entire point of
+never accepting a batch unconditionally.
+
+**Natural next step, not yet built**: cap cluster size (skip or subdivide
+any cluster above some small net-count threshold) to isolate whether the
+*original*, more modest version of this idea -- small, genuinely local
+pockets of a handful of mutually-contending nets, exactly like the
+self-test's clean 2-net scenario -- can find real wins once the
+giant-cluster pathology is excluded, rather than concluding the whole
+joint/batch idea is a dead end from a version that was never actually
+testing the intended scope.
+
