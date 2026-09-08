@@ -206,6 +206,20 @@
 //                                 accepted,overflow_before,overflow_after)
 //                                 with one row per cluster Phase D
 //                                 attempted. Unset by default.
+//     BROUTE_MAX_CLUSTER_NETS=<int>
+//                                 caps how many nets a single batch ever
+//                                 reroutes at once, default 12. Clusters
+//                                 above the cap are trimmed to their own
+//                                 worst-offending nets (by individual
+//                                 local overflow), not skipped outright --
+//                                 see negotiateBatchRescue's own comment
+//                                 for why, and HISTORY_COST_SWEEP.md's
+//                                 Part 12 for the uncapped result this
+//                                 exists to fix (one cluster reached 8634
+//                                 nets and every batch that large made
+//                                 things worse). A first empirically-
+//                                 motivated starting point, not a tuned
+//                                 result -- needs its own sweep.
 
 #include <algorithm>
 #include <chrono>
@@ -1370,6 +1384,52 @@ void negotiateBatchRescue(const RoutingGrid &g, Prices &prices, Usage &usage, co
     std::vector<size_t> netIdx = clusterNets(g, usage, rep.nets, inCluster);
     if (netIdx.empty())
       continue;
+
+    // Cap batch size: the very first version of this mechanism found that
+    // a naive tile-adjacency cluster can sprawl to thousands of nets once
+    // congestion is widespread (one reached 8634, ~3% of the whole
+    // design), and unconditionally rerouting that many nets at once, in
+    // arbitrary order, reproduces the exact "reroute everyone every
+    // round" thundering-herd failure this project has confirmed multiple
+    // times elsewhere -- see the file header's Measured result note and
+    // HISTORY_COST_SWEEP.md's Part 12. Only the self-test's small,
+    // hand-verified 2-net scenario is actually validated at this point;
+    // BROUTE_MAX_CLUSTER_NETS (default 12, an order of magnitude above
+    // that, several below the observed catastrophe) is a first
+    // empirically-motivated starting point, not a tuned result.
+    //
+    // Rather than skip an oversized cluster outright -- which would write
+    // off exactly the regions carrying the most overflow -- trim it to
+    // its own worst-offending nets, ranked by each net's individual local
+    // overflow contribution (reusing overflowOverUnion per net, the same
+    // primitive every other supervised decision in this codebase already
+    // uses). A cluster far over the cap still gets a bounded, safe chance
+    // at improvement instead of either "all of it" or "none of it."
+    // Deliberately not `static`: a cached value would lock in whatever
+    // BROUTE_MAX_CLUSTER_NETS happened to be on this function's first
+    // call for the rest of the process, which is exactly wrong for the
+    // self-tests below that need to exercise different caps via setenv
+    // within one test binary (this project's own real-world usage only
+    // ever reads the env var once per actual process anyway, so this
+    // costs nothing there).
+    const size_t maxClusterNets = [] {
+      const char *m = std::getenv("BROUTE_MAX_CLUSTER_NETS");
+      return m ? static_cast<size_t>(std::atoi(m)) : static_cast<size_t>(12);
+    }();
+    if (netIdx.size() > maxClusterNets) {
+      std::vector<std::pair<long long, size_t>> ranked;
+      ranked.reserve(netIdx.size());
+      for (size_t idx : netIdx) {
+        const RoutedNet &rn = rep.nets[idx];
+        ranked.emplace_back(overflowOverUnion(g, usage, rn.charges, rn.charges), idx);
+      }
+      std::sort(ranked.begin(), ranked.end(),
+                [](const auto &a, const auto &b) { return a.first > b.first; });
+      netIdx.clear();
+      for (size_t r = 0; r < maxClusterNets; ++r)
+        netIdx.push_back(ranked[r].second);
+    }
+
     ++rep.batchesAttempted;
     rep.batchNetsTouched += static_cast<int>(netIdx.size());
 
@@ -2451,6 +2511,90 @@ void testBatchRescueLeavesUsageConsistentWithFinalCommittedCharges() {
         "committed, the same class of bug yroute's own rescue pass once had");
 }
 
+// A 7x2 grid, one layer, capacity 1 on every edge. Three nets, each on
+// its own distinct edge along row 0 (so no two nets ever share capacity
+// directly), but those three edges are tile-adjacent to each other
+// (0-1, 1-2, 2-3), so findOverflowClusters merges all three into one
+// cluster the same way it would a genuinely shared contention -- this
+// is deliberately about testing the *cap*, not re-testing clustering
+// itself. Each net's own charge amount is set well above that edge's
+// capacity, giving each one a distinct, known, self-inflicted overflow
+// magnitude: netHigh=5 over, netMid=3 over, netLow=1 over.
+const char *kBatchCapGr = R"(grid 7 2 1
+vertical capacity 1
+horizontal capacity 1
+minimum width 1
+minimum spacing 0
+via spacing 0
+0 0 10 10
+num net 3
+netHigh 0 2 1
+5 5 1
+15 5 1
+netMid 1 2 1
+15 5 1
+25 5 1
+netLow 2 2 1
+25 5 1
+35 5 1
+0
+)";
+
+void testBatchCapTrimsToWorstOffendingNetsNotArbitraryOnes() {
+  Design d = parse("broute_selftest_batchcap.gr", kBatchCapGr);
+  const RoutingGrid &g = d.grid;
+  Prices prices(g);
+  Usage usage(g);
+  LayerPlan lp(g);
+  SearchRegion region;
+
+  // Deliberately inserted in ascending overflow order (low, mid, high) --
+  // the *opposite* of the ranking the trim should produce -- so this test
+  // actually discriminates "sorted by real overflow magnitude" from a
+  // buggy "just keep the first N in list order," which would otherwise
+  // coincidentally look identical if insertion order already matched the
+  // correct ranking.
+  RunReport rep;
+  struct Spec {
+    int netId;
+    int x;
+    int overAmount; // charge amount; capacity is 1, so overflow = amount - 1
+  };
+  Spec specs[3] = {{2, 2, 2}, {1, 1, 4}, {0, 0, 6}}; // low, mid, high -- ascending
+  for (const Spec &s : specs) {
+    RoutedNet rn;
+    rn.net = &d.nets[s.netId];
+    rn.pts = {{s.x, 0}, {s.x + 1, 0}};
+    rn.mst = {{0, 1}};
+    ChargeRecord c{true, 0, s.x, s.x + 1, 0, s.overAmount};
+    rn.charges = {c};
+    rn.segs = {{s.x, 0, 0, s.x + 1, 0, 0}};
+    usage.h[g.hIndex(s.x, 0, 0)] += s.overAmount;
+    rep.nets.push_back(std::move(rn));
+  }
+
+  setenv("BROUTE_MAX_CLUSTER_NETS", "2", 1);
+  negotiateBatchRescue(g, prices, usage, lp, region, 0.5, rep);
+  unsetenv("BROUTE_MAX_CLUSTER_NETS");
+
+  check(rep.batchNetsTouched == 2,
+        "with the cap set to 2, exactly 2 of the 3 clustered nets were "
+        "touched, not all 3 -- the cap is actually enforced");
+
+  // The low-overflow net was inserted *first* (index 0) but should still
+  // be the one excluded, since it has the smallest individual overflow
+  // (amount 2 -> over by 1) of the three -- proving the trim ranks by
+  // real overflow magnitude, not list position.
+  const RoutedNet &low = rep.nets[0];
+  check(low.charges.size() == 1 && low.charges[0].amount == 2 && low.charges[0].a == 2,
+        "the least-overflowed net -- inserted *first*, so a list-order-based "
+        "bug would have kept it and dropped the actual worst offender -- "
+        "was correctly excluded from the capped batch and left with its "
+        "exact original charge, proving the trim ranks by real overflow "
+        "magnitude, not insertion order");
+  check(rep.batchesAttempted == 1, "the trimmed cluster still counts as exactly one attempted batch");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -2468,6 +2612,7 @@ int run() {
   testExponentEscalationTracksStackSizeAndRelaxesWithIt();
   testBatchRescueResolvesTwoNetsJammedOnSameEdgeToZeroOverflow();
   testBatchRescueLeavesUsageConsistentWithFinalCommittedCharges();
+  testBatchCapTrimsToWorstOffendingNetsNotArbitraryOnes();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
