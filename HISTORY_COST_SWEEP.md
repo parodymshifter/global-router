@@ -945,3 +945,64 @@ above:
    reaches, no single value dominates, and a meaningful share need it at
    its most extreme (0) rather than some gentle intermediate compromise.
 
+## Part 11: zroute -- MSMV plus the length-weight rescue pass, combined
+
+Direct follow-up to Part 10's own closing question: MSMV and length-weight
+decay are orthogonal mechanisms (one changes what points a search can
+connect through, the other changes what that search optimizes for), so
+does combining them help beyond either alone? `gr/zroute.cpp` (commit
+7701955) is yroute's Phase C ported onto vroute, substituting
+`routeNetSlowMSMV` for plain `routeNetSlow` as the rescue pathfinder.
+
+**Verified result, 30/40-round newblue1 screen (same budget as every
+other data point in this comparison)**: **32994**, 2625.1s (~43.8 min).
+Legal per gr_verify, cross-checked exactly against eval2008.pl (32994 /
+max 22 / wirelength 6703406, all three agree). Rescue pass: 19792
+attempted, 3137 succeeded (15.8%).
+
+**The combination is a real, substantial win** -- far beyond either
+mechanism alone:
+
+| config | overflow | vs kroute-equivalent (41956) |
+|---|---|---|
+| xroute ordering-only | 41514 | -1.05% |
+| yroute (rescue alone, plain Dijkstra) | 41860 | -0.46% |
+| vroute (MSMV alone, own 30/40 screen) | 33184 | -20.9% |
+| **zroute (MSMV + rescue)** | **32994** | **-21.36%** |
+
+**But the marginal contribution of the rescue pass on top of MSMV is
+modest, not synergistic**: 33184 -> 32994 is a further **-0.57%**, close
+to what the rescue pass achieved on its own (-0.46%) rather than
+compounding with MSMV's own gain. Confirmed directly by comparing the
+rescue log's own distribution against yroute's (Part 10):
+
+| outcome | yroute (plain Dijkstra) | zroute (MSMV) |
+|---|---|---|
+| never succeeded | 86.0% | 84.2% |
+| succeeded at weight=1.0 | 11.1% | 12.5% |
+| succeeded at weight in (0,1) | 2.4% | 2.7% |
+| succeeded only at weight=0 | 0.5% | 0.7% |
+
+The shapes are nearly identical. **MSMV does not expand which nets the
+rescue pass can reach** -- it operates on a smaller starting population
+(19792 attempted here vs yroute's 23108, since MSMV's own phase B already
+resolves more nets before Phase C ever runs) but of whatever remains
+overflowed, essentially the same ~84-86% fraction is unreachable by
+length-weight decay regardless of which pathfinder tries it. This is
+consistent with the earlier per-tile finding (Part 9): MSMV's real
+strength is finding better topology within a congested region (which is
+exactly what fixes most of the overflow before Phase C even starts), not
+reaching resources that are jointly oversubscribed by many nets at once
+-- MSMV, like plain Dijkstra, is still routing one net at a time, so a
+resource genuinely oversubscribed across many simultaneous nets stays out
+of either mechanism's reach. The "batch/joint rerouting" option raised
+back in that discussion remains the one untried lever that targets this
+specific gap directly.
+
+**Cost**: 2625.1s vs vroute-alone's own 30/40 screen (2120.7s, this file's
+own Part 7) -- roughly +24% more time for the additional -0.57%. Whether
+that trade is worth it depends entirely on whether the eventual zero-
+overflow goal cares about the last few percent enough to pay for it; at
+minimum, it's the correct, measured answer to "should MSMV and the
+rescue pass be combined," not an assumption.
+
