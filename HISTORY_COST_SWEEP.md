@@ -534,6 +534,17 @@ per-round cost grows as more nets escalate over the run): roughly
 7-8 hours for adaptec1, 8-9 hours for bigblue1. This is the last piece
 needed to complete vroute's full 3-benchmark validation.
 
+**adaptec1 full-budget result (172 rounds, matching kroute's committed
+budget exactly): 103172** at 26986.3s (~7.5 hours) -- landing right in
+the estimated 7-8hr window. Legal per gr_verify (0
+disconnected/incomplete/unrouted/malformed), cross-checked exactly
+against eval2008.pl (103172 / max 22 / wirelength 7514462, both tools
+agree). Beats kroute's committed 162584 by **-36.55%** -- *larger* than
+the 30/40 screen's -31.2%, the same pattern newblue1 already showed
+(the benefit compounds with more rounds rather than being a fast-
+convergence artifact). bigblue1's full-budget run is still in progress;
+see this file's next update for the third and final benchmark.
+
 ## Part 8: xroute -- price barrier + RUDY/centrality net ordering
 
 While vroute's two full-budget runs were in progress, the user asked why
