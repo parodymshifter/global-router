@@ -545,6 +545,46 @@ the 30/40 screen's -31.2%, the same pattern newblue1 already showed
 convergence artifact). bigblue1's full-budget run is still in progress;
 see this file's next update for the third and final benchmark.
 
+**bigblue1 full-budget result (172 rounds): 230084** at 29679.3s (~8.24
+hours), landing in the estimated 8-9hr window. Legal per gr_verify,
+cross-checked exactly against eval2008.pl (230084 / max 26 / wirelength
+7836782, both tools agree). Beats kroute's committed 292420 by
+**-21.32%**.
+
+**vroute's full 3-benchmark validation is now complete.** Final,
+verified, apples-to-apples comparison against kroute's own committed
+numbers, same round budget (172) on both sides:
+
+| benchmark | kroute (committed) | vroute (full budget) | change |
+|---|---|---|---|
+| adaptec1 | 162584 | 103172 | **-36.55%** |
+| newblue1 | 41014 | 30668 | **-25.23%** |
+| bigblue1 | 292420 | 230084 | **-21.32%** |
+| **total** | **496018** | **363924** | **-26.63%** |
+
+Unanimous, large, double-digit-percent improvement on all three real
+ISPD benchmarks -- by a wide margin the single largest result of this
+entire session, dwarfing every pricing-formula variant tried (iroute's
+history-cost -0.6 to -2.7%, kroute's relaxable version another -0.6 to
+-1.4%, xroute's barrier experiments a regression, yroute's rescue pass
+alone -0.46%). MSMV is a structural change to *how* a net's topology is
+decided -- real congestion-aware search replacing a fixed, congestion-
+blind MST built before routing starts -- not another coefficient on the
+same cost formula every other router in this lineage has been tuning.
+That distinction is the actual finding of the whole session: the ceiling
+on how much a pricing curve alone can achieve was reached early (kroute),
+and every further pricing experiment since (xroute, yroute) has moved the
+needle by low single digits at best; changing the search algorithm itself
+moved it by 20-37%.
+
+**Cost, honestly**: vroute is dramatically slower than kroute at the same
+round budget -- roughly 30000s (8+ hours) per benchmark at full budget,
+versus kroute's own several-hundred-second runs. That is a real tradeoff,
+not a free win, and matters directly for whether this is deployable as-is
+versus a proof of concept that a production implementation would need to
+make practical (e.g. bounding MSMV's search cost, or applying it
+selectively rather than to every escalated net).
+
 ## Part 8: xroute -- price barrier + RUDY/centrality net ordering
 
 While vroute's two full-budget runs were in progress, the user asked why
