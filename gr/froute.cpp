@@ -59,60 +59,81 @@
 // trim-to-worst-offenders logic broute's own capped Phase D validated
 // (`clusterNets` + the same ranking-and-trim step, `rankAndCapClusterNets`)
 // -- here purely to decide cluster *membership* for ordering purposes, not
-// to gate a batch accept/reject. `buildReorderedNetOrder` then concatenates
-// every cluster's capped net list according to `FROUTE_ORDER`:
+// to gate a batch accept/reject. The nets from every contributing cluster,
+// deduplicated, concatenated according to `FROUTE_ORDER`, are Phase E's
+// entire scope -- and only that scope, nothing wider (see "Rip-up" below
+// for why this is load-bearing, not incidental):
 //   - hottocold (default): hottest cluster's nets first, proceeding to the
 //     coldest.
 //   - coldtohot: the exact reverse.
 //   - alternatehotcold: hottest, coldest, 2nd-hottest, 2nd-coldest, ...,
 //     walking inward from both ends of the temperature-sorted cluster
 //     list.
-// Every net not claimed by any cluster (never overflowed, or trimmed away
-// from an oversized one) is appended at the end in original net-id order
-// -- this mechanism's new signal only concerns the relative order of
-// nets that were actually part of the heat map; nothing changes about how
-// the rest are ordered.
+// (`buildReorderedNetOrder`, unit-tested separately, implements this exact
+// concatenation and additionally appends every unclaimed net at the tail
+// for callers that want a total ordering over the whole design; Phase E
+// itself only ever uses its cluster-derived prefix -- see below.)
 //
-// Rip-up: every non-giant net's charges are undone and usage rebuilt from
-// giants alone (giants are never touched -- they never searched to begin
-// with, and CLAUDE.md's own rule is that they charge usage without being
-// rerouteable). Then, in the order above, each non-giant net is routed
+// Rip-up: undo committed charges for exactly the nets in that scope --
+// nothing wider. Then, in the chosen order, route each of those nets
 // exactly once, via whichever tier phase B already settled on for it
-// (`rn.escalated`) -- never upgrading every net to the slow tier just
-// because Phase E is touching it. This matters more than it sounds: an
-// early version of this mechanism called the slow tier unconditionally
-// for every net in the reorder, which includes every never-overflowed
-// "leftover" net appended at the tail, not just the cluster members --
-// silently force-migrating all ~270K non-giant nets to real search in one
-// unsupervised pass. Measured consequence: overflow exploded roughly 43x,
-// identically regardless of FROUTE_ORDER, which was the tell that it had
-// nothing to do with ordering at all -- it exactly reproduced CLAUDE.md's
-// own documented "unconditional escalation" anti-pattern (there, 30% of a
-// design escalating at once spiked overflow ~25x; here, 100% did, at a
-// correspondingly larger multiple), and directly contradicts CLAUDE.md's
-// own escalation-tier rule that a net's tier is sticky. Respecting that
-// stickiness during Phase E is what isolates the one variable this
-// mechanism is actually meant to test -- net processing order -- from a
-// second, much larger, and already-answered variable (routing tier).
-// Prices are NOT reset:
-// phase B's learned reactive lambda and permanent history terms carry
-// straight into Phase E unchanged, since the whole point is testing
-// whether a converged price landscape plus a smarter global commit order
-// finds a better arrangement, not whether starting cold does. Lambda still
-// updates live, per commit, exactly as it does inside every other
-// sequential rescue mechanism in this codebase (`negotiateWire` fires
-// every time `commitPath` closes a segment); history does not update
-// again until phase E's own single pass is over, since there is no round
-// boundary inside it.
+// (`rn.escalated`) -- never upgrading a fast-tier net to a real search
+// just because Phase E is touching it. Both restrictions were forced by
+// real measurement, not designed in from the start, and both are worth
+// keeping in the record since either one alone reproduces a catastrophic,
+// order-independent blowup that could easily be mistaken for "the whole
+// idea doesn't work":
+//   1. An early version called the slow tier unconditionally for every
+//      net Phase E touched, including every never-overflowed net it was
+//      about to rip up regardless. Force-migrating all ~270K non-giant
+//      nets in a design to real search in one unsupervised pass exactly
+//      reproduces CLAUDE.md's own documented "unconditional escalation"
+//      anti-pattern (30% of a design escalating at once there spiked
+//      overflow ~25x) and directly contradicts its escalation-tier
+//      stickiness rule ("once a net escalates, leave it there"). Measured
+//      on newblue1: overflow exploded from 41956 to ~1.81 million (~43x),
+//      identically across all three FROUTE_ORDER modes -- the sameness
+//      across modes was the tell that it had nothing to do with ordering.
+//   2. Fixing (1) alone was not enough. A version that respected each
+//      net's tier but still ripped up and rebuilt *every* net in the
+//      design (cluster members and untouched leftovers alike) still
+//      exploded overflow to ~872,700 (~20x), again identically across all
+//      three modes. Rerouting ~269,000 nets that were never part of any
+//      overflow cluster, sequentially and live -- each one reacting
+//      instantly to the immediately preceding net's fresh commit, rather
+//      than every net in a round reacting to one shared, frozen price
+//      snapshot the way phase A/B's actual round-based scheduler works --
+//      is a fundamentally noisier pricing dynamic than this codebase's
+//      architecture is built around, and it visibly destabilized nets
+//      that had nothing to do with the heat map at all. Restricting
+//      Phase E's rip-up-and-rebuild scope to genuine cluster members
+//      (never touching a leftover net's charges at all) is what actually
+//      isolates the one variable this mechanism is meant to test -- net
+//      processing order, among nets already known to be contending -- from
+//      two much larger, already-answered variables (routing tier, and
+//      whether the whole design should be resequenced at all).
+//
+// Prices are NOT reset: phase B's learned reactive lambda and permanent
+// history terms carry straight into Phase E unchanged, since the whole
+// point is testing whether a converged price landscape plus a smarter
+// commit order, among already-contending nets, finds a better local
+// arrangement -- not whether starting cold does. Lambda still updates
+// live, per commit, exactly as it does inside every other sequential
+// rescue mechanism in this codebase (`negotiateWire` fires every time
+// `commitPath` closes a segment); history does not update again until
+// Phase E's own single pass is over, since there is no round boundary
+// inside it.
 //
 // Supervision: this project's standing rule applies at the one granularity
-// that actually matches what changed -- the whole design, once. Phase E's
-// resulting total overflow is compared against phase B's own best result;
-// if it is not strictly better, every net is reverted to its pre-Phase-E
-// route and the output is phase B's result unchanged. This is a coarser
-// gate than Phase D's per-cluster one (a full rebuild cannot be partially
-// accepted the way a handful of independent batches can), but it is still
-// a real gate, never an unconditional accept, exactly per CLAUDE.md's
+// that actually matches what changed -- the whole reordered rebuild, once
+// (not the whole design; scope is already bounded to cluster-member nets,
+// per "Rip-up" above). Total design overflow after Phase E is compared
+// against phase B's own best result; if it is not strictly better, every
+// touched net is reverted to its pre-Phase-E route and the output is
+// phase B's result unchanged. This is a coarser gate than Phase D's
+// per-cluster one (the whole rebuild cannot be partially accepted the way
+// a handful of independent batches can), but it is still a real gate,
+// never an unconditional accept, exactly per CLAUDE.md's
 // escalation-supervision rule.
 //
 // `FROUTE_REORDER=0` disables Phase E entirely, reproducing broute-with-
@@ -1640,18 +1661,43 @@ void negotiateReorder(const RoutingGrid &g, Prices &prices, Usage &usage, const 
 
   ReorderMode mode = parseReorderMode(std::getenv("FROUTE_ORDER"));
   std::vector<OrderedCluster> ordered = orderClustersByTemperature(std::move(contributing), mode);
-  std::vector<size_t> order = buildReorderedNetOrder(ordered, rep.nets.size());
 
+  // buildReorderedNetOrder's own contract (see its comment) places every
+  // cluster-claimed net before any leftover, never-overflowed net it
+  // appends at the tail -- so truncating its result to exactly the
+  // cluster-derived prefix, computed the same way via the same dedupe,
+  // gives Phase E's real scope: ONLY nets that actually contributed to an
+  // overflow cluster. Nets outside that scope are left completely
+  // untouched -- not ripped up, not rerouted, not even considered. An
+  // earlier version of this function called buildReorderedNetOrder's full
+  // result (cluster nets *plus* every leftover net) and ripped up and
+  // rebuilt literally all of it. Even with each net's tier correctly
+  // respected (the previous fix above), that alone still exploded
+  // overflow from 41956 to ~872,700 on newblue1 -- a ~20x blowup,
+  // identically across all three FROUTE_ORDER modes, the same
+  // "unaffected by ordering" tell the tier bug produced. Rerouting the
+  // other ~269,000 untouched nets sequentially and live -- each one
+  // reacting instantly to the immediately preceding net's fresh commit,
+  // rather than all nets in a round reacting to one shared, frozen price
+  // snapshot the way phase A/B's own round-based scheduler works -- turns
+  // out to be a fundamentally different, far noisier pricing dynamic than
+  // this codebase's architecture is built around, and it visibly
+  // destabilized nets that had nothing to do with any overflow cluster at
+  // all. Restricting scope to genuine cluster members keeps Phase E
+  // testing the one thing it is actually meant to test (does processing
+  // order, among the nets already known to be contending, matter) instead
+  // of accidentally re-running the entire design through an unsupervised,
+  // architecturally-mismatched routing regime.
+  std::vector<size_t> order;
   {
     std::vector<bool> seen(rep.nets.size(), false);
-    int touched = 0;
     for (const OrderedCluster &c : ordered)
       for (size_t idx : c.nets)
         if (!seen[idx]) {
           seen[idx] = true;
-          ++touched;
+          order.push_back(idx);
         }
-    rep.reorderNetsTouched = touched;
+    rep.reorderNetsTouched = static_cast<int>(order.size());
   }
 
   if (logging) {
@@ -1665,11 +1711,16 @@ void negotiateReorder(const RoutingGrid &g, Prices &prices, Usage &usage, const 
   rep.reorderOverflowBefore = before;
   std::vector<RoutedNet> preNets = rep.nets; // full pre-Phase-E snapshot for the revert path
 
-  // Rip up: undo every non-giant net's committed charges. Giants are never
-  // touched -- routeGiantNet never searched for them in the first place,
-  // and CLAUDE.md's own rule is that a giant net charges usage without
-  // being rerouteable, so there is nothing to rip up for one.
-  for (RoutedNet &rn : rep.nets) {
+  // Rip up: undo committed charges for exactly the nets in scope (order,
+  // computed above -- every net that actually contributed to an overflow
+  // cluster, and nothing else). Giants can never appear here regardless
+  // (clusterNets already excludes them), but the check is kept as a
+  // defensive invariant: routeGiantNet never searched for a giant net in
+  // the first place, and CLAUDE.md's own rule is that a giant net charges
+  // usage without being rerouteable, so there would be nothing to rip up
+  // for one even if it somehow showed up.
+  for (size_t idx : order) {
+    RoutedNet &rn = rep.nets[idx];
     if (rn.giant)
       continue;
     for (const ChargeRecord &c : rn.charges)
@@ -1678,30 +1729,15 @@ void negotiateReorder(const RoutingGrid &g, Prices &prices, Usage &usage, const 
     rn.segs.clear();
   }
 
-  // Rebuild, net by net, in the order Phase E selected -- using whichever
-  // tier phase B already settled on for that net (rn.escalated), never
+  // Rebuild, net by net, in the order Phase E selected, using whichever
+  // tier phase B already settled on for that net (rn.escalated) -- never
   // upgrading a fast-tier net to a real search just because it's being
-  // touched here. This is not an incidental detail: an earlier version of
-  // this function called routeNetSlow unconditionally for every net in
-  // `order`, which includes every non-clustered "leftover" net appended at
-  // the tail -- silently force-migrating all ~270K non-giant nets to the
-  // slow tier in one unsupervised pass, not just the ~1700 actually-
-  // contending cluster members. Measured consequence on newblue1: overflow
-  // exploded from 41956 to ~1.81 million (a ~43x blowup), identically
-  // regardless of FROUTE_ORDER -- confirming it was never about ordering
-  // at all. This is exactly the escalation anti-pattern CLAUDE.md's own
-  // "Escalation... must be supervised per net" section warns about
-  // (unconditionally escalating 30% of a design there spiked overflow
-  // ~25x), reproduced here at a larger scale because 100% of nets moved
-  // tiers at once instead of 30%. CLAUDE.md's escalation-tier rule is also
-  // explicit that a net's tier is sticky ("once a net escalates, leave it
-  // there... no reason to downgrade after paying for a real search") --
-  // respecting that here, rather than resetting every net to a shared
-  // tier, is what actually isolates the one variable this mechanism is
-  // supposed to test: net processing order, not routing tier.
+  // touched here. See the file header for the two real, measured bugs
+  // (unconditional tier upgrade; unbounded rip-up scope) this restriction
+  // and the scope restriction above both exist to fix.
   //
   // routeNetFast's and routeNetSlow's own undo-at-start are both no-ops
-  // here (every non-giant net's charges are already empty from the rip-up
+  // here (every in-scope net's charges are already empty from the rip-up
   // above), so this is a genuine from-scratch route in the chosen
   // sequence -- each net immediately seeing every earlier net's fresh
   // commit via the live usage array and reactive per-commit pricing
@@ -2826,6 +2862,59 @@ void testReorderRebuildLeavesUsageConsistentWithFinalCommittedCharges() {
         "committed, the same class of bug yroute's own rescue pass once had");
 }
 
+// Proves Phase E's scope restriction actually holds: a net that never
+// contributed to any overflow cluster is left completely untouched -- not
+// ripped up and immediately reproduced, but genuinely never visited at
+// all. The real bug this guards against (see the file header's confound
+// #2): an earlier version ripped up and rebuilt literally every net in
+// the design, including untouched leftovers, which destabilized the whole
+// design and spiked overflow ~20x on newblue1, identically regardless of
+// FROUTE_ORDER.
+void testReorderLeavesNeverOverflowedNetsCompletelyUntouched() {
+  Design d = parse("froute_selftest_reorder_scope.gr", kReorderDiagonalGr);
+  const RoutingGrid &g = d.grid;
+  Prices prices(g);
+  Usage usage(g);
+  LayerPlan lp(g);
+  SearchRegion region;
+  RunReport rep;
+
+  // A net with a real, legal, already-committed route -- never
+  // overflowed, so it should never be a cluster member.
+  RoutedNet untouched;
+  untouched.net = &d.nets[0];
+  untouched.pts = {{0, 0}, {1, 0}};
+  untouched.mst = {{0, 1}};
+  ChargeRecord uc{true, 0, 0, 1, 0, 1}; // row0, x0->1, layer0, amount 1 (cap 1, legal)
+  untouched.charges = {uc};
+  untouched.segs = {{0, 0, 0, 1, 0, 0}};
+  usage.h[g.hIndex(0, 0, 0)] += uc.amount;
+  std::vector<ChargeRecord> chargesBefore = untouched.charges;
+  size_t segsBefore = untouched.segs.size();
+  rep.nets.push_back(std::move(untouched));
+
+  // A separate, self-overflowing net elsewhere, purely to trigger Phase E.
+  RoutedNet trigger;
+  trigger.net = &d.nets[1];
+  trigger.pts = {{1, 2}, {2, 2}};
+  trigger.mst = {{0, 1}};
+  ChargeRecord tc{true, 2, 1, 2, 0, 2}; // row2, x1->2, layer0, amount 2 (cap 1, over by 1)
+  trigger.charges = {tc};
+  trigger.segs = {{1, 2, 0, 2, 2, 0}};
+  usage.h[g.hIndex(1, 2, 0)] += tc.amount;
+  rep.nets.push_back(std::move(trigger));
+
+  negotiateReorder(g, prices, usage, lp, region, 0.3, rep);
+  check(rep.reorderClusters > 0, "Phase E actually ran (the trigger net forced a real cluster)");
+  check(rep.reorderNetsTouched == 1,
+        "exactly the one overflowed net counted as touched -- the "
+        "never-overflowed net was never in scope at all");
+  check(edgeSet(g, rep.nets[0].charges) == edgeSet(g, chargesBefore),
+        "the never-overflowed net's charges are bit-for-bit unchanged -- "
+        "Phase E never ripped it up, let alone rerouted it");
+  check(rep.nets[0].segs.size() == segsBefore, "its segment list wasn't touched either");
+}
+
 // Proves Phase E's rebuild respects each net's already-established tier
 // (rn.escalated) rather than upgrading everyone to the slow tier just
 // because Phase E is touching them -- the real bug an earlier version of
@@ -2868,21 +2957,31 @@ void testReorderRebuildRespectsEachNetsEstablishedTier() {
         undoCharge(g, usage, c);
     }
 
-    // The zigzag-obstructed net itself -- starts with no charges at all,
-    // exactly how Phase E's rip-up-then-rebuild always sees a net going
-    // into the rebuild loop.
+    // The zigzag-obstructed net itself. Phase E's scope is now restricted
+    // to genuine cluster members (see the file header's confound #2), so
+    // this net needs its own hand-set, self-overflowing placeholder
+    // charge -- on an edge unrelated to its own real pts/mst geometry,
+    // the same pattern kBatchCapGr's fixture already uses elsewhere in
+    // this file -- purely so clusterNets recognizes it as a contending
+    // net and includes it in Phase E's scope at all. The rip-up undoes
+    // this placeholder before the real rebuild via pts/mst begins, so it
+    // has no bearing on the actual zigzag route found.
     RoutedNet target;
     target.net = &d.nets[0];
     target.pts = {{0, 0}, {9, 0}};
     target.mst = {{0, 1}};
     target.escalated = escalated;
+    ChargeRecord placeholder{true, 1, 0, 1, 0, 5}; // row1, x0->1, layer0, amount 5 (cap 4)
+    target.charges = {placeholder};
+    target.segs = {{0, 1, 0, 1, 1, 0}};
+    usage.h[g.hIndex(0, 1, 0)] += placeholder.amount;
     rep.nets.push_back(std::move(target));
 
     // A second, fully synthetic net elsewhere on the same grid, hand-
     // charged into a self-overflow purely so findOverflowClusters finds
-    // *something* and Phase E doesn't return early with "no overflow
-    // clusters found" -- far from the zigzag obstruction so the two never
-    // interact.
+    // *more than one* cluster and Phase E doesn't return early with "no
+    // overflow clusters found" -- far from both the zigzag obstruction
+    // and the placeholder above so none of the three interact.
     RoutedNet trigger;
     trigger.net = &d.nets[0];
     trigger.pts = {{8, 2}, {9, 2}};
@@ -2968,6 +3067,7 @@ int run() {
   testReorderModesProduceExpectedNetSequenceFromClusterTemperatures();
   testProcessingOrderDeterminesWhichNetKeepsTheDefaultPath();
   testReorderRebuildLeavesUsageConsistentWithFinalCommittedCharges();
+  testReorderLeavesNeverOverflowedNetsCompletelyUntouched();
   testReorderRebuildRespectsEachNetsEstablishedTier();
   testReorderSkipsCleanlyWhenNoOverflowRemains();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
