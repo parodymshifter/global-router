@@ -1113,3 +1113,130 @@ giant-cluster pathology is excluded, rather than concluding the whole
 joint/batch idea is a dead end from a version that was never actually
 testing the intended scope.
 
+### Follow-up: capping cluster size to <= 12 nets (`BROUTE_MAX_CLUSTER_NETS`)
+
+Built per the user's own request for a cap strategy: rather than skipping
+an oversized cluster outright (which would write off exactly the region
+carrying the most overflow), rank every member net of an oversized
+cluster by its own individual `overflowOverUnion` contribution and keep
+only the top `BROUTE_MAX_CLUSTER_NETS` (default 12) worst offenders,
+dropping the rest from that batch. Caught and fixed a real bug on the way:
+the cap threshold was first read into a `static const` local, which
+caches the env var's value on the function's first call for the rest of
+the process -- the exact pitfall already known from xroute's `orderMode`
+and deliberately avoided there from the start. A purpose-built self-test
+(`testBatchCapTrimsToWorstOffendingNetsNotArbitraryOnes`, three nets with
+overflow magnitudes 2/4/6 inserted in ascending order specifically so
+"keep by list order" and "keep by real ranking" would produce different,
+distinguishable results) caught it immediately; fixed by making the
+threshold a plain non-static local, re-read via `getenv` on every call.
+
+**Verified result, same 30/40-round newblue1 screen, `BROUTE_MAX_CLUSTER_NETS=12`
+(default)**: **41956**, 195.153s. Legal per gr_verify, cross-checked
+exactly against eval2008.pl (41956 / max 22 / wirelength 6634017, both
+tools agree) -- again an *exact* match to the uncapped run and to the
+kroute-equivalent baseline.
+
+| metric | uncapped | capped (<=12/cluster) |
+|---|---|---|
+| clusters attempted | 218 | 218 |
+| clusters accepted | 0 (0%) | **0 (0%)** |
+| net-instances touched | 29934 | **2510** |
+| max nets in one batch | 8634 | 12 (by construction) |
+| batches where overflow got worse | 218 (100%) | **218 (100%)** |
+| mean worsening multiplier | ~10x | **6.82x** |
+| median worsening multiplier | -- | **3.77x** |
+| median overflow before -> after | 204 -> 1290 | **177 -> 703** |
+| wall time | 216.194s | **195.153s** |
+| final overflow | 41956 | **41956 (identical)** |
+
+**Capping did not recover any accepted batch.** Every single one of the
+218 clusters still made local overflow worse even bounded to its 12
+worst-offending member nets, and the batch-acceptance gate correctly
+rejected all 218 again, landing on the exact same final result as the
+uncapped run and as doing nothing at all. This is a real, if modest,
+efficiency win (13% less wall time, 12x fewer net-reroute attempts, and a
+lower blast radius / worsening multiplier per rejected batch when it does
+fire) but **not the hoped-for recovery of the original, more modest
+joint/batch idea** -- the giant-cluster pathology was never the only
+problem. Even a genuinely small (<=12-net) locally-contending pocket, at
+this round budget, on this benchmark, still cannot be jointly rerouted to
+a better local optimum via sequential `routeNetSlow` calls in net-id
+order. Plausible reasons, not yet distinguished: (a) sequential
+rerouting within a batch still lets later nets see (and re-contend with)
+earlier nets' fresh attempts rather than solving the cluster's tiles
+jointly, so it's a better-ordered greedy pass, not real joint
+optimization; (b) the round budget (30 fast / 40 slow) may leave clusters
+still actively forming/growing rather than at a stable local minimum
+where a rescue pass has real headroom to find; (c) net-id order (not
+overflow-magnitude order) governs the sequential pass within a batch,
+which the earlier per-net rescue mechanisms (yroute, zroute) never needed
+to worry about since they process one net at a time.
+
+**Honest bottom line on the joint/batch idea overall**: two variants
+tried (uncapped, capped-at-12), both fully supervised, both landing on
+the identical safe result of zero net change to kroute's baseline.
+Capping made the experiment cheaper and safer to run, not more
+effective. The joint/batch mechanism as built (sequential per-net
+`routeNetSlow` calls inside a batch, gated by a single before/after
+`overflowOverUnion` accept/reject) has not yet demonstrated any scenario
+on real ISPD data where it beats doing nothing -- consistent with, but
+not yet conclusive proof of, the deeper structural gap this whole sweep
+keeps surfacing: everything in this lineage (rescue passes, MSMV, batch
+rerouting) still prices routing decisions through one blended scalar
+cost function, never truly optimizing overflow lexicographically ahead
+of wirelength the way the ISPD scoring itself does.
+
+### Parked idea, not yet built: heat-map-then-reorder full reroute
+
+User-proposed follow-up, explicitly deferred for a later session --
+recorded here per this project's file-based-state discipline so it is
+not lost to context compaction:
+
+> "do enough iterations to have a stable overflow heat map, then do the
+> capped cluster analysis then rip up everything and try starting with
+> rerouting either the nets contributing to the hottest or coldest
+> cluster and proceeding to the other end of the temperature range"
+
+This is a materially different mechanism from anything built in Part 12:
+broute's batch rescue keeps every net outside a contended cluster frozen
+and only touches the cluster's own members, accepting/rejecting each
+cluster independently and leaving everything else exactly as phase B
+left it. The parked idea instead proposes (1) running to a converged,
+*stable* congestion snapshot first (not mid-convergence, where clusters
+are still forming/growing -- directly relevant to reason (b) above for
+why the capped batch experiment found nothing), (2) running the existing
+capped-cluster analysis on that stable snapshot purely as a
+*diagnostic/ordering* pass rather than a route-and-gate mechanism, (3)
+then a full rip-up of literally everything, and (4) a single, one-time,
+globally-reordered rebuild that routes net-by-net in cluster-temperature
+order -- hottest cluster's nets first, proceeding to coldest (or the
+reverse), rather than the current fixed/arbitrary net-id order every
+router in this lineage has used unconditionally since kroute.
+
+Two prior findings bear directly on this, in opposite directions.
+Against it: rroute's full-rip-up-every-round experiment (Part 6) is the
+closest prior test of "throw away committed routes and start over," and
+it made things worse -- but that was *repeated* rip-up every round
+(pure churn, no new information gained each time), structurally
+different from this idea's *single* one-time rebuild informed by a
+genuinely new signal (a converged heat map) that no earlier round had
+available. For it: xroute's centrality-ordering work (and, further back,
+mroute's ordering-by-constraint work) already established that *the
+order in which nets are committed against a shared, contended resource
+measurably changes outcomes* -- constrained-first orderings beat
+arbitrary/id order there. Routing the hottest contention first (when
+the most capacity is still free to negotiate with) or the coldest first
+(clearing easy nets out of the way so the hard ones see a cleaner board)
+are both directly testable instances of that same general lever, applied
+globally for the first time rather than per-tiebreak.
+
+**Not to be built without an explicit go-ahead.** If taken up: it needs
+its own forked file (next free single-letter prefix), its own
+self-test proving the reordering measurably changes which nets see which
+prices at commit time (not just that a permutation was computed), and
+should measure hottest-first and coldest-first as two separate,
+independently-reported conditions rather than assuming a direction in
+advance -- this project's empirical-tuning discipline applies exactly as
+much here as anywhere else in the sweep.
+

@@ -60,7 +60,18 @@
 // `BROUTE_BATCH=0` disables Phase D entirely, reproducing kroute's exact
 // behavior, so this file is a strict superset.
 //
-// Measured result: pending.
+// Measured result (newblue1, 30/40-round screen, both gr_verify- and
+// eval2008.pl-cross-checked): uncapped, 218 clusters attempted / 0
+// accepted / 29934 net-instances touched / 216.2s, exact match to
+// kroute's 41956 baseline. Capped at BROUTE_MAX_CLUSTER_NETS=12 (default):
+// same 218/0, only 2510 net-instances touched, 195.153s, still an exact
+// match to 41956. Capping made the mechanism cheaper and its rejected
+// batches less catastrophic (mean worsening multiplier dropped from ~10x
+// to 6.82x) but did not recover a single accepted batch either way --
+// sequential per-net rerouting inside a batch, gated by one before/after
+// accept/reject check, has not yet found a case on real ISPD data where
+// it beats leaving phase B's result alone. Full tables and discussion:
+// HISTORY_COST_SWEEP.md Part 12.
 //
 
 // Build:
