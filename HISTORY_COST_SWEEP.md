@@ -1934,3 +1934,51 @@ together, given time already spent). UROUTE_REGION_EPS=0.005 launched
 now on all three benchmarks (adaptec1 and bigblue1 running; newblue1
 already on record above) to see if the tuned setting holds up
 everywhere, before changing the file's own default.
+
+**Final result, UROUTE_REGION_EPS=0.005 on all three benchmarks (gr_verify
++ eval2008.pl cross-checked exactly, both legal, 172 rounds each):**
+
+| benchmark | kroute (bar) | uroute eps=0.02 | uroute eps=0.005 |
+|---|---|---|---|
+| adaptec1 | 162584 / 7254167 | 161544 / 7253929 (-0.64%) | 162664 / 7258013 (+0.05%) |
+| newblue1 | 41014 / 6644362 | 41178 / 6642911 (+0.40%) | 40926 / 6644352 (-0.21%) |
+| bigblue1 | 292420 / 7535653 | 293388 / 7533489 (+0.33%) | 292380 / 7537447 (-0.01%) |
+| **combined total** | **496018** | **496110 (+0.019%)** | **495970 (-0.0097%)** |
+
+**Verdict: mixed, not a clean win either way -- and this does not change
+with more tuning of this one knob.** eps=0.02 trades a big adaptec1 win
+for two small regressions; eps=0.005 nearly reverses that pattern.
+Combined, both are within ~0.02% of kroute's own baseline -- two orders
+of magnitude smaller than vroute's own MSMV win (-21% to -36%), and in
+the same "near-exhausted" territory Parts 12-17 already found for the
+exact-search/candidate-widening family, though for a structurally
+different reason: not too little candidate diversity, but a *single
+global epsilon* applied across benchmarks whose congestion geometry
+(different pin densities, different placements -- see Part 8) responds
+to it differently, the same character CLAUDE.md's own note about the
+per-round pricing threshold already documents for a different parameter.
+
+eps=0.005 is kept as the file's own default (smaller worst case, +0.05%
+vs +0.40%), documented honestly in `gr/uroute.cpp`'s own header as a
+tradeoff choice, not a discovered optimum -- neither setting is presented
+as "the" answer.
+
+**What this experiment actually settles.** The mechanism's core claim --
+that region-level, cross-layer aggregate pricing is a genuinely different
+signal from anything per-edge pricing (lambda or history) can see -- is
+decisively proven, not just argued: `uroute.cpp`'s own self-test shows the
+real production candidate-selection pipeline picking a different,
+equal-length route purely because of another net's usage on a *different*
+edge in the same region, something no per-edge mechanism in this
+project's whole history (hroute through qroute) could ever respond to.
+What is *not* settled, and what this real-benchmark measurement actually
+shows, is that having a real, novel signal is not sufficient for a
+benchmark-independent win at a single fixed global tuning -- a smaller,
+narrower version of the same lesson vroute's own result taught at a much
+larger scale (structural change beats coefficient tuning), and consistent
+with the answer already given to the user's own question about this whole
+family of experiments: real, measurable, but not close to closing the gap
+to zero on its own. A per-benchmark-adaptive epsilon, or combining region
+pricing with region size tuning (not attempted jointly here, given time
+already spent), are natural further follow-ups, not undertaken in this
+pass.

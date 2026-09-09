@@ -54,12 +54,54 @@
 // formula, the same "strict superset, not a fork that could regress"
 // property KROUTE_HIST_RELAX=0 already guarantees relative to iroute.
 //
-// Measured result: see "Measured result" below, filled in once the real
-// three-benchmark run (same 172-round budget as kroute's own recorded
-// baseline) is complete and cross-checked against gr_verify and
-// eval2008.pl.
+// Measured result, total overflow / scored wirelength, against kroute's
+// own current best (same 172-round budget both sides -- default env vars
+// on both, "172 rounds" being however many the round-cap/patience logic
+// actually runs, not a forced override). All legal per gr_verify (0
+// disconnected/incomplete/unrouted/malformed) and cross-checked exactly
+// against eval2008.pl:
 //
-// MEASURED RESULT PLACEHOLDER -- replaced once real benchmarks are run.
+//   benchmark   kroute (172 rounds)   uroute, eps=0.02   uroute, eps=0.005 (default)
+//   adaptec1    162584 / 7254167      161544 / 7253929   162664 / 7258013
+//                                     -- overflow -0.64%  -- overflow +0.05%
+//   newblue1     41014 / 6644362       41178 / 6642911     40926 / 6644352
+//                                     -- overflow +0.40%  -- overflow -0.21%
+//   bigblue1    292420 / 7535653      293388 / 7533489    292380 / 7537447
+//                                     -- overflow +0.33%  -- overflow -0.01%
+//
+// Mixed, not a clean unanimous win either way -- the first mechanism in
+// this project's whole history-cost lineage to land here rather than a
+// clear win or a clear rejection. eps=0.02 (KROUTE_EPS's own default,
+// copied over naively) wins big on adaptec1 but regresses the other two;
+// eps=0.005, found via a quick tuning probe on newblue1 alone, nearly
+// reverses that pattern -- small wins on newblue1/bigblue1, a small
+// (+0.05%, near-parity) loss on adaptec1. Combined total overflow across
+// all three is close to a wash either way (kroute 496018; eps=0.02
+// 496110, +0.019%; eps=0.005 495970, -0.0097%) -- both settings move the
+// number by two orders of magnitude less than vroute's own MSMV result
+// did, consistent with the "close to exhausted" character the
+// exact-search/candidate-widening family (Parts 12-17) already showed
+// for a *different* kind of lever. eps=0.005 is this file's default: not
+// because it's unambiguously better (it isn't -- it just trades which
+// benchmark wins), but because its worst case (+0.05%) is far closer to
+// parity than eps=0.02's worst case (+0.40%), a safer default absent a
+// reason to prefer one benchmark's win over another's.
+//
+// Why mixed, in one sentence: unlike kroute's own edge-level history (one
+// lambda term per edge, reacting to that edge alone) or vroute's MSMV
+// search (a structurally different, strictly more powerful solve method),
+// a single global region-price epsilon is one scalar knob shared across
+// every region on every benchmark, and different benchmarks' congestion
+// geometry (adaptec1 vs newblue1 vs bigblue1 -- different pin densities,
+// different placements, see Part 8's own finding that congestion is
+// substantially a placement artifact) responds to that one knob
+// differently -- the same character CLAUDE.md's own "per-round pricing
+// threshold is fixed, not scheduled" note already documents for a
+// different parameter in this same cost model. A real, structurally novel
+// signal (proven decisively in this file's own self-test) does not by
+// itself guarantee a benchmark-independent win at a fixed global tuning;
+// see HISTORY_COST_SWEEP.md Part 18 for the full record, including the
+// tuning probe that found eps=0.005.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o uroute uroute.cpp
@@ -83,11 +125,23 @@
 //                                 genuinely idle capacity, diluting the
 //                                 signal Part 9 identified. See "Measured
 //                                 result" for whether a sweep was needed.
-//     UROUTE_REGION_EPS=<float>   region price step size, default 0.02
-//                                 (matching KROUTE_EPS's own fast-tier
-//                                 default -- both are the epsilon in the
-//                                 same exp(epsilon * ratio) update law,
-//                                 just computed over different aggregates).
+//     UROUTE_REGION_EPS=<float>   region price step size, default 0.005.
+//                                 KROUTE_EPS's own fast-tier default
+//                                 (0.02) was the first value tried, copied
+//                                 over naively -- a real measured 3-
+//                                 benchmark run found it too aggressive at
+//                                 region scale (a region aggregates far
+//                                 more usage/capacity than a single edge,
+//                                 so the same multiplicative step
+//                                 compounds differently): it won big on
+//                                 adaptec1 but regressed newblue1 and
+//                                 bigblue1. 0.005, found via a follow-up
+//                                 tuning probe, has a smaller worst case
+//                                 across all three (see "Measured result"
+//                                 above) and is this file's default, but
+//                                 neither value is a clean unanimous win --
+//                                 pass 0.02 to reproduce that side of the
+//                                 tradeoff instead.
 //     UROUTE_TRACE=1              print, at each round boundary, how many
 //                                 regions are currently over their
 //                                 aggregate cross-layer budget and the
@@ -1266,7 +1320,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
                  int streakThreshold = 1, bool scaleByOverflow = false,
                  bool relaxEnabled = true, double ratioExponent = 1.0,
                  double exponentEscalation = 0.0, bool regionPricingEnabled = true,
-                 double regionEps = 0.02) {
+                 double regionEps = 0.005) {
   const RoutingGrid &g = d.grid;
   RunReport rep;
   Prices prices(g);
@@ -2469,7 +2523,7 @@ int main(int argc, char **argv) {
   bool regionPricingEnabled = true;
   if (const char *r = std::getenv("UROUTE_REGION_PRICING"); r)
     regionPricingEnabled = std::string(r) != "0";
-  double regionEps = 0.02;
+  double regionEps = 0.005;
   if (const char *r = std::getenv("UROUTE_REGION_EPS"); r)
     regionEps = std::atof(r);
 
