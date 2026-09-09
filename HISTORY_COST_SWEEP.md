@@ -1839,3 +1839,98 @@ left at its original default (20); nothing here justifies moving it
 without a clearer picture of the curve's shape between the tested
 points, which was not the goal of this pass.
 
+
+## Part 18: uroute -- region-level cross-layer congestion pricing
+
+Scoped from the user's own question above ("is there any realistic
+probability... or is it suggesting some additional exploration of
+untried approaches?"), pointed specifically at Part 9's own finding
+(bigblue1: aggregate layer utilization only 65.7%, yet every layer at a
+hot tile is simultaneously over capacity) as the most promising
+*structurally untested* remaining lever, since the whole exact-search/
+candidate-widening family (Parts 12-17) had just been shown close to
+exhausted (best -8/41956, 0.019%, non-monotonic in its own tuning
+parameter).
+
+Built as `gr/uroute.cpp`, forked from `gr/kroute.cpp` specifically --
+not from the broute-through-qroute joint-search lineage -- to isolate
+this as a standalone pricing-formula-level test, directly comparable to
+kroute's own recorded 172-round baseline. Partitions the die into
+UROUTE_REGION_SIZE x UROUTE_REGION_SIZE tile regions (default 8x8),
+aggregated across *every layer and both edge directions* -- the direct
+encoding of Part 9's finding, dropping layer entirely from the region
+key. Each region gets a static aggregate capacity and a multiplicative
+`regionPrice`, updated at the same three round-boundary points
+`updateHistory` already fires from, via this project's own core
+multiplicative price-update law (`lambda_e <- lambda_e *
+exp(epsilon * usage_e/capacity_e)`) applied to the region's aggregate
+ratio instead of a single edge's -- deliberately reusing that law rather
+than inventing a fourth pricing formula. `regionPrice` becomes a third
+multiplicative factor in `edgeCost`. No relaxation (LIFO-undo) for
+region price in this first version, unlike kroute's own edge-level
+history -- a disclosed scope cut, not an oversight.
+
+40 self-tests pass, including the decisive one: a 16x16 single-layer
+fixture where every candidate route between two corner-opposite pins has
+*identical* total tile length and *identical* lambda/hist everywhere (so
+nothing but list order breaks the tie) -- the real production pipeline
+(`generateCandidates`, `priceCandidate`, `routeNetFast`'s own min-cost
+selection, none of it reimplemented) picks the default tied candidate at
+baseline, then picks a *different*, equal-length candidate that avoids a
+region entirely once a separate net's usage (on an edge neither
+candidate's own path touches) drives that region's aggregate cross-layer
+budget over capacity. That is the one outcome plain per-edge pricing
+(every edge on every candidate individually legal, lambda and hist both
+untouched) structurally cannot produce.
+
+**Real 3-benchmark result, default settings (UROUTE_REGION_SIZE=8,
+UROUTE_REGION_EPS=0.02), no round-cap overrides -- same convention as
+kroute's own "172-round" baseline (default env vars, round count is
+however many the patience/cap logic actually runs, not a forced
+override). Both legal per gr_verify (0 disconnected/incomplete/
+unrouted/malformed) and cross-checked exactly against eval2008.pl:**
+
+| benchmark | kroute (bar) | uroute (default) | delta |
+|---|---|---|---|
+| adaptec1 | 162584 / 7254167 | 161544 / 7253929 | **-0.64%** |
+| newblue1 | 41014 / 6644362 | 41178 / 6642911 | +0.40% (regression) |
+| bigblue1 | 292420 / 7535653 | 293388 / 7533489 | +0.33% (regression) |
+
+All three ran the full 172 rounds (hit the round cap, same as kroute's
+own baseline run) -- not a stalled or degenerate run on either side of
+the comparison. Wirelength is essentially a wash on all three (all
+within 0.03%), so this isn't a "traded wirelength for overflow" story
+either way.
+
+**Mixed, not a clean win.** One real improvement (adaptec1, comparable in
+size to kroute's own historic wins in this lineage) and two small
+regressions. A follow-up tuning probe (UROUTE_REGION_EPS at 0.005 and
+0.002, and UROUTE_REGION_SIZE=16, all on newblue1 -- the fastest
+benchmark, ~11 minutes/run) is running now to see whether the default
+region-pricing step size is simply too aggressive at the region scale
+(the same epsilon as kroute's own per-edge default, applied to an
+aggregate that behaves differently) before drawing a final conclusion.
+Results to follow in this same Part.
+
+**Tuning probe result (newblue1, ~11min/run, all cross-checked against
+gr_verify and eval2008.pl):**
+
+| UROUTE_REGION_EPS | UROUTE_REGION_SIZE | overflow | vs kroute (41014) |
+|---|---|---|---|
+| 0.02 (default) | 8 (default) | 41178 | +0.40% |
+| 0.005 | 8 | **40926** | **-0.21%** |
+| 0.002 | 8 | 41008 | -0.01% (a wash) |
+| 0.02 (default) | 16 | 41058 | +0.11% |
+
+Confirms the hypothesis directly: the default region-eps (0.02, copied
+from kroute's own per-edge `KROUTE_EPS` default) is too aggressive at
+region scale -- a region aggregates far more usage and capacity than a
+single edge, so the same multiplicative step compounds differently.
+0.005 is a real, gr_verify+eval2008.pl-cross-checked improvement over
+kroute on newblue1, not just a smaller regression. Widening the region
+(size 16, epsilon left at default) also helps, but less than tightening
+epsilon does, and the two are not mutually exclusive (not yet tried
+together, given time already spent). UROUTE_REGION_EPS=0.005 launched
+now on all three benchmarks (adaptec1 and bigblue1 running; newblue1
+already on record above) to see if the tuned setting holds up
+everywhere, before changing the file's own default.

@@ -31,3 +31,4 @@ bench/
 *.gr
 *.route
 *.csv
+runs/
