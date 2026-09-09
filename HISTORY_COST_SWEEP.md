@@ -1632,3 +1632,100 @@ now well-motivated follow-up question this measurement raises rather
 than answers. -2 out of 41956 is a marginal result in isolation; its
 real significance is ending the sweep's five-way tie at exactly zero.
 
+## Part 17: qroute -- isolating candidate-generation baseline widening
+
+The user asked directly to try Part 16's own follow-up question. Before
+building, the mechanism itself needed re-diagnosing: oroute's win looked
+at first like "removing a helper's usage frees capacity," but Dijkstra's
+candidate search prices edges, it doesn't hard-check capacity, and
+`undoCharge` only ever reverts `usage`, never `prices` -- so simple
+capacity freeing can't be the real explanation. The actual mechanism:
+`negotiateWire` (called from inside `commitPath`, which every trial
+candidate `generateCandidatesForNet` tries commits through) raises an
+edge's price based on `usage` at that exact moment, and that rise is
+never undone. The *sequence* of price bumps a whole cluster's candidate
+generation leaves behind depends on which nets' usage was present in the
+baseline throughout -- so removing a helper's usage from that baseline,
+even though the helper's own final route never changes, changes what
+every *other* net's own candidate generation sees.
+
+`gr/qroute.cpp` (forked from oroute.cpp; commit 940d1b5) tests this
+mechanism directly, deliberately separated from whether the widening
+nets ever move. `recruitContextNets` recruits up to
+`QROUTE_MAX_CONTEXT_NETS` (default 20, an order of magnitude past
+eviction's own default 3 -- affordable because these nets never join the
+branch-and-bound's own search space at all) currently-legal,
+cluster-touching nets, ripped up for exactly candidate generation's own
+window, then unconditionally restored to their exact original charges
+before the greedy incumbent, the exact search, or the accept/reject gate
+ever run. A context net never appears in `netIdx`, never gets a
+candidate slot, and is never a possible search outcome at all -- unlike
+a recruited eviction helper (an offer the search may take), its only
+role is to be temporarily absent, then present again. Cooperative
+eviction itself is inherited unchanged but defaults to *off*
+(`QROUTE_MAX_EVICTION_HELPERS=0`), isolating context widening as this
+file's own single new variable.
+
+**Verified result, same 30/40-round newblue1 screen**: **41954 / max 22
+/ wl 6634267**, both gr_verify (0 disconnected/incomplete/unrouted/
+malformed) and eval2008.pl in exact agreement. 218 clusters attempted,
+1 accepted -- the *exact same* **-2 overflow** win oroute.cpp found, at
+**less than a third the wirelength cost** (+250 vs. oroute's +703 over
+the shared 6634017 baseline).
+
+| metric | nroute (no widening) | oroute (eviction + widening entangled) | qroute (widening alone) |
+|---|---|---|---|
+| cluster 18: nets / candidates | 12 / 100 | 15 / 127 | **12 / 100** |
+| cluster 18: overflow before -> after | 18 -> 18 | 18 -> 16 | **18 -> 16** |
+| cluster 18: accepted | no | yes | **yes** |
+| final overflow | 41956 | 41954 | **41954** |
+| final wirelength | 6634017 | 6634720 (+703) | **6634267 (+250)** |
+| clusters that hit the node cap | 8 | 8 | 8 |
+
+**Confirmed directly against both prior logs, not inferred**: cluster 18
+is the *same* cluster in all three runs (identical `overflow_before=18`,
+proving all three runs are synchronized up to that point). nroute's
+search, over the 12 overflowed nets' own candidates alone, finds
+nothing. oroute's search, over those same 12 nets plus 3 real
+candidate-owning helpers (15 nets, 127 candidates total), finds
+`18 -> 16`. qroute's search, over exactly the same 12 nets and the exact
+same candidate *count* (100) nroute's own identical search
+produced -- context nets are never counted in `candidates_total` at
+all -- *also* finds `18 -> 16`. Since qroute's branch-and-bound explores
+a search space identical in size to nroute's, the improvement cannot be
+attributed to extra search power or extra participants; the only
+variable that differs between nroute and qroute is what baseline
+candidate generation ran against, exactly isolating the mechanism the
+file set out to test.
+
+**Why qroute costs less wirelength than oroute for the identical
+overflow win**: oroute's winning combination is drawn from a *larger*
+candidate pool (127 candidates across 15 nets, including 3 real
+candidates for helpers that end up unused) generated against a baseline
+where those 3 helpers' own usage was *also* absent -- a wider, noisier
+price-bump history than qroute's narrower one (only the 12 overflowed
+nets' own candidate generation, against a baseline widened by 20
+context-only nets). The two runs' price landscapes diverge in
+path-dependent ways neither this measurement nor a hand-derivation
+could have predicted in advance; qroute's own tighter scope happened to
+land on a cheaper route to the identical overflow reduction. This is an
+observation, not (yet) a general rule -- worth flagging honestly rather
+than overclaiming a "widening alone is strictly better" pattern from a
+single data point.
+
+**Honest bottom line.** The re-diagnosis holds up under direct,
+apples-to-apples measurement: cooperative eviction's real value in
+Part 16 came entirely from the candidate-generation baseline effect,
+not from helpers physically relocating, and that effect is now isolated
+into its own clean mechanism that reproduces the identical win more
+cheaply. Six real ISPD-benchmark measurements have now been run across
+Parts 12-17 (broute's two batch variants, froute's three orderings,
+aroute's exact search, nroute's exact search over a richer pool,
+oroute's eviction, qroute's isolated widening); five landed on the
+identical safe no-op, and the two that found anything (oroute, qroute)
+found the *same* single real improvement via what turns out to be the
+*same* underlying mechanism. The magnitude remains marginal (-2 out of
+41956) and the effect fired in exactly one of 218 clusters -- but it is
+now a real, understood, reproducible lever rather than an accidental
+side effect discovered once and left unexplained.
+

@@ -52,7 +52,22 @@
 // alone, isolating it as this file's own single new variable per this
 // project's own discipline.
 //
-// Measured result: pending.
+// Measured result (newblue1, 30/40-round screen, both gr_verify- and
+// eval2008.pl-cross-checked): 41954/22/6634267 -- the *exact same*
+// **-2 overflow** win as oroute.cpp's own result, at less than a third
+// the wirelength cost (+250 vs. oroute's +703 over the 6634017
+// baseline). 218 clusters attempted, 1 accepted (cluster 18, 0 recruited
+// helpers, 20 context nets, 12 nets/100 candidates -- the same candidate
+// *count* nroute's own identical search generated for the identical 12
+// nets, confirming the difference is genuinely in candidate *content*,
+// not scope). Traced directly against nroute's and oroute's own logs for
+// this exact cluster: nroute (no widening at all) finds nothing
+// (18 -> 18); oroute (context widening entangled with 3 real B&B
+// candidate-owning helpers, 15 nets/127 candidates) finds 18 -> 16;
+// qroute (context widening alone, 12 nets/100 candidates, identical
+// scope to nroute) finds the *same* 18 -> 16 -- confirming the win was
+// never about the extra B&B participants at all. Full discussion:
+// HISTORY_COST_SWEEP.md Part 17.
 //
 
 // Build:
