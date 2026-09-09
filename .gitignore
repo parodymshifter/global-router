@@ -21,6 +21,7 @@ xroute
 yroute
 zroute
 froute
+aroute
 *.o
 bench/
 *.gr

@@ -36,6 +36,7 @@ jobs:
           - yroute
           - zroute
           - froute
+          - aroute
     steps:
       - uses: actions/checkout@v4
 
