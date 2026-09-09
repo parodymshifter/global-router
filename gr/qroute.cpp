@@ -66,8 +66,20 @@
 // candidate-owning helpers, 15 nets/127 candidates) finds 18 -> 16;
 // qroute (context widening alone, 12 nets/100 candidates, identical
 // scope to nroute) finds the *same* 18 -> 16 -- confirming the win was
-// never about the extra B&B participants at all. Full discussion:
-// HISTORY_COST_SWEEP.md Part 17.
+// never about the extra B&B participants at all.
+//
+// Follow-up width sweep (same screen, `QROUTE_MAX_CONTEXT_NETS` varied):
+// 20 (default) -> 41954 (1 accepted); 50 -> 41952 (2 accepted, a
+// *different* second cluster than 150 found); 150 -> 41952 (2 accepted,
+// same cluster 18 win, cheaper wirelength than 50); unbounded -> **41956,
+// 0 accepted** -- cluster 18's own win, present at both 50 and 150,
+// reverses once its natural (uncapped) context pool of 241 nets is fully
+// admitted. Widening is not monotonic: helpful in a narrow middle band,
+// actively harmful past it, on this benchmark at this round budget. The
+// default (20) is a first empirically-motivated guess only, not
+// re-tuned from this result -- a proper sweep needs many more points
+// than four to characterize the real shape of this curve, not just its
+// non-monotonicity. Full discussion: HISTORY_COST_SWEEP.md Part 17.
 //
 
 // Build:

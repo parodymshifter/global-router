@@ -1729,3 +1729,58 @@ found the *same* single real improvement via what turns out to be the
 now a real, understood, reproducible lever rather than an accidental
 side effect discovered once and left unexplained.
 
+### Follow-up: does widening further help further?
+
+The user asked directly. Since context nets never enter the
+branch-and-bound's own search space, widening them costs only linear
+extra rip-up/restore work, not combinatorial blowup -- so a much larger
+`QROUTE_MAX_CONTEXT_NETS` was cheap to test directly on the real
+benchmark rather than reasoned about in advance. Three widths run in
+parallel against the same 30/40-round newblue1 screen, all cross-checked
+exactly via gr_verify and eval2008.pl:
+
+| `QROUTE_MAX_CONTEXT_NETS` | accepted | final overflow | final wirelength |
+|---|---|---|---|
+| 20 (default) | 1 (cluster 18) | 41954 | 6634267 |
+| 50 | 2 (clusters 18, 128) | **41952** | 6634736 |
+| 150 | 2 (clusters 18, 40) | **41952** | **6634460** (cheaper than 50, same overflow) |
+| unbounded (~241 natural pool at cluster 18) | **0** | **41956** (back to exact baseline) | 6634017 |
+
+**Widening is not monotonic.** It helps in a narrow middle band (50-150:
+a second cluster starts winning, on top of cluster 18's own win, which
+survives unchanged at both these widths) and is actively *harmful* past
+it: cluster 18's own win -- present, identical, at width 20, 50, *and*
+150 -- disappears entirely once its true (uncapped) pool of 241 eligible
+context nets is fully admitted, reverting the whole run to the exact
+41956 baseline. This was checked directly, not inferred: cluster 18's
+own row in the joint log shows `context_nets=150` (hit the cap) at
+width 150 and `context_nets=241` (its real, uncapped count) at the
+unbounded setting -- the extra 91 nets between those two runs are what
+flip its own accept to a reject.
+
+This is consistent with -- and sharpens -- the mechanism qroute.cpp's
+own header already documents: the effect is a side effect of the
+*specific sequence* of price bumps `negotiateWire` leaves behind during
+candidate generation, never undone by `undoCharge`. That sequence is
+inherently path-dependent, not a monotonic "more information always
+helps" signal -- more context nets ripped up means more trial-commit
+price perturbations layered on top of each other, and past some point
+for a given cluster, that noise can just as easily cancel out a
+beneficial perturbation as compound it. The two 2nd-cluster wins at
+width 50 and 150 are also *different clusters* (128 vs. 40), not the
+same win found earlier and kept -- further evidence this is closer to a
+noisy, width-and-cluster-specific interaction than a clean dial to turn
+up.
+
+**Not re-tuned from this result.** Four points (20, 50, 150, unbounded)
+establish non-monotonicity convincingly but do not characterize the real
+shape of the curve -- where the peak actually sits, whether 100 or 200
+does better than both 50 and 150, or whether the harmful region begins
+gradually or as a sharp cliff for most clusters the way it did for
+cluster 18. `QROUTE_MAX_CONTEXT_NETS`'s default stays at 20 (already
+documented as a first empirically-motivated guess, not a tuned value) --
+a proper sweep, should this be worth pursuing further, needs many more
+points across the same real screen, following this project's own
+"tune empirically, never by pure reasoning" discipline exactly as it
+already applied to every other threshold in this codebase.
+
