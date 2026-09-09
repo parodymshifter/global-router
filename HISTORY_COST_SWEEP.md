@@ -1982,3 +1982,80 @@ to zero on its own. A per-benchmark-adaptive epsilon, or combining region
 pricing with region size tuning (not attempted jointly here, given time
 already spent), are natural further follow-ups, not undertaken in this
 pass.
+
+## Part 19: kr1route -- LIFO-relax the reactive price itself
+
+First router under the new two-letter + generation-number naming
+convention (species `kr`, generation 1; see CLAUDE.md's "Router naming
+convention" addendum). Scoped from a direct observation: every router in
+this lineage updates the reactive edge price (`lambda`) only one way --
+`negotiateWire`'s multiplicative `exp(epsilon*ratio)` growth, always
+`>= 1`. Checking every assignment to `Prices::h`/`v` confirms lambda is
+monotonically non-decreasing for the entire run, with no relax mechanism
+anywhere in the project's history -- the exact disease `hist` had before
+`kroute`'s own LIFO-relax fix, which was the single biggest unanimous win
+in the whole pricing-formula sweep. The hypothesis: since relaxing
+history worked so well, relaxing lambda (the far more frequently-touched
+term -- updated per net commit, not just per round boundary) the same
+way should help further, and would directly attack part of Part 9's
+"unused space" puzzle (a stale, elevated price hiding real idle
+capacity).
+
+Built as `gr/kr1route.cpp`, forked from `gr/uroute.cpp`: a new per-edge
+LIFO stack (`Prices::lambdaOpsH/V`) pushed by `negotiateWire` at commit
+time (the *applied*, post-clamp factor) and popped by a new `relaxLambda`
+function at the same three round-boundary points `updateHistory` already
+fires from. `KR1ROUTE_LAMBDA_RELAX=0` reproduces uroute's exact permanent
+formula. 83 self-tests pass, including the decisive one proving the
+mechanism does exactly what it claims: a genuinely-recovered edge's
+stale, elevated price correctly returns to baseline after the same
+number of clean rounds it took commits to raise it, flipping a real
+`bestHLayer` comparison in its favor.
+
+**Real result, isolated (`KR1ROUTE_LAMBDA_RELAX=1`,
+`UROUTE_REGION_PRICING=0` -- lambda-relax alone), against kroute's own
+baseline, same 172-round budget, both legal per gr_verify and
+cross-checked exactly against eval2008.pl:**
+
+| benchmark | kroute (bar) | kr1route (lambda-relax alone) | overflow delta | wirelength delta |
+|---|---|---|---|---|
+| adaptec1 | 162584 / 7254167 | 162984 / 7206243 | +0.25% | -0.66% |
+| newblue1 | 41014 / 6644362 | 41458 / 6608842 | +1.08% | -0.53% |
+| bigblue1 | 292420 / 7535653 | 292958 / 7506080 | +0.18% | -0.39% |
+
+**A clean, unanimous overflow regression on all three real benchmarks,
+paired with a clean, unanimous wirelength improvement on all three.**
+Three-for-three in both directions is a real, interpretable tradeoff, not
+noise. The hypothesis was wrong, and the numbers themselves show why:
+`hist` and `lambda` are not interchangeable memory terms playing the same
+role. `hist` exists specifically to add a *longer* memory of congestion
+*on top of* lambda's fast, memoryless-but-permanent reactive term (see
+kroute's own header: lambda reacts every commit, `hist` only grows once
+a round's settled usage is over capacity -- a strictly narrower trigger
+than lambda's own 20%-utilization threshold curve). Giving lambda a
+*second*, independent short memory removes exactly the durability that
+made it a useful, stabilizing deterrent on its own: an edge relaxes back
+to cheap the moment it reads clear for one round, inviting nets straight
+back onto real bottlenecks that a few rounds of elevated price were
+correctly keeping them off of. Nets take shorter paths on average (the
+wirelength win, real and consistent) because they're more willing to
+reuse recently-busy edges -- and more of those reused edges tip into real
+overflow than the wirelength savings are worth, against a project mandate
+that cares about overflow specifically, not wirelength.
+
+This does not undermine Part 9's own "unused space" observation -- idle
+capacity that a stale price signal hides from later nets is still real.
+It is evidence that *this specific mechanism* -- kroute's LIFO-relax
+pattern, copied onto lambda unchanged -- is the wrong tool for recovering
+it. A different approach (e.g. relaxing lambda only far more slowly than
+hist does, or only below a much stricter "genuinely idle for many
+consecutive rounds" bar, rather than the very next clean round) might
+behave differently, but is a distinct, separately-motivated experiment,
+not a foregone conclusion from this result.
+
+Given the isolated result is already a clean, unambiguous regression on
+the metric this project's mandate cares about, the combined run (lambda-
+relax stacked with uroute's own default region pricing) was [PENDING /
+run and recorded below once complete] -- checking with the user before
+spending another ~2 hours of compute on a configuration very unlikely to
+reverse an already-clear three-for-three finding.

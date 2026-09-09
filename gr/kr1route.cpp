@@ -62,12 +62,53 @@
 // relaxLambda call (matching the one real commit) restores it, at which
 // point the comparison correctly flips to prefer the genuinely-idle edge.
 //
-// Measured result: see "Measured result" below, filled in once the real
-// benchmark runs (isolated, and combined with uroute's own default
-// region pricing) are complete and cross-checked against gr_verify and
-// eval2008.pl.
+// Measured result, isolated (KR1ROUTE_LAMBDA_RELAX=1, UROUTE_REGION_PRICING=0
+// -- lambda-relax alone, none of uroute's own region pricing in play),
+// against kroute's own current best (same 172-round budget, default env
+// vars, both sides). All legal per gr_verify (0 disconnected/incomplete/
+// unrouted/malformed) and cross-checked exactly against eval2008.pl:
 //
-// MEASURED RESULT PLACEHOLDER -- replaced once real benchmarks are run.
+//   benchmark   kroute (172 rounds)   kr1route, lambda-relax alone
+//   adaptec1    162584 / 7254167      162984 / 7206243
+//                                     -- overflow +0.25%, wirelength -0.66%
+//   newblue1     41014 / 6644362       41458 / 6608842
+//                                     -- overflow +1.08%, wirelength -0.53%
+//   bigblue1    292420 / 7535653      292958 / 7506080
+//                                     -- overflow +0.18%, wirelength -0.39%
+//
+// A clean, unanimous OVERFLOW REGRESSION on all three real benchmarks,
+// paired with a clean, unanimous WIRELENGTH IMPROVEMENT on all three --
+// not noise (three-for-three in both directions), a real and
+// interpretable tradeoff. The hypothesis this file was built to test --
+// "lambda has the same disease hist had, so relaxing it should help the
+// same way" -- does not hold, and the real, verified run shows why:
+// lambda's permanence was never a symmetric analogue of hist's own
+// original bug. `hist` exists specifically to add a *longer* memory of
+// congestion on top of lambda's fast, memoryless-but-permanent reactive
+// term -- kroute's own header explains the split (lambda reacts every
+// commit, hist only grows once a round's *settled* usage is over
+// capacity). Giving lambda a *second*, independent short memory on top
+// of that removes exactly the durability that made it a useful,
+// stabilizing deterrent: an edge relaxes back to cheap the moment it
+// reads clear for one round, inviting nets straight back onto real
+// bottlenecks that a few rounds of elevated price were correctly keeping
+// them off of. The result is legible in the numbers themselves: nets take
+// shorter paths on average (the wirelength win), because they're more
+// willing to reuse recently-busy edges -- and more of those reused edges
+// tip into real overflow than the wirelength savings are worth.
+//
+// This is not the same finding as HISTORY_COST_SWEEP.md Part 9's "unused
+// space" observation being wrong -- idle capacity that price signals hide
+// is still real. It is evidence that *this specific mechanism* (kroute's
+// LIFO-relax pattern, copied onto lambda unchanged) is the wrong tool for
+// recovering it: lambda and hist are not interchangeable memory terms
+// playing the same role, and treating them as if they were made the
+// pricing loop measurably less conservative in exactly the dimension
+// (overflow) this whole project's mandate cares about, in exchange for a
+// dimension (wirelength) it doesn't optimize for. See
+// HISTORY_COST_SWEEP.md Part 19 for the full record, including whether
+// the combined run (with uroute's own region pricing also enabled) was
+// run and what it showed.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o kr1route kr1route.cpp
