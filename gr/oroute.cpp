@@ -63,7 +63,20 @@
 // while leaving everything else (including MSMV candidates) exactly as
 // nroute.cpp left it -- a strict superset in that sense.
 //
-// Measured result: pending.
+// Measured result (newblue1, 30/40-round screen, both gr_verify- and
+// eval2008.pl-cross-checked): 41954/22/6634720 -- a real, independently-
+// verified **-2 overflow** improvement over the whole lineage's shared
+// 41956 baseline (kroute/broute/froute/aroute/nroute), at a wirelength
+// cost of +703 (6634017 -> 6634720). The first accepted cluster (1 of
+// 218) anywhere in this five-mechanism sweep. Surprisingly, the winning
+// combination never actually moved a recruited helper (0 of 218 clusters
+// moved one) -- the benefit came from ripping the helper up during
+// candidate generation, which momentarily widens the *overflowed* nets'
+// own frozen search baseline enough to expose a genuinely better
+// combination among their own candidates that nroute's narrower rip-up
+// (helper's usage never removed) never generated in the first place. See
+// HISTORY_COST_SWEEP.md Part 16 for the full account and what it does
+// and doesn't establish.
 //
 
 // Build:

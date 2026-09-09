@@ -1544,3 +1544,91 @@ three orderings, aroute's exact search, nroute's exact search over a
 richer pool) and all five land on the identical safe no-op relative to
 kroute's own baseline on this benchmark.
 
+## Part 16: oroute -- cooperative eviction of legal nets
+
+The user asked directly to try the second of Part 14's two untested
+levers. `gr/oroute.cpp` (forked from nroute.cpp; commit d3c4bfc) reverses
+the membership rule every prior mechanism in this sweep inherited from
+broute's own `clusterNets`: only nets *already overflowed* ever move.
+`recruitEvictionHelpers` recruits up to `OROUTE_MAX_EVICTION_HELPERS`
+(default 3) currently-*legal* nets that also touch the cluster's own
+tiles into the same joint search, ranked by how much of the cluster's
+edge capacity each one occupies. Everything downstream -- candidate
+generation (both generators), the exact branch-and-bound search, the
+accept/reject gate -- is exactly aroute's/nroute's own machinery,
+unchanged; a helper's own original route is always its candidate 0, so
+recruitment only ever offers the search an option, never forces a move.
+
+**No decisive "eviction strictly helps" fixture was found**, despite
+real, sustained effort (documented in the file's own self-test comment):
+a hand-verified 3-net fixture where a real, geometrically legitimate
+helper is correctly recruited and genuinely considered, where the exact
+search still lands on the identical result with or without it available
+to move. Kept as a permanent regression/plumbing guard rather than
+deleted, following froute.cpp's own precedent for this exact situation.
+
+**Verified result, same 30/40-round newblue1 screen**: **41954 / max 22
+/ wl 6634720**, both gr_verify (0 disconnected/incomplete/unrouted/
+malformed) and eval2008.pl in exact agreement. This is a real,
+independently-verified **-2 overflow** improvement over the entire
+lineage's shared 41956 baseline (kroute/broute/froute/aroute/nroute) --
+the first accepted cluster (1 of 218) anywhere in this five-mechanism
+sweep, at a wirelength cost of +703 (6634017 -> 6634720, +0.011%).
+
+| metric | value |
+|---|---|
+| clusters attempted | 218 |
+| clusters accepted | **1 (0.46%)** |
+| clusters that hit the node cap | 8 (same as nroute) |
+| clusters with >=1 helper recruited | **218 / 218 (100%)** |
+| clusters where a helper actually *moved* | **0** |
+| candidates per cluster (median / mean) | 131 / 125.6 |
+| final overflow | **41954** (-2 vs. every prior mechanism's 41956) |
+| final wirelength | 6634720 (+703 vs. 6634017) |
+
+**The one win did not come from a helper physically relocating --
+confirmed directly against nroute's own cluster-by-cluster log, not
+inferred.** Clusters 1-17 show bit-identical `overflow_before` values
+between nroute's and oroute's runs (proving both runs are perfectly
+synchronized up to that point, since phase A/B are unchanged and every
+earlier cluster was rejected -- and reverted -- in both). At cluster 18,
+both start from the identical `before=18`. nroute's exact search, over
+exactly the same 12 overflowed nets' own candidates, finds nothing
+(`18 -> 18`, rejected). oroute's exact search, over the same 12 nets
+*plus* 3 recruited helpers, finds `18 -> 16` -- genuinely better -- and
+the accepted combination leaves all 3 helpers at their own original
+route (`helper_moved=0` for this cluster too).
+
+The mechanism: candidate generation for every net in a cluster runs
+against a single frozen baseline built by ripping up *every* net
+`negotiateJointAssignment` currently considers a member -- in oroute,
+that rip-up removes the 3 helpers' own usage too, not just the 12
+overflowed nets'. That leaves *more* free capacity in the baseline the
+12 overflowed nets' own candidate search reacts to than nroute's
+narrower rip-up (helpers' usage never removed) ever exposed them to --
+letting `generateCandidatesForNet` discover a genuinely different,
+better candidate for one of them that nroute's own identical search
+never had the chance to generate in the first place, since it was never
+offered the option of searching against that particular baseline. The
+exact search then correctly determines the helpers don't actually need
+to move to realize that gain, and leaves them exactly where they were.
+This is a real, structural side effect of the mechanism as built, not a
+bug -- recruiting a helper's *candidate-generation footprint* turns out
+to matter independently of whether the helper's own route ever changes.
+
+**Honest bottom line.** After five consecutive exact-negative results
+(Parts 12-15), cooperative eviction is the first mechanism in this whole
+sweep to find anything -- a small, real, doubly-verified win. It is not
+the mechanism the file's own header argued for (a helper physically
+making room was the whole premise); it is a genuine, unanticipated
+consequence of *how* the rip-up-before-candidate-generation step scopes
+itself, discovered by measurement, not designed in. Whether this
+specific effect -- widening the candidate-generation baseline by
+recruiting nets that end up not moving -- generalizes, or whether it
+could be captured more directly (e.g. by ripping up recruited helpers
+for candidate-generation purposes even when eviction itself is disabled,
+isolating this exact effect from actual helper relocation) is an open,
+now well-motivated follow-up question this measurement raises rather
+than answers. -2 out of 41956 is a marginal result in isolation; its
+real significance is ending the sweep's five-way tie at exactly zero.
+
