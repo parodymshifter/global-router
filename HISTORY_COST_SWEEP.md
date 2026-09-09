@@ -1457,3 +1457,90 @@ nets move, and if their own rearrangements among themselves cannot
 relieve a jointly-oversubscribed resource, recruiting a neighbor outside
 that set may be the only real lever left.
 
+## Part 15: nroute -- MSMV candidates on top of aroute's exact search
+
+The user asked directly to try the first of Part 14's two untested
+levers: candidate diversity. `gr/nroute.cpp` (forked from aroute.cpp;
+commit 9615233) reuses aroute's exact branch-and-bound search completely
+unchanged and widens only what it gets to choose from --
+`generateCandidatesForNet` is extended with MSMV, ported verbatim from
+zroute.cpp/vroute.cpp, as a second candidate source alongside yroute's
+length-weight-decay schedule. Where the fixed-MST decomposition can only
+ever attach a new segment at one of the *pins* a precomputed tree edge
+names, MSMV grows a net incrementally, treating every already-committed
+tile as a simultaneous source and every unconnected pin as a
+simultaneous sink -- finding genuinely different Steiner topologies a
+fixed-MST decomposition cannot represent at all. Confirmed with a
+hand-verified, decisive fixture before any real-data run: a 3-pin,
+Manhattan-equilateral triangle (every pairwise distance exactly 4 tiles)
+where the fixed-MST decomposition commits two independent 4-tile paths
+(8 tiles total) but MSMV finds the true 6-tile Steiner tree by attaching
+the third pin to the *midpoint* of the first two pins' already-committed
+wire -- both numbers (8 and 6) matched the hand derivation exactly on
+the first run.
+
+**Verified result, same 30/40-round newblue1 screen**: **41956 / max 22
+/ wl 6634017**, an exact match to the kroute/broute/froute/aroute
+baseline via both gr_verify (0 disconnected/incomplete/unrouted/
+malformed) and eval2008.pl (exact agreement). 218 clusters attempted,
+**0 accepted**.
+
+| metric | aroute (Part 14) | nroute |
+|---|---|---|
+| clusters attempted | 218 | 218 |
+| clusters accepted | 0 (0%) | **0 (0%)** |
+| candidates per cluster (mean) | ~60 | **101.2** |
+| clusters that hit the node cap | 0 | **8** |
+| bnb nodes per cluster (median / mean / max) | 66 / 1364 / 87676 | **159 / 10524 / 200001** |
+| clusters where greedy was worse than doing nothing | 218/218 | 218/218 |
+| greedy/before ratio (mean / median / max) | 6.18x / 3.99x / 45.25x | 5.95x / 3.80x / 45.50x |
+| runtime | 212.0s | **426.9s** |
+| final overflow | 41956 | 41956 (identical) |
+
+**A genuinely richer candidate pool -- confirmed, not assumed.**
+Candidates per cluster nearly doubled (mean 101.2 vs. aroute's ~60,
+median exactly 108 -- the theoretical max for a 12-net cluster of
+multi-pin nets: 5 fixed-MST candidates plus 4 MSMV candidates per net),
+confirming the MSMV addition is doing real work generating genuinely
+different options, not just relabeling the same ones. Runtime roughly
+doubled too (426.9s vs. 212.0s), the honest cost of that richer pool --
+MSMV's incremental growth is inherently more expensive than a fixed-MST
+decomposition's independent point-to-point searches.
+
+**Still zero accepted, and this time not fully exhaustive.** Unlike
+aroute's own result, 8 of the 218 searches here hit the
+`NROUTE_MAX_BNB_NODES` cap (default 200000) before proving optimality --
+the larger candidate space (up to 9 candidates per net instead of 5)
+costs real search time, and one cluster (215) reached the cap exactly
+(200001 nodes, one over the limit). All 8 correctly reverted to their
+pre-touch state regardless (the safety-valve behavior aroute's own
+self-test already validated), so the final committed result is
+unaffected -- but the claim for those 8 clusters specifically is
+empirical (nothing better was *found* within budget), not exhaustive
+(proven that nothing better *exists*) the way aroute's full-exhaustion
+result was for every one of its 218.
+
+**Honest bottom line.** Widening the candidate pool with a structurally
+different, already-validated generator (MSMV) did not recover anything a
+narrower pool couldn't -- the joint search still finds nothing better
+than leaving every cluster alone, on all 218 real contended regions on
+this benchmark. This is a real, if negative, answer to Part 14's own
+open question: candidate diversity via MSMV specifically is not the
+missing ingredient either. Two readings are both consistent with this
+result, and this measurement alone can't distinguish them: (1) these
+particular contended clusters are genuinely unresolvable by *any*
+rearrangement of the nets already in them, regardless of how those
+routes are generated -- which would point toward Part 14's second
+untested lever, "cooperative eviction" (recruiting nearby legal nets, not
+just already-overflowed ones); or (2) MSMV's own candidates still share
+a common blind spot with yroute's length-weight schedule -- both are
+single-path-growth mechanisms reacting to the same live price landscape,
+so a resource three or four nets are jointly fighting over may need a
+topology neither generator's own search bias ever surfaces, even though
+the *exact* assignment search now picks perfectly among whatever each
+generator offers. Five distinct coordination/search mechanisms have now
+been tried across Parts 12-15 (broute's two batch variants, froute's
+three orderings, aroute's exact search, nroute's exact search over a
+richer pool) and all five land on the identical safe no-op relative to
+kroute's own baseline on this benchmark.
+

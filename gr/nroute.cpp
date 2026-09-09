@@ -92,7 +92,18 @@
 // wirelength together, at every round/pass/cluster checkpoint, to one CSV
 // meant to be charted -- see `wirelengthStats`/`ProgressLog` below.
 //
-// Measured result: pending.
+// Measured result (newblue1, 30/40-round screen, both gr_verify- and
+// eval2008.pl-cross-checked): 41956/22/6634017, an exact match to the
+// kroute/broute/froute/aroute baseline. 218 clusters attempted, 0
+// accepted -- the richer candidate pool (mean 101.2 candidates per
+// cluster vs. aroute's ~60, from adding MSMV) still found nothing better
+// than doing nothing. Unlike aroute's own fully exhaustive result, 8 of
+// the 218 searches here hit the node cap before proving optimality (the
+// larger candidate space costs real search time) -- all 8 correctly
+// reverted to their pre-touch state regardless, so the final result is
+// unaffected, but the claim for those 8 clusters specifically is
+// empirical, not exhaustive. Full discussion: HISTORY_COST_SWEEP.md
+// Part 15.
 //
 
 // Build:
