@@ -23,6 +23,7 @@ zroute
 froute
 aroute
 nroute
+oroute
 *.o
 bench/
 *.gr

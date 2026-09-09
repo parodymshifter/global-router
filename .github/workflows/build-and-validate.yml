@@ -38,6 +38,7 @@ jobs:
           - froute
           - aroute
           - nroute
+          - oroute
     steps:
       - uses: actions/checkout@v4
 
