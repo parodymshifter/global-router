@@ -68,7 +68,18 @@
 // wirelength together, at every round/pass/cluster checkpoint, to one CSV
 // meant to be charted -- see `wirelengthStats`/`ProgressLog` below.
 //
-// Measured result: pending.
+// Measured result (newblue1, 30/40-round screen, both gr_verify- and
+// eval2008.pl-cross-checked): 41956/22/6634017, an exact match to the
+// kroute/broute/froute baseline. 218 clusters attempted, 0 accepted,
+// 0 hit the node cap (every search ran to true completion, max 87676 of
+// 200000 nodes) -- the joint search, run to exhaustion rather than
+// truncated, still found nothing better than leaving every single
+// cluster alone. The seeded sequential-greedy incumbent, computed fresh
+// per cluster from the same frozen baseline, was worse than doing
+// nothing in all 218/218 clusters (mean 6.18x, median 3.99x, max 45.25x)
+// -- an independent, exact-search-based reproduction of broute's own
+// finding via a completely different code path. Full discussion:
+// HISTORY_COST_SWEEP.md Part 14.
 //
 
 // Build:

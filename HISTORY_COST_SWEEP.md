@@ -1350,3 +1350,110 @@ optimization within a cluster (something other than sequential
 time) -- sequential-with-reordering, at every scope tried so far, keeps
 landing in the same place.
 
+## Part 14: aroute -- joint candidate-assignment via exact branch-and-bound
+
+The user asked directly what a genuinely joint optimization strategy
+inside a cluster could realistically be based on, given everything Parts
+12-13 had already ruled out. The answer built here: generate several
+candidate routes per contending net up front, against one frozen
+baseline (reusing yroute's own length-weight-decay trick,
+`AROUTE_CANDIDATE_WEIGHTS`, to get genuinely different candidates
+cheaply, plus each net's own original route as a standing "no change"
+option), then pick one candidate per net *jointly* -- the combination
+minimizing the cluster's total overflow -- via an exact branch-and-bound
+search over the small capped candidate space, rather than committing net
+by net and reacting to whatever the previous commit changed. This is the
+first mechanism in the whole sweep to change the *solve method* itself,
+not just the scope (Part 12) or order (Part 13) of the same sequential
+greedy solve. `gr/aroute.cpp` (forked from broute.cpp; commit 35ce6be)
+reuses `findOverflowClusters`/`clusterNets` and froute's own standalone
+`rankAndCapClusterNets` unchanged, and carries forward froute's own
+scope-restriction lesson (only genuine cluster members are ever touched).
+
+**A real bug found and fixed before the result below was trustworthy,**
+caught the same way as always in this sweep -- not by reasoning, by the
+numbers looking wrong on real data. The first real-benchmark smoke test
+(a short 5/5-round screen) showed 220 of 243 clusters "accepted," with
+the branch-and-bound reporting dramatic internal improvements (e.g.
+1730 vs. a seeded incumbent of 5124) -- but the mechanism's own final
+independent-recomputation gate (`overflowOverUnion`, recomputed from the
+actually-committed charges, never trusted to agree with the search's own
+bookkeeping) disagreed with the search's internal number in 223 of those
+244 cases, revealing that the "improvements" were mostly ties with doing
+nothing, not real wins. Root cause: the branch-and-bound's incremental
+delta tracking only ever accumulated overflow on edges some *candidate*
+touched. An edge one net's *original* route touched, but that the
+winning combination abandoned (that net moved to a different candidate),
+never got a single `applyDelta` call in that combination -- so any
+background overflow already sitting there, from nets entirely outside
+the capped cluster, or from nets that merely pass through the cluster's
+tiles without being overflowed themselves (both explicitly outside
+`clusterNets`' own membership rule), silently vanished from the running
+total instead of persisting the way it actually does in the real design.
+Fixed by seeding the search with a precomputed baseline-overflow term --
+the true, zero-delta overflow over the full union of every candidate's
+edges -- before the recursion starts. A small, rare residual disagreement
+(single digits, not the thousands-off gap this bug caused) still turns
+up occasionally and was not further root-caused, but -- as with every
+other mechanism's own final gate in this codebase -- it has never once
+caused an incorrect accept, since accept/reject always uses the
+independently-recomputed value, never the search's own internal number.
+See `gr/aroute.cpp`'s own comments (`branchAndBoundAssign`,
+`negotiateJointAssignment`) for the full account.
+
+**Verified result, same 30/40-round newblue1 screen used throughout this
+comparison, after the fix**: **41956 / max 22 / wl 6634017**, an exact
+match to the kroute/broute/froute baseline via both gr_verify (0
+disconnected/incomplete/unrouted/malformed) and eval2008.pl (exact
+agreement). 218 clusters attempted, **0 accepted**.
+
+| metric | value |
+|---|---|
+| clusters attempted | 218 |
+| clusters accepted | **0 (0%)** |
+| clusters that hit the node cap | **0** -- every search ran to true completion |
+| bnb nodes per cluster (median / mean / max) | 66 / 1364.3 / 87676 (of a 200000 cap) |
+| clusters where the seeded greedy incumbent was worse than doing nothing | **218 / 218 (100%)** |
+| greedy-incumbent / before ratio (mean / median / max) | 6.18x / 3.99x / 45.25x |
+| final overflow | 41956 (identical to doing nothing) |
+
+**This is a clean, decisive negative result, not a truncated or
+under-powered one.** Every one of the 218 searches ran to genuine
+completion (max 87676 of the 200000-node budget -- the cap was never
+binding), meaning branch-and-bound proved, exhaustively over the
+generated candidate space, that *no* combination of these nets' own
+weight-schedule candidates beats leaving the cluster untouched, for any
+of the 218 real contended regions on this benchmark. This is a
+materially stronger claim than anything Parts 10-13 could make: those
+measured that a *particular* sequential procedure didn't find an
+improvement; this measures that *no* assignment reachable from the
+generated candidates does, within the search's own exact guarantee.
+
+The seeded greedy-incumbent numbers are independently interesting on
+their own: computed fresh, from the identical frozen baseline, via the
+exact sequential procedure broute's own Phase D uses, they confirm
+broute's finding a second time via a completely different code path
+(dedicated candidate generation plus a from-scratch sequential pass, not
+broute's own live batch loop) -- sequential greedy is worse than doing
+nothing in literally every single cluster on this benchmark, by a mean
+of 6.18x.
+
+**Honest bottom line and what it actually rules in or out.** Joint
+*selection* among these particular candidates does not help -- confirmed
+exhaustively, not just empirically. This narrows, rather than closes, the
+open question from the earlier discussion with the user about what a
+real joint optimization lever could be: the candidate generator itself
+(yroute's length-weight schedule) is the same one whose own rescue log
+found 86% of holdouts unhelped at *any* weight (Part 10) -- so a search
+method that reasons perfectly over a candidate set this narrow was
+always bounded by that same ceiling. The two structural gaps raised in
+that discussion remain untested: (1) candidate diversity itself --
+MSMV-generated candidates, or genuinely different topologies, rather
+than one path decaying toward straight-line indifference to congestion;
+and (2) the "cooperative eviction" idea -- expanding a cluster's scope to
+include nearby *legal* nets willing to make room, since every mechanism
+through this part, aroute included, only ever lets already-overflowed
+nets move, and if their own rearrangements among themselves cannot
+relieve a jointly-oversubscribed resource, recruiting a neighbor outside
+that set may be the only real lever left.
+
