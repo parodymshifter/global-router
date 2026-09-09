@@ -39,6 +39,7 @@ jobs:
           - aroute
           - nroute
           - oroute
+          - qroute
     steps:
       - uses: actions/checkout@v4
 

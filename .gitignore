@@ -24,6 +24,7 @@ froute
 aroute
 nroute
 oroute
+qroute
 *.o
 bench/
 *.gr
