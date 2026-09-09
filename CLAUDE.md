@@ -505,3 +505,26 @@ work -- there is no way to recover peak RSS or VSZ after the fact for a
 process that already exited without something watching it while it ran.
 Wrap the launch before starting it, every time, the same discipline
 "write each step's state to a file" already asks for above.
+
+## Router naming convention (2026-09-09 addendum)
+
+Every single-letter prefix a-z is now used (`gr/aroute.cpp` through
+`gr/zroute.cpp`). New routers use **two letters plus a generation
+number**: the letters identify a *species* -- a core algorithmic
+approach -- and the number increments for direct descendants that refine
+that species (a new coefficient, a new formula term, a relaxation
+mechanism) without changing its core algorithm. Only change the letters
+when a new file's core solve method is genuinely different, not merely a
+new tunable on an existing one -- e.g. the MSMV maze-growth lineage
+(`vroute`/`zroute`) and the joint-candidate-assignment/branch-and-bound
+lineage (`broute` through `qroute`) would each be their own species under
+this scheme, had it existed when they were built; existing single-letter
+files are not renamed retroactively.
+
+First use: `gr/kr1route.cpp`, species `kr` (rooted at `kroute` -- the
+ancestor that defined "negotiated congestion via a 2-tier fast/slow
+pricing loop with LIFO-relaxable multiplicative terms" as this species'
+defining trait, as opposed to MSMV search or joint B&B assignment),
+generation 1. A further refinement of the same mechanism becomes
+`kr2route.cpp`, and so on. Env var prefixes follow the same file-stem-in-
+caps convention every prior router already uses (`KR1ROUTE_...`).

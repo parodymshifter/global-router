@@ -41,6 +41,7 @@ jobs:
           - oroute
           - qroute
           - uroute
+          - kr1route
     steps:
       - uses: actions/checkout@v4
 
