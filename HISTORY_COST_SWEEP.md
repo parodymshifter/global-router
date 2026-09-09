@@ -1784,3 +1784,58 @@ points across the same real screen, following this project's own
 "tune empirically, never by pure reasoning" discipline exactly as it
 already applied to every other threshold in this codebase.
 
+### Follow-up to the follow-up: a finer sweep, 50-300 in steps of 25-50
+
+The user asked for exactly that finer sweep. Nine more widths (75, 100,
+125, 175, 200, 225, 250, 275, 300), run in three batches of three at the
+project's own 3-concurrent-process cap, all cross-checked exactly via
+both gr_verify and eval2008.pl, joined with the four points already on
+record:
+
+| width | overflow | accepted clusters |
+|---|---|---|
+| 20 (default) | 41954 | {18} |
+| 50 | 41952 | {18, 128} |
+| 75 | 41952 | {18, 113} |
+| 100 | 41954 | {18} |
+| 125 | 41952 | {18, 40} |
+| 150 | 41952 | {18, 40} |
+| 175 | 41954 | {18} |
+| 200 | **41956** | {} |
+| 225 | **41948** | {18, 134, 165} |
+| 250 | **41948** | {18, 134, 165} |
+| 275 | 41952 | {18, 165} |
+| 300 | 41950 | {18, 103, 165} |
+| unbounded | 41956 | {} |
+
+**Not pure noise -- a genuine mix of two different behaviors, both real.**
+Cluster 165 accepts at *every* width from 225 up through 300 and *never*
+below 225 -- a real threshold for that cluster specifically, not a
+coincidence repeated four times running. Cluster 18, by contrast, accepts
+at nearly every width tested (20 through 300, ten of twelve points) but
+drops out at exactly two points: width 200 (sandwiched between 175 and
+225, both wins) and again once its own true, uncapped context pool (241
+nets) is fully admitted -- a real reversal, not just "eventually stops
+helping." The additional clusters that accept alongside 18 differ by
+width almost every time (128, 113, 40, 134+165, 165, 103+165) -- some of
+that is real width-dependent structure (165's own clean threshold), and
+some of it likely is the path-dependent price-bump noise the mechanism's
+own header already documents. Both are present in the same sweep; this
+result doesn't resolve which dominates, only that neither is the whole
+story on its own.
+
+**The best point found (41948 at widths 225 and 250, tied) is still only
+-8 out of 41956 -- 0.019%.** This does not change the answer to the
+user's own question about whether this line of work could plausibly
+reach anywhere near zero overflow: even the best-case point in a
+12-point sweep spanning 20 to unbounded found a reduction two orders of
+magnitude short of what would be needed. The sweep's real value is
+methodological, not in the headline number -- it rules out "just widen
+it more" as a path to a materially better result on this specific
+mechanism, and it demonstrates concretely (not just in the abstract)
+that this whole family (Parts 12-17) has reached the point of
+diminishing, near-zero returns on this benchmark. The width itself is
+left at its original default (20); nothing here justifies moving it
+without a clearer picture of the curve's shape between the tested
+points, which was not the goal of this pass.
+

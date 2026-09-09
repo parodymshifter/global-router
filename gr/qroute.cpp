@@ -68,18 +68,25 @@
 // scope to nroute) finds the *same* 18 -> 16 -- confirming the win was
 // never about the extra B&B participants at all.
 //
-// Follow-up width sweep (same screen, `QROUTE_MAX_CONTEXT_NETS` varied):
-// 20 (default) -> 41954 (1 accepted); 50 -> 41952 (2 accepted, a
-// *different* second cluster than 150 found); 150 -> 41952 (2 accepted,
-// same cluster 18 win, cheaper wirelength than 50); unbounded -> **41956,
-// 0 accepted** -- cluster 18's own win, present at both 50 and 150,
-// reverses once its natural (uncapped) context pool of 241 nets is fully
-// admitted. Widening is not monotonic: helpful in a narrow middle band,
-// actively harmful past it, on this benchmark at this round budget. The
-// default (20) is a first empirically-motivated guess only, not
-// re-tuned from this result -- a proper sweep needs many more points
-// than four to characterize the real shape of this curve, not just its
-// non-monotonicity. Full discussion: HISTORY_COST_SWEEP.md Part 17.
+// Follow-up width sweep (same screen, `QROUTE_MAX_CONTEXT_NETS` swept
+// 20-300 in steps of 25-50, plus unbounded -- 12 points total, all
+// gr_verify/eval2008.pl cross-checked): overflow ranges 41948-41956
+// across the sweep (best: 41948 at width 225 and 250, tied, via the
+// identical 3-cluster set {18, 134, 165}). Not pure noise: cluster 165
+// accepts at every width >=225 and never below -- a real threshold, not
+// a coincidence -- while cluster 18 accepts at nearly every width tested
+// but drops out exactly at 200 and again once its own natural
+// (uncapped) pool of 241 context nets is fully admitted. Different
+// widths admit different *additional* clusters (128 at 50, 113 at 75,
+// 40 at 125/150, 134+165 at 225/250, 165 alone at 275, 103+165 at 300)
+// -- some width-dependent structure exists per cluster, but no simple
+// monotonic "more is better" relationship across the whole sweep. See
+// HISTORY_COST_SWEEP.md Part 17's own follow-up for the full table and
+// the honest bottom line: even the best point found (-8 out of 41956,
+// 0.019%) does not change the conclusion that this mechanism family is
+// nowhere close to a path to zero overflow on its own. The default (20)
+// is left as a first empirically-motivated guess, not re-tuned from
+// this sweep.
 //
 
 // Build:
