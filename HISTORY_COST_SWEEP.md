@@ -2054,8 +2054,52 @@ behave differently, but is a distinct, separately-motivated experiment,
 not a foregone conclusion from this result.
 
 Given the isolated result is already a clean, unambiguous regression on
-the metric this project's mandate cares about, the combined run (lambda-
-relax stacked with uroute's own default region pricing) was [PENDING /
-run and recorded below once complete] -- checking with the user before
+the metric this project's mandate cares about, the user was asked before
 spending another ~2 hours of compute on a configuration very unlikely to
-reverse an already-clear three-for-three finding.
+reverse an already-clear three-for-three finding -- and chose to run it
+anyway, for completeness, matching this project's own "finish the sweep
+for completeness" precedent from the qroute width sweep.
+
+**Combined result (default settings: `KR1ROUTE_LAMBDA_RELAX=1` +
+uroute's own default region pricing, `UROUTE_REGION_PRICING=1`,
+`UROUTE_REGION_EPS=0.005`), same 172-round budget, both legal per
+gr_verify and cross-checked exactly against eval2008.pl:**
+
+| benchmark | kroute (bar) | uroute alone (eps=0.005) | kr1route, lambda-relax alone | kr1route, combined |
+|---|---|---|---|---|
+| adaptec1 | 162584 / 7254167 | 162664 / 7258013 | 162984 / 7206243 | 162402 / 7206913 |
+| newblue1 | 41014 / 6644362 | 40926 / 6644352 | 41458 / 6608842 | 41326 / 6596450 |
+| bigblue1 | 292420 / 7535653 | 292380 / 7537447 | 292958 / 7506080 | 293500 / 7506439 |
+| **combined total** | **496018** | **495970** | **497400** | **497228** |
+
+**Combining doesn't rescue lambda-relax.** Region pricing's own effect
+(mixed, benchmark-dependent, per Part 18) partially offsets lambda-relax's
+regression on two of three benchmarks (adaptec1 and newblue1 both improve
+slightly relative to lambda-relax alone) but makes bigblue1 slightly
+worse, and the combined total (497228, +0.24% vs kroute) is still worse
+than both kroute's own baseline and uroute's own already-established
+default (495970) -- combining does not turn a real regression into a
+win, it just reshuffles which benchmark absorbs how much of it, the same
+"one scalar knob, benchmark-dependent response" character Part 18 already
+documented for region pricing alone. The wirelength story holds up even
+more strongly combined (-0.65%, -0.72%, -0.39% vs kroute, all larger
+margins than lambda-relax alone) -- reinforcing, not complicating, the
+mechanistic explanation above: this mechanism trades wirelength for
+overflow, consistently, and stacking it with a second mixed-effect
+mechanism doesn't change what it fundamentally is.
+
+**Conclusion: `KR1ROUTE_LAMBDA_RELAX=1` is not adopted as a default.**
+kroute's own permanent-lambda behavior (equivalent to
+`KR1ROUTE_LAMBDA_RELAX=0`) remains the better choice on every real
+measurement taken here, isolated or combined. The mechanism itself is
+real, correctly implemented, and decisively self-tested -- it does what
+its header claims -- but what it claims to do (let a genuinely-recovered
+edge's price return to baseline) is not, in practice, a net improvement
+for this project's overflow-only mandate. This is the most informative
+negative result in the whole lineage since the "close to exhausted"
+verdict on the exact-search/candidate-widening family: a well-motivated,
+precedented, carefully-targeted mechanism, built on a real and correctly-
+diagnosed asymmetry in the cost model, that real measurement shows
+does not transfer the way its precedent (`hist`'s own relax) did --
+because the two terms it was built to treat symmetrically were never
+actually playing symmetric roles.

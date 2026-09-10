@@ -105,10 +105,29 @@
 // playing the same role, and treating them as if they were made the
 // pricing loop measurably less conservative in exactly the dimension
 // (overflow) this whole project's mandate cares about, in exchange for a
-// dimension (wirelength) it doesn't optimize for. See
-// HISTORY_COST_SWEEP.md Part 19 for the full record, including whether
-// the combined run (with uroute's own region pricing also enabled) was
-// run and what it showed.
+// dimension (wirelength) it doesn't optimize for.
+//
+// Combined result (default settings: lambda-relax + uroute's own default
+// region pricing) does not rescue this -- adaptec1 162402/7206913,
+// newblue1 41326/6596450, bigblue1 293500/7506439, all legal and
+// eval2008.pl-cross-checked. Combined total overflow 497228 (+0.24% vs
+// kroute's 496018) is still worse than both kroute's own baseline and
+// uroute's own already-established default (495970); region pricing's
+// own mixed effect partially offsets lambda-relax's regression on two of
+// three benchmarks but not the third, and the wirelength-for-overflow
+// tradeoff holds up even more strongly combined (-0.65%/-0.72%/-0.39%).
+//
+// **Conclusion: KR1ROUTE_LAMBDA_RELAX=1 is not adopted as a default.**
+// kroute's own permanent-lambda behavior (KR1ROUTE_LAMBDA_RELAX=0)
+// remains the better choice on every real measurement taken here,
+// isolated or combined. The mechanism is real, correctly implemented,
+// and decisively self-tested -- it does exactly what its header claims --
+// but what it claims to do is not, in practice, a net improvement for
+// this project's overflow-only mandate: a well-motivated, precedented
+// mechanism whose precedent (hist's own relax) turned out not to
+// transfer, because the two terms it was built to treat symmetrically
+// were never actually playing symmetric roles. See HISTORY_COST_SWEEP.md
+// Part 19 for the full record.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o kr1route kr1route.cpp
