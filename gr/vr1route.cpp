@@ -67,12 +67,43 @@
 // Proof the signal reaches this project's actual best search method, not
 // only the weaker one it was first proven against.
 //
-// Measured result: see "Measured result" below, filled in once the real
-// benchmark runs are complete and cross-checked against gr_verify and
-// eval2008.pl. Cost, honestly: inherited from vroute -- roughly
-// 7.5-8.25 hours per benchmark at the full 172-round budget.
+// Measured result, default settings (VR1ROUTE_REGION_PRICING=1,
+// VR1ROUTE_REGION_EPS=0.005, VROUTE_MSMV=1), full 172-round budget on all
+// three real ISPD benchmarks, against vroute's own recorded baseline.
+// All legal per gr_verify (0 disconnected/incomplete/unrouted/malformed)
+// and cross-checked exactly against eval2008.pl:
 //
-// MEASURED RESULT PLACEHOLDER -- replaced once real benchmarks are run.
+//   benchmark   vroute (MSMV alone)   vr1route (MSMV + region pricing)
+//   adaptec1    103172 / 7514462      102482 / 7521789
+//                                     -- overflow -0.67%, wirelength +0.10%
+//   newblue1     30668 / (unrecorded)  31056 / 6716003
+//                                     -- overflow +1.27%
+//   bigblue1    230084 / 7836782      230754 / 7834988
+//                                     -- overflow +0.29%, wirelength -0.02%
+//   combined    363924                364292  -- overflow +0.10%
+//
+// Mixed, near-wash -- the same shape region pricing produced on kroute's
+// own much weaker fixed-topology search (HISTORY_COST_SWEEP.md Part 18):
+// adaptec1 improves, newblue1 and bigblue1 regress slightly, combined
+// total a fraction worse. Unlike kr1route's lambda-relax (Part 19, a
+// clean wirelength-for-overflow tradeoff), there is no consistent
+// wirelength story here either -- just overflow noise in both directions.
+//
+// The plan this file was scoped from named exactly this outcome as its
+// key risk: "a wash here would be a weaker signal than a wash on kroute
+// was ... meaningful evidence the mechanism itself, not just its prior
+// pairing, has a ceiling." That is now the measured conclusion. Region
+// pricing has been tested against both the weakest and the strongest
+// search method this project has, and lands in the same place both times:
+// a real, decisively-self-tested signal (this file's own MSMV steering
+// test proves the search genuinely acts on it) that does not translate
+// into a benchmark-independent overflow win at any tuning tried. The
+// contingency the user set -- "if vroute goes well, then zroute makes
+// sense" -- is not triggered; pairing region pricing with an even more
+// powerful search is very unlikely to change a result this consistent
+// across two very different ones. VROUTE_MSMV=1 with region pricing OFF
+// (i.e. plain vroute) remains the better choice. See HISTORY_COST_SWEEP.md
+// Part 20 for the full record.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o vr1route vr1route.cpp

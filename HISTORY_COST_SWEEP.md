@@ -2103,3 +2103,85 @@ diagnosed asymmetry in the cost model, that real measurement shows
 does not transfer the way its precedent (`hist`'s own relax) did --
 because the two terms it was built to treat symmetrically were never
 actually playing symmetric roles.
+
+## Part 20: vr1route -- region-level cross-layer pricing on MSMV search
+
+First router in the MSMV species (`vr`, generation 1) under the
+two-letter + generation-number naming convention. Scoped after Parts
+18-19 (uroute's region pricing, kr1route's lambda relax) both landed
+mixed-to-negative on the kroute-based lineage, from a direct observation:
+`vroute`'s MSMV search is this project's actual best router by a wide
+margin (-21% to -36.55% vs kroute), and nothing has ever combined that
+structural win with a pricing-formula idea. Region pricing's motivation
+(Part 9: every layer at a hot tile simultaneously over capacity, real
+idle capacity elsewhere) doesn't depend on which search method finds
+paths, so the natural question: does the signal matter more paired with a
+search that can actually act on it (attach anywhere on already-built
+wire, not just fixed tree endpoints)?
+
+Built as `gr/vr1route.cpp`, forked from `gr/vroute.cpp` (not `zroute`,
+per user direction -- zroute's own `-0.57%` marginal gain over vroute was
+never validated outside a single reduced-round newblue1 screen, so
+isolating region pricing against vroute's fully-proven numbers avoids
+compounding one unvalidated claim on another). Mechanism is uroute's
+region pricing ported verbatim, with six `edgeCost` call sites updated
+instead of four (vroute's MSMV `multiSourceDijkstra` is a second real
+Dijkstra relaxation loop alongside the inherited fixed-topology
+`boundedDijkstra`). 66 self-tests pass, including a new one specific to
+this file: a real MSMV search's own genuinely-shortest tie-broken path is
+shown to change to a different, equal-length path once a separate net's
+usage drives an "optional" region it passes through (via an edge the
+path itself never touches) over its aggregate budget -- proof the signal
+reaches this project's best search, not only the weaker one uroute tested.
+
+**Real result, default settings, full 172-round budget, all three
+benchmarks legal per gr_verify and cross-checked exactly against
+eval2008.pl:**
+
+| benchmark | vroute (MSMV alone) | vr1route (MSMV + region pricing) | overflow delta | wirelength delta |
+|---|---|---|---|---|
+| adaptec1 | 103172 / 7514462 | 102482 / 7521789 | **-0.67%** | +0.10% |
+| newblue1 | 30668 / (unrecorded) | 31056 / 6716003 | **+1.27%** | n/a |
+| bigblue1 | 230084 / 7836782 | 230754 / 7834988 | **+0.29%** | -0.02% |
+| **combined** | **363924** | **364292** | **+0.10%** | ~flat |
+
+(vroute's own newblue1 wirelength was never recorded with its overflow
+number and no vroute solution file survives to re-verify -- overflow is
+the mandate's sole metric and is compared exactly; wirelength is compared
+where vroute's number is on record, and shows no consistent movement
+either way.)
+
+**Verdict: mixed, near-wash -- the same shape region pricing produced on
+kroute's own much weaker fixed-topology search (Part 18).** adaptec1
+improves, newblue1 and bigblue1 regress slightly, combined total a
+fraction worse. Runtimes 27109s / 6896s / 30002s -- squarely in vroute's
+own 7.5-8.25 hour-per-benchmark range, no MSMV cost regression from the
+added per-round region resum.
+
+**This is the conclusion the plan named as its key risk in advance.**
+Region pricing has now been tested against both the weakest and the
+strongest search method this project has, and lands in the same place
+both times: a real, decisively-self-tested signal (the MSMV steering
+test proves the search genuinely acts on it) that does not translate
+into a benchmark-independent overflow win at any tuning tried. The
+per-benchmark response to a single global region-eps is the same
+"one scalar knob, benchmark-dependent geometry" behavior Part 18
+documented -- and it is a property of the mechanism, not of the search it
+was paired with. The contingency the user set ("if vroute goes well,
+then zroute makes sense") is not triggered: pairing region pricing with
+an even more powerful search is very unlikely to reverse a result this
+consistent across two very different ones. `VROUTE_MSMV=1` with region
+pricing off -- i.e. plain vroute -- remains the better choice, and
+vroute stays this project's current-best router.
+
+**Where the region-pricing line of inquiry stands after Parts 18 and 20:
+closed.** Two full-scale tests, opposite ends of the search-power
+spectrum, same mixed result. Combined with Part 19's clean rejection of
+lambda-relax and Parts 12-17's "close to exhausted" verdict on the
+exact-search family, the pricing-formula and per-region axes are now both
+substantially explored without producing a second unambiguous win beyond
+kroute's own history relax. The MSMV structural change (vroute) remains
+the one large, unmatched lever -- and Part 8's placement-artifact finding
+(pin density varies 4x by radial band while capacity varies ~3%) remains
+the honest ceiling on how far any routing-only technique in this project
+can go.
