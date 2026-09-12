@@ -62,18 +62,41 @@
 // including the odd ones (1, 3, 5, 7) the fixed menu never considers --
 // finds the gap and legalizes it cleanly.
 //
-// Measured result: see "Measured result" below, filled in once the real
-// benchmark runs are complete, at the same default round budget as
-// fr1route's own baseline measurement (no VROUTE_FAST_ROUNDS/SLOW_ROUNDS
-// override) -- holding round budget constant isolates escalation
-// architecture as the only variable being tested, not conflated with the
-// round-budget probe already run on fr1route. Decision criterion for
-// "dramatic," per the plan: a clear double-digit-percent reduction in 2D
-// overflow, matching the scale of vroute's own structural win over
-// kroute (-21% to -36%) -- anything smaller triggers the user's own
-// fallback, trying Steinerization next.
+// Measured result, default settings (FR2ROUTE_MONOTONIC=1, same round
+// budget convention as fr1route's own baseline), all three real ISPD
+// benchmarks. All legal per gr_verify (0 malformed/disconnected/
+// incomplete/unrouted/out-of-bounds):
 //
-// MEASURED RESULT PLACEHOLDER -- replaced once real benchmarks are run.
+//   benchmark   fr1route (2D overflow, bar)   fr2route (2D overflow)
+//   adaptec1    69394                         76296   -- +9.9%, 2898s
+//   newblue1    20040                         21644   -- +8.0%,  583s
+//   bigblue1    207612                        223026  -- +7.4%, 3118s
+//
+// **Not dramatic -- the opposite of dramatic.** A clean, unanimous
+// regression, 7-10% worse on all three, while running *more* total
+// rounds than fr1route's own baseline (222-223 vs 172-173) -- not an
+// under-converged comparison. Per the user's own decision criterion,
+// this triggers the stated fallback directly: try Steinerization next.
+//
+// Working diagnosis: the escalation ladder's accept/reject gate
+// (overflowOverUnion, unchanged from fr1route/vroute) only checks that a
+// net's own *local* overflow doesn't get worse, not whether the accepted
+// route is as good as a stronger tier would have found. Once a net
+// resolves via the monotonic tier, `tier` only ever increases, so it is
+// never reconsidered by Phase C's full, unrestricted maze/MSMV search --
+// including cases where MSMV would have found a shorter or better-
+// distributed path. The monotonic tier can "steal" nets into a locally-
+// legal but globally worse route, permanently, before the stronger
+// search ever gets a chance. This is a real structural cost of
+// *sequential* graduated escalation paired with a *local-only*
+// acceptance gate, not an implementation bug -- the mechanism does
+// exactly what its own self-tests prove (finds a real monotonic path the
+// fixed pattern menu cannot); "resolves this net's overflow" and "is a
+// good route" are simply not the same claim, and the gate only checks
+// the first. See HISTORY_COST_SWEEP.md Part 22 for the full record,
+// including the note that a global-cost acceptance rule (closer to
+// FastRoute's own real approach) might avoid this, left for a future
+// session per the user's own directive to move to Steinerization now.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr2route fr2route.cpp

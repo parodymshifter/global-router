@@ -2364,3 +2364,55 @@ Decision criterion, per the plan: a clear double-digit-percent reduction
 in 2D overflow (matching the scale of vroute's own structural win, -21%
 to -36%) counts as "dramatic"; anything smaller triggers the user's own
 fallback to Steinerization next.
+
+**Real result, default settings (FR2ROUTE_MONOTONIC=1, same round budget
+convention as fr1route's own baseline), all three real ISPD benchmarks --
+all legal per gr_verify (0 malformed/disconnected/incomplete/unrouted/
+out-of-bounds):**
+
+| benchmark | fr1route (2D overflow, bar) | fr2route (2D overflow) | delta | runtime |
+|---|---|---|---|---|
+| adaptec1 | 69394 | 76296 | **+9.9%** | 2898s |
+| newblue1 | 20040 | 21644 | **+8.0%** | 583s |
+| bigblue1 | 207612 | 223026 | **+7.4%** | 3118s |
+
+All three ran *more* total rounds than fr1route's own baseline (222-223
+vs 172-173) -- this is not an under-converged comparison, it is a clean,
+unanimous regression while running longer.
+
+**Verdict, per the user's own decision criterion: not dramatic -- the
+opposite of dramatic.** A double-digit-or-clear reduction would have
+counted as a win; instead all three benchmarks got 7-10% worse. This
+triggers the user's own stated fallback directly: try Steinerization
+next.
+
+**Working diagnosis.** The escalation ladder's accept/reject gate
+(`overflowOverUnion`, unchanged from fr1route/vroute) only checks that a
+net's *own local* overflow doesn't get worse -- it says nothing about
+whether the accepted route is as good as a stronger tier would have
+found. Once a net resolves via the monotonic tier, `tier` only ever
+increases (by design, matching every prior escalation flag in this
+project), so a net that passes Phase B's local check is never
+reconsidered by Phase C's full, unrestricted maze/MSMV search --
+including in cases where MSMV would have found a shorter or better-
+distributed path than the monotonic tier's own bounding-box-confined,
+backtrack-free search could. The monotonic tier can "steal" nets into a
+locally-legal but globally worse route, permanently, before the stronger
+search ever gets a chance at them. This is a real structural cost of
+*sequential* graduated escalation with a *local-only* acceptance gate,
+not a bug in the implementation -- the mechanism does exactly what its
+self-tests prove it does (finds a real monotonic path the fixed pattern
+menu cannot), it is simply that "resolves this net's own overflow" and
+"is a good route" are not the same claim, and the gate only checks the
+first. FastRoute's own real implementation likely avoids this by scoring
+candidate routes globally (via a shared congestion cost, same as this
+project's own pricing) *before* committing, rather than accepting the
+first tier that locally clears -- a distinction this project's existing
+accept/reject discipline (built for a different purpose: preventing
+unconditional-batch-acceptance stampedes, see CLAUDE.md's own design
+decision) does not draw.
+
+Not investigated further given the user's own directive to move to
+Steinerization on a non-dramatic (here, negative) escalation result --
+worth noting for the record in case a future session revisits escalation
+architecture with a global-cost acceptance rule instead.
