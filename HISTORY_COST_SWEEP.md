@@ -2320,3 +2320,47 @@ detour bounds). Neither has been tried yet on the 2D-collapsed grid;
 deciding between them (or building `fr2route`'s layer assignment anyway,
 to see what even this un-converged 2D base produces once mapped to real
 3D) is the next open decision.
+
+## Part 22: fr2route -- escalation architecture (monotonic-maze middle tier)
+
+Generation 2 of the `fr` species. Per the user's own directive (escalation
+first; only if not dramatic, try Steinerization; then take the best of
+{fr1route, fr2route, fr3route} into layer assignment), this tests the
+first of the two architectural gaps fr1route's own header named after its
+round-budget probe ruled out "just run it longer" (Part 21's own
+follow-up): escalation sophistication.
+
+The gap: fr1route (and vroute before it) escalates in exactly two steps
+-- a fixed ~8-candidate L/Z pattern menu, then straight to full,
+unrestricted, margin-expanding maze/MSMV search. FastRoute's own
+architecture escalates gradually, with a cheap-but-real monotonic-path
+middle tier in between. Built as `gr/fr2route.cpp`, forked from
+`gr/fr1route.cpp`: `monotonicDijkstra` mirrors `boundedDijkstra` with two
+restrictions (no margin expansion -- exactly the net's own bounding box;
+monotonic neighbor generation -- only the neighbor that reduces distance
+to the target in each axis is ever relaxed). `RoutedNet::tier` (a new
+`Tier{Fast,Monotonic,Maze}` enum, replacing the old boolean `escalated`)
+only ever increases. A new Phase B, structurally identical to the old
+maze-tier round loop (same supervised accept/reject, same round-boundary
+history update, same patience-based stop), tries the monotonic tier
+first; only nets still overflowed after Phase B's own loop escalate
+further to Phase C's full maze search. `FR2ROUTE_MONOTONIC=0` reproduces
+fr1route's exact two-tier behavior.
+
+68 self-tests pass, including the decisive one: on a fixture where a wall
+blocks every column/row the fast tier's fixed candidates could ever turn
+at (0, 2, 4, 6, 8 -- the only columns `generateCandidates` ever tries),
+the real production `routeNetFast` cannot legalize the net, but the real
+production `routeNetMonotonic` -- free to turn at any column, including
+the odd ones the fixed menu never considers -- finds the gap and
+legalizes it cleanly.
+
+**Not yet measured against the real ISPD benchmarks.** Real-benchmark
+run, at the same default round budget as fr1route's own baseline
+measurement (isolating escalation architecture as the only variable),
+is the next step.
+
+Decision criterion, per the plan: a clear double-digit-percent reduction
+in 2D overflow (matching the scale of vroute's own structural win, -21%
+to -36%) counts as "dramatic"; anything smaller triggers the user's own
+fallback to Steinerization next.
