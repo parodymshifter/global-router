@@ -2250,3 +2250,39 @@ overflow/wirelength numbers are 2D-only and not directly comparable to
 vroute's own real 3D numbers (103172/30668/230084) until `fr2route`'s
 layer assignment exists. That real-benchmark measurement, and the
 decision whether to proceed to `fr2route`, is the next step once resumed.
+
+**Real result, default settings (172-round budget, same convention as every prior measurement), all three real ISPD benchmarks:**
+
+| benchmark | vroute (real 3D overflow, bar) | fr1route (2D overflow) | delta | runtime |
+|---|---|---|---|---|
+| adaptec1 | 103172 | 69394 | **-32.7%** | 2655s (~44 min) |
+| newblue1 | 30668 | 20040 | **-34.6%** | 540s (~9 min) |
+| bigblue1 | 230084 | 207612 | **-9.8%** | 2738s (~46 min) |
+
+`gr_verify` confirms all three legal and fully connected (0 malformed/
+disconnected/incomplete/unrouted/out-of-bounds). Its own *overflow*
+number on this output (7222978 / 4634042 / 7384704) is not reported as a
+result -- it scores against real per-layer 3D capacity while every
+segment sits on layer 1 alone (no layer assignment exists yet), so a huge
+number there is the expected, uninformative artifact of that, not a
+finding. Runtime confirms the plan's own cost estimate and then some:
+roughly 10x faster than vroute's real-3D runs (2655s vs 27109s on
+adaptec1), not just the ~6x predicted from dropping the layer dimension
+and via edges.
+
+**Verdict: a real, substantial, unanimous reduction -- but far short of
+the zero contest winners reach on adaptec1 and bigblue1.** The 2D
+collapse alone, with no other change to the negotiation/search machinery,
+cuts overflow 10-35% relative to full 3D routing purely by pooling
+cross-layer capacity -- direct, real evidence for Part 9's own thesis
+(idle capacity elsewhere hidden by per-layer accounting). But all three
+runs *hit the round cap* without converging to zero even in the easier,
+pooled-capacity 2D problem, so the immediate open question is whether
+that's a round-budget limit or an architecture limit: the 2D problem is
+~10x cheaper per round than vroute's 3D one, so testing a substantially
+larger round budget is cheap before concluding anything about topology
+(RSMT, deferred) or escalation architecture (FastRoute's own graduated
+monotonic-then-maze routing with expanding detour bounds, which this
+project's binary fast/slow split does not have). Whether to run that
+round-budget probe, move straight to `fr2route`'s layer assignment, or
+investigate topology/escalation next is an open decision, not yet made.

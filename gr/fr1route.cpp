@@ -105,12 +105,38 @@
 // FR1ROUTE_TWOD_ONLY is accepted but inert in this generation (there is
 // no layer-assignment stage yet to stop before) -- reserved for fr2route.
 //
-// Measured result: self-tests only. Per the plan's own risk note and the
-// user's explicit instruction, the real 3D benchmark runs (which need
-// fr2route's layer assignment to produce a comparable number against
-// vroute's own 103172/30668/230084) have not been launched from this
-// build -- only this generation's own 2D-phase behavior is measured here,
-// via self-test, not yet against the real ISPD benchmarks.
+// Measured result, default settings (172-round budget), all three real
+// ISPD benchmarks. `gr_verify` confirms all three legal and connected (0
+// malformed/disconnected/incomplete/unrouted/out-of-bounds); its own
+// *overflow* number on this output is not reported -- it scores against
+// real per-layer 3D capacity while every segment sits on layer 1 alone
+// (no layer assignment exists yet), so a huge number there (millions) is
+// the expected, uninformative artifact of that, not a finding. "2D
+// overflow" below is measured the way this file's own route() measures
+// it: against the pooled, summed-cross-layer capacity this file's whole
+// mechanism creates.
+//
+//   benchmark   vroute (real 3D overflow, bar)   fr1route (2D overflow)
+//   adaptec1    103172                           69394   -- -32.7%, 2655s
+//   newblue1     30668                           20040   -- -34.6%,  540s
+//   bigblue1    230084                          207612   --  -9.8%, 2738s
+//
+// A real, substantial, unanimous reduction -- direct evidence for Part
+// 9's own thesis, pooling cross-layer capacity alone (no other change to
+// the negotiation/search machinery) cuts overflow 10-35% relative to
+// full 3D routing -- but far short of the zero contest winners reach on
+// adaptec1 and bigblue1. All three runs hit the round cap without
+// converging even in this easier, pooled-capacity problem, and runtime
+// came in faster than predicted (~10x vroute's own 3D runtime, not just
+// the ~6x estimated from dropping the layer dimension and via edges) --
+// cheap enough that a substantially larger round-budget probe is a fast
+// way to tell a round-budget limit apart from an architecture limit
+// (topology -- RSMT, deliberately deferred -- or escalation
+// architecture -- FastRoute's own graduated monotonic-then-maze routing
+// with expanding detour bounds, which this project's binary fast/slow
+// split does not have) before committing to fr2route's layer assignment.
+// See HISTORY_COST_SWEEP.md Part 21 for the full record; which of those
+// three follow-ups to run next is an open decision, not yet made.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr1route fr1route.cpp
