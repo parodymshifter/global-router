@@ -28,6 +28,7 @@ qroute
 uroute
 kr1route
 vr1route
+fr1route
 *.o
 bench/
 *.gr

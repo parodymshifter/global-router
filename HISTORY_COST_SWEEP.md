@@ -2185,3 +2185,68 @@ the one large, unmatched lever -- and Part 8's placement-artifact finding
 (pin density varies 4x by radial band while capacity varies ~3%) remains
 the honest ceiling on how far any routing-only technique in this project
 can go.
+
+## Part 21: fr1route -- 2D-collapse global routing (generation 1 of the FastRoute/NTHU-Route pipeline)
+
+New species under the two-letter + generation-number naming convention:
+`fr` (FastRoute/NTHU-Route family -- 2D global routing, then a separate
+layer-assignment stage), generation 1. Scoped after the user pushed back
+directly on this project's own "placement ceiling" framing: the ISPD-2008
+contest record shows NTHU-Route 2.0 and FastRoute routed 12 of 16
+benchmarks to exactly zero overflow, adaptec1 and bigblue1 among them --
+not a last-mile gap against this project's current best (vroute:
+102482/30668/230084), evidence the search itself is leaving most of the
+achievable result on the table. Every ISPD-competitive router shares one
+architectural feature this project has never built: compress the 3D grid
+to 2D with summed per-layer capacity, route to an overflow-free 2D
+solution, then assign layers separately. This directly targets Part 9's
+own finding (every layer at a hot tile simultaneously over capacity,
+65.7% aggregate utilization) -- region pricing (Parts 18, 20) was a weak
+cost-hint approximation of the same idea and landed as a wash twice; this
+actually collapses the search space instead of nudging its cost.
+
+Full design in `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`,
+including the explicit topology decision (kept vroute's MST + MSMV
+unchanged, no RSMT, to isolate the 2D-first variable) and the
+generation-1/generation-2 split (2D routing now; capacity-aware DP layer
+assignment later, only if this generation validates).
+
+Built as `gr/fr1route.cpp`, forked from `gr/vroute.cpp`: every real
+per-layer edge at a given (x,y) collapses onto one synthetic 2D edge,
+`Usage::capH`/`capV` (summed once from the dense, post-adjustment
+g.hcap/g.vcap, so real .gr capacity adjustments carry through exactly).
+`Prices`/`Usage` are sized for the 2D edge count instead of vroute's full
+3D count. `LayerPlan` collapses to one synthetic layer (`hLayers =
+vLayers = {0}`, `isH`/`isV` unconditionally true); `boundedDijkstra` and
+`multiSourceDijkstra` both lose their via-edge relaxation block entirely
+(there is nothing to change layer *to*) and their "reachable at any
+layer" source-push case collapses to a single push at the one synthetic
+layer. A load-bearing identity avoids introducing a second, parallel
+indexing scheme: `g.hIndex(x, y, 0)` already reduces to the correct 2D
+index, so every inherited `g.hIndex`/`g.vIndex` call site works
+unmodified as long as `l` is always 0, which the edits above guarantee.
+
+Two of vroute's own inherited self-tests were removed (not adapted) --
+`testEscalationSolvesWhatFastTierCannot` (needed a multi-layer detour)
+and `testHistoryCostPreventsDriftBackToPreviouslyCongestedEdge` (compared
+two different real layers' cost) -- since their whole premise is
+structurally inapplicable once there is exactly one synthetic layer;
+`testHistoryIgnoresZeroCapacityEdges` was adapted (every real layer must
+now be blocked for the 2D-summed capacity to genuinely vanish) rather
+than removed, since the arithmetic-edge-case claim it tests is still
+real. 49 self-tests pass, including the file's own decisive proof:
+a net whose required width (10) exceeds every individual real layer's
+capacity (4 each, on 3 layers) -- so no single-layer choice a 3D router
+could ever make can avoid a 6-unit overflow on this net's one edge --
+routes at exactly 0 overflow once every layer's capacity is pooled
+(4+4+4=12 >= 10) into the one 2D edge this file's whole mechanism exists
+to create (`testTwoDRoutingClearsAnOverflowNoSingleLayerChoiceCanClear`).
+
+**Not yet measured against the real ISPD benchmarks.** Per the user's own
+explicit instruction (usage-limit constrained), the real 3D benchmark
+runs were not launched from this build -- this generation's own output
+places every segment on layer 1 (no layer assignment exists yet), so its
+overflow/wirelength numbers are 2D-only and not directly comparable to
+vroute's own real 3D numbers (103172/30668/230084) until `fr2route`'s
+layer assignment exists. That real-benchmark measurement, and the
+decision whether to proceed to `fr2route`, is the next step once resumed.
