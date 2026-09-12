@@ -2286,3 +2286,37 @@ monotonic-then-maze routing with expanding detour bounds, which this
 project's binary fast/slow split does not have). Whether to run that
 round-budget probe, move straight to `fr2route`'s layer assignment, or
 investigate topology/escalation next is an open decision, not yet made.
+
+### Follow-up: does a larger round budget close the gap? No.
+
+Direct test of the first of three open follow-ups named above: rerun all
+three benchmarks at roughly 1.7x the round budget
+(`VROUTE_FAST_ROUNDS=100 VROUTE_SLOW_ROUNDS=250`, nominal cap 350 vs the
+default's 210) -- cheap to test given the 2D phase's own ~10x-faster
+runtime. All three still "hit the round cap" (the slow tier was still
+declining, not stalled) at 272-273 total rounds run (fast tier plateaus
+at the same ~22-23 rounds regardless of its own raised cap, consistent
+with earlier runs; the slow tier used its entire new 250-round budget).
+Legal and connected on all three per `gr_verify` (0 malformed/
+disconnected/incomplete/unrouted/out-of-bounds).
+
+| benchmark | 172 rounds (2D overflow) | 273 rounds (2D overflow) | improvement | extra runtime |
+|---|---|---|---|---|
+| adaptec1 | 69394 | 68394 | -1.4% | 2655s -> 4208s (+58%) |
+| newblue1 | 20040 | 19676 | -1.8% | 540s -> 778s (+44%) |
+| bigblue1 | 207612 | 206810 | -0.4% | 2738s -> 4351s (+59%) |
+
+**Round budget is not the bottleneck.** ~60% more rounds (and ~50-60%
+more runtime) bought under 2% further reduction on every benchmark --
+diminishing returns, not a router on the verge of a breakthrough given
+more time. Extrapolating, even another doubling of the budget would not
+put any of the three within meaningful reach of the zero contest winners
+achieve on adaptec1 and bigblue1. This rules out "just run it longer" and
+points at the two remaining, deliberately-deferred architectural gaps:
+**topology quality** (this file kept vroute's plain MST, no RSMT) and
+**escalation sophistication** (this project's binary fast/slow split vs.
+FastRoute's own graduated monotonic-then-maze routing with expanding
+detour bounds). Neither has been tried yet on the 2D-collapsed grid;
+deciding between them (or building `fr2route`'s layer assignment anyway,
+to see what even this un-converged 2D base produces once mapped to real
+3D) is the next open decision.

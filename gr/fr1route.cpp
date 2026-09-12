@@ -128,15 +128,31 @@
 // adaptec1 and bigblue1. All three runs hit the round cap without
 // converging even in this easier, pooled-capacity problem, and runtime
 // came in faster than predicted (~10x vroute's own 3D runtime, not just
-// the ~6x estimated from dropping the layer dimension and via edges) --
-// cheap enough that a substantially larger round-budget probe is a fast
-// way to tell a round-budget limit apart from an architecture limit
-// (topology -- RSMT, deliberately deferred -- or escalation
-// architecture -- FastRoute's own graduated monotonic-then-maze routing
-// with expanding detour bounds, which this project's binary fast/slow
-// split does not have) before committing to fr2route's layer assignment.
-// See HISTORY_COST_SWEEP.md Part 21 for the full record; which of those
-// three follow-ups to run next is an open decision, not yet made.
+// the ~6x estimated from dropping the layer dimension and via edges).
+//
+// Follow-up, directly tested: does a larger round budget close the gap?
+// No. Rerun at ~1.7x the round budget (VROUTE_FAST_ROUNDS=100
+// VROUTE_SLOW_ROUNDS=250, nominal cap 350 vs the default 210; all three
+// still legal and connected per gr_verify, still "hit the round cap" at
+// 272-273 rounds run, not stalled):
+//
+//   benchmark   172 rounds   273 rounds   improvement   extra runtime
+//   adaptec1    69394        68394        -1.4%         2655s->4208s (+58%)
+//   newblue1    20040        19676        -1.8%          540s->778s  (+44%)
+//   bigblue1    207612       206810       -0.4%         2738s->4351s (+59%)
+//
+// Round budget is not the bottleneck -- ~60% more rounds bought under 2%
+// further reduction everywhere, diminishing returns rather than a router
+// on the verge of a breakthrough given more time. This rules out "just
+// run it longer" and points at the two remaining, deliberately-deferred
+// architectural gaps: topology quality (this file kept vroute's plain
+// MST, no RSMT) and escalation sophistication (this project's binary
+// fast/slow split vs. FastRoute's own graduated monotonic-then-maze
+// routing with expanding detour bounds). See HISTORY_COST_SWEEP.md Part
+// 21 for the full record; which to try next -- topology, escalation, or
+// building fr2route's layer assignment anyway to see what even this
+// un-converged 2D base produces in real 3D -- is an open decision, not
+// yet made.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr1route fr1route.cpp
