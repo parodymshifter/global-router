@@ -62,17 +62,38 @@
 // tile-edges with Steinerization enabled, 25 with it disabled on the
 // identical fixture).
 //
-// Measured result: see "Measured result" below, filled in once the real
-// benchmark runs are complete, at the same default round budget as
-// fr1route's own baseline measurement (matching fr2route's own
-// comparison convention) -- isolating topology as the only variable
-// being tested. Decision criterion for "dramatic," per the plan: a clear
-// double-digit-percent reduction in 2D overflow, matching the scale of
-// vroute's own structural win over kroute (-21% to -36%) -- anything
-// smaller is recorded honestly, and full FLUTE becomes the next thing to
-// try per the user's own stated sequence.
+// Measured result, default settings (FR3ROUTE_STEINERIZE=1, same round
+// budget convention as fr1route's own baseline), all three real ISPD
+// benchmarks. All legal per gr_verify (0 malformed/disconnected/
+// incomplete/unrouted/out-of-bounds):
 //
-// MEASURED RESULT PLACEHOLDER -- replaced once real benchmarks are run.
+//   benchmark   fr1route (2D overflow, bar)   fr3route (2D overflow)
+//   adaptec1    69394                         66792   -- -3.75%, 2916s
+//   newblue1    20040                         18428   -- -8.04%,  559s
+//   bigblue1    207612                        183362  -- -11.68%, 2876s
+//
+// **A real, unanimous improvement -- the first of the two fr-family
+// follow-ups to actually beat fr1route's baseline on all three
+// benchmarks** (fr2route's escalation-architecture experiment was a
+// clean regression, Part 22). Runtime is essentially unchanged from
+// fr1route's own baseline -- Steinerization is O(pins) per net,
+// negligible next to the routing search itself.
+//
+// Applying the "dramatic" decision criterion honestly: mixed against its
+// letter. Only bigblue1 (-11.68%) crosses into double digits, and even
+// that is well short of vroute's own -21% to -36% structural-win scale;
+// adaptec1 (-3.75%) is a modest single-digit gain. This is not the same
+// magnitude of result vroute's MSMV search was. But it is a clean,
+// unanimous *win*, not a wash or a regression -- the best of the three
+// fr-family variants measured so far. This cheap, dependency-free
+// version already finds real gains without touching degree>=3 branch
+// points at all (a disclosed scope cut); full FLUTE, which would also
+// optimize those, could plausibly do more, but the size of that
+// additional gain is unknown without building it -- a genuine judgment
+// call, deferred to the user: push further with FLUTE, or take this file
+// as the winner of the three parallel alternatives and move on to the
+// originally-planned layer-assignment stage on top of it. See
+// HISTORY_COST_SWEEP.md Part 23 for the full record.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr3route fr3route.cpp

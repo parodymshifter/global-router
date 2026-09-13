@@ -2449,3 +2449,42 @@ run, at the same default round budget as fr1route's and fr2route's own
 baseline convention (isolating topology as the only variable), is the
 next step. Same decision criterion as fr2route's: a clear double-digit-
 percent reduction in 2D overflow counts as "dramatic."
+
+**Real result, default settings (FR3ROUTE_STEINERIZE=1, same round budget
+convention as fr1route's own baseline), all three real ISPD benchmarks --
+all legal per gr_verify (0 malformed/disconnected/incomplete/unrouted/
+out-of-bounds):**
+
+| benchmark | fr1route (2D overflow, bar) | fr3route (2D overflow) | delta | runtime |
+|---|---|---|---|---|
+| adaptec1 | 69394 | 66792 | **-3.75%** | 2916s |
+| newblue1 | 20040 | 18428 | **-8.04%** | 559s |
+| bigblue1 | 207612 | 183362 | **-11.68%** | 2876s |
+
+**A real, unanimous improvement -- the first of the two fr-family
+follow-ups to actually beat fr1route's baseline on all three benchmarks.**
+Runtime is essentially unchanged from fr1route's own baseline (the
+Steinerization pass itself is O(pins) per net, negligible next to the
+routing search).
+
+**Applying the user's own decision criterion honestly: mixed against the
+letter of "dramatic."** Only bigblue1 (-11.68%) crosses into double
+digits, and even that is well short of vroute's own -21% to -36%
+structural-win scale; adaptec1 (-3.75%) is a modest single-digit gain.
+This is not the same magnitude of result vroute's MSMV search was. But
+unlike fr2route's clean, unanimous regression, this is a clean, unanimous
+*win* -- the best of the three `fr`-family variants measured so far
+(fr1 baseline, fr2 regression, fr3 real improvement on all three). Where
+it lands relative to "try FLUTE next" is a genuine judgment call, not a
+mechanical read of the stated threshold: the cheap, dependency-free
+version already found real gains without touching degree>=3 branch
+points at all (a disclosed, deliberate scope cut) -- full FLUTE, which
+would also optimize those, could plausibly do better, but the size of
+that additional gain is unknown without building it.
+
+**Decision, deferred to the user**: push further with full FLUTE
+(larger implementation, dependency-free but non-trivial -- lookup-table
+generation plus the FLUTE algorithm itself), or take `fr3route` as the
+winner of the three parallel alternatives and move on to the originally-
+planned layer-assignment stage on top of it, per the plan's own "final
+step" section. Not yet decided.
