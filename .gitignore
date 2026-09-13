@@ -31,6 +31,7 @@ vr1route
 fr1route
 fr2route
 fr3route
+fr4route
 *.o
 bench/
 *.gr

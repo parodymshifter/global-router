@@ -2488,3 +2488,63 @@ generation plus the FLUTE algorithm itself), or take `fr3route` as the
 winner of the three parallel alternatives and move on to the originally-
 planned layer-assignment stage on top of it, per the plan's own "final
 step" section. Not yet decided.
+
+## Part 24: fr4route -- exact rectilinear Steiner minimal tree (Dreyfus-Wagner DP), the "try full FLUTE" step
+
+Decision from Part 23: the user chose to push further -- "try full FLUTE
+-- then see which of the variants gets to the lowest overflow and take
+that one to full layer assignment."
+
+**Framing, disclosed up front**: literal FLUTE is a lookup-table speed
+hack -- fast because Chu's original work precomputed, via an offline
+exhaustive/POWV search, the optimal Steiner topology for every terminal
+configuration up to degree 9, then ships that table. Reproducing that
+table from scratch is a separate, multi-week research artifact, and this
+project's own conventions rule out vendoring an external dependency or
+datafile. `gr/fr4route.cpp` instead builds the **exact rectilinear
+Steiner minimal tree (RSMT)**, for the same degree range FLUTE targets
+(bounded terminal count, default <=8 unique pins), via the classical
+Dreyfus-Wagner Steiner-tree dynamic program over the Hanan grid -- slower
+per net than a table lookup, but exact rather than looked-up-approximate,
+achieving the same practical goal FLUTE exists to deliver, from scratch,
+with no external data.
+
+Unlike fr2route and fr3route (each an independent alternative measured
+against the common fr1route base), fr4route forks from `gr/fr3route.cpp`:
+it is a strict refinement of fr3's cheap pass, not a parallel alternative
+to it -- exact-solve the nets fr3's degree-2-only median trick
+structurally cannot help (any branch point of degree>=3), and keep fr3's
+own already-proven cheap pass as the fallback for nets above the degree
+cap. Full derivation (Hanan-grid construction, the DP's merge/relax
+steps, traceback reconstruction) in `gr/fr4route.cpp`'s own header.
+`FR4ROUTE_EXACT_STEINER=0` disables the exact solve (falling back to
+fr3route's own behavior, itself still gated by the inherited
+`FR3ROUTE_STEINERIZE`); `FR4ROUTE_EXACT_MAX_PINS` (default 8) sets the
+degree cap.
+
+76 self-tests pass, including the decisive proof fr3route's own cheap
+pass structurally cannot reach: a 4-point "hub" fixture (A=(0,3),
+B=(4,3), C=(2,6), D=(2,0)) whose plain MST gives branch point A degree 3
+-- outside fr3's degree-2-only scope, so its cheap pass is a no-op and
+total span stays at the plain MST's 14. The real Dreyfus-Wagner DP finds
+the true optimum, a "plus"-shaped tree through the exact hand-derived
+Steiner point (2,3), totaling 10 -- a 28.6% reduction reproduced end to
+end through the real `route()` pipeline (two independent copies of this
+fixture as separate nets: 20 total charged tile-edges with the exact
+solve enabled, 28 with both Steinerization mechanisms disabled). Also
+verified: two additional hand-computed small fixtures cross-checking the
+DP's cost against independently-derived optima; the degree-cap fallback
+path routes a 9-unique-pin net identically to calling fr3route's own
+`steinerizeTree` directly; disabling only the exact solve (leaving
+fr3route's cheap pass on) falls back to it correctly rather than
+silently reaching all the way down to the plain MST; tree-validity
+(union-find) on the exact solve's own output; and 2-pin/already-optimal
+nets are confirmed untouched.
+
+**Not yet measured against the real ISPD benchmarks.** Real-benchmark
+run, at the same default round budget as fr1route's and fr3route's own
+baseline convention (isolating topology as the only variable), is the
+next step. Per the user's own instruction, whichever of
+fr1route/fr3route/fr4route (fr2route's escalation architecture is
+already a rejected regression, Part 22) has the lowest 2D overflow is
+the one carried forward into the full layer-assignment stage.
