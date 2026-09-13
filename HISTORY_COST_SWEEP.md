@@ -2541,10 +2541,49 @@ silently reaching all the way down to the plain MST; tree-validity
 (union-find) on the exact solve's own output; and 2-pin/already-optimal
 nets are confirmed untouched.
 
-**Not yet measured against the real ISPD benchmarks.** Real-benchmark
-run, at the same default round budget as fr1route's and fr3route's own
-baseline convention (isolating topology as the only variable), is the
-next step. Per the user's own instruction, whichever of
-fr1route/fr3route/fr4route (fr2route's escalation architecture is
-already a rejected regression, Part 22) has the lowest 2D overflow is
-the one carried forward into the full layer-assignment stage.
+**Real result, default settings (FR4ROUTE_EXACT_STEINER=1, same round
+budget convention as fr1route's and fr3route's own baseline), all three
+real ISPD benchmarks -- all legal (0 malformed/out-of-bounds/disconnected
+/incomplete/unrouted segments per `gr_verify`; its own "total overflow"
+verdict is not the comparable metric here, same as every prior
+`fr*route` entry -- raw output has no layer assignment yet, so every
+segment piles onto one synthetic layer and gr_verify's real-3D-capacity
+overflow check does not apply until that stage exists):**
+
+| benchmark | fr1route (2D overflow, bar) | fr3route (2D overflow) | fr4route (2D overflow) | fr4 vs fr1 | fr4 vs fr3 | runtime |
+|---|---|---|---|---|---|---|
+| adaptec1 | 69394 | 66792 | **63966** | **-7.82%** | -4.23% | 3016s |
+| newblue1 | 20040 | 18428 | **18156** | **-9.40%** | -1.48% | 577s |
+| bigblue1 | 207612 | 183362 | **180060** | **-13.27%** | -1.80% | 2943s |
+
+**A real, unanimous improvement over both prior variants -- fr4route
+beats fr1route's plain-MST baseline and fr3route's cheap Steinerization
+on all three benchmarks, with no regression anywhere.** Runtime is
+essentially unchanged from fr1route's and fr3route's own baseline (the
+DP's cost is trivial per net at the default 8-pin cap; only the rare
+higher-degree nets pay any real DP cost at all, and the vast majority of
+real nets are 2-3 pins, which either skip the DP entirely or resolve it
+almost instantly).
+
+**Applying the user's own "dramatic" criterion honestly, one more time:**
+closer than fr3route was, but still not a clean sweep of double digits.
+bigblue1 (-13.27% vs fr1) crosses into double digits; adaptec1 (-7.82%)
+and newblue1 (-9.40%) are high single digits, just short. Measured
+against fr3route specifically (the more informative comparison, since
+fr4route is a strict refinement of it, not an independent alternative),
+the incremental gain from exact-solving degree>=3 branch points on top
+of fr3route's already-captured degree-2 gains is real but modest
+(-1.48% to -4.23%) -- most of the achievable Steiner benefit on these
+benchmarks was already low-hanging and fr3route's cheap pass had already
+picked most of it; the exact DP's own additional contribution, while
+unanimous and free (no runtime cost, no regression), is a smaller slice
+than fr3route's own jump over the plain MST was.
+
+**Decision, per the user's own explicit instruction ("see which of the
+variants gets to the lowest overflow and take that one to full layer
+assignment"): fr4route.** It has the strictly lowest 2D overflow of all
+four variants (fr1/fr2/fr3/fr4) on every one of the three real
+benchmarks -- not a judgment call this time, a direct read of the
+numbers above. `gr/fr4route.cpp` is the topology this project carries
+forward into the full layer-assignment stage, the originally-deferred
+final step from the plan that first scoped fr1route.

@@ -96,13 +96,36 @@
 // checks, degree-cap fallback-path exercise, tree-validity, and the
 // FR4ROUTE_EXACT_STEINER=0 regression guard).
 //
-// **Not yet measured against the real ISPD benchmarks.** Real-benchmark
-// run, at the same default round budget as fr1route's and fr3route's own
-// baseline convention (isolating topology as the only variable), is the
-// next step. Per the user's own final instruction, whichever of
-// fr1route/fr3route/fr4route (fr2route's escalation architecture is
-// already a rejected regression, Part 22) has the lowest 2D overflow is
-// the one carried forward into the full layer-assignment stage.
+// Real result, default settings, same round budget convention as
+// fr1route's and fr3route's own baseline, all three real ISPD
+// benchmarks -- all legal per gr_verify (0 malformed/out-of-bounds/
+// disconnected/incomplete/unrouted; its own "total overflow" verdict is
+// not the comparable metric here, same as every prior fr*route entry --
+// no layer assignment exists yet, so gr_verify's real-3D-capacity
+// overflow check does not apply):
+//
+//   benchmark   fr1route (bar)   fr3route   fr4route   fr4 vs fr1   fr4 vs fr3
+//   adaptec1    69394            66792      63966      -7.82%       -4.23%
+//   newblue1    20040            18428      18156      -9.40%       -1.48%
+//   bigblue1    207612           183362     180060      -13.27%     -1.80%
+//
+// A real, unanimous improvement over both prior variants -- no
+// regression anywhere, essentially unchanged runtime. Against fr1route's
+// "dramatic" bar, closer than fr3route was (bigblue1 crosses into double
+// digits) but still not a clean sweep. Against fr3route specifically
+// (the more informative comparison, since this file is a strict
+// refinement of it): the incremental gain from exact-solving degree>=3
+// branch points is real but modest (-1.48% to -4.23%) -- fr3route's
+// cheap pass had already captured most of the low-hanging Steiner
+// benefit on these benchmarks.
+//
+// **Decision, per the user's own explicit instruction ("see which of
+// the variants gets to the lowest overflow and take that one to full
+// layer assignment"): this file.** fr4route has the strictly lowest 2D
+// overflow of all four variants (fr1/fr2/fr3/fr4) on every one of the
+// three real benchmarks. See HISTORY_COST_SWEEP.md Part 24 for the full
+// record. This is the topology carried forward into the full
+// layer-assignment stage next.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr4route fr4route.cpp
