@@ -2717,3 +2717,69 @@ cost/capacity-aware generation 2 layer assignment (this generation's own
 disclosed scope cut, given via count is large enough here to plausibly
 matter), or (b) returning to the pricing loop itself now that the whole
 pipeline produces a real, comparable 3D number for the first time.
+
+## Part 26: fr6route -- layer assignment, generation 2 (joint via-cost/capacity-aware tree DP)
+
+The user's own chosen next step from Part 25: address fr5route's
+disclosed scope cut directly. fr5route's two layer-assignment passes
+were structurally blind to via cost -- each segment picked its own
+least-loaded real layer independently, and a separate stitching pass
+added whatever vias connectivity required, after the fact, with no cost
+or capacity model. The measured result showed via count roughly
+matching total wirelength (adaptec1: 3.9M wirelength vs 3.7M vias).
+
+Built as `gr/fr6route.cpp`, forked from `gr/fr5route.cpp` (same species,
+same pipeline stage, generation 2 of layer assignment specifically).
+Core mechanism: a **tree DP jointly choosing every net's own segment
+layers to minimize wire cost and via cost together**, replacing the
+independent-then-stitch approach entirely. Since `rn.mst` (the fixed
+Steinerization tree) is stale for any net that escalates to the
+MSMV/slow tier (>40% of nets on adaptec1 -- MSMV attaches new wire to
+any point on its own already-committed wire, mid-span, and never
+updates `rn.mst` again), the DP first **reconstructs** a clean tree
+directly from `rn.segs`'s own geometry (splitting every leg at every
+other leg's endpoint that falls strictly inside its own span), then runs
+a standard bottom-up/top-down tree DP: for each edge and each candidate
+real layer, cost = wire cost (fr5route's own usage/capacity ratio) plus,
+for each child edge, the cheapest combination of the child's own layer
+and the via chain needed if it disagrees with the parent -- a new real
+via-capacity model (`viaIndex`/`viaCapacityPerLayerPair`/`RealViaUsage`,
+adapted directly from `mroute.cpp`'s own, the only prior via-capacity
+precedent in this project) makes that via cost genuinely capacity-aware,
+not just a flat penalty. A root-level virtual-reference step makes even
+a branch-point root correctly weigh its own multiple children against
+each other, not just independently. If tree reconstruction or the DP
+ever fails for a specific net (a redundant/overlapping leg producing a
+cycle -- watched for via an explicit union-find check, not assumed
+safe), that one net falls back to fr5route's own already-proven-correct
+independent-greedy path rather than risking a new correctness bug on
+unusual topology. `FR6ROUTE_VIA_AWARE=0` reproduces fr5route's exact
+behavior, segment for segment, for direct comparison.
+
+170 checks across 45 test functions pass (all of fr5route's own 39
+carried over unchanged, plus 6 new ones), including: the decisive proof
+the joint DP avoids an avoidable via a greedy independent choice would
+create (a hand-engineered branch point where matching layers, accepting
+a wire-cost penalty, beats paying for a tight via site -- confirmed
+against fr5route's own inherited `assignSegmentLayer`, called on the
+identical starting usage, which does mismatch); via capacity that
+actually changes a later net's own decision (two sequential nets sharing
+one via site -- the first accepts the cheap, uncongested via; the
+second, after the first net's charge, switches to matching layers
+instead, since the same via has become more expensive than the wire
+penalty); tree reconstruction correctly splitting a mid-span MSMV-style
+attachment and remaining a valid tree (edges==nodes-1, connected, no
+cycle) on a real 4-way branch point; pin-access vias now genuinely
+charged into `RealViaUsage` (entirely free in fr5route); and
+`FR6ROUTE_VIA_AWARE=0` reproducing fr5route's own output exactly,
+segment for segment.
+
+**Not yet measured against the real ISPD benchmarks.** Real-benchmark
+run, same round budget as fr5route's own baseline, with the same careful
+`gr_verify` + `eval2008.pl` cross-check discipline fr5route's own
+verification required (three real bugs were found there before a result
+was trustworthy), is the next step. The explicit, open question this
+generation exists to answer: does joint via-awareness reduce real total
+overflow, via count, or both, relative to fr5route's own committed real
+numbers (adaptec1 93764, newblue1 26776, bigblue1 191976; via counts
+3713931 / 4340058 / 4033049).

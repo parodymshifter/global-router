@@ -48,6 +48,7 @@ jobs:
           - fr3route
           - fr4route
           - fr5route
+          - fr6route
     steps:
       - uses: actions/checkout@v4
 
