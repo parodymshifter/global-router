@@ -2416,3 +2416,36 @@ Not investigated further given the user's own directive to move to
 Steinerization on a non-dramatic (here, negative) escalation result --
 worth noting for the record in case a future session revisits escalation
 architecture with a global-cost acceptance rule instead.
+
+## Part 23: fr3route -- cheap MST Steinerization (Ho-Vijayan-Wong style)
+
+Generation 3 of the `fr` species, an independent alternative measured
+against the same fr1route base as fr2route (not stacked on top of it),
+per the user's own directive after fr2route's escalation-architecture
+experiment came back a clean regression (Part 22): try Steinerization
+next, cheap version before full FLUTE.
+
+The gap: `mstEdges` builds a plain rectilinear MST -- no Steiner points,
+ever, anywhere in this project's history. Built as `gr/fr3route.cpp`,
+forked from `gr/fr1route.cpp`: for every degree-2 node in the plain MST,
+compute the coordinate-wise median of it and its two tree-neighbors --
+the exact optimal rectilinear Steiner point for 3 terminals -- and if
+routing through it strictly reduces total span, replace the node's two
+MST edges with three new ones through a newly-appended Steiner point.
+Degree>=3 branch points are left untouched (a disclosed scope cut, not
+an oversight -- those need the fuller Hanan-grid Steiner DP FLUTE
+actually solves). `FR3ROUTE_STEINERIZE=0` reproduces fr1route's exact
+plain-MST topology.
+
+68 self-tests pass, including an exact, hand-derived decisive proof: a
+3-point hub shape (a=(0,0), b=(10,0), i=(5,10)) has plain-MST span 25;
+the real production `steinerizeTree` computes the exact Steiner point
+S=(5,0) and totals exactly 20 -- reproduced end to end through the real
+`route()` pipeline too (20 charged tile-edges with Steinerization
+enabled, 25 disabled, on the identical fixture).
+
+**Not yet measured against the real ISPD benchmarks.** Real-benchmark
+run, at the same default round budget as fr1route's and fr2route's own
+baseline convention (isolating topology as the only variable), is the
+next step. Same decision criterion as fr2route's: a clear double-digit-
+percent reduction in 2D overflow counts as "dramatic."
