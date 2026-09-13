@@ -2638,12 +2638,82 @@ end-to-end multi-net, multi-layer design confirmed fully connected in 3D
 (real layers plus stitched vias) through the real `route()` ->
 `assignLayers()` pipeline.
 
-**Not yet measured against the real ISPD benchmarks.** This is the point
-where the `fr` lineage's own numbers finally become directly comparable
-to this project's actual zero-overflow mandate and to `vroute`'s historic
-real result (adaptec1 103172, newblue1 30668, bigblue1 230084) -- not
-just to each other's self-reported 2D overflow. Real-benchmark run, same
-default round budget as fr4route's own baseline, with the real
-`gr_verify` + `eval2008.pl` cross-check as the actual comparison metric
-(the "2D overflow" self-reported convention ends here, since it's finally
-meaningful again), is the next step.
+**Three real bugs were found and fixed during this generation's own
+real-benchmark verification, before any result was recorded as
+settled** -- exactly the discipline this project's verification
+principles exist for. In order:
+
+1. **Pin-declared-layer connectivity** (fix `5fe1185`): `gr_verify`
+   (matching `eval2008.pl`'s own real scoring) requires a route to touch
+   each pin's *exact* declared layer, not just its tile on any layer.
+   fr1route through fr4route's uniform single-layer output happened to
+   satisfy this by coincidence (these benchmarks apparently declare
+   most/all pins on layer index 0), masking the gap entirely until this
+   generation's own greedy layer choice broke it at massive scale (98%
+   of adaptec1's nets came back "incomplete"). Fixed with
+   `stitchPinAccessForNet`.
+2. **Mid-span MSMV via-stitching** (fix `542821b`): the first via-
+   stitching pass only checked segment *endpoints*, missing MSMV's own
+   defining mechanism -- attaching new wire to any point on already-
+   committed wire, mid-span. With 75993 of 176716 nets on adaptec1
+   escalating to the slow/MSMV tier, this broke 5974 nets into multiple
+   disconnected pieces. Fixed by replacing the endpoint-only scan with
+   `coverageAt`, recording every real layer present at every unit tile a
+   segment's full span covers.
+3. **Degenerate zero-length segments** (fix `8c60a98`): `eval2008.pl`
+   rejects any segment whose two endpoints match exactly on the same
+   layer as a hard "null route" error. Traced to `commitCandidate`'s own
+   inherited leg-commit code (unchanged since `vroute.cpp`), which emits
+   exactly this whenever an L/Z-shape candidate's own leg is zero-length
+   -- confirmed byte-for-byte identical in `fr4route`'s own earlier real
+   output (net n7807 alone had 200+), never caught because `gr_verify`
+   doesn't flag it and `eval2008.pl` was never run against any
+   2D-collapsed generation's raw output before this one. Fixed with
+   `dropDegenerateSegs`.
+
+**Real result, all three fixes applied, same default round budget as
+fr4route's own baseline, all three real ISPD benchmarks -- all legal per
+`gr_verify` (0 malformed/out-of-bounds/disconnected/incomplete/unrouted),
+and `gr_verify`'s own total overflow/max overflow/scored wirelength agree
+exactly with the independent `eval2008.pl` scorer on every benchmark --
+the first time in the whole `fr` lineage this cross-check has been
+meaningful or run:**
+
+| benchmark | vroute (real total overflow, historic best) | fr5route (real total overflow) | delta vs vroute | via count | runtime |
+|---|---|---|---|---|---|
+| adaptec1 | 103172 | **93764** | **-9.12%** | 3713931 | 2962s |
+| newblue1 | 30668 | **26776** | **-12.69%** | 4340058 | 574s |
+| bigblue1 | 230084 | **191976** | **-16.56%** | 4033049 | 2896s |
+
+**A real, unanimous improvement over `vroute`'s own historic real
+result -- the best total overflow this entire project has ever measured
+against real per-layer capacity, on all three benchmarks.** This is the
+first router in the whole project's history to beat vroute's real number
+at all; every intermediate `fr1`-`fr4` generation was only ever
+comparable to `vroute` via each router's own self-reported 2D-collapsed
+number, never head-to-head on the actual mandate metric. Total overflow
+remains far from zero (tens of thousands to nearly two hundred thousand)
+-- this is a major step, not the destination -- and via count is large
+relative to wirelength (roughly one via per wire tile-edge on average),
+the direct, expected cost of this generation's disclosed scope cut: via
+placement is driven purely by connectivity, never by cost or capacity.
+
+**Why this beats vroute at all, despite `fr5route`'s own 2D-collapsed
+search converging to a *worse* 2D overflow than vroute's real search
+ever saw** (the 2D numbers were never apples-to-apples with vroute's own
+3D ones): pooling every real layer's capacity into one synthetic 2D edge
+before routing, then greedily spreading the resulting wires back across
+real layers by congestion, evidently finds a materially better balance
+of real per-layer utilization than vroute's real-3D-aware but
+fixed-topology-free search did on its own -- consistent with this
+project's own recurring lesson (first surfaced when vroute itself beat
+kroute) that *what the search is structurally allowed to do* moves the
+number more than tuning a shared cost formula ever has.
+
+**This is the router carried into whatever comes next.** Per the user's
+own original sequencing, the natural next steps -- not yet started,
+genuine open choices rather than foregone conclusions -- are: (a) a via-
+cost/capacity-aware generation 2 layer assignment (this generation's own
+disclosed scope cut, given via count is large enough here to plausibly
+matter), or (b) returning to the pricing loop itself now that the whole
+pipeline produces a real, comparable 3D number for the first time.

@@ -69,13 +69,24 @@
 //     file's own lineage regardless): a plain usage/capacity ratio is the
 //     right amount of mechanism for a single-pass greedy fill, not a full
 //     parallel real-layer negotiation loop.
-//   - Via stitching: after every Seg in a net has a real layer, group
-//     segment endpoints by coordinate; wherever more than one distinct
-//     layer is present at a point, pick the minimum as the reference layer
-//     and append a chain of unit via Segs stepping from the reference to
-//     every other distinct layer present, one real layer at a time --
-//     transitively connecting everything at that point through the
-//     reference layer. Via capacity/cost is not charged or optimized here.
+//   - Via stitching (`coverageAt`/`stitchViasForNet`): records every real
+//     layer present at *every unit tile* a Seg's full span covers, not
+//     just its two endpoints (a first version that only checked endpoints
+//     missed MSMV's own defining mechanism -- attaching new wire mid-span
+//     to already-committed wire -- see "bugs found" below); wherever more
+//     than one distinct layer is present at a tile, picks the minimum as
+//     the reference layer and appends a chain of unit via Segs stepping
+//     from the reference to every other distinct layer present, one real
+//     layer at a time. Via capacity/cost is not charged or optimized here.
+//   - Pin access (`stitchPinAccessForNet`): re-derives each real pin's
+//     required layer directly from rn.net->pins (untouched by
+//     Steinerization) and bridges a via chain from whatever layer the
+//     tree already reaches at that pin's tile down to its own declared
+//     layer -- gr_verify's real connectivity check requires an exact
+//     layer match, not just a tile match.
+//   - `dropDegenerateSegs`: strips zero-length, same-layer segments
+//     ((x,y,l)-(x,y,l)) inherited from route()'s own candidate-commit
+//     code before any of the above runs -- see "bugs found" below.
 //   - Net order = rep.nets' own existing order (fr4route's own routing
 //     order) -- a disclosed, simple choice, not congestion-optimized.
 //
@@ -110,6 +121,52 @@
 //     the full account, and testPinAccessLayerIsAlwaysReached for the
 //     regression test that would have caught this before it ever reached
 //     a real benchmark run.
+//
+// Three real bugs were found and fixed during this generation's own
+// real-benchmark verification, before any result was recorded as
+// settled -- exactly what this project's verification principles exist
+// for:
+//   1. Pin-declared-layer connectivity (fix 5fe1185, above).
+//   2. Mid-span MSMV via-stitching (fix 542821b): the first
+//      stitchViasForNet only checked segment endpoints, missing MSMV's
+//      own defining mechanism (attaching wire to any point on already-
+//      committed wire, mid-span) -- broke 5974 of adaptec1's nets into
+//      multiple disconnected pieces. Fixed with coverageAt's full-span
+//      scan; see testViaStitchingCatchesMidSpanMsmvAttachmentNotJustEndpoints.
+//   3. Degenerate zero-length segments (fix 8c60a98): eval2008.pl rejects
+//      a segment whose endpoints match exactly on the same layer as a
+//      hard "null route" error -- traced to commitCandidate's own
+//      inherited leg-commit code (unchanged since vroute.cpp), confirmed
+//      byte-for-byte identical in fr4route's own earlier real output.
+//      Fixed with dropDegenerateSegs; see
+//      testDegenerateZeroLengthSegmentsAreDropped.
+//
+// Real result, all three fixes applied, same round budget as fr4route's
+// own baseline, all three real ISPD benchmarks -- all legal per gr_verify
+// (0 malformed/out-of-bounds/disconnected/incomplete/unrouted), and
+// gr_verify's own total overflow/max overflow/scored wirelength agree
+// exactly with the independent eval2008.pl scorer on every benchmark --
+// the first time in the whole fr lineage this cross-check has been
+// meaningful or run:
+//
+//   benchmark   vroute (real, historic best)   fr5route (real)   delta      vias
+//   adaptec1    103172                         93764             -9.12%     3713931
+//   newblue1    30668                          26776             -12.69%    4340058
+//   bigblue1    230084                         191976            -16.56%    4033049
+//
+// A real, unanimous improvement over vroute's own historic real result --
+// the best total overflow this entire project has ever measured against
+// real per-layer capacity, on all three benchmarks. The first router in
+// the whole project's history to beat vroute's real number at all; every
+// intermediate fr1-fr4 generation was only ever comparable to vroute via
+// each router's own self-reported 2D-collapsed number. Total overflow
+// remains far from zero -- a major step, not the destination -- and via
+// count is large relative to wirelength (roughly one via per wire
+// tile-edge on average), the direct, expected cost of this generation's
+// disclosed via-cost-blind scope cut. See HISTORY_COST_SWEEP.md Part 25
+// for the full record, including the likely explanation for why pooling
+// capacity into 2D before spreading it back across real layers beats
+// vroute's real-3D-aware but fixed-topology-free search on its own.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr5route fr5route.cpp
