@@ -2169,15 +2169,46 @@ void stitchPinAccessForNet(RoutedNet &rn) {
   rn.segs.insert(rn.segs.end(), vias.begin(), vias.end());
 }
 
-// The whole new stage: greedily assign every net's segments to real
-// layers, stitch each net's own internal layer mismatches with vias, then
-// stitch every real pin down to its own exact declared layer. Mutates
-// `nets` in place -- called once, after route() has fully converged, and
-// before writeSolution.
+// Bug found (a third one) during this generation's own real-benchmark
+// verification: eval2008.pl's own scorer treats any segment whose two
+// endpoints match exactly, on the same layer -- (x,y,l)-(x,y,l) -- as a
+// hard error ("null route"). route()'s own inherited candidate-commit
+// code (commitCandidate, this file's own priceCandidate/commitCandidate,
+// unchanged since vroute.cpp) emits exactly this whenever an L/Z-shape
+// candidate's own leg happens to be zero-length (its two endpoints
+// already share that axis coordinate) -- `segs.push_back({leg.a,
+// leg.cross, l, leg.b, leg.cross, l})` with leg.a==leg.b. This has been
+// present, silently, in every router in this whole lineage since it was
+// first written -- confirmed byte-for-byte identical in fr4route's own
+// earlier real adaptec1 output (net n7807 alone had over 200 of them).
+// It was never caught because gr_verify doesn't flag it and eval2008.pl
+// was never run against any 2D-collapsed generation's raw single-layer
+// output before this one. A zero-length segment contributes nothing to
+// real wirelength or overflow either way, so dropping it changes no
+// measured behavior -- it only removes dead output eval2008.pl is
+// stricter about than gr_verify. Rather than patch multiple frozen,
+// inherited emission sites (commitCandidate, commitPath, routeGiantNet),
+// this generation -- already doing substantial segment post-processing
+// -- filters every one out before layer assignment even runs.
+void dropDegenerateSegs(RoutedNet &rn) {
+  rn.segs.erase(std::remove_if(rn.segs.begin(), rn.segs.end(),
+                                [](const Seg &s) {
+                                  return s.x1 == s.x2 && s.y1 == s.y2 && s.l1 == s.l2;
+                                }),
+                rn.segs.end());
+}
+
+// The whole new stage: drop any inherited degenerate zero-length
+// segments, greedily assign every real segment to a real layer, stitch
+// each net's own internal layer mismatches with vias, then stitch every
+// real pin down to its own exact declared layer. Mutates `nets` in
+// place -- called once, after route() has fully converged, and before
+// writeSolution.
 void assignLayers(const RoutingGrid &g, std::vector<RoutedNet> &nets) {
   RealLayerPlan lp(g);
   RealUsage ru(g);
   for (RoutedNet &rn : nets) {
+    dropDegenerateSegs(rn);
     for (Seg &s : rn.segs)
       assignSegmentLayer(g, ru, lp, rn.net->minWidth, s);
     stitchViasForNet(rn);
@@ -3620,6 +3651,30 @@ void testMultiTileSegmentChargesEveryUnitEdgeNotJustOnce() {
   }
 }
 
+// The decisive regression test for the third bug found during this
+// generation's own real-benchmark verification (see dropDegenerateSegs's
+// own comment): route()'s own inherited candidate-commit code has always
+// emitted zero-length, same-layer segments -- (x,y,l)-(x,y,l) -- which
+// eval2008.pl's real scorer rejects outright as a "null route", even
+// though gr_verify never flagged them and they contribute nothing to
+// real wirelength either way. A hand-built RoutedNet mixing one real
+// wire leg with two degenerate ones (matching the exact shape found in
+// fr4route's own real adaptec1 output, net n7807) confirms only the
+// degenerate ones are removed.
+void testDegenerateZeroLengthSegmentsAreDropped() {
+  RoutedNet rn;
+  rn.segs = {
+      {0, 0, 0, 10, 0, 0},  // a real wire leg
+      {5, 5, 1, 5, 5, 1},   // degenerate: same point, same layer
+      {20, 20, 2, 20, 20, 2}, // another, elsewhere in the net
+  };
+  dropDegenerateSegs(rn);
+  check(rn.segs.size() == 1, "both degenerate segments were removed, "
+                              "the real leg was not");
+  check(rn.segs[0].x1 == 0 && rn.segs[0].x2 == 10,
+        "the surviving segment is exactly the real wire leg, untouched");
+}
+
 // FR1ROUTE_TWOD_ONLY=1's own long-documented purpose, finally made real:
 // main() never calls assignLayers() at all when it is set, reproducing
 // fr4route's exact single-layer output. Self-tests call route() directly
@@ -3782,6 +3837,7 @@ int run() {
   testViaStitchingConnectsAThreeWayLayerMismatch();
   testViaStitchingCatchesMidSpanMsmvAttachmentNotJustEndpoints();
   testMultiTileSegmentChargesEveryUnitEdgeNotJustOnce();
+  testDegenerateZeroLengthSegmentsAreDropped();
   testTwodOnlyReproducesFr4routesExactSingleLayerOutput();
   testPinAccessLayerIsAlwaysReached();
   testEndToEndRoutingAndLayerAssignmentProducesAConnectedThreeDResult();
