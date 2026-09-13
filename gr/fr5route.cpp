@@ -97,11 +97,19 @@
 //   - Greedy, single-pass, order-dependent -- nets are assigned layers in
 //     rep.nets' own existing order, not re-optimized once later nets have
 //     committed.
-//   - Pin-declared access layers (Pin::layer in gr_io.h) are not enforced
-//     -- a pre-existing gap across the entire project (every router since
-//     aroute, fr1-fr4 included, has always discarded Pin::layer when
-//     building RoutedNet::pts), not something this generation newly
-//     introduces.
+//   - Pin-declared access layers (Pin::layer in gr_io.h) were initially
+//     mis-assessed as a harmless pre-existing gap (every router since
+//     aroute, fr1-fr4 included, discards Pin::layer when building
+//     RoutedNet::pts) -- wrong: fr1-fr4's uniform single-layer output
+//     happened to satisfy it by coincidence (these benchmarks apparently
+//     declare most/all pins on layer index 0), masking it completely.
+//     This generation's own greedy layer choice broke it at massive scale
+//     the moment wires actually spread across real layers (98% of
+//     adaptec1's nets came back "incomplete" per gr_verify before the
+//     fix). Fixed with `stitchPinAccessForNet` -- see its own comment for
+//     the full account, and testPinAccessLayerIsAlwaysReached for the
+//     regression test that would have caught this before it ever reached
+//     a real benchmark run.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr5route fr5route.cpp
@@ -2092,8 +2100,60 @@ void stitchViasForNet(RoutedNet &rn) {
   rn.segs.insert(rn.segs.end(), vias.begin(), vias.end());
 }
 
+// Bug found and fixed during this generation's own real-benchmark
+// verification, not caught by any hand-built self-test until one was
+// added specifically to catch it (see testPinAccessLayerIsAlwaysReached):
+// gr_verify (matching eval2008.pl's own real scoring -- gr_verify.cpp's
+// own comment: "The route must reach the pin's exact declared layer, not
+// merely its tile on some other layer") requires a net's route to touch
+// each pin's exact (x, y, layer) triple, not just its tile on any layer.
+// fr1route through fr4route's uniform single-layer output happened to
+// satisfy this by coincidence -- these benchmarks apparently declare
+// most/all pins on layer index 0 -- masking the gap entirely; this file's
+// own greedy layer choice, once wires genuinely spread across multiple
+// real layers, broke it at massive scale (98% of adaptec1's routed nets
+// came back "incomplete" before this fix). assignSegmentLayer/
+// stitchViasForNet only ever reason about the *tree's own* internal
+// layer choices -- neither one knows where a net's real pins declared
+// they must be reached, because RoutedNet::pts never retained pin layers
+// in the first place (route()'s own net-construction loop only ever kept
+// {x, y}). This pass re-derives that requirement directly from
+// `rn.net->pins` (untouched by anything upstream, including
+// Steinerization, which only ever appends new points and never touches
+// an original pin's own (x, y)) rather than threading pin layers through
+// the whole Steinerization pipeline. Must run after stitchViasForNet, so
+// every point's already-committed layer choice is the single, fully-
+// connected representative CLAUDE.md's own via-stitching guarantee
+// already established for that point -- not an arbitrary one of several
+// still-disconnected candidates.
+void stitchPinAccessForNet(RoutedNet &rn) {
+  std::map<std::pair<int, int>, int> layerAt;
+  for (const Seg &s : rn.segs) {
+    layerAt[{s.x1, s.y1}] = s.l1;
+    layerAt[{s.x2, s.y2}] = s.l2;
+  }
+
+  std::vector<Seg> vias;
+  for (const Pin &p : rn.net->pins) {
+    auto it = layerAt.find({p.x, p.y});
+    if (it == layerAt.end())
+      continue; // the tree already spans every pin's (x,y) by construction
+    int have = it->second;
+    if (have == p.layer)
+      continue;
+    if (p.layer > have)
+      for (int l = have; l < p.layer; ++l)
+        vias.push_back({p.x, p.y, l, p.x, p.y, l + 1});
+    else
+      for (int l = have; l > p.layer; --l)
+        vias.push_back({p.x, p.y, l, p.x, p.y, l - 1});
+  }
+  rn.segs.insert(rn.segs.end(), vias.begin(), vias.end());
+}
+
 // The whole new stage: greedily assign every net's segments to real
-// layers, then stitch each net's own layer mismatches with vias. Mutates
+// layers, stitch each net's own internal layer mismatches with vias, then
+// stitch every real pin down to its own exact declared layer. Mutates
 // `nets` in place -- called once, after route() has fully converged, and
 // before writeSolution.
 void assignLayers(const RoutingGrid &g, std::vector<RoutedNet> &nets) {
@@ -2103,6 +2163,7 @@ void assignLayers(const RoutingGrid &g, std::vector<RoutedNet> &nets) {
     for (Seg &s : rn.segs)
       assignSegmentLayer(g, ru, lp, rn.net->minWidth, s);
     stitchViasForNet(rn);
+    stitchPinAccessForNet(rn);
   }
 }
 
@@ -3378,12 +3439,22 @@ void testCapacityAwareLayerChoiceReactsToRealUsageNotJustPreference() {
       netB = &rn;
   }
   check(netA != nullptr && netB != nullptr, "found both nets by name (sanity)");
-  check(netA->segs.size() == 1 && netB->segs.size() == 1,
-        "each net is a single straight horizontal leg (sanity)");
-  check(netA->segs[0].l1 == 0,
+
+  // Find each net's own wire leg specifically (not any via segment
+  // stitchPinAccessForNet may since have added -- both nets' pins are
+  // declared on layer index 0 in this fixture, so whichever net's wire
+  // landed on a different layer now also carries pin-access vias, which
+  // is correct behavior, not this test's own concern).
+  auto wireLayer = [](const RoutedNet &rn) {
+    for (const Seg &s : rn.segs)
+      if (s.l1 == s.l2 && (s.x1 != s.x2 || s.y1 != s.y2))
+        return s.l1;
+    return -1;
+  };
+  check(wireLayer(*netA) == 0,
         "the first-committed net ties on empty-usage cost and lands on "
         "the lower-indexed real layer, 0");
-  check(netB->segs[0].l1 == 1,
+  check(wireLayer(*netB) == 1,
         "the second net's identical-position segment sees layer 0 "
         "already at its real capacity (usage 1, cap 1) and is pushed to "
         "real layer 1 instead -- driven by RealUsage, not a static rule");
@@ -3535,6 +3606,55 @@ void testTwodOnlyReproducesFr4routesExactSingleLayerOutput() {
         "genuinely differ, not just an inert flag read");
 }
 
+const char *kPinLayerMismatchGr = R"(grid 6 2 3
+vertical capacity 20 20 20
+horizontal capacity 20 20 20
+minimum width 1 1 1
+minimum spacing 0 0 0
+via spacing 0 0 0
+0 0 10 10
+num net 1
+netPin 0 2 1
+5 5 1
+35 5 3
+0
+)";
+
+// The decisive regression test for the bug found during this generation's
+// own real-benchmark verification (see stitchPinAccessForNet's own
+// comment): a 2-pin net where one pin is declared on layer 1 (file,
+// 1-indexed -- index 0) and the other on layer 3 (index 2). The greedy
+// wire assignment has no congestion-driven reason to ever choose layer 2
+// on its own (every layer here is ample and equally cheap, so it ties to
+// the lowest index, 0) -- reproducing exactly the real-benchmark failure
+// mode where a pin's own declared layer is never naturally reached.
+// gr_verify's own connectivity check (matching eval2008.pl) is reproduced
+// directly here: the route must touch each pin's exact (x, y, layer).
+void testPinAccessLayerIsAlwaysReached() {
+  Design d = parse("fr5route_selftest_pinlayer.gr", kPinLayerMismatchGr);
+  RunReport rep = route(d, 30, 5, 0.02, 1.0, HistMode::kAdditive, 1.0);
+  check(rep.nets.size() == 1, "netPin produced a route");
+  assignLayers(d.grid, rep.nets);
+  RoutedNet &rn = rep.nets[0];
+
+  check(segsConnected(rn.segs),
+        "the net is fully connected in 3D after pin-access stitching");
+
+  auto touches = [&](int x, int y, int l) {
+    for (const Seg &s : rn.segs)
+      if ((s.x1 == x && s.y1 == y && s.l1 == l) ||
+          (s.x2 == x && s.y2 == y && s.l2 == l))
+        return true;
+    return false;
+  };
+  check(touches(0, 0, 0), "pin A's own declared layer (index 0) is reached");
+  check(touches(3, 0, 2),
+        "pin B's own declared layer (index 2) is reached -- even though "
+        "the wire's own greedy choice, driven purely by congestion, has "
+        "no reason to land there on its own, exactly the gap "
+        "stitchPinAccessForNet exists to close");
+}
+
 const char *kMultiNetMultiLayerGr = R"(grid 10 10 3
 vertical capacity 4 4 4
 horizontal capacity 4 4 4
@@ -3616,6 +3736,7 @@ int run() {
   testViaStitchingConnectsAThreeWayLayerMismatch();
   testMultiTileSegmentChargesEveryUnitEdgeNotJustOnce();
   testTwodOnlyReproducesFr4routesExactSingleLayerOutput();
+  testPinAccessLayerIsAlwaysReached();
   testEndToEndRoutingAndLayerAssignmentProducesAConnectedThreeDResult();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
