@@ -165,6 +165,7 @@
 #include <limits>
 #include <map>
 #include <queue>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -2059,43 +2060,65 @@ void assignSegmentLayer(const RoutingGrid &g, RealUsage &ru, const RealLayerPlan
   s.l1 = s.l2 = best;
 }
 
-// After every Seg in a net has a real layer, physically stitch together
-// any point where two legs meeting there disagree on layer -- a separate,
-// unoptimized connectivity pass (via cost/capacity is not charged or
-// optimized in this generation, see the file header). Groups segment
-// endpoints by raw coordinate (Seg stores real coordinates, not point
-// indices, unlike SteinerResult's edge list); for every point with more
-// than one distinct layer present, picks the minimum as the reference
-// layer and appends a chain of unit via Segs stepping from the reference
-// to every other distinct layer present, one real layer at a time --
-// transitively connecting everything at that point through the reference
-// layer.
-void stitchViasForNet(RoutedNet &rn) {
-  std::map<std::pair<int, int>, std::vector<int>> layersAt;
-  for (const Seg &s : rn.segs) {
-    layersAt[{s.x1, s.y1}].push_back(s.l1);
-    layersAt[{s.x2, s.y2}].push_back(s.l2);
+// Bug found and fixed during this generation's own real-benchmark
+// verification: the first version of stitchViasForNet only grouped by
+// *segment endpoints*, but MSMV's whole defining mechanism (see
+// fr1route.cpp's/vroute.cpp's header) is attaching a net's growing wire
+// to any point on its own already-committed wire, mid-span, not just at
+// the two ends of some other tree edge. Once a majority of nets escalate
+// to the slow/MSMV tier (75993 of 176716 on adaptec1), a huge number of
+// real layer mismatches happen exactly at these mid-span attachment
+// points, which the endpoint-only version silently never saw -- gr_verify
+// caught this as "route is in more than one piece" on thousands of real
+// nets (5974 on adaptec1) even after the pin-access fix resolved the
+// separate incomplete-nets bug. `coverageAt` below fixes this by
+// recording every real layer present at *every unit tile* a Seg's full
+// span covers, not just its two endpoints -- exactly matching how
+// gr_verify's own connectivity check (and the real physical wire) treats
+// two same-layer segments sharing any tile as already connected there,
+// and two different-layer segments sharing a tile as needing a real via.
+std::map<std::pair<int, int>, std::set<int>> coverageAt(const std::vector<Seg> &segs) {
+  std::map<std::pair<int, int>, std::set<int>> cov;
+  for (const Seg &s : segs) {
+    if (s.l1 != s.l2) {
+      // A via: a single point, present at both layers it bridges.
+      cov[{s.x1, s.y1}].insert(s.l1);
+      cov[{s.x1, s.y1}].insert(s.l2);
+      continue;
+    }
+    if (s.x1 == s.x2) {
+      for (int y = std::min(s.y1, s.y2); y <= std::max(s.y1, s.y2); ++y)
+        cov[{s.x1, y}].insert(s.l1);
+    } else {
+      for (int x = std::min(s.x1, s.x2); x <= std::max(s.x1, s.x2); ++x)
+        cov[{x, s.y1}].insert(s.l1);
+    }
   }
+  return cov;
+}
 
+// After every Seg in a net has a real layer, physically stitch together
+// any tile where two legs (or a leg and a mid-span MSMV attachment)
+// occupy the same (x,y) on different real layers -- a separate,
+// unoptimized connectivity pass (via cost/capacity is not charged or
+// optimized in this generation, see the file header). For every tile
+// with more than one distinct layer present, picks the minimum as the
+// reference layer and appends a chain of unit via Segs stepping from the
+// reference to every other distinct layer present, one real layer at a
+// time -- transitively connecting everything at that tile through the
+// reference layer.
+void stitchViasForNet(RoutedNet &rn) {
+  auto cov = coverageAt(rn.segs);
   std::vector<Seg> vias;
-  for (auto &entry : layersAt) {
-    std::vector<int> layers = entry.second;
-    std::sort(layers.begin(), layers.end());
-    layers.erase(std::unique(layers.begin(), layers.end()), layers.end());
-    if (layers.size() < 2)
-      continue; // every leg at this point already agrees -- nothing to stitch
+  for (auto &entry : cov) {
+    if (entry.second.size() < 2)
+      continue; // every leg at this tile already agrees -- nothing to stitch
+    std::vector<int> layers(entry.second.begin(), entry.second.end()); // std::set: already sorted
     int ref = layers.front();
     int x = entry.first.first, y = entry.first.second;
-    for (size_t i = 1; i < layers.size(); ++i) {
-      int target = layers[i];
-      if (target > ref) {
-        for (int l = ref; l < target; ++l)
-          vias.push_back({x, y, l, x, y, l + 1});
-      } else {
-        for (int l = ref; l > target; --l)
-          vias.push_back({x, y, l, x, y, l - 1});
-      }
-    }
+    for (size_t i = 1; i < layers.size(); ++i)
+      for (int l = ref; l < layers[i]; ++l)
+        vias.push_back({x, y, l, x, y, l + 1});
   }
   rn.segs.insert(rn.segs.end(), vias.begin(), vias.end());
 }
@@ -2121,26 +2144,21 @@ void stitchViasForNet(RoutedNet &rn) {
 // `rn.net->pins` (untouched by anything upstream, including
 // Steinerization, which only ever appends new points and never touches
 // an original pin's own (x, y)) rather than threading pin layers through
-// the whole Steinerization pipeline. Must run after stitchViasForNet, so
-// every point's already-committed layer choice is the single, fully-
-// connected representative CLAUDE.md's own via-stitching guarantee
-// already established for that point -- not an arbitrary one of several
-// still-disconnected candidates.
+// the whole Steinerization pipeline. Must run after stitchViasForNet (and
+// re-derive coverage fresh, including its new vias), so a pin's own tile
+// is checked against the single, fully-connected layer set
+// stitchViasForNet already established there -- not a stale or partial
+// view of it.
 void stitchPinAccessForNet(RoutedNet &rn) {
-  std::map<std::pair<int, int>, int> layerAt;
-  for (const Seg &s : rn.segs) {
-    layerAt[{s.x1, s.y1}] = s.l1;
-    layerAt[{s.x2, s.y2}] = s.l2;
-  }
-
+  auto cov = coverageAt(rn.segs);
   std::vector<Seg> vias;
   for (const Pin &p : rn.net->pins) {
-    auto it = layerAt.find({p.x, p.y});
-    if (it == layerAt.end())
+    auto it = cov.find({p.x, p.y});
+    if (it == cov.end() || it->second.empty())
       continue; // the tree already spans every pin's (x,y) by construction
-    int have = it->second;
-    if (have == p.layer)
-      continue;
+    if (it->second.count(p.layer))
+      continue; // already reached
+    int have = *it->second.begin(); // any layer already connected at this tile
     if (p.layer > have)
       for (int l = have; l < p.layer; ++l)
         vias.push_back({p.x, p.y, l, p.x, p.y, l + 1});
@@ -3538,6 +3556,34 @@ void testViaStitchingConnectsAThreeWayLayerMismatch() {
         "segments total, none wasted");
 }
 
+// The decisive regression test for the second bug found during this
+// generation's own real-benchmark verification (see coverageAt's own
+// comment): the first version of this stage only checked segment
+// *endpoints* for layer mismatches, missing MSMV's own defining
+// mechanism -- attaching new wire to any point on already-committed
+// wire, mid-span, not just at another tree edge's two ends. This fixture
+// reproduces exactly that shape: a long already-committed leg, and a
+// second leg attaching at a point strictly inside the first leg's own
+// span (not one of its two declared endpoints), on a different layer.
+void testViaStitchingCatchesMidSpanMsmvAttachmentNotJustEndpoints() {
+  RoutedNet rn;
+  rn.segs = {
+      {0, 5, 0, 10, 5, 0}, // an already-committed wire, layer 0, x=0..10
+      {5, 5, 2, 5, 8, 2},  // a new leg attaching mid-span at (5,5), layer 2
+  };
+  size_t before = rn.segs.size();
+  stitchViasForNet(rn);
+  check(rn.segs.size() > before,
+        "a via was inserted at the mid-span attachment point (5,5), not "
+        "just at segment endpoints -- the exact gap this fix closes");
+  check(segsConnected(rn.segs),
+        "the two legs are connected in full 3D even though their shared "
+        "point is the middle of the first leg's own span, not one of its "
+        "declared endpoints -- exactly what MSMV produces at scale on "
+        "real benchmarks (5974 disconnected nets on adaptec1 before this "
+        "fix)");
+}
+
 const char *kLongEdgeGr = R"(grid 8 2 1
 vertical capacity 20
 horizontal capacity 1
@@ -3734,6 +3780,7 @@ int run() {
   testCapacityAwareLayerChoiceReactsToRealUsageNotJustPreference();
   testDirectionPreferenceIsNeverViolated();
   testViaStitchingConnectsAThreeWayLayerMismatch();
+  testViaStitchingCatchesMidSpanMsmvAttachmentNotJustEndpoints();
   testMultiTileSegmentChargesEveryUnitEdgeNotJustOnce();
   testTwodOnlyReproducesFr4routesExactSingleLayerOutput();
   testPinAccessLayerIsAlwaysReached();
