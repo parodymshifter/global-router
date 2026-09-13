@@ -170,6 +170,16 @@
 //                                 1 (enabled). 0 reproduces fr5route's
 //                                 exact independent-greedy-plus-stitching
 //                                 behavior for direct comparison.
+//     FR6ROUTE_VIA_WEIGHT=<float>  scales the DP's via-cost term relative
+//                                 to its wire-cost term, default 1.0
+//                                 (unweighted -- reproduces the real
+//                                 result recorded in HISTORY_COST_SWEEP.md
+//                                 Part 26, a clean rejection). Added as a
+//                                 tuning knob after that result, per the
+//                                 diagnosis in this file's own header:
+//                                 the two cost domains are summed with no
+//                                 inherent calibration. See Part 27 for
+//                                 the empirical sweep.
 //     FR1ROUTE_TWOD_ONLY=1         skips assignLayers() entirely,
 //                                 reproducing fr4route's exact
 //                                 single-layer, zero-via output.
@@ -2248,7 +2258,8 @@ bool buildNetTree(const std::vector<Seg> &segs, NetTree &t) {
 // attempted here.
 bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
                     const std::vector<int> &viaCap, const RealLayerPlan &lp, int width,
-                    const NetTree &t, std::vector<int> &edgeLayer, int &rootLayer) {
+                    const NetTree &t, std::vector<int> &edgeLayer, int &rootLayer,
+                    double viaWeight = 1.0) {
   int n = static_cast<int>(t.nodes.size());
   edgeLayer.assign(t.edges.size(), 0);
   rootLayer = 0;
@@ -2307,7 +2318,7 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
       size_t idx = viaIndex(g, x, y, l);
       total += static_cast<double>(rvu.usage[idx] + 1) / static_cast<double>(std::max(1, viaCap[l]));
     }
-    return total;
+    return total * viaWeight;
   };
 
   std::vector<std::vector<double>> dp(t.edges.size(), std::vector<double>(L, kInf));
@@ -2717,6 +2728,18 @@ void assignLayers(const RoutingGrid &g, std::vector<RoutedNet> &nets) {
   bool viaAware = true;
   if (const char *r = std::getenv("FR6ROUTE_VIA_AWARE"); r)
     viaAware = std::string(r) != "0";
+  // This file's own tuning knob, added after the real-benchmark result
+  // recorded a clean, unanimous regression at the implicit default of
+  // 1.0 (HISTORY_COST_SWEEP.md Part 26): the DP's cost model sums a wire
+  // usage/capacity ratio and a via usage/capacity ratio with no
+  // calibration between them; this scales the via term relative to the
+  // wire term so that relationship can be tuned empirically against the
+  // real benchmarks rather than assumed. Default stays 1.0 (unweighted,
+  // reproducing the already-recorded rejected result exactly) until a
+  // sweep finds a better value -- see HISTORY_COST_SWEEP.md Part 27.
+  double viaWeight = 1.0;
+  if (const char *r = std::getenv("FR6ROUTE_VIA_WEIGHT"); r)
+    viaWeight = std::atof(r);
 
   for (RoutedNet &rn : nets) {
     dropDegenerateSegs(rn);
@@ -2726,7 +2749,8 @@ void assignLayers(const RoutingGrid &g, std::vector<RoutedNet> &nets) {
       std::vector<int> edgeLayer;
       int rootLayer = 0;
       if (buildNetTree(rn.segs, t) &&
-          layerAssignDP(g, ru, rvu, viaCap, lp, rn.net->minWidth, t, edgeLayer, rootLayer)) {
+          layerAssignDP(g, ru, rvu, viaCap, lp, rn.net->minWidth, t, edgeLayer, rootLayer,
+                        viaWeight)) {
         commitNetTree(g, ru, rvu, rn.net->minWidth, t, edgeLayer, rootLayer, rn);
         stitchPinAccessForNetChargingVias(g, rvu, rn);
         continue;
@@ -4410,6 +4434,41 @@ void testJointDPAvoidsAnAvoidableViaGreedyWouldCreate() {
         "not a coincidence both mechanisms would reach anyway");
 }
 
+// This file's own tuning knob (added after the real-benchmark result in
+// HISTORY_COST_SWEEP.md Part 26) has a real, direct effect: on the
+// identical tight-via fixture above, a low via weight should make the
+// DP behave like the old independent-greedy path (mismatch, since the
+// via cost that used to deter it is now negligible), not like the
+// default weight=1.0 case (match).
+void testViaWeightKnobHasRealEffect() {
+  Design d = parse("fr6route_selftest_viaweight.gr", kTightViaGr);
+  RealLayerPlan lp(d.grid);
+  RealViaUsage rvu(d.grid);
+  std::vector<int> viaCap = viaCapacityPerLayerPair(d.grid);
+
+  RealUsage ru(d.grid);
+  for (int x = 0; x < 5; ++x)
+    ru.h[d.grid.hIndex(x, 0, 1)] += 1;
+  for (int y = 0; y < 5; ++y)
+    ru.v[d.grid.vIndex(5, y, 0)] += 1;
+
+  std::vector<Seg> segs = {{0, 0, 0, 5, 0, 0}, {5, 0, 0, 5, 5, 0}};
+  NetTree t;
+  check(buildNetTree(segs, t), "tree reconstruction succeeded (sanity)");
+
+  std::vector<int> edgeLayer;
+  int rootLayer = 0;
+  check(layerAssignDP(d.grid, ru, rvu, viaCap, lp, 1, t, edgeLayer, rootLayer,
+                       /*viaWeight=*/0.01),
+        "the DP produced a result at a low via weight (sanity)");
+  check(edgeLayer[0] != edgeLayer[1],
+        "at a low via weight, the same tight-via site that made the "
+        "default (1.0) match layers is no longer worth avoiding -- the "
+        "DP mismatches instead, same as the old independent-greedy path "
+        "-- proving the weight parameter genuinely reaches the DP's own "
+        "cost computation, not just accepted and ignored");
+}
+
 // Via capacity is charged, and genuinely changes a later net's own
 // decision, not just passively tracked. A separate fixture (via spacing
 // 3, not 10) gives via capacity 3, headroom enough that a first net's
@@ -4657,6 +4716,7 @@ int run() {
   testPinAccessLayerIsAlwaysReached();
   testEndToEndRoutingAndLayerAssignmentProducesAConnectedThreeDResult();
   testJointDPAvoidsAnAvoidableViaGreedyWouldCreate();
+  testViaWeightKnobHasRealEffect();
   testViaCapacityIsChargedAndInfluencesLaterDecisions();
   testTreeReconstructionSplitsAMidSpanAttachment();
   testTreeReconstructionIsAlwaysAValidTree();
