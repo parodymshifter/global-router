@@ -2587,3 +2587,63 @@ benchmarks -- not a judgment call this time, a direct read of the
 numbers above. `gr/fr4route.cpp` is the topology this project carries
 forward into the full layer-assignment stage, the originally-deferred
 final step from the plan that first scoped fr1route.
+
+## Part 25: fr5route -- layer assignment, generation 1 (greedy real-layer selection + via stitching)
+
+Every `fr*route` file through fr4route only solves the *2D-collapsed*
+problem: every real layer's capacity is summed into one synthetic layer,
+every routed segment is dumped onto a single placeholder real layer
+(`Seg.l1==Seg.l2==0` always, vias always 0), and `gr_verify`'s own "total
+overflow" -- this project's actual zero-overflow mandate metric -- is not
+even meaningful on that output. `FR1ROUTE_TWOD_ONLY` has been carried,
+documented but inert, through every generation since fr1route
+specifically reserved it for this moment: **layer assignment**, the
+second half of the FastRoute/NTHU-Route pipeline this whole species is
+modeled on.
+
+Built as `gr/fr5route.cpp`, forked from `gr/fr4route.cpp` (same species,
+not a new core 2D-search algorithm -- this is the pipeline's second
+stage, not a variation on the first). Scope for this generation,
+disclosed up front: a full jointly-optimized (wire-congestion + via-cost)
+layer assignment is a real DP problem -- the "capacity-aware DP" half of
+the two-stage split the original fr1route plan first sketched. This
+generation builds the cheaper half first, per this project's own repeated
+"cheap version before the full one" discipline: **greedy, capacity-aware,
+per-segment real-layer selection** (each leg independently picks the
+direction-matching real layer with the lowest running usage-over-capacity
+ratio, no negotiated pricing, no joint via-cost optimization), followed
+by a **separate, unoptimized via-stitching pass** that guarantees
+physical connectivity wherever two legs meeting at a point land on
+different real layers (reference = the minimum layer present; a chain of
+unit vias bridges every other layer to it). Via cost/capacity is not part
+of the optimization objective in this generation -- a disclosed scope
+cut. `FR1ROUTE_TWOD_ONLY=1` is now finally functional: it skips
+`assignLayers()` entirely, reproducing fr4route's exact single-layer,
+zero-via output.
+
+All 30 of fr4route's own inherited self-tests still pass unchanged, plus
+6 new ones added for this generation's own mechanism (36 test functions,
+133 individual checks total, 0 failures) -- see `fr5route.cpp`'s own
+self-test namespace. The 6 new tests cover: capacity-awareness
+that's real, not a static rule (two nets forced to share one edge land on
+two different real layers, the second net's choice driven by the first's
+already-committed usage); direction preference never violated (a
+horizontal-only layer never receives a vertical leg and vice versa); via
+stitching verified directly on a hand-built three-layer mismatch (legs on
+layers 0, 2, and 4 meeting at one hub point end up fully connected in 3D
+via exactly 6 unit-step via segments, none wasted); a multi-tile-edge leg
+charging every unit edge it covers, not just the first; `FR1ROUTE_TWOD_ONLY
+=1` byte-for-byte reproducing fr4route's placeholder output; and an
+end-to-end multi-net, multi-layer design confirmed fully connected in 3D
+(real layers plus stitched vias) through the real `route()` ->
+`assignLayers()` pipeline.
+
+**Not yet measured against the real ISPD benchmarks.** This is the point
+where the `fr` lineage's own numbers finally become directly comparable
+to this project's actual zero-overflow mandate and to `vroute`'s historic
+real result (adaptec1 103172, newblue1 30668, bigblue1 230084) -- not
+just to each other's self-reported 2D overflow. Real-benchmark run, same
+default round budget as fr4route's own baseline, with the real
+`gr_verify` + `eval2008.pl` cross-check as the actual comparison metric
+(the "2D overflow" self-reported convention ends here, since it's finally
+meaningful again), is the next step.
