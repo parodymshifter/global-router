@@ -117,6 +117,43 @@
 //     mroute.cpp's fuller negotiated exponential curve -- consistent
 //     with this generation's own single-pass scope, not a lower-effort
 //     oversight.
+//
+// Real result, all three real ISPD benchmarks -- all legal per gr_verify
+// (0 malformed/out-of-bounds/disconnected/incomplete/unrouted), gr_verify
+// and eval2008.pl agreeing exactly on every benchmark:
+//
+//   benchmark   fr5route (real)   fr6route (real)   delta      fr5 vias   fr6 vias   via delta
+//   adaptec1    93764             148746             +58.64%    3713931    3432150    -7.59%
+//   newblue1    26776             80164              +199.39%   4340058    4109510    -5.31%
+//   bigblue1    191976            248336             +29.36%    4033049    3714381    -7.90%
+//
+// **A clean, unanimous regression on the actual mandate metric (real
+// total overflow) on all three benchmarks -- substantial, not a close
+// call, and consistent in direction everywhere.** The via-count reduction
+// this generation was built for did happen (-5% to -8%, consistently),
+// but at a cost that far outweighs it: fr6route is now worse than
+// vroute's own historic real result on all three benchmarks too, undoing
+// fr5route's own milestone. Per this project's own decision discipline
+// (fr2route's escalation architecture, kr1route's lambda-relax): **this
+// generation is rejected as the default; gr/fr5route.cpp remains this
+// project's best real result.**
+//
+// Diagnosis (most likely explanation, not yet confirmed by further
+// experiment): the DP's cost model sums a wire usage/capacity ratio and
+// a via usage/capacity ratio with no calibration between them. A single
+// hand-checked via site looked reasonable next to typical wire
+// capacities in isolation, but across hundreds of thousands of real
+// edges, with many nets now actively matching layers to *reuse* already-
+// used via sites (concentrating traffic there, the opposite of
+// independent wire spreading), a systemic imbalance between the two
+// ratio domains could dominate even when one site's own numbers look
+// fine. Not fixed here -- per the user's own explicit instruction, the
+// cost formula is not modified without further direction; this
+// generation's job was to measure and report honestly. See
+// HISTORY_COST_SWEEP.md Part 26 for the full record and the deferred
+// decision on how to proceed (accept the rejection and keep fr5route, or
+// attempt an empirically-tuned weighting coefficient between the two
+// cost terms).
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr6route fr6route.cpp

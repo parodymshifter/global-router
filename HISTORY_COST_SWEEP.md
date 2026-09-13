@@ -2774,12 +2774,60 @@ charged into `RealViaUsage` (entirely free in fr5route); and
 `FR6ROUTE_VIA_AWARE=0` reproducing fr5route's own output exactly,
 segment for segment.
 
-**Not yet measured against the real ISPD benchmarks.** Real-benchmark
-run, same round budget as fr5route's own baseline, with the same careful
-`gr_verify` + `eval2008.pl` cross-check discipline fr5route's own
-verification required (three real bugs were found there before a result
-was trustworthy), is the next step. The explicit, open question this
-generation exists to answer: does joint via-awareness reduce real total
-overflow, via count, or both, relative to fr5route's own committed real
-numbers (adaptec1 93764, newblue1 26776, bigblue1 191976; via counts
-3713931 / 4340058 / 4033049).
+**Real result, all three real ISPD benchmarks -- all legal per gr_verify
+(0 malformed/out-of-bounds/disconnected/incomplete/unrouted), and
+gr_verify's own total overflow/max overflow/scored wirelength agree
+exactly with the independent eval2008.pl scorer on every benchmark:**
+
+| benchmark | fr5route (real overflow) | fr6route (real overflow) | delta | fr5route vias | fr6route vias | via delta |
+|---|---|---|---|---|---|---|
+| adaptec1 | 93764 | **148746** | **+58.64%** | 3713931 | 3432150 | -7.59% |
+| newblue1 | 26776 | **80164** | **+199.39%** | 4340058 | 4109510 | -5.31% |
+| bigblue1 | 191976 | **248336** | **+29.36%** | 4033049 | 3714381 | -7.90% |
+
+**A clean, unanimous regression on the actual mandate metric, real total
+overflow, on all three benchmarks -- substantial (+29% to +199%), not a
+close call, and consistent in direction across every benchmark, not an
+outlier on one.** The via-count reduction this generation was built to
+deliver did happen, consistently (-5% to -8%), but at a cost that far
+outweighs it: fr6route is now worse than `vroute`'s own historic real
+result on all three benchmarks too (adaptec1 +44.17%, newblue1 +161.39%,
+bigblue1 +7.93% vs vroute), undoing fr5route's own milestone (the first
+router in this project to beat vroute's real number at all). Applying
+this project's own decision discipline (fr2route's escalation
+architecture and kr1route's lambda-relax are the direct precedents for a
+clean, unanimous rejection): **fr6route is rejected as the default; `gr/
+fr5route.cpp` remains this project's best real result.**
+
+**Diagnosis, offered as the most likely explanation, not yet confirmed
+by further experiment**: the DP's cost model directly sums two cost
+domains -- a wire usage/capacity ratio and a via usage/capacity ratio --
+with no calibration between them, implicitly assuming one unit of "wire
+ratio" and one unit of "via ratio" are comparable costs. A single hand-
+checked via site on newblue1 (via capacity 30, derived from via-spacing
+1 and tile 30x30) looked reasonable next to that benchmark's own typical
+wire capacities (6-28 per layer) -- but that is one site in isolation,
+not the aggregate picture. Across hundreds of thousands of real edges,
+with many nets simultaneously competing for the same via sites the DP
+now actively tries to *reuse* (matching layers to avoid new vias
+concentrates traffic onto whichever via sites already got used, the
+opposite of what spreading wire across layers independently would do),
+a systemic imbalance in how the two ratios accumulate could easily
+dominate even when one site's own numbers look fine -- exactly the kind
+of aggregate effect a single hand-checked example can't reveal, and
+exactly why this project's own discipline insists on measuring real
+benchmarks rather than reasoning from a hand-picked case. Bearing this
+out (or ruling it out) is future work, not attempted here -- per the
+user's own explicit instruction, the cost formula is not being modified
+without further direction; this generation's job right now was to
+measure and report honestly.
+
+**Decision, deferred to the user**: accept this as a rejected generation
+and keep `fr5route` as the standing best (matching the disclosed-risk
+framing this generation's own plan already flagged -- via-cost/capacity
+awareness was always a real open question, not a foregone improvement),
+or attempt a tuning follow-up (e.g. an explicit weighting coefficient
+between the wire and via cost terms, tuned empirically against the real
+benchmarks the same way every other coefficient in this project's
+history has been) before deciding whether the underlying mechanism is
+salvageable. Not yet decided.
