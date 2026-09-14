@@ -101,6 +101,37 @@
 //     fix (this generation's aggregation change *and* a nonzero weight)
 //     may still be worth screening if the default weight alone doesn't
 //     close the gap.
+//
+// Real result, default FR7ROUTE_VIA_WEIGHT=1.0, all three real ISPD
+// benchmarks -- all legal per gr_verify (0 malformed/out-of-bounds/
+// disconnected/incomplete/unrouted), gr_verify and eval2008.pl agreeing
+// exactly on every benchmark:
+//
+//   benchmark   fr5route (real)   fr6route (real)   fr7route (real)   fr7 vs fr6   fr7 vs fr5
+//   adaptec1    93764             148746             148574            -0.12%       +58.46%
+//   newblue1    26776             80164              79420             -0.93%       +196.61%
+//   bigblue1    191976            248336             246352            -0.80%       +28.32%
+//
+// **The overcounting-bug fix alone does not rescue this generation
+// either.** fr7route is essentially indistinguishable from fr6route's
+// own rejected result (within -0.12% to -0.93% on overflow, -0.44% to
+// -0.56% on vias, on every benchmark unanimously) -- both remain far
+// worse than fr5route on the actual mandate metric. The hypothesis that
+// motivated this generation (that per-node overcounting was the
+// *dominant* cause of fr6route's regression) does not hold up against
+// real data, even though the bug itself was real and the fix was
+// confirmed correct by a hand-derived decisive self-test. This suggests
+// the cost-domain scale mismatch (fr6route's own Part 26 diagnosis) is
+// the dominant factor after all, and the two issues are more
+// independent than initially assumed.
+//
+// **Decision: rejected on the same grounds as fr6route.**
+// `gr/fr5route.cpp` remains this project's best real result. This file
+// stays frozen as the corrected cost-model base for a possible combined
+// fix (this generation's own aggregation fix plus an empirically-tuned
+// FR7ROUTE_VIA_WEIGHT, mirroring Part 27's sweep but on the now-correct
+// model) -- not yet tried, and a genuinely open question. See
+// HISTORY_COST_SWEEP.md Part 28 for the full record.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr7route fr7route.cpp

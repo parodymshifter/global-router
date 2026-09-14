@@ -2968,11 +2968,48 @@ layer-pair double-charged), while still letting every edge keep its own
 genuinely cheapest layer -- every number hand-derived before running the
 test, all matched exactly.
 
-**Not yet measured against the real ISPD benchmarks.** Real-benchmark
-run at the default `FR7ROUTE_VIA_WEIGHT=1.0`, with the same careful
-`gr_verify` + `eval2008.pl` cross-check discipline every layer-assignment
-generation's verification has required, is the next step. The explicit
-question: does fixing the overcounting bug alone get closer to, or beat,
-fr5route's own real overflow (adaptec1 93764, newblue1 26776, bigblue1
-191976) while still capturing a real via reduction, compared to
-fr6route's own rejected numbers (Part 26/27).
+**Real result, default `FR7ROUTE_VIA_WEIGHT=1.0`, all three real ISPD
+benchmarks -- all legal per `gr_verify` (0 malformed/out-of-bounds/
+disconnected/incomplete/unrouted), `gr_verify` and `eval2008.pl`
+agreeing exactly on every benchmark:**
+
+| benchmark | fr5route (real) | fr6route (real, Part 26) | fr7route (real) | fr7 vs fr6 | fr7 vs fr5 | fr6 vias | fr7 vias | vias delta |
+|---|---|---|---|---|---|---|---|---|
+| adaptec1 | 93764 | 148746 | 148574 | -0.12% | +58.46% | 3432150 | 3413125 | -0.55% |
+| newblue1 | 26776 | 80164 | 79420 | -0.93% | +196.61% | 4109510 | 4091578 | -0.44% |
+| bigblue1 | 191976 | 248336 | 246352 | -0.80% | +28.32% | 3714381 | 3693453 | -0.56% |
+
+**The overcounting-bug fix alone does not rescue this generation
+either.** fr7route is essentially indistinguishable from fr6route's own
+rejected result -- within -0.12% to -0.93% on overflow and -0.44% to
+-0.56% on vias, on every benchmark, unanimously. Both remain far worse
+than fr5route on the actual mandate metric (+28% to +197% real
+overflow). The hypothesis that motivated this generation -- that
+per-node overcounting was the *dominant* cause of fr6route's
+regression -- does not hold up against real data: fixing it, correctly
+and confirmed via a hand-derived decisive self-test, moved the real
+result by less than 1% in either direction.
+
+**Reading**: this is consistent with the "known risk" this generation's
+own plan disclosed up front -- fixing the overcounting bug and the
+cost-domain scale mismatch (Part 26's own diagnosis, tested without
+rescue via the weight sweep in Part 27) are independent axes, and this
+result suggests the scale mismatch, not the overcounting, is the
+dominant factor after all. The overcounting bug was real (proven by the
+decisive self-test: fr6route's model would have charged 8 via
+unit-steps for a case where the true cost is 5) and worth fixing on its
+own correctness merits, but apparently affects too small a fraction of
+real branch points, or too small a magnitude relative to the scale
+mismatch, to move the aggregate real-benchmark result measurably.
+
+**Decision: `fr7route` is rejected as the default on the same grounds as
+fr6route -- no improvement over `fr5route` on the actual mandate
+metric.** `gr/fr5route.cpp` remains this project's best real result.
+`gr/fr7route.cpp` stays in the repository, frozen, as a real negative
+result and the corrected cost-model base for any future attempt --
+notably, a `FR7ROUTE_VIA_WEIGHT` sweep on this now-corrected model
+(the natural combined-fix follow-up the original plan already
+anticipated) has not yet been tried, and remains a genuinely open
+question deferred to the user: does combining the overcounting fix with
+a tuned weight succeed where either alone did not, or has this whole
+via-cost-aware line of attack now been reasonably exhausted.
