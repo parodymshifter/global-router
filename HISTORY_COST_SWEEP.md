@@ -2925,3 +2925,54 @@ chains, or a real negotiated/iterative via-pricing loop instead of a
 static ratio) -- not modified further under this generation's own name,
 per this project's own "build new mechanisms as separate frozen files"
 discipline.
+
+## Part 28: fr7route -- true minimal-spanning-stack via cost (layer assignment, generation 3)
+
+The user's own chosen follow-up from Part 27: fix fr6route's actual
+cost-model bug rather than continue scaling it. fr6route's own header
+already flagged a second, independent hypothesis the weight sweep never
+tested: `viaChainCost` charged a full chain from the parent's layer to
+*every* child's layer independently, double-counting any shared portion
+of a via stack at a node with two or more children. Concretely, a parent
+at layer 0 with children at layers 3 and 5 was charged
+`chain(0,3)=3 + chain(0,5)=5 = 8` unit-steps, when the true physical cost
+is one stack spanning 0 to 5 -- 5 steps, since a single contiguous stack
+lets every edge in between tap into it for free. This structurally
+biases the DP toward over-avoiding vias exactly at real branch points
+(Steiner points, multi-way MSMV attachments) -- exactly where fr6route's
+own regression cost the most in sacrificed wire quality.
+
+Built as `gr/fr7route.cpp`, forked from `gr/fr6route.cpp`: `layerAssignDP`
+replaces the per-child independent minimization with a joint per-node
+stack-range search -- for each candidate parent layer, try every
+candidate via-stack range containing it (at most `nLayers^2`, `nLayers`
+is 6 for every real benchmark here), and for each range, let every child
+independently pick its own cheapest candidate layer that falls inside
+it. This is exhaustive, not an approximation, since a child choosing
+outside a given range would mean that range was wrong, and every range
+is tried. `commitNetTree` now emits exactly one via chain per node,
+spanning its own resolved range, instead of a separate chain per parent/
+child pair. Everything else (`buildNetTree`, the real via-capacity
+model, pin-access charging, the `FR7ROUTE_VIA_AWARE=0` fallback
+reproducing fr5route exactly) carries over from fr6route unchanged.
+`FR7ROUTE_VIA_WEIGHT` (default 1.0) carries the tuning knob forward,
+now scaling the corrected cost.
+
+47 test functions, 190 checks, 0 failures -- 46 inherited from fr6route
+unchanged, plus one new decisive test: a hand-engineered real 3-edge
+branch point (parent overwhelmingly cheapest at layer 0, two children
+overwhelmingly cheapest at layers 3 and 5) confirms the new model
+resolves the branch point's own via-stack range to exactly `[0,5]`,
+charges exactly 5 via unit-steps into `RealViaUsage` (not 8, and no
+layer-pair double-charged), while still letting every edge keep its own
+genuinely cheapest layer -- every number hand-derived before running the
+test, all matched exactly.
+
+**Not yet measured against the real ISPD benchmarks.** Real-benchmark
+run at the default `FR7ROUTE_VIA_WEIGHT=1.0`, with the same careful
+`gr_verify` + `eval2008.pl` cross-check discipline every layer-assignment
+generation's verification has required, is the next step. The explicit
+question: does fixing the overcounting bug alone get closer to, or beat,
+fr5route's own real overflow (adaptec1 93764, newblue1 26776, bigblue1
+191976) while still capturing a real via reduction, compared to
+fr6route's own rejected numbers (Part 26/27).
