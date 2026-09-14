@@ -2831,3 +2831,97 @@ between the wire and via cost terms, tuned empirically against the real
 benchmarks the same way every other coefficient in this project's
 history has been) before deciding whether the underlying mechanism is
 salvageable. Not yet decided.
+
+## Part 27: fr6route -- via-weight sweep, screened on newblue1
+
+The user's own chosen follow-up from Part 26: add an explicit weighting
+coefficient between the DP's wire-cost and via-cost terms
+(`FR6ROUTE_VIA_WEIGHT`, default 1.0, exactly reproducing Part 26's
+rejected result) and sweep it empirically against the real benchmarks,
+per this project's own "tune empirically, never by pure reasoning"
+discipline, to see whether the diagnosed cost-domain miscalibration is
+fixable with a single scale factor.
+
+**Screened on newblue1 alone first** (the fast benchmark, ~575-600s per
+run) rather than committing to full 3-benchmark trios per candidate
+weight -- 14 weights tested across five orders of magnitude, using
+`gr_verify` only at this stage (no `eval2008.pl` cross-check; that is
+reserved for whichever configuration, if any, earns a full 3-benchmark
+verification). fr5route's own newblue1 baseline: total overflow 26776,
+vias 4340058.
+
+| weight | total overflow | vias |
+|---|---|---|
+| 1.0 | 80164 | 4109510 |
+| 0.3 | 43782 | 4099387 |
+| 0.1 | 33752 | 4155408 |
+| 0.03 | 29922 | 4230207 |
+| 0.01 | 28792 | 4274605 |
+| 0.003 | 28328 | 4288597 |
+| 0.0025 | 28342 | 4289320 |
+| 0.002 | 28236 | 4290371 |
+| 0.0015 | 28310 | 4289920 |
+| 0.001 | 28308 | 4290354 |
+| 0.0005 | 28300 | 4290516 |
+| 0.0001 | 28342 | 4289888 |
+| 0.00003 | 28266 | 4290494 |
+| 0.00001 | 28186 | 4290732 |
+| **0.0** | **26654** | **4597425** |
+
+All 14 legal per `gr_verify` (0 malformed/out-of-bounds/disconnected/
+incomplete/unrouted).
+
+**Finding: the transition from "any nonzero weight" to "exactly zero" is
+a genuine step function, not a gradient, and no weight beats fr5route on
+both overflow and via count at once.** Every weight from 1.0 down to
+0.00001 -- five full orders of magnitude -- lands in one of exactly two
+regimes:
+
+- **Weight > 0, however small**: a tight, flat plateau once below ~0.01
+  (overflow 28186-28342, vias 4288597-4290732) that never moves further
+  no matter how close to zero the weight gets. Consistently ~5.3-5.8%
+  *worse* than fr5route on overflow, ~1.1-1.2% *better* on vias.
+- **Weight exactly 0**: a sharply different result (overflow 26654, vias
+  4597425) -- marginally *better* than fr5route on overflow (-0.46%) but
+  clearly *worse* on vias (+5.9%).
+
+The likely mechanism, consistent with Part 26's own diagnosis: many real
+edges have exactly tied wire cost across two or more candidate layers
+(most commonly, multiple uncongested layers all costing the same
+near-zero ratio). At any nonzero via weight, however astronomically
+small, such a tie is always broken in favor of matching the neighboring
+edge's layer, since doing so avoids some via cost while mismatching
+never saves anything (the wire costs are tied). Only at literally zero
+does that tie-break vanish, letting the DP's own more exhaustive
+per-branch search freely pick among tied layers without regard for the
+neighbor -- producing more mismatches, and therefore more vias, than
+even fr5route's simpler independent pass finds. This is a real,
+structural property of the cost model, not a resolution limit of the
+sweep: probing five orders of magnitude below the plateau's own lower
+edge (0.001 down to 0.00001) moved the result by less than 1%, while the
+jump from 0.00001 to 0.0 moved it by 5-6%.
+
+**Conclusion: no scalar weight rescues this generation on the actual
+mandate metric.** The best any nonzero weight achieves is a ~5.3% real
+overflow regression in exchange for a ~1.2% via reduction -- and the one
+configuration that ties fr5route on overflow (weight 0) does so only by
+abandoning via-awareness entirely in the one case that matters (exact
+ties), while making via count meaningfully worse. Since this project's
+success metric is total overflow, not via count, no point on this
+frontier is a genuine improvement over fr5route. A full 3-benchmark
+verification was not run for any weight -- the single-benchmark screen
+already resolved the question this tuning pass was designed to answer,
+and running the expensive full trio would not change the conclusion.
+
+**Decision: `fr6route`'s via-cost/capacity-aware DP is closed out as
+rejected, on this cost formulation, without further tuning.**
+`gr/fr5route.cpp` remains this project's best real result (adaptec1
+93764, newblue1 26776, bigblue1 191976 -- all beating `vroute`'s own
+historic real numbers). `gr/fr6route.cpp` stays in the repository,
+frozen, as a real, honestly-measured negative result and a base for any
+future via-cost-aware attempt with a genuinely different cost model
+(e.g. a true minimal-spanning-stack via cost instead of per-neighbor
+chains, or a real negotiated/iterative via-pricing loop instead of a
+static ratio) -- not modified further under this generation's own name,
+per this project's own "build new mechanisms as separate frozen files"
+discipline.

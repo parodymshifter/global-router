@@ -154,6 +154,33 @@
 // decision on how to proceed (accept the rejection and keep fr5route, or
 // attempt an empirically-tuned weighting coefficient between the two
 // cost terms).
+//
+// **Follow-up, closed out: FR6ROUTE_VIA_WEIGHT sweep (HISTORY_COST_
+// SWEEP.md Part 27).** Added a scalar multiplier on the DP's own via-
+// cost term and swept it across 14 values, five orders of magnitude,
+// screened on newblue1 alone (fr5route baseline: overflow 26776, vias
+// 4340058). Result: a genuine step function, not a gradient -- every
+// weight from 1.0 down to 0.00001 lands in one tight, flat plateau
+// (overflow 28186-28342, vias 4288597-4290732, consistently ~5.3-5.8%
+// worse than fr5route on overflow and ~1.1-1.2% better on vias) that
+// never moves further no matter how close to zero the weight gets;
+// only at literally weight=0 does the result jump to a different regime
+// (overflow 26654, a marginal -0.46% win, but vias 4597425, a real
+// +5.9% loss). No weight beats fr5route on both overflow and via count
+// at once -- likely because any nonzero weight, however small, still
+// breaks the many exact wire-cost ties real benchmarks produce in favor
+// of matching, while only weight=0 removes that tie-break entirely,
+// letting the DP's own more exhaustive search find more mismatches (and
+// therefore more vias) than fr5route's simpler pass ever did. Since
+// total overflow, not via count, is this project's actual success
+// metric, **no scalar weight rescues this generation** -- closed out as
+// rejected without a full 3-benchmark verification (the single-
+// benchmark screen already answered the question). `gr/fr5route.cpp`
+// remains this project's best real result; this file stays frozen as a
+// real negative result and a base for a future attempt with a
+// genuinely different via-cost model (a true minimal-spanning-stack
+// cost, or a real negotiated/iterative via-pricing loop), not modified
+// further under its own name.
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o fr6route fr6route.cpp
