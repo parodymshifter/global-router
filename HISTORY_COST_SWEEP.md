@@ -3168,3 +3168,100 @@ verification (`gr_verify` + `eval2008.pl` cross-check on all three),
 starting with newblue1 alone to sanity-check round count/runtime before
 committing to the full three-benchmark run, per this project's own
 established screening discipline.
+
+**Newblue1 screening result, and two bugs found and fixed along the
+way.** First screening run (default knobs) legalized cleanly but showed
+a puzzling internal number (the loop's own "best round" overflow, 108960)
+*worse* than the final `gr_verify`-measured result (47242) -- the loop
+was rolling back to the wrong notion of "best." Root cause: `viaCap` has
+always been this project's own internal heuristic (inherited from
+mroute, unchanged since fr6route), never a real ISPD-scored capacity --
+confirmed by reading `gr_verify.cpp`'s own `totalOverflow` computation,
+which sums overflow over wire h/v edges only. `localOverflow`/
+`totalRealOverflow` were summing wire overflow *and* fictional via-site
+overflow together, so the loop's own accept/revert and bestRound/
+convergence bookkeeping was judging outcomes by a metric that didn't
+match what actually gets scored. Fixed via a new `includeVia` parameter
+(default true, every pre-existing call site including the self-tests
+unaffected; the negotiation loop's own three internal call sites pass
+false) -- historyVia and candidate selection are unchanged (via
+congestion still steers the DP's cost function and still decides who
+gets reprocessed), only the loop's own judgment of outcomes changed.
+
+A second, smaller bug surfaced closing the remaining gap: the same three
+functions clamped wire capacity to `std::max(1, cap)`, appropriate for
+`wireCostForEdge`'s own cost *denominator* (avoiding division by zero)
+but wrong for an overflow computation, where a genuinely zero-capacity
+edge (a preferred-direction zeroing, or a `.gr` adjustment) legitimately
+contributes its full usage as overflow -- `gr_verify.cpp`'s own `scan`
+never clamps. Removing the clamp closed the internal-vs-`gr_verify` gap
+from ~186 units to exactly zero (both report 46908 after the fix,
+confirmed three ways: two independent runs matched each other, and each
+matched `gr_verify` exactly on its own output).
+
+**Newblue1, final clean number, all legal (0 malformed/out-of-bounds/
+disconnected/incomplete/unrouted), `gr_verify`-confirmed:**
+
+| | overflow | vs fr7route (79420) | vs fr5route (26776) |
+|---|---|---|---|
+| nv1route (default knobs, patience 20/rounds 60) | 46908 | -40.9% | +75.2% |
+
+A large, real improvement over fr7route -- by far the biggest single
+move in the whole via-cost-aware lineage, and a structurally different
+kind of result than fr6route/fr7route's own sub-1%-either-way weight
+sweeps. Runtime (602-607s across three runs) stayed within a few percent
+of fr7route's own single-pass baseline, confirming the plan's own
+expectation that reprocessing stays cheap.
+
+**Follow-up knob sweep on newblue1** (`NV1ROUTE_VIA_PATIENCE`/
+`NV1ROUTE_VIA_ROUNDS` raised to 100/150, three `NV1ROUTE_HIST_STEP`
+values, 3 runs in parallel, capped at the project's own 3-concurrent
+limit):
+
+| variant | best round | rounds run | overflow | vs fr5route |
+|---|---|---|---|---|
+| step 0.05 (default), more patience | 19 | 120 | 46908 | +75.2% (identical to the 40-round run -- round 19 is a real plateau, not patience-starved) |
+| step 0.2 (faster growth) | 6 | 107 | 47110 | +75.9% (worse -- overshoots) |
+| step 0.01 (slower growth) | 85 | 151 (hit the round cap) | 46662 | +74.3% (best found, but did not stall -- still finding new bests at round 85) |
+
+Slower growth finds a somewhat better plateau and hadn't converged when
+the round cap stopped it, which is a genuine "there might be a little
+more here" signal -- but the magnitude is small (-0.52% over the
+default's own plateau, earned across 85 rounds) and, at every knob
+setting tried, the result sits firmly in the +74% to +76% range above
+fr5route. Extending patience alone (same growth rate) changed nothing at
+all, which rules out "it just needed longer to stall" as an explanation
+for the earlier runs' own numbers.
+
+**Reading.** This generation answered the question it was built to ask:
+does adding memory of persistent via congestion across multiple passes
+-- the one mechanism untested by fr6route/fr7route's own single-pass
+cost-formula work -- move the needle. It does, by far the largest margin
+of any via-cost-aware attempt (-40.9% vs fr7route). But knob-tuning
+*within* this mechanism (patience, round budget, history growth rate)
+is already showing the same diminishing-returns shape CLAUDE.md's own
+vroute section names directly: "the ceiling on how much tuning a shared
+cost formula's coefficients can achieve was reached early in this
+lineage." A five-generation-deep pattern is now on record -- fr5route's
+own plain greedy layer assignment, with no via-cost-awareness at all,
+has not been beaten by any of fr6route's, fr7route's, or nv1route's
+(three knob variants) attempts to be smarter about via cost specifically
+-- which is itself informative: on these benchmarks, via-cost-awareness
+in the layer-assignment stage does not appear to be the dominant lever
+left on real overflow, regardless of how it's implemented.
+
+**Decision, pending user direction**: further tuning of nv1route's own
+history formula (mode, streak threshold, a higher round cap for the
+slow-growth variant) is not expected, on this evidence, to close the
+remaining ~74% gap to fr5route -- flagged to the user rather than
+pursued further on the strength of this screening data alone. `gr/
+fr5route.cpp` remains this project's best real result; `gr/nv1route.cpp`
+stays in the repository, frozen, as this lineage's best via-cost-aware
+attempt and a real, structurally-informative negative result on the
+larger question (via-cost-awareness is not, on this evidence, the
+lever that closes the gap to zero overflow). Full three-benchmark
+verification was not run -- the newblue1 screening pattern across every
+prior generation in this lineage (fr6route, fr7route) has always held
+unanimously across all three real benchmarks, so a result this far from
+fr5route on the screening benchmark was judged not worth the ~50-80
+minute full-verification cost before checking with the user first.

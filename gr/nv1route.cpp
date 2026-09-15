@@ -91,6 +91,30 @@
 //     here are exact integer counts with no drift concern to guard
 //     against, and only DP-managed nets ever change after round 0).
 //
+// Metric fix, found during this file's own first real-benchmark screening
+// run (newblue1): localOverflow/totalRealOverflow originally summed wire
+// overflow *and* via-site usage-over-viaCap together, on the assumption
+// via sites were a second capacitied resource worth tracking the same way.
+// They are not -- reading gr_verify.cpp's own totalOverflow computation
+// confirms the real ISPD scoring charges overflow against wire edges only;
+// `viaCap` has always been this project's own internal heuristic
+// (inherited from mroute, unchanged since fr6route) for steering the DP's
+// cost function, never a real constraint. Summing it into the loop's own
+// bookkeeping meant accept/revert and bestRound/convergence/patience were
+// all judging outcomes by a metric that didn't match what gr_verify
+// actually scores -- the first screening run's own internal "best round"
+// number (108960) was worse than the final gr_verify-measured real
+// overflow (47242) specifically because of this. Both functions now take
+// an `includeVia` parameter (default true, preserving every pre-existing
+// call site including this file's own self-tests); the negotiation loop's
+// own three call sites pass false, so every decision the loop makes is now
+// judged by real, wire-only overflow -- the metric that is actually
+// scored -- while historyVia itself, and candidate selection
+// (netOverflowedVia, deliberately left checking via sites -- see its own
+// comment), are unchanged: via congestion still steers the DP's cost
+// function and still decides who gets reprocessed, it just no longer
+// decides whether a reprocessing attempt is kept.
+//
 // Known risks, disclosed up front (see the plan this was scoped from for
 // the full discussion):
 //   - This is a genuinely bigger change than any prior generation in the
@@ -2834,8 +2858,24 @@ void stitchPinAccessForNetChargingVias(const RoutingGrid &g, RealViaUsage &rvu, 
 // resource touched by both `a` and `b` is counted once), so the caller is
 // free to pass the same charge for both arguments (as the negotiation loop
 // does for its own "before" measurement) without double-counting.
+//
+// `includeVia` (default true, preserving every pre-existing call site's own
+// behavior): whether via-site usage-over-viaCap counts toward the total.
+// Confirmed by reading gr_verify.cpp's own totalOverflow computation
+// (gr_verify.cpp's own `scan` calls, husage/g.hcap and vusage/g.vcap only)
+// -- the real ISPD scoring charges overflow against wire edges only; via
+// sites are never a capacitied resource in the actual metric. `viaCap`
+// here has always been this project's own internal heuristic (inherited
+// from mroute, unchanged since fr6route) for steering the DP's cost
+// function away from busy via sites, not a real constraint. The
+// negotiation loop's own accept/revert decision passes false, so it judges
+// outcomes by the metric that is actually scored; this function's own
+// general-purpose default stays true so it remains reusable wherever via
+// congestion genuinely is the thing being measured (as in this file's own
+// testSupervisedRevertPrimitivesDetectAndUndoAWorseningMove).
 long long localOverflow(const RoutingGrid &g, const RealUsage &ru, const RealViaUsage &rvu,
-                         const std::vector<int> &viaCap, const NetCharge &a, const NetCharge &b) {
+                         const std::vector<int> &viaCap, const NetCharge &a, const NetCharge &b,
+                         bool includeVia = true) {
   std::set<size_t> hSeen, vSeen, rvuSeen;
   auto addRu = [&](const NetCharge &c) {
     for (const ChargeEntry &e : c.ruH)
@@ -2845,16 +2885,28 @@ long long localOverflow(const RoutingGrid &g, const RealUsage &ru, const RealVia
   };
   addRu(a);
   addRu(b);
-  for (size_t idx : a.rvuIdx)
-    rvuSeen.insert(idx);
-  for (size_t idx : b.rvuIdx)
-    rvuSeen.insert(idx);
+  if (includeVia) {
+    for (size_t idx : a.rvuIdx)
+      rvuSeen.insert(idx);
+    for (size_t idx : b.rvuIdx)
+      rvuSeen.insert(idx);
+  }
   size_t plane = static_cast<size_t>(g.nx) * static_cast<size_t>(g.ny);
   long long total = 0;
+  // No std::max(1, ...) clamp here, deliberately -- unlike wireCostForEdge's
+  // own use of that clamp (protecting a cost *denominator* from division by
+  // zero), gr_verify.cpp's own totalOverflow computation (its `scan` calls:
+  // `ov = use[i] - cap[i]`) never clamps capacity, so a real declared-zero
+  // edge (a preferred-direction zeroing, or a .gr adjustment that reduces
+  // capacity to 0) legitimately contributes its full usage as overflow, not
+  // usage-1. Clamping here would silently undercount by exactly 1 per such
+  // edge relative to the real scored metric -- found via the small (~0.4%)
+  // gap between this file's own internal "best round" number and gr_verify's
+  // independently-computed real overflow on the same output.
   for (size_t idx : hSeen)
-    total += std::max(0LL, ru.h[idx] - std::max(1, g.hcap[idx]));
+    total += std::max(0LL, ru.h[idx] - g.hcap[idx]);
   for (size_t idx : vSeen)
-    total += std::max(0LL, ru.v[idx] - std::max(1, g.vcap[idx]));
+    total += std::max(0LL, ru.v[idx] - g.vcap[idx]);
   for (size_t idx : rvuSeen) {
     int l = static_cast<int>(idx / plane);
     int cap = (l >= 0 && l < static_cast<int>(viaCap.size())) ? viaCap[l] : 1;
@@ -2866,14 +2918,26 @@ long long localOverflow(const RoutingGrid &g, const RealUsage &ru, const RealVia
 // Whether a net's own currently-charged resources are, right now, over
 // capacity anywhere -- kroute.cpp's own netOverflowed, ported: O(that net's
 // own charged cells), never a grid scan, so candidate selection stays cheap
-// regardless of grid size.
+// regardless of grid size. Deliberately keeps checking via sites against
+// `viaCap` even though it is only a heuristic, not a real scored capacity
+// (see localOverflow's own comment): this function only decides who is
+// *eligible* for reprocessing, not whether a reprocessing attempt is kept,
+// and a net sitting at a heavily-used via site is exactly the net whose own
+// choice might change once historyVia (also driven by this same heuristic)
+// has grown -- casting that wider net costs nothing but a cheap reprocessing
+// attempt, which the real-overflow-only accept/revert step below will
+// reject if it doesn't actually help.
 bool netOverflowedVia(const RoutingGrid &g, const RealUsage &ru, const RealViaUsage &rvu,
                        const std::vector<int> &viaCap, const NetCharge &c) {
+  // No std::max(1, ...) clamp on wire capacity here either -- same reason
+  // as localOverflow's own comment: gr_verify's real definition never
+  // clamps, and a genuinely zero-capacity edge with nonzero usage is a
+  // real overflow, worth flagging as a reprocessing candidate.
   for (const ChargeEntry &e : c.ruH)
-    if (ru.h[e.idx] > std::max(1, g.hcap[e.idx]))
+    if (ru.h[e.idx] > g.hcap[e.idx])
       return true;
   for (const ChargeEntry &e : c.ruV)
-    if (ru.v[e.idx] > std::max(1, g.vcap[e.idx]))
+    if (ru.v[e.idx] > g.vcap[e.idx])
       return true;
   size_t plane = static_cast<size_t>(g.nx) * static_cast<size_t>(g.ny);
   for (size_t idx : c.rvuIdx) {
@@ -2885,22 +2949,27 @@ bool netOverflowedVia(const RoutingGrid &g, const RealUsage &ru, const RealViaUs
   return false;
 }
 
-// Whole-grid total overflow across both resources this file's DP charges --
-// wire (ru, the same capacity fr7route's own wireCostForEdge reads) and via
-// (rvu) -- kroute.cpp's own totalOverflow, generalized to the second
-// resource. O(grid size); called once per round boundary, not per net.
+// Whole-grid total overflow -- kroute.cpp's own totalOverflow, generalized
+// with the same `includeVia` escape hatch as localOverflow above (default
+// true for general-purpose reuse; the negotiation loop's own round-boundary
+// bookkeeping passes false so bestRound/convergence/patience all track the
+// real, wire-only scored metric gr_verify reports, not a combined metric
+// inflated by via sites that were never a real capacity to begin with).
 long long totalRealOverflow(const RoutingGrid &g, const RealUsage &ru, const RealViaUsage &rvu,
-                             const std::vector<int> &viaCap) {
+                             const std::vector<int> &viaCap, bool includeVia = true) {
   long long total = 0;
+  // No clamp -- see localOverflow's own comment.
   for (size_t i = 0; i < ru.h.size(); ++i)
-    total += std::max(0LL, ru.h[i] - std::max(1, g.hcap[i]));
+    total += std::max(0LL, ru.h[i] - g.hcap[i]);
   for (size_t i = 0; i < ru.v.size(); ++i)
-    total += std::max(0LL, ru.v[i] - std::max(1, g.vcap[i]));
-  for (int l = 0; l < static_cast<int>(viaCap.size()); ++l) {
-    int cap = std::max(1, viaCap[l]);
-    for (int y = 0; y < g.ny; ++y)
-      for (int x = 0; x < g.nx; ++x)
-        total += std::max(0LL, rvu.usage[viaIndex(g, x, y, l)] - cap);
+    total += std::max(0LL, ru.v[i] - g.vcap[i]);
+  if (includeVia) {
+    for (int l = 0; l < static_cast<int>(viaCap.size()); ++l) {
+      int cap = std::max(1, viaCap[l]);
+      for (int y = 0; y < g.ny; ++y)
+        for (int x = 0; x < g.nx; ++x)
+          total += std::max(0LL, rvu.usage[viaIndex(g, x, y, l)] - cap);
+    }
   }
   return total;
 }
@@ -2991,7 +3060,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     return rep;
   }
 
-  rep.bestOverflow = totalRealOverflow(g, ru, rvu, viaCap);
+  rep.bestOverflow = totalRealOverflow(g, ru, rvu, viaCap, /*includeVia=*/false);
   rep.bestRound = 0;
   rep.roundsRun = 1;
   if (trace)
@@ -3024,7 +3093,10 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
       // "Before" is measured over the old charge's own indices, while it
       // is still live -- kroute's own idiom (overflowOverUnion(g, usage,
       // oldCharges, oldCharges)), computed before anything is undone.
-      long long localBefore = localOverflow(g, ru, rvu, viaCap, oldCharge, oldCharge);
+      // includeVia=false: judge this net's outcome by real (wire-only)
+      // overflow, the metric gr_verify actually scores -- see
+      // localOverflow's own comment for why via sites don't belong here.
+      long long localBefore = localOverflow(g, ru, rvu, viaCap, oldCharge, oldCharge, false);
 
       undoCharge(ru, rvu, oldCharge);
       std::vector<int> edgeLayer;
@@ -3045,7 +3117,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
         continue;
       }
 
-      long long localAfter = localOverflow(g, ru, rvu, viaCap, oldCharge, newCharge);
+      long long localAfter = localOverflow(g, ru, rvu, viaCap, oldCharge, newCharge, false);
       if (localAfter > localBefore) {
         undoCharge(ru, rvu, newCharge);
         applyCharge(ru, rvu, oldCharge);
@@ -3057,7 +3129,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
       }
     }
 
-    finalOverflow = totalRealOverflow(g, ru, rvu, viaCap);
+    finalOverflow = totalRealOverflow(g, ru, rvu, viaCap, /*includeVia=*/false);
     rep.roundsRun = round + 1;
     if (trace)
       std::cerr << "round " << round << ": overflow " << finalOverflow << " (accepted "
