@@ -3013,3 +3013,158 @@ anticipated) has not yet been tried, and remains a genuinely open
 question deferred to the user: does combining the overcounting fix with
 a tuned weight succeed where either alone did not, or has this whole
 via-cost-aware line of attack now been reasonably exhausted.
+
+**Follow-up: the combined-fix sweep, screened on newblue1.** The user
+asked for this directly. Same methodology as Part 27's own sweep
+(`gr_verify` only at the screening stage, output to `gr/runs/sweep7/`),
+now on fr7route's corrected cost model:
+
+| `FR7ROUTE_VIA_WEIGHT` | overflow | vias |
+|---|---|---|
+| 1.0 | 79420 | 4091578 |
+| 0.3 | 42994 | 4085648 |
+| 0.1 | 33782 | 4136017 |
+| 0.03 | 29748 | 4199282 |
+| 0.01 | 28768 | 4237207 |
+| 0.003 | 28474 | 4248642 |
+| 0.0 | 26654 | 4603407 |
+
+(fr5route's own newblue1 baseline: overflow 26776, vias 4340058.)
+
+Same step-function shape as fr6route's own sweep (Part 27): a flat
+plateau from weight 0.003 up to 1.0, all worse than fr5route on
+overflow, then a discontinuous jump to a different regime at exactly
+weight 0 -- no weight bridges the two. fr7route is consistently a few
+percent better than fr6route's own sweep at every matching nonzero
+weight (the real, if small, overcounting-fix effect already measured at
+weight 1.0), and at weight 0 the two generations land on *identical*
+overflow (26654 vs fr6route's own 26654) with nearly identical vias --
+expected, since at weight 0 the via-cost term is zeroed in both models,
+so the overcounting bug (a bug in computing a cost multiplied by zero)
+becomes irrelevant and both models mathematically coincide.
+
+**Reading, combining Parts 26 through 28**: fixing the overcounting bug
+and tuning the weight are now both tested, separately and together, on
+two independent generations, and neither -- alone or combined -- finds
+a weight that beats fr5route on both overflow and via count
+simultaneously. The via-cost-aware DP line of attack, as a **single-pass,
+one-shot cost formula**, is reasonably exhausted: two distinct
+hypotheses for what was wrong with it (per-node cost aggregation, and
+cost-domain scale) have each been tested to a null result. `gr/fr5route.cpp`
+remains this project's best real result. The next escalation the user
+chose to pursue is `gr/nv1route.cpp` (Part 29) -- not another cost-formula
+variant, but a genuinely different mechanism: a multi-round negotiated-
+congestion loop wrapping this same corrected DP, porting the one thing
+in this domain that has never been tried (memory of persistent
+congestion across multiple passes, the specific mechanism that won for
+2D wire pricing via iroute/kroute) rather than another one-shot weight
+or aggregation fix.
+
+## Part 29: nv1route -- negotiated via pricing (new species, generation 1)
+
+The user's own chosen next direction after Part 28's combined sweep
+closed out the via-cost-aware single-pass line of attack: port
+iroute/kroute's own negotiated-congestion mechanism (a permanent-then-
+LIFO-relaxable history-cost term, layered on top of a reactive price,
+inside a multi-round rip-up/reroute loop) from its original domain (2D
+wire-edge congestion) to a domain that has never had it -- via/layer
+congestion. Every `fr` generation through fr7route decides each net's
+via-stack range exactly once, permanently, in a single pass over all
+nets; there is no rip-up path, no memory of a via site being
+persistently over capacity, and no way for a net decided early to react
+to congestion that only becomes visible once later nets commit. This is
+the same structural gap the zero-overflow mandate's own history
+(hroute's single reactive price -> iroute/kroute's history-cost fix)
+already diagnosed and solved once, in a different domain.
+
+Built as `gr/nv1route.cpp`, forked from `gr/fr7route.cpp` -- a new
+species (`nv`, per the 2026-09-09 naming addendum) rather than another
+`fr` generation, since the core mechanism changes from a one-shot DP
+pass to a multi-round negotiation loop wrapping that same DP. Three new
+pieces, each a direct port of a kroute.cpp mechanism (see kroute.cpp's
+own header for the original derivation):
+
+- **Per-net charge logs** (`NetCharge`, `undoCharge`/`applyCharge`):
+  `commitNetTree`/`stitchPinAccessForNetChargingVias` now optionally log
+  every array index (and, for wire usage, the exact amount) they
+  increment, so a net's committed layer assignment can be undone and
+  redone exactly, cheaply -- no geometry re-walk. `nullptr` (every
+  pre-existing self-test call site) preserves fr7route's own behavior
+  unchanged.
+- **`historyVia`** (`ViaPrices`, `updateViaHistory`): a per-via-site
+  multiplicative memory term, grown via kroute's own exact
+  streak-gated, LIFO-relaxable formula, keyed by via-site index. Layers
+  on top of fr7route's own existing usage/capacity ratio term in
+  `spanCost` (which plays lambda's role, left untouched) exactly the
+  way kroute's own `hist * (1 + lambda*amount)` separates the two.
+- **The round loop** (`negotiateViaAssignment`): round 0 reproduces
+  fr7route's own single pass exactly (historyVia all 1.0). Each net's
+  `NetTree` is built once and reused every round (rebuilding it from a
+  net's own *committed* 3D output would corrupt topology reconstruction,
+  since committed segs mix via segments into what `buildNetTree` expects
+  to be pure 2D wire geometry). After each round boundary, historyVia
+  updates and a net becomes a reprocessing candidate iff its own charge
+  log currently touches an over-capacity resource (kroute's own
+  `netOverflowed`, ported). Reprocessing is supervised exactly like
+  kroute's own accept/revert (kroute's own `overflowOverUnion` pattern,
+  ported verbatim): compare overflow over the union of old+new touched
+  indices, revert byte-for-byte if it got worse. State rolls back to the
+  best-known round at the end if the loop didn't end there, via exact
+  incremental undo/redo (simpler than kroute's own rebuild-from-zero,
+  since via/wire usage here are exact integer counts with no drift to
+  guard against).
+
+53 test functions, 239 checks, 0 failures -- 48 inherited from fr7route
+unchanged, plus 5 new decisive tests, every one hand-derived exactly
+before running:
+
+1. **Charge-log round-trip identity**: commit a net, undo via its own
+   logged charge (ru/rvu return to exact all-zero), redo with unchanged
+   inputs (byte-identical ru/rvu and segs to the first commit) --
+   confirms no charge site was missed, in particular pin-access
+   stitching's own charge (logged outside `commitNetTree` proper, the
+   specific risk the plan flagged up front).
+2. **Negotiation fixes what a single pass structurally cannot**: five
+   structurally identical branch nets (engineered via preload, same
+   convention as `kModerateViaGr`) contend for one via site, capacity 1.
+   Hand-derived via the DP's own real `resolveNode` mechanics (not a
+   simplified abstraction): every net mismatches in round 0 regardless
+   of processing order (usage settles at 5, overflow 4 -- provably
+   un-fixable by any single pass, since spanCost there never exceeds 5
+   against a 49-unit match threshold). `updateViaHistory` grows
+   `historyVia` to exactly 11, then 99, across two real production
+   calls; reprocessing with those exact values flips exactly 1 net in
+   round 1 (usage 5->4) and the remaining 4 in round 2 (usage 4->0) --
+   every intermediate number (11, 99, 55, 44, 396, 297, 198, 99) matched
+   the hand derivation exactly on the first run.
+3. **`NV1ROUTE_HIST_RELAX=0` reproduces permanent-only behavior**, and
+   **`=1` undoes exactly one growth step per clean round** -- direct
+   ports of the 2D stage's own two decisive relaxation tests, applied to
+   `updateViaHistory`/`ViaPrices` instead of `updateHistory`/`Prices`.
+4. **Supervised accept/revert primitives detect and undo a worsening
+   move**: hand-computed two-resource scenario (old charge on a
+   resource 2 over capacity, candidate new charge on a different
+   resource that would end up 5 over) -- `localOverflow` correctly
+   reports 6 > 2 (worse), and `undoCharge`+`applyCharge` restore both
+   resources to their exact pre-attempt usage, byte-for-byte.
+5. **`NV1ROUTE_VIA_AWARE=0` reproduces fr5route's exact behavior**,
+   segment for segment -- the regression-continuity test every
+   generation in this lineage carries.
+
+A real end-to-end smoke test (not a self-test, run manually during this
+build): a small deliberately-congested fixture (20 nets, 1 shared pin
+tile, via capacity 1 per layer pair) through the actual `main()` CLI
+path shows the negotiation loop doing real work -- round 0 overflow 32,
+round 1 (18 accepted reroutes) drops it to 30, then plateaus and hits
+the round cap -- and `gr_verify` confirms the output stays fully legal
+throughout (0 malformed/out-of-bounds/disconnected/incomplete/unrouted;
+the residual overflow is expected and not a legality issue -- no router
+in this project reaches zero overflow on every input).
+
+**Not yet measured: the real result on the three ISPD benchmarks.**
+Round count and runtime at real-benchmark scale are genuinely unknown
+going in -- the plan's own disclosed risk. Next step: real-benchmark
+verification (`gr_verify` + `eval2008.pl` cross-check on all three),
+starting with newblue1 alone to sanity-check round count/runtime before
+committing to the full three-benchmark run, per this project's own
+established screening discipline.
