@@ -3356,3 +3356,137 @@ margin is so much thinner than the other two's, whether the deferred
 42.4%-scale aggregate-shortage gap on top of this, and whether the two
 history mechanisms (via, wire) interact in ways worth tuning jointly
 rather than in isolation.
+
+## Part 31: mt1route and mt2route -- escalation-tier sophistication (species `mt`), both negative
+
+A follow-up diagnostic re-ran nv2route's own real output through the
+distribution-vs-aggregate-shortage split from Part 30 (`diag4`, a
+throwaway tool, not part of the repo) to see how the remaining overflow
+looked after historyWire had done its work. Result: 84-98% of what's
+left on all three benchmarks is now aggregate-shortage overflow,
+tracking the 2D pricing stage's own unresolved "2D overflow" almost
+exactly (65644 vs 63966 on adaptec1, 181748 vs 180060 on bigblue1),
+meaning historyWire's own target (the distribution slice) is now mostly
+exhausted and the 2D pricing loop itself is the dominant remaining
+lever. That loop had been deferred twice before -- Part 29 named it
+directly as one of two open gaps, the other being topology quality
+(RSMT vs. plain MST). This part covers escalation-tier sophistication;
+topology quality remains deferred, see the open item at the end of this
+part.
+
+Every router through nv2route splits escalation into exactly two tiers:
+a fixed L/Z pattern menu, and a full margin-6-and-doubling maze search
+(`routeStepMSMV`). Real routers in this space (FastRoute) use a graduated
+three-stage architecture -- pattern, then monotonic maze, then full maze
+-- and this project's own history had never tried the middle stage.
+
+**mt1route** (`gr/mt1route.cpp`, forked from nv2route.cpp) adds it: a new
+medium tier (`routeStepMSMVMonotonic`) runs one `multiSourceDijkstra`
+search at margin exactly 0 -- no expansion, no retry -- cheaper than the
+full tier's cheapest attempt, more powerful than the fixed pattern menu.
+`RoutedNet::escalated` (bool) became `RoutedNet::tier`
+(`kTierFast`/`kTierMedium`/`kTierFull`, one-way). `route()` gained a new
+phase mirroring the existing full-tier loop's own structure (candidate
+selection, supervised accept/revert via `overflowOverUnion`), promoting
+to `kTierFull` on failure instead of giving up. 63 test functions, 302
+checks, 0 failures.
+
+**Real result: a clean, unanimous regression**, despite the core
+mechanical hypothesis being confirmed true -- the medium tier really did
+shrink the full tier's own candidate pool:
+
+| benchmark | nv2route full-tier pool | mt1route full-tier pool | reduction |
+|---|---|---|---|
+| adaptec1 | 75993 | 50172 | -34.0% |
+| newblue1 | 53194 | 28507 | -46.4% |
+| bigblue1 | 97873 | 84000 | -14.2% |
+
+Fewer nets needing the expensive tier did not translate into a better
+result. Real overflow, both `gr_verify`- and `eval2008.pl`-confirmed
+legal and matching exactly (0 malformed/out-of-bounds/disconnected/
+incomplete/unrouted on all three):
+
+| benchmark | nv2route r=200 (best) | mt1route | delta |
+|---|---|---|---|
+| adaptec1 | 75192 | 81326 | **+8.16%** |
+| newblue1 | 21904 | 22292 | **+1.77%** |
+| bigblue1 | 185258 | 200608 | **+8.28%** |
+
+Runtime also grew (adaptec1 3131s -> 3954s, bigblue1 3083s -> 3987s;
+newblue1 615s -> 819s).
+
+**Diagnosis:** escalation is one-way and permanent. The medium tier's
+own supervised accept/revert only requires a candidate reroute to be not
+worse than before (`localAfter > localBefore` -> revert, otherwise
+accept) -- a bar a plain *tie* clears as easily as a genuine
+improvement. Once accepted, `rn.tier` locks at `kTierMedium` forever,
+permanently denying that net a shot at the full tier's own wider search
+even where it would have found something genuinely better, not just
+locally tied. A tied medium-tier "resolution" is often just whichever
+arbitrary equal-cost path Dijkstra happened to settle on inside a
+smaller search box.
+
+**mt2route** (`gr/mt2route.cpp`, forked from mt1route.cpp, generation 2
+of the same species) made medium-tier resolutions *provisional* rather
+than permanent, scoped narrowly to the diagnosis: a strict local
+improvement (`localAfter < localBefore`) stays durably at the medium
+tier; a tie (`localAfter == localBefore`) gets promoted to the full tier
+for one more chance, regardless of current overflow status --
+deliberately not "retry every medium-tier net," which the plan reasoned
+would degenerate toward nv2route's own original full-population
+behavior on benchmarks that never converge to zero, losing the medium
+tier's efficiency gain for nothing. `shouldPromoteMediumToFull` extracted
+as a small pure function for direct, exhaustive testing. New env var
+`MT2ROUTE_PROVISIONAL_TIES=0|1` (default 1; `0` reproduces mt1route's
+exact output byte for byte, the standard toggle-reproduces-the-parent
+regression-continuity check). 65 test functions, 318 checks, 0 failures.
+
+**Real result: the fix barely moved the needle, and did not recover the
+regression.** Verified legal on all three (`gr_verify`, 0 malformed/
+out-of-bounds/disconnected/incomplete/unrouted; not cross-checked
+against `eval2008.pl` -- see below):
+
+| benchmark | nv2route (best) | mt1route | mt2route | mt2route vs mt1route | mt2route vs nv2route |
+|---|---|---|---|---|---|
+| adaptec1 | 75192 | 81326 | 81130 | -0.24% | +7.89% |
+| newblue1 | 21904 | 22292 | 22238 | -0.24% | +1.53% |
+| bigblue1 | 185258 | 200608 | 200370 | -0.12% | +8.15% |
+
+Meanwhile the full-tier candidate pool grew back substantially -- most
+of mt1route's own -34%/-46%/-14% reduction was given back for almost no
+quality gain:
+
+| benchmark | mt1route full-tier | mt2route full-tier | regrowth |
+|---|---|---|---|
+| adaptec1 | 50172 | 62831 | +25.2% |
+| newblue1 | 28507 | 38081 | +33.6% |
+| bigblue1 | 84000 | 88947 | +5.9% |
+
+Runtime on adaptec1 and bigblue1 nearly doubled (3954s -> 7461s,
+3987s -> 7465s); newblue1 held flat (819s -> 819s, a smaller pool
+regrowth there in absolute terms).
+
+Per this project's own screening discipline, the full `eval2008.pl`
+cross-check was skipped: `gr_verify` alone was sufficient to show this
+is another negative result, and paying for the independent cross-check
+only makes sense once a result looks like a real candidate.
+
+**Decision: the escalation-tier-sophistication line of attack (species
+`mt`, two generations) is closed as a dead end**, and the committed best
+real router remains `gr/nv2route.cpp` (Part 30's own numbers), unchanged
+by either `mt1route` or `mt2route`. The result directly falsifies
+mt2route's own hypothesis: ties were not the dominant source of
+mt1route's regression. Whatever actually causes it is present even in
+the resolutions that stayed durably at the medium tier, untouched by the
+provisional-ties fix -- something about the medium tier's own
+margin-0, no-retry search itself (not merely which of its results get
+locked in) is producing worse global outcomes than either the cheap
+pattern menu or the full margin-6-and-doubling search, despite
+mechanically shrinking the full tier's own candidate pool both times.
+Not further diagnosed in this pass; a future session revisiting
+escalation architecture should look at *why* the medium tier's
+accepted-and-kept resolutions themselves are harmful, not just how they
+get locked in.
+
+Per Part 29/30's own open item, the other previously-deferred gap --
+**topology quality (RSMT vs. plain MST)** -- is next.
