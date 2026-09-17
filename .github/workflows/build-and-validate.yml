@@ -52,6 +52,7 @@ jobs:
           - fr7route
           - nv1route
           - nv2route
+          - mt1route
     steps:
       - uses: actions/checkout@v4
 
