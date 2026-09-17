@@ -3369,10 +3369,19 @@ exactly (65644 vs 63966 on adaptec1, 181748 vs 180060 on bigblue1),
 meaning historyWire's own target (the distribution slice) is now mostly
 exhausted and the 2D pricing loop itself is the dominant remaining
 lever. That loop had been deferred twice before -- Part 29 named it
-directly as one of two open gaps, the other being topology quality
-(RSMT vs. plain MST). This part covers escalation-tier sophistication;
-topology quality remains deferred, see the open item at the end of this
-part.
+directly as one of two open gaps, the other being "topology quality
+(RSMT vs. plain MST)" -- a label carried forward unexamined from Part 21
+(`fr1route`), where it was accurate. It stopped being accurate at Part 24
+(`fr4route`), which added an exact Dreyfus-Wagner RSMT for the fast
+tier's own fixed topology (nets up to 8 pins by default, heuristic
+Steinerization above that) -- adopted forward unchanged through fr5-7,
+nv1, and nv2. Checked directly against nv2route.cpp's own code before
+writing this part: the fast tier already builds RSMT, not plain MST, and
+the escalation tier (`routeStepMSMV`) abandons any fixed topology
+entirely in favor of MSMV maze growth. "Topology quality" as originally
+scoped is therefore not a live gap and is retired as a deferred item;
+see the open item at the end of this part for what's actually still
+open. This part covers escalation-tier sophistication only.
 
 Every router through nv2route splits escalation into exactly two tiers:
 a fixed L/Z pattern menu, and a full margin-6-and-doubling maze search
@@ -3488,5 +3497,14 @@ escalation architecture should look at *why* the medium tier's
 accepted-and-kept resolutions themselves are harmful, not just how they
 get locked in.
 
-Per Part 29/30's own open item, the other previously-deferred gap --
-**topology quality (RSMT vs. plain MST)** -- is next.
+Per Part 29/30's own open item, the other previously-deferred gap was
+recorded as "topology quality (RSMT vs. plain MST)" -- but as established
+above, that gap was already closed at Part 24 and is not actually open.
+What remains genuinely unexplored: the `maxExactPins=8` degree cap on
+the exact RSMT DP (larger nets still get only heuristic Steinerization,
+never the exact tree), whether the RSMT-seeded fast tier's own topology
+biases which nets even reach MSMV in a way worth revisiting, and the 2D
+pricing loop's own convergence gap named at the top of this part
+(84-98% of remaining overflow is now aggregate-shortage, tracking that
+loop's own unresolved state). None of these three has been scoped yet;
+that is the open work for the next generation.
