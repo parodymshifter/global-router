@@ -38,6 +38,7 @@ fr7route
 nv1route
 nv2route
 mt1route
+mt2route
 *.o
 bench/
 *.gr
