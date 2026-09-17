@@ -107,6 +107,42 @@
 //     remaining gap is the strongest evidence yet that the 2D-pricing-loop
 //     retune (deferred, not attempted here) is the next place to look, not
 //     further tuning of this mechanism.
+//
+// Real result: the first unanimous win over fr5route in this project's
+// entire via-cost-aware exploration. Screened on newblue1 alone first
+// (default NV2ROUTE_VIA_ROUNDS=60): 22118, already -17.4% vs fr5route's
+// own committed 26776 -- the first generation in the fr6route/fr7route/
+// nv1route/nv2route lineage to beat it at all. A round-cap sweep followed
+// (60 -> 200 -> 400, on newblue1 alone, then all three real benchmarks at
+// 200 and 400) to check how much of that was still-improving vs.
+// converged: 60->200 bought another -1.1% (22118 -> 21904), 200->400
+// bought only -0.37% more (21904 -> 21824) -- real, but sharply
+// diminishing, the same shape as the discredited coefficient-tuning
+// sweeps this generation was built specifically to move past. Full
+// three-benchmark result at NV2ROUTE_VIA_ROUNDS=200/400 (essentially
+// equivalent; 200 is nearly as good and roughly half the runtime), all
+// legal per `gr_verify` (0 malformed/out-of-bounds/disconnected/
+// incomplete/unrouted) and cross-checked exactly against `eval2008.pl`
+// on every benchmark:
+//
+//   benchmark   fr5route (real)   nv2route (real, r=400)   delta
+//   adaptec1    93764             75028                     -19.98%
+//   newblue1    26776             21824                     -18.49%
+//   bigblue1    191976            184922                     -3.67%
+//
+// **Decision: `gr/nv2route.cpp` is this project's new best real result,
+// replacing `gr/fr5route.cpp`.** Unanimous, verified, non-trivial on two
+// of three benchmarks; bigblue1's own margin is real but much thinner,
+// and none of the three had fully converged even at 400 rounds (all
+// still finding new bests on the final rounds) -- diminishing, not
+// exhausted. `NV2ROUTE_VIA_ROUNDS=200` (default 60; not the file's own
+// implicit default) is the recommended operating point: captures
+// essentially all of the measured gain for about half the runtime of
+// 400. See `HISTORY_COST_SWEEP.md` Part 30 for the full record,
+// including the round-cap sweep's own numbers on all three benchmarks
+// and the historical context (five prior generations -- fr6route,
+// fr7route, and nv1route's own three knob variants -- all failed to
+// beat fr5route before this one did).
 
 // Build:
 //     clang++ -std=c++17 -O2 -Wall -Wextra -o nv2route nv2route.cpp

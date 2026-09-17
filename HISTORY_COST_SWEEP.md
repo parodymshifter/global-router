@@ -3265,3 +3265,94 @@ prior generation in this lineage (fr6route, fr7route) has always held
 unanimously across all three real benchmarks, so a result this far from
 fr5route on the screening benchmark was judged not worth the ~50-80
 minute full-verification cost before checking with the user first.
+
+## Part 30: nv2route -- historyWire, negotiated real per-layer wire congestion (species `nv`, generation 2)
+
+Part 29's own knob sweep closed out nv1route as a dead end on its own
+terms (diminishing returns, +75% vs fr5route at every setting tried).
+Rather than continue tuning nv1route's existing knobs, a read-only
+diagnostic (not part of the repo) measured *where* nv1route's own
+remaining real overflow on newblue1 (46908) actually sat, comparing it
+against what the 2D pricing stage's own summed-across-layers metric saw
+at the same grid positions: real per-layer overflow 46908 (matching
+`gr_verify` exactly) vs. 2D-combined overflow 18156 (matching nv1route's
+own reported "2D overflow" exactly). **Of the 46908, 27002 (57.6%) sat
+at positions where the aggregate capacity across all 6 real layers was
+actually sufficient** -- a pure per-layer distribution problem,
+structurally invisible to the 2D stage's own metric, and one nv1route's
+own negotiation loop couldn't reach either: it gives the DP memory of
+via congestion (`historyVia`) but none for wire congestion. The
+remaining 19906 (42.4%) was genuine aggregate shortage, matching the 2D
+stage's own 18156 closely -- the only slice a 2D-pricing-loop retune
+(the other candidate direction, considered and explicitly deferred)
+could ever reach.
+
+Built as `gr/nv2route.cpp`, forked from `gr/nv1route.cpp`: `historyWire`
+(`WirePrices`/`updateWireHistory`) is a direct, verbatim-mechanism port
+of `historyVia` to real per-layer wire edges instead of via sites --
+same LIFO-relaxable, streak-gated formula, no capacity clamp on the
+overflow trigger (the same lesson nv1route's own metric fix
+established). `wireCostForEdge` multiplies its existing usage/capacity
+ratio by the *maximum* history value along a leg's own span (backward
+compatible: nullptr, every pre-existing call site, reproduces nv1route's
+formula exactly). Candidate selection and the accept/revert judgment
+needed no changes at all -- they already select and judge nets by real
+wire overflow, exactly the resource historyWire now gives the DP memory
+of. 57 test functions, 272 checks, 0 failures, including a hand-derived
+decisive test (a single straight edge, no via at all) proving historyWire
+fixes real overflow a single pass cannot, and a real end-to-end fixture
+(5 real nets through the actual `route()` -> `negotiateViaAssignment()`
+pipeline) proving the mechanism isn't a dead flag.
+
+**Real result: the first unanimous win over fr5route in this project's
+entire via-cost-aware exploration**, across five prior generations that
+all failed (fr6route, fr7route, and nv1route's own three knob variants).
+Screened on newblue1 alone first, default `NV2ROUTE_VIA_ROUNDS=60`:
+22118, already -17.4% vs fr5route's own committed 26776. A round-cap
+sweep followed to check how much more was available:
+
+| round cap | newblue1 overflow | further gain |
+|---|---|---|
+| 60 | 22118 | -- |
+| 200 | 21904 | -1.1% |
+| 250 | 21874 | -0.1% (from 200) |
+| 400 | 21824 | -0.4% (from 200) |
+
+Real, but sharply diminishing past round cap 200 -- the same shape as
+the coefficient-tuning sweeps this generation exists to move past, just
+at a much better baseline. Full three-benchmark runs at round caps 200
+and 400 (`gr_verify`-confirmed, `eval2008.pl`-cross-checked exactly on
+every benchmark: adaptec1 and bigblue1 both matched to the OF/max-OF
+digit, newblue1 likewise -- 0 malformed/out-of-bounds/disconnected/
+incomplete/unrouted on all three at both round caps):
+
+| benchmark | fr5route (real) | nv2route r=200 | nv2route r=400 | final delta vs fr5route |
+|---|---|---|---|---|
+| adaptec1 | 93764 | 75192 | 75028 | **-19.98%** |
+| newblue1 | 26776 | 21904 | 21824 | **-18.49%** |
+| bigblue1 | 191976 | 185258 | 184922 | **-3.67%** |
+
+Doubling the round cap from 200 to 400 bought only -0.22%/-0.37%/-0.18%
+further on adaptec1/newblue1/bigblue1 respectively -- all three still
+hit the round cap without fully converging (none stalled even at 400),
+but the marginal return per additional round has clearly collapsed by
+that point. bigblue1's own margin is real but far thinner than the
+other two's, for reasons not yet investigated.
+
+**Decision: `gr/nv2route.cpp` is this project's new best real result,
+replacing `gr/fr5route.cpp`.** Unanimous across all three real ISPD
+benchmarks, non-trivial on two of three, verified both ways (`gr_verify`
+and `eval2008.pl` agreeing exactly) -- the first result in the entire
+via-cost-aware line of attack (fr6route through nv2route, six
+generations) to actually close part of the gap this project's own
+zero-overflow mandate exists to chase, rather than widen it.
+`NV2ROUTE_VIA_ROUNDS=200` (not the file's own implicit default of 60) is
+the recommended operating point: captures nearly all of the measured
+gain at roughly half the runtime of 400. Total overflow remains far from
+zero on all three benchmarks -- this is a real step, not the
+destination. Open questions for a future session: why bigblue1's own
+margin is so much thinner than the other two's, whether the deferred
+2D-pricing-loop retune could still close more of the remaining
+42.4%-scale aggregate-shortage gap on top of this, and whether the two
+history mechanisms (via, wire) interact in ways worth tuning jointly
+rather than in isolation.
