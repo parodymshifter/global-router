@@ -3508,3 +3508,107 @@ pricing loop's own convergence gap named at the top of this part
 (84-98% of remaining overflow is now aggregate-shortage, tracking that
 loop's own unresolved state). None of these three has been scoped yet;
 that is the open work for the next generation.
+
+## Part 32: `FR4ROUTE_EXACT_MAX_PINS` sweep on nv2route -- degree cap for the exact RSMT DP (pure tuning, no new file)
+
+Part 31's own open item picked the `maxExactPins=8` degree cap as the next
+thing to investigate: `nv2route`'s fast tier only runs the exact
+Dreyfus-Wagner RSMT DP (`exactSteinerTree()`, `gr/nv2route.cpp:699-840`)
+for nets with at most 8 unique pins; larger nets fall back to
+`steinerizeTree()`'s cheap heuristic, which structurally cannot improve
+any degree>=3 branch point. The cap was picked with no empirical sweep
+("the DP gets expensive past here," never measured), and no data existed
+on how much this actually costs in real overflow. Scoped in
+`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+
+**Stage 1 diagnostic** (`diag5`, throwaway, not part of the repo, matching
+the `diag4` precedent from Part 30/31): built a fair-share overflow
+attribution tool, adapting `gr_verify.cpp`'s own per-net edge-list and
+usage-accumulation logic rather than reimplementing it. For every
+overflowed edge, divided its overflow across the nets crossing it in
+proportion to each net's own charged width, summed per net, and bucketed
+by dedup'd pin count (self-check: the fair-share sum reconciled with
+`gr_verify`'s own `totalOverflow` exactly, to the last unit, on all three
+benchmarks). Result, on the three already-committed `nv2route` outputs
+(`NV2ROUTE_VIA_ROUNDS=200`, `gr_verify`-reconfirmed clean before use):
+
+| benchmark | nets >8 pins (share of routed population) | overflow attributed to them |
+|---|---|---|
+| adaptec1 | 16705 (9.45%) | **31.48%** |
+| bigblue1 | 16193 (8.23%) | **39.22%** |
+| newblue1 | 14986 (5.54%) | **39.57%** |
+
+Unanimous, well past the 10% decision gate fixed before looking at the
+number (see Part 31's plan file for the gate's own reasoning) -- a small
+fraction of nets by count, carrying a disproportionate share of what's
+still overflowed. This justified the sweep below, though as an upper
+ceiling on possible gain, not an expected one (per the gate's own caveat:
+Part 24 already measured the whole lever's full-population ceiling at only
+1.5-4.2%, and raising the cap only reaches a strict subset of that
+population while only affecting initial topology, not negotiation).
+
+**Stage 1.5 timing microbenchmark**: `exactSteinerTree()` is a pure
+function of a point set, so its real cost was measured directly (not
+reasoned about) over real point sets pulled from each benchmark's own net
+population, k=8..20, with a per-k wall-clock budget so an exponential blow-up
+couldn't hang the tool. Nearly identical across all three benchmarks (the
+DP's cost is a function of k alone, not benchmark-specific geometry):
+
+| k | mean time/net |
+|---|---|
+| 8 | 1.5ms |
+| 9 | 4.9ms |
+| 10 | 15.3ms |
+| 11 | 50.0ms |
+| 12 | 150ms |
+| 13 | 480ms |
+| 14 | 1.5s |
+
+A clean ~3.1-3.3x growth per unit k, matching the DP's own O(3^k) merge-step
+term. k=15+ was not pursued -- already impractical by extrapolation (tens of
+seconds to hours per net). Combined with adaptec1's own granular per-k
+population, estimated one-time added setup cost: cap=10 ~36s, cap=12
+~6min, cap=13 ~17.5min, cap=14 ~49min. Candidates 10, 12 (and 13, held in
+reserve) were judged practical.
+
+**Stage 3 cheap screen** (adaptec1 only, reduced rounds:
+`VROUTE_FAST_ROUNDS=15 VROUTE_SLOW_ROUNDS=25 NV2ROUTE_VIA_ROUNDS=20`,
+`gr_verify`-checked, all three confirmed legal: 0 malformed/out-of-bounds/
+disconnected/incomplete/unrouted, self-reported overflow matching
+`gr_verify` exactly):
+
+| cap | real overflow | vs. cap=8 baseline | wall clock |
+|---|---|---|---|
+| 8 (baseline) | 93538 | -- | 726.5s |
+| 10 | 94122 | **+0.62%** | 772.2s |
+| 12 | 98300 | **+5.09%** | 1112.2s |
+
+**Clean, monotonic regression.** Raising the cap makes real overflow
+worse, and worse the higher it goes, while also costing more runtime.
+Neither candidate beat baseline, so per this sweep's own promotion gate,
+neither was promoted to a full three-benchmark run, and cap=13 (already
+judged practical by Stage 1.5) was not run either -- the trend was already
+unambiguous and a third point on an already-monotonic curve was not worth
+the ~17.5 minutes.
+
+**Diagnosis:** `exactSteinerTree()` is a pure geometric length-minimizer
+with zero congestion awareness -- exactly like `steinerizeTree()`'s own
+fallback. A shorter, more "optimal" tree is not necessarily a
+less-congested one: it can concentrate a net's wire onto fewer, more
+central Hanan-grid edges instead of the fallback heuristic's comparatively
+spread-out path. This is consistent with Part 24's own original finding
+that moving the *entire* eligible population to exact RSMT bought only a
+modest 1.5-4.2% gain in the first place -- extending it further into
+larger, more interconnected nets appears to cross into net-negative
+territory. Not further diagnosed (e.g., no instrumented comparison of
+which specific edges each topology choice prefers) -- a future revisit
+would need that to say more precisely why.
+
+**Decision: the exact-RSMT degree cap is not a lever worth raising, in
+either direction.** `maxExactPins=8` (the existing default) stays as is;
+`nv2route` is unchanged. This closes out the "Exact RSMT degree cap"
+direction Part 31 opened. Of the three items Part 31 left open, two remain:
+the RSMT-seeded fast tier's own topology bias into MSMV eligibility, and
+the 2D pricing loop's own convergence gap (the larger, already-quantified
+target: 84-98% of remaining overflow tracks that loop's own unresolved
+state).
