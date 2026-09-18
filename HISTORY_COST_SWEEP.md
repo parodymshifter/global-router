@@ -3612,3 +3612,111 @@ the RSMT-seeded fast tier's own topology bias into MSMV eligibility, and
 the 2D pricing loop's own convergence gap (the larger, already-quantified
 target: 84-98% of remaining overflow tracks that loop's own unresolved
 state).
+
+## Part 33: `VROUTE_EPS`/`VROUTE_THRESHOLD`/`VROUTE_POWER` sweep on nv2route's 2D pricing loop -- mixed, net negligible
+
+Part 32 closed the RSMT-cap direction as negative. The user picked the
+other, stronger-looking open item: the 2D pricing loop's own convergence
+gap, since 84-98% of nv2route's remaining real overflow tracks that
+loop's own unresolved "2D overflow" number almost exactly (Part 30/31).
+Scoped in `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+
+**Diagnostic first** (`VROUTE_TRACE=1 FR1ROUTE_TWOD_ONLY=1`, zero new
+code -- both env vars already existed): read the loop's own round-by-round
+trace on adaptec1 before touching anything. Found the fast tier does NOT
+converge -- it overshoots after round 1 (248780, its best-ever value),
+climbs to 285736 by round 14, then oscillates in a 274000-283000 band,
+patience-stopped at round 21 (`kFastPatience=20`), never beating round
+1's own number. The cleanup pass reverts toward the best-seen state and
+improves further (248780 -> 232190). The slow tier, by contrast, declines
+smoothly with no oscillation, still improving at the round cap
+(172072 -> 63966 over 150 rounds, "hit the round cap", never stalled),
+with a flat ~72% reject rate that never shrinks across all 150 rounds.
+`accepted` never hits exactly 0, closing the planned Stage 3
+premature-stop probe as a non-issue before it was even run. The final 2D
+overflow (63966) matched Part 30/31's own cited number exactly, confirming
+the isolated 2D-only run faithfully reproduces the real pipeline.
+
+The fast tier's overshoot and the slow tier's still-declining plateau
+pointed in opposite directions for the shared coefficients (fast tier
+wants gentler steps, slow tier's plateau suggested it could converge
+faster with more aggressive ones) -- resolved by screening the full grid
+in both directions rather than guessing.
+
+**Screen** (adaptec1, `VROUTE_FAST_ROUNDS=15 VROUTE_SLOW_ROUNDS=25
+NV2ROUTE_VIA_ROUNDS=20`, `gr_verify`-confirmed legal throughout, baseline
+93538): a one-factor-at-a-time sweep around the defaults (eps=0.02,
+threshold=0.2, power=2.5) plus follow-ups once a trend appeared:
+
+| axis | value | overflow | delta |
+|---|---|---|---|
+| eps | 0.005 | 106416 | +13.8% |
+| eps | 0.01 | 98172 | +5.0% |
+| eps | 0.04 | 94086 | +0.6% |
+| eps | 0.08 | 101974 | +9.0% |
+| threshold | 0.4 | 96312 | +3.0% |
+| threshold | 0.3 | 94482 | +1.0% |
+| threshold | 0.1 | 93158 | -0.4% |
+| threshold | 0.05 | 89738 | -4.1% |
+| threshold | 0.0 | 89422 | -4.4% |
+| power | 3.5 | 97974 | +4.7% |
+| power | 5.0 | 90036 | -3.7% |
+| power | 1.5 | 88086 | -5.8% |
+| power | 1.0 | 85884 | -8.2% |
+| power | 0.5 | 87066 | -6.9% |
+| threshold=0.05 + power=1.0 | | **84610** | **-9.6%** |
+
+Lower threshold and lower power both helped independently (power
+non-monotonically -- 3.5 lost, 5.0 and below all won, with a sweet spot
+around 1.0-1.5, not a clean single-direction trend), and combining the
+two best single-axis values won further. `threshold=0.05, power=1.0` was
+the best of 15 screened combinations.
+
+**Round-budget sanity check, per the plan's own explicit risk flag**
+(these knobs change convergence rate/shape directly, so a heavily
+truncated round budget could reward a candidate that converges fast early
+but plateaus worse at the real cap -- exactly the risk this check exists
+to catch): re-ran the winning combination on adaptec1 at the REAL 2D
+round budget (default 60/150, not the screen's 15/25), against a
+same-conditions default-coefficient baseline run fresh for this purpose.
+Result: 76264 vs 77444 -- **-1.5%**, both `gr_verify`-confirmed legal. The
+screen's apparent -9.6% collapsed to a much more modest edge once given
+the real round budget the committed operating point actually uses (2D
+overflow itself: 63548 vs 63966, only -0.7%) -- confirming most of the
+screen's advantage really was a truncated-round-budget artifact, exactly
+as the plan anticipated, though a small real edge survived the check.
+
+**Full three-benchmark run** at the committed operating point
+(`NV2ROUTE_VIA_ROUNDS=200`, default 2D rounds,
+`VROUTE_THRESHOLD=0.05 VROUTE_POWER=1.0`), `gr_verify`-confirmed legal on
+all three (0 malformed/out-of-bounds/disconnected/incomplete/unrouted):
+
+| benchmark | nv2route committed best | threshold=0.05/power=1.0 | delta |
+|---|---|---|---|
+| adaptec1 | 75192 | 74148 | -1.4% |
+| newblue1 | 21904 | 21868 | -0.2% |
+| bigblue1 | 185258 | 186340 | +0.6% |
+| **sum** | **282354** | **282356** | **~0%** |
+
+**Not unanimous -- a mixed result**, small wins on two benchmarks offset
+by a small loss on the third, net essentially zero in aggregate (a
+difference of 2 out of 282354, noise-level). Every result this project
+has adopted as a new committed best won unanimously across all three
+benchmarks (kroute, then nv2route); this doesn't clear that bar. Per this
+project's own screening discipline, `eval2008.pl` was not run -- there's
+no independent cross-check worth paying for on a result that isn't a real
+win by `gr_verify` alone.
+
+**Decision: `nv2route` is unchanged; the committed best stays Part 30's
+own numbers.** The coefficient-tuning angle on the 2D pricing loop is
+closed as mixed/negligible, not a regression and not a win. Of the three
+items open after Part 31/32, one remains genuinely untried: the fast
+tier's own persistent overshoot (never resolved by this sweep -- lowering
+threshold/power helped the slow tier's plateau, not the fast tier's own
+non-convergence, though the cleanup pass largely absorbs that damage
+already) and the net-ordering/scheduler sensitivity question this
+diagnostic's own flat ~72% reject rate motivates -- CLAUDE.md's own
+scheduler section warns about exactly this shape (a fixed per-round net
+order, every net reacting to a price state already perturbed by every
+earlier-ordered net in that same round). Scoped as Stage 4 in the plan
+file for the next session.
