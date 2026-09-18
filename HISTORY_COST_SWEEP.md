@@ -3720,3 +3720,82 @@ scheduler section warns about exactly this shape (a fixed per-round net
 order, every net reacting to a price state already perturbed by every
 earlier-ordered net in that same round). Scoped as Stage 4 in the plan
 file for the next session.
+
+## Part 34: net-ordering/scheduler sensitivity on nv2route's 2D pricing loop -- real but negligible
+
+Part 33 left net ordering as the least-explored remaining lever on the 2D
+pricing loop, motivated by its own diagnostic (slow-tier reject rate flat
+at ~72% for all 150 rounds, never shrinking) and CLAUDE.md's own
+"Module structure" warning about a fixed per-round net order letting
+early-processed nets systematically bias the price state later-processed
+nets react to. `negotiateWire` mutates `prices` immediately per committed
+leg, not once per round, so this mechanism is real and direct, not
+speculative. Scoped in
+`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+
+**Prior art found while scoping this**: net ordering was already tested
+once, in isolation, with a real positive result -- `gr/xroute.cpp` (Part
+8) found RUDY+centrality ordering alone won -1.05% on newblue1, cleanly
+separated from an unrelated barrier-curve regression. That result predates
+historyWire, MSMV, and RSMT-exact-Steiner (kroute-era pricing), so it
+doesn't automatically transfer to nv2route's substantially different
+dynamics -- worth re-testing specifically, not assuming.
+
+**Part 1 -- position-bias diagnostic** (`diag6`, throwaway, not part of
+the repo, adapting Part 32's own fair-share overflow-attribution machinery
+but bucketed by each net's index in `route()`'s own processing order
+instead of pin count): run on all three benchmarks' already-committed
+real output (`gr_verify`-reconfirmed clean first). Self-check reconciled
+exactly (fair-share sum = trusted `totalOverflow`, diff 0.000000) on all
+three. Result: real, non-uniform skew on every benchmark, but
+**inconsistent in shape**:
+
+| benchmark | pattern | late-decile (6-9) share |
+|---|---|---|
+| adaptec1 | skews toward late-processed nets | 67.3% |
+| bigblue1 | scattered, no clean trend | 36.1% |
+| newblue1 | spikes in the middle (deciles 4-5) | 18.5% (middle carries 73%) |
+
+If a genuine per-round processing-order bias were the cause, the same
+relative shape (late deciles worst) should appear on all three, since the
+round-loop mechanism is identical. Instead each benchmark spikes in a
+different, benchmark-specific position -- more consistent with each
+design's own physical congestion happening to correlate with wherever its
+`.gr` file lists those nets, than with a generic order-causation effect.
+Read as a soft signal, not a verdict, per the plan's own framing (this
+measures settled post-negotiation attribution, not the process-level
+reject-rate signal that motivated the stage) -- Part 2 ran regardless.
+
+**Part 2 -- reversal sensitivity probe.** A throwaway scratch copy of
+`nv2route.cpp` ported `xroute.cpp`'s own `routeOrder` indirection pattern
+(`nets` stays in file order; only which net each round loop visits
+first/last changes, via a `VROUTE_NET_ORDER=default|reverse` gate) --
+safer than physically reordering `nets`, since every downstream reader of
+`nets`' index position keeps working unchanged. Self-test suite passed
+clean on the scratch copy. Screened on adaptec1 (reduced rounds,
+`gr_verify`-confirmed legal both ways):
+
+| order | overflow | vs. default |
+|---|---|---|
+| default (sanity check) | 93538 | -- (exact match to the existing baseline) |
+| full reversal | 92900 | **-0.68%** |
+
+The default-order run reproduced the existing baseline to the last unit,
+confirming the scratch copy is trustworthy. Full reversal -- the most
+extreme order perturbation possible -- moved the result by well under 1%,
+far short of the ±5% sensitivity gate fixed before running it. If even
+maximal reversal barely matters, milder structure-informed reorderings
+(by span, by RUDY/centrality) are very unlikely to do better, since
+they're gentler perturbations of the same mechanism.
+
+**Decision: net-ordering sensitivity on nv2route's own 2D pricing loop is
+real but negligible.** `nv2route` is unchanged; no reordering mechanism is
+worth building. This also resolves Part 1's own ambiguity: the diag6 skew
+reflects each benchmark's own incidental netlist-position/congestion
+correlation, not order-causation -- consistent with reversal barely moving
+the number. Closes out Stage 4. Two items remain genuinely open from this
+investigation's own bookkeeping: the RSMT-seeded fast tier's own topology
+bias into MSMV eligibility (untouched since Part 31), and the fast tier's
+own persistent non-convergence/overshoot (diagnosed in Part 33 -- climbs
+from round 1's 248780 to 285736 by round 14, never recovers, rescued only
+by the cleanup pass -- never addressed).
