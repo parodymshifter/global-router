@@ -3799,3 +3799,84 @@ bias into MSMV eligibility (untouched since Part 31), and the fast tier's
 own persistent non-convergence/overshoot (diagnosed in Part 33 -- climbs
 from round 1's 248780 to 285736 by round 14, never recovers, rescued only
 by the cleanup pass -- never addressed).
+
+## Part 35: fast-tier accept/revert supervision -- mechanism confirmed correct, result decisively negative
+
+Part 34 left the fast tier's own persistent overshoot as the
+better-characterized of the two remaining open items. Direct code reading
+confirmed the root cause precisely: the fast tier's round loop
+(`route()`, `nv2route.cpp:1866-1899`) has no accept/revert supervision on
+its per-net reroute (`routeNetFast`) -- every still-overflowed net
+reroutes to whatever's cheapest under current prices, unconditionally
+committed, with zero check on global overflow impact. This is a direct
+violation of CLAUDE.md's own explicit design rule ("Escalation... must be
+supervised per net... revert on the spot if it made things worse"). The
+slow tier and `relaxedCleanup` both already implement exactly this
+supervision, proven and working -- the fix looked like a structurally
+trivial copy-adapt of existing, battle-tested code. Scoped in
+`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+
+**Stage 1 -- scratch probe and a real, self-correcting decisive test.**
+A throwaway scratch copy (`VROUTE_FAST_SUPERVISED=0|1`, default
+reproducing nv2route exactly) ported the slow tier's own snapshot/
+compare/revert block around `routeNetFast`. The first hand-built fixture
+(three small nets contesting a capacity-1 edge) immediately caught a real
+bug before any real-benchmark run: supervising a net's very first-ever
+route (always round 0, where `oldCharges` is empty) reverts it to
+*nothing* on rejection -- worse than any overflow, since an unrouted net
+violates connectivity outright. Fixed by skipping supervision when there
+is no prior route to fall back to (mirroring the unsupervised path's own
+implicit behavior for a first assignment). After the fix, the same
+fixture no longer showed a decisive difference -- itself informative:
+`overflowOverUnion` is computed over a net's own old-union-new edge set,
+so it already correctly captures self-inflicted harm (vacating one
+overloaded edge for another only "looks better" if the new edge is
+genuinely less overflowed); what it structurally cannot see is a
+same-round ordering interaction between different nets, which Part 34
+already measured as real but tiny (-0.68% under full reversal). Given
+that, the real test moved to Stage 2 -- an honest methodological note
+worth recording, not a shortcut.
+
+**Stage 2 -- real trace validation, adaptec1** (`VROUTE_TRACE=1
+FR1ROUTE_TWOD_ONLY=1`, full real round budget). Result: supervision
+**does exactly what it was designed to do** -- the fast tier's own
+oscillation disappears completely, replaced by a smooth, monotonic
+decline every single round (no exceptions, confirmed across all 60
+rounds). But it converges to a **worse** place: round 1 alone resolves
+far less (288650, vs. the unsupervised original's 248780) because
+supervision rejects much of round 1's aggressive churn (48889 accepted,
+16540 rejected) that the unsupervised version accepts unconditionally.
+By the fast tier's own round cap and cleanup pass, supervised reaches
+273164 -- **+17.7% worse** than the unsupervised original's own
+248780-then-232190. The slow tier's own much larger round budget (150
+rounds, vs. the fast tier's 60) narrows this gap only slightly and very
+slowly (273164 -> 83648 over 150 rounds, still declining but by single
+digits per round near the end) -- final 2D overflow **83648**, vs. the
+unsupervised original's own **63966** -- **+30.8% worse**, confirmed
+`FR1ROUTE_TWOD_ONLY`-isolated, both runs otherwise identical.
+
+**Diagnosis**: the unsupervised fast tier's own round-1 unrestrained
+churn -- accepting essentially every reroute regardless of individual
+local effect -- achieves a large aggregate win specifically *because* it
+doesn't stop to check each move; supervision's stricter round-1
+rejection rate locks in a materially worse starting configuration too
+early, and the extra 150 rounds of slow-tier work downstream cannot make
+up the gap. This is the same shape as Part 31's mt1route finding: the
+mechanism is mechanically exactly what was diagnosed and intended, and it
+demonstrably fixes the specific symptom it targeted (the oscillation is
+gone, confirmed), but the end-to-end result is decisively worse, not
+better. Per the plan's own Stage 2 gate ("if the fix doesn't recover to
+at least match the unsupervised baseline, this should be reported as a
+real negative finding and not progressed to Stage 3"), this closes here
+-- no screen, no promotion, no `eval2008.pl` cross-check attempted, since
+the trace-level evidence alone is already unambiguous and would only cost
+more runtime to reconfirm.
+
+**Decision: fast-tier accept/revert supervision is a real, decisive
+negative.** `nv2route` is unchanged. The apparent design-rule violation
+CLAUDE.md warns against turns out, empirically, to be load-bearing here:
+the fast tier's own lack of supervision is not an oversight this specific
+loop suffers from, it's part of what makes its round-1 churn effective.
+One item remains genuinely open from this investigation's own
+bookkeeping: the RSMT-seeded fast tier's own topology bias into MSMV
+eligibility, untouched since Part 31.
