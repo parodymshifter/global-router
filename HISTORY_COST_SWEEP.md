@@ -3880,3 +3880,121 @@ loop suffers from, it's part of what makes its round-1 churn effective.
 One item remains genuinely open from this investigation's own
 bookkeeping: the RSMT-seeded fast tier's own topology bias into MSMV
 eligibility, untouched since Part 31.
+
+## Part 36: nv3route -- giant-net negotiation, the first real win since nv2route itself
+
+A new per-net ranking diagnostic (`diag7`, throwaway, not part of the
+repo, complementing `diag5`'s pin-count buckets and `diag6`'s
+processing-order deciles with an actual per-net leaderboard) found, while
+investigating a user question about which individual nets contribute most
+to overflow, that in every one of the three real benchmarks the single
+largest "giant net" (`n.pins.size() > kGiantNetPins`=1000 raw pins -- the
+ISPD contest's own official "need not be routed" exemption threshold,
+matching `gr_verify.cpp`'s identical exemption check, not a tuned
+performance constant) is the #1 or #2 worst overflow offender by both
+total attributed overflow and distinct-overflowed-edges-touched, out of a
+population of 176,716 to 270,715 routed nets:
+
+| benchmark | giant nets (raw pins) | rank by overflow breadth |
+|---|---|---|
+| adaptec1 | n7807 (2271) | #1 -- 344 distinct overflowed edges |
+| bigblue1 | n10760 (2621), n10756 (1342) | #1 and #2 -- 530/531 edges |
+| newblue1 | n71 (12335), n1211 (4682) | #1 and #2 -- 368/93 edges |
+
+Only 1-2 such nets exist per benchmark (confirmed via direct grep of the
+`.gr` files) -- a small, concentrated population, meaning per-net cost
+tolerance for a fix is far higher than anywhere else in this codebase.
+`diag7` reads the final `.route` output, so this is real, scored
+overflow (self-check reconciled exactly with `gr_verify`'s own
+`totalOverflow`), not `route()`'s own internal 2D metric. Scoped in
+`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`, run in
+parallel with Part 35's own investigation per explicit user direction.
+
+**Root cause, confirmed by direct code reading:** giant nets are routed
+via `routeGiantNet`, which gets `steinerizeTree`'s topology (the same as
+any net too large for exact RSMT) but commits each MST edge as a fixed
+horizontal-then-vertical L-shape with zero price awareness
+(`routeGiantNet`'s own signature takes `Usage&`, never `Prices&`) and
+zero congestion awareness (no search, unconditional commit) -- and is
+entirely excluded from `route()`'s fast tier, slow tier, and cleanup
+pass. A giant net's initial, congestion-blind route is never revisited at
+the 2D level, while every other net gets up to 60+150 rounds of
+price-based negotiation to escape congestion. It does still charge usage
+for whatever it emits, so its congestion is fully counted in the final
+score -- it just never gets a chance to negotiate it away. An initial
+hypothesis (giant nets stuck on fixed *real* layers) was checked and
+found wrong: `route()`'s own `LayerPlan` is synthetic (`hLayers{0},
+vLayers{0}`) for every net during the 2D-collapsed phase, giant or not;
+real per-layer assignment already applies to giant-net segments
+downstream with no special-casing. The actual gap is narrower and more
+specific: a giant net's XY topology is locked in once, congestion-blind,
+and nothing downstream can reroute the path itself, only choose which
+layer a fixed path lives on.
+
+**The new mechanism**: let giant nets participate in the fast tier's own
+per-leg price-negotiated reroute (`routeNetFast`), unchanged from how
+every other net already uses it -- no new function, no signature change,
+gated by `NV3ROUTE_GIANT_FAST_TIER=0|1` (default 1, `=0` reproduces
+nv2route's exact prior behavior). `routeGiantNet`'s own initial commit
+still runs first, and giant nets still never reach the slow tier's MSMV
+escalation or the cleanup pass -- this generation only widens fast-tier
+eligibility, deliberately the narrowest possible test of "does
+negotiation help at all," before considering CLAUDE.md's own bigger
+prescribed fix (subnet decomposition) or slow-tier eligibility. Cost,
+measured directly rather than assumed: `routeNetFast` on the real giant
+net (adaptec1's n7807, 1926 unique points) took ~1.07ms per call --
+negligible even across 60 rounds.
+
+**Screen and mandatory sanity check.** A reduced-round screen on
+adaptec1 showed -0.63% (93538 -> 92952, `gr_verify`-confirmed legal).
+Per this investigation lineage's own hard-won discipline (Part 33 caught
+a much larger screen-level effect collapse entirely at the real round
+budget), a sanity check at the real 2D round budget was run before
+trusting the screen number -- it held: 76384 vs. a same-conditions
+default baseline of 77444, -1.37%, `gr_verify`-confirmed legal. This is
+the first Stage in this whole lineage (Parts 32-35 all screened
+positive-or-negative signals that either collapsed or were correctly
+predicted to be modest) where a screen-level win survived the sanity
+check un-diminished in direction and comparable in magnitude.
+
+**Full three-benchmark result** at the committed operating point
+(`NV2ROUTE_VIA_ROUNDS=200`, default 2D rounds), `gr_verify`-confirmed
+legal on all three (0 malformed/out-of-bounds/disconnected/incomplete/
+unrouted) and cross-checked exactly against `eval2008.pl` (total
+overflow, max overflow, and scored wirelength matching to the unit on
+every benchmark):
+
+| benchmark | nv2route (committed best) | nv3route | delta |
+|---|---|---|---|
+| adaptec1 | 75192 | 74210 | **-1.31%** |
+| newblue1 | 21904 | 21634 | **-1.23%** |
+| bigblue1 | 185258 | 185246 | **-0.006%** (flat, not worse) |
+| **sum** | **282354** | **281090** | **-0.448%** |
+
+**Decision: `gr/nv3route.cpp` is this project's new best real result,
+replacing `gr/nv2route.cpp`.** No benchmark regressed; two improved
+meaningfully and the third held essentially flat -- clears this
+project's own established promotion bar. Modest in absolute magnitude,
+but the first real progress after four straight negative/mixed
+generations (Parts 32-35), and it directly validates the diagnosis: a
+small, disproportionately-congested population was being denied
+negotiation entirely, not merely given a suboptimal topology. Self-tests:
+a decisive hand-built fixture (a >1000-raw-pin net with only two unique
+points after dedup, so the routed topology stays trivial while the giant
+classification is genuinely tripped) proves `routeGiantNet`'s own fixed
+corner can permanently contest an edge that the untested alternate corner
+would avoid entirely -- `NV3ROUTE_GIANT_FAST_TIER=0` reproduces that
+permanent overflow exactly (matching nv2route's own behavior); the
+default (giant nets in the fast tier) resolves it completely by
+discovering the untested corner under real price pressure. 57 test
+functions, 275 checks, all passing.
+
+Two directions are already scoped as the immediate next steps, in order:
+(1) slow-tier (MSMV) eligibility for giant nets -- this generation still
+withholds it even though the population's tiny size (1-2 nets) makes an
+expensive per-net search entirely affordable; (2) a congestion-aware
+corner choice inside `routeGiantNet`'s own initial commit itself (cheap,
+no search, compounds with this fix by making the *first* commit less
+blind rather than only correcting it afterward). CLAUDE.md's own
+prescribed bigger fix (subnet decomposition) remains a further, heavier
+option if 1-2 don't close the remaining gap.
