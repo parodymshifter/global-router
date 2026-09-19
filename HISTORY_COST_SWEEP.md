@@ -3998,3 +3998,89 @@ no search, compounds with this fix by making the *first* commit less
 blind rather than only correcting it afterward). CLAUDE.md's own
 prescribed bigger fix (subnet decomposition) remains a further, heavier
 option if 1-2 don't close the remaining gap.
+
+## Part 37: giant-net follow-ups -- MSMV eligibility and corner choice, both negative
+
+Part 36 scoped two immediate follow-ups to nv3route's own giant-fast-tier
+win: (1) slow-tier (MSMV) eligibility for giant nets, (2) a
+congestion-aware corner choice inside `routeGiantNet`'s own initial
+commit. Scoped in `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+
+**#1, MSMV eligibility -- a real, disclosed risk, tested carefully, and a
+clear negative.** Direct code reading found `multiSourceDijkstra`'s own
+search-region bbox spans the net's ENTIRE committed footprint union all
+remaining sinks (not bounded by margin for a wide-spanning net), its own
+heuristic does a linear scan over all remaining sinks per queue push, and
+`routeNetSlowMSMV` rebuilds its whole source list from scratch every
+step -- closer to O(k^2) than the O(k) bounded cost normal escalated nets
+pay. Worse, a margin-exhaustion path calls `gr_io::fail()`, a hard
+`std::exit(1)` with zero recovery -- a real crash risk, not just a
+performance one, for a net possibly spanning genuinely disconnected grid
+regions. This needed a measure-first, safety-first staging distinct from
+every prior generation's own "screen first" pattern.
+
+Stage 1 (mandatory gate, before any real-benchmark run): a single
+`routeNetSlowMSMV` call on the worst-case real giant net (newblue1's n71,
+4622 unique points after dedup) using authentic negotiated prices (the
+fast tier's own real state, not a freshly-flat-priced test, which would
+badly underestimate cost) took 29.3s and succeeded cleanly -- no margin
+exhaustion. This cleared the gate. A reduced-round screen on adaptec1
+then showed a further real win on top of nv3route's own screen number
+(92570 vs. 92952, and vs. 93538 with no giant mechanisms at all -- -1.03%),
+with zero margin-exhaustion warnings across all 25 slow rounds.
+
+The mandatory round-budget sanity check (this lineage's own hard-won
+Part-33 discipline) reversed it: at the real 2D round budget, still zero
+margin exhaustion (safety held at scale), but **77504 vs. nv3route's own
+76384 -- +1.47% worse**, while taking **nearly double the runtime**
+(5738s vs. 2919s). The screen's own apparent win did not survive scale --
+the same shape Part 33 taught this project to watch for, but this time
+the mechanism was never mechanically broken (it never crashed, never
+mishandled the giant net) -- it simply made the broader 210-round
+negotiation across hundreds of thousands of other nets worse in
+aggregate, the same "confirmed-correct mechanism, still lost" pattern as
+Part 31 (mt1route) and Part 35 (fast-tier supervision). Not promoted; no
+`eval2008.pl` cross-check attempted.
+
+**#2, congestion-aware corner choice -- cheap and safe, but also
+negative.** `routeGiantNet` always committed each MST edge as a fixed
+horizontal-then-vertical L-shape; the new mechanism compares that corner
+against the untested alternative (vertical-then-horizontal) by summed
+usage/capacity ratio over each corner's own specific edges (O(span), no
+search, no `Prices&` needed -- `Usage&` alone suffices for a greedy
+comparison), committing whichever is less loaded, ties keeping the
+original corner. Unlike #1, this carries none of MSMV's own cost or
+crash risk -- it was expected to be a safe, incremental addition on top
+of nv3route's own fast-tier fix.
+
+A reduced-round screen on adaptec1 (with nv3route's own giant-fast-tier
+mechanism still active) showed a real, if modest, regression instead:
+**93856 vs. nv3route's own screen number of 92952 -- +0.97% worse**,
+`gr_verify`-confirmed legal. Per this project's own established
+precedent (a clear screen-level loss doesn't need the round-budget
+sanity check -- that safeguard exists specifically to catch *wins* that
+might evaporate at scale, not to double-check losses; Part 32 skipped
+`eval2008.pl` on a negative `gr_verify` result on the same reasoning),
+no further real-budget verification was run. A plausible explanation,
+consistent with #1's own lesson: a "better" initial commit changes which
+specific edges the giant net's own topology touches at round 0, which
+then propagates through the fast tier's own subsequent renegotiation
+(already active from nv3route) along a different path -- better locally,
+but not better once hundreds of thousands of other nets' own negotiation
+dynamics react to it over the following rounds.
+
+**Decision: neither follow-up improves on `gr/nv3route.cpp`.** `nv3route`
+remains the committed best; no `nv4route.cpp` is created. Both negative
+results are honest and informative in the same way: **this specific
+router's own negotiation dynamics do not reward locally-better decisions
+in isolation** -- three separate mechanisms now (mt1route's medium tier,
+the fast tier's own accept/revert supervision, and now MSMV/corner-choice
+for giant nets) have each demonstrably done exactly what they were
+designed to do at the local level, and each has made the full,
+many-rounds, many-thousands-of-nets aggregate result worse. CLAUDE.md's
+own prescribed bigger fix for giant nets specifically -- subnet
+decomposition, splitting a giant net into pieces that negotiate as
+independent, ordinary-sized nets rather than one monolithic unit
+reacting all at once -- remains untried and is the more structurally
+different option still on the table; a piecemeal local tweak to the
+existing monolithic mechanism has now failed twice.
