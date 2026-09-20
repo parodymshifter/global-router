@@ -56,6 +56,7 @@ jobs:
           - mt2route
           - nv3route
           - nv4route
+          - nv5route
     steps:
       - uses: actions/checkout@v4
 

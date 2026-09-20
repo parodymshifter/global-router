@@ -4405,3 +4405,118 @@ dynamics -- a sample of three joint attempts is far too small to
 generalize from -- but worth keeping in mind when scoping the next
 candidate. `nv4route.cpp`'s own header carries the full derivation and
 result table.
+
+## Part 42: `gr/nv5route.cpp` -- checkpoint jolt + halo pricing, a clean and decisive negative
+
+Motivated by three new diagnostics run against nv4route.cpp's own committed
+output (adaptec1 72882 / newblue1 21418 / bigblue1 183044): overflowed edges
+cluster into a small number of large contiguous regions (bigblue1: one
+connected component covers 71.9% of every overflow-touched tile); 96-99.98%
+of nets touching more than one overflowed edge are already escalated to
+slow-tier MSMV and still overflow; and the median overflow-touching net
+shows essentially zero detour. User-proposed mechanism, refined over
+several rounds of discussion (full design in
+`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`): a discrete
+"jolt" -- a significant, threshold-triggered multiplicative cost penalty
+on currently-overflowed edges, distinct from the existing smooth `hist`
+term -- plus a smaller "halo" penalty on grid-adjacent (not themselves
+overflowed) edges, plus a continuous relax-rate knob spanning fully-sticky
+through gradual capacity-slack-proportional relaxation through
+effectively-full-reset.
+
+Built as `gr/nv5route.cpp`, forked from `gr/nv4route.cpp`. New `updateJolt`
+function called at the same three round-boundary checkpoints
+`updateHistory` already uses; a hand-built grid-adjacency helper
+(`forEachAdjacent2dEdge`, none existed anywhere in this codebase); a
+second independent multiplicative array (`joltH`/`joltV`) riding the same
+`edgeCost` choke point `histH`/`histV` already uses (6 call sites, one
+token each). Precedence (an edge both overflowed and halo-adjacent only
+ever gets the full jolt) and the relax-rate's promotion behavior (a halo
+edge that later genuinely overflows is promoted to full jolt and stays
+there) both fall out of the same value-based comparison
+(`jolt < haloFactor`) with no separate bookkeeping needed. 63 test
+functions, 303 checks, 0 failures, clean `-Wall -Wextra` build -- 5 new
+decisive fixtures: pure-function jolt/halo/precedence/trigger-gate
+correctness on a hand-built usage grid; the relax-rate continuum
+(sticky/gradual/full-reset) including a direct check that more free
+capacity relaxes by a strictly larger step than an edge just barely
+clearing capacity; a halo tie-break fixture proving the real production
+`priceCandidate` function breaks an exact geometric tie toward the
+non-adjacent corner once halo is enabled; a real two-round
+`routeNetFast` demonstration (an exact-tie fixture has no deadzone --
+any nonzero perturbation flips it regardless of magnitude, so this
+fixture deliberately gives the alternate candidate its own small,
+independent handicap first, so a small history step provably isn't
+enough to overcome it while a jolt is); and a toggle-inertness check
+proving `NV5ROUTE_JOLT=0` is unaffected by even extreme values of every
+other jolt/halo/relax knob.
+
+**Screen** (adaptec1, half the real round budget --
+`VROUTE_FAST_ROUNDS=30 VROUTE_SLOW_ROUNDS=75 NV2ROUTE_VIA_ROUNDS=100`,
+this session's own established discipline after three short-screen
+reversals earlier this session), direct jolt alone
+(`NV5ROUTE_HALO_RADIUS=0`), against a same-conditions baseline
+(`NV5ROUTE_JOLT=0`, real overflow 74984), all `gr_verify`-confirmed legal
+(0 malformed/disconnected/incomplete/unrouted):
+
+| `NV5ROUTE_JOLT_FACTOR` | real overflow | delta |
+|---|---|---|
+| 1.1 (gentlest tested) | 75212 | +0.30% |
+| 1.5 | 78432 | +4.60% |
+| 2.0 | 82142 | +9.55% |
+| 3.0 | 87678 | +16.93% |
+
+Monotonic and unambiguous across the entire tested range -- there is no
+magnitude, from barely-there to strong, at which the direct jolt helps.
+`NV5ROUTE_JOLT_MIN_OVERFLOW` (20/100/500) made no measurable difference
+at any factor: at this problem scale the checkpoint's own overflowed-edge
+count already vastly exceeds all three thresholds within the first few
+rounds, so every value tested was equivalent to "always triggered" --
+this specific threshold dimension turned out not to be a live variable
+at real-benchmark scale, the same shape of lesson Part 38's own
+percentage-threshold calibration bug taught for a different mechanism.
+
+**Halo check**: layered on top of the gentlest (least-bad) jolt setting
+(`NV5ROUTE_HALO_RADIUS=1 NV5ROUTE_HALO_FACTOR=1.3`, `JOLT_FACTOR=1.1`),
+real overflow 75660 (+0.90%) -- slightly *worse* than jolt alone at the
+same factor (75212, +0.30%), not better. `gr_verify`-confirmed legal.
+
+Per the plan's own explicit contingency ("if radius-1 itself washes out,
+that's the answer; don't chase a larger radius hoping to fix it"), the
+same logic closes the whole line here: halo compounding rather than
+reversing an already-losing base mechanism means the mandatory
+real-budget sanity check, a relax-rate sweep, and a three-benchmark run
+are all skipped -- per this project's own established discipline, a
+clear screen-level *loss* doesn't need the sanity check (that safeguard
+exists specifically to catch wins evaporating, per Parts 32/37's own
+precedent, not to double-check losses), and there is no plausible path
+by which retuning the relaxation dynamics of a base mechanism that loses
+monotonically across its entire tested magnitude range would reverse
+that trend.
+
+**Decision: `gr/nv5route.cpp` does not improve on `gr/nv4route.cpp`.**
+`nv4route` remains the committed best (adaptec1 72882 / newblue1 21418 /
+bigblue1 183044); `nv5route.cpp` stays in the repository, frozen, as a
+real, honestly-measured negative result. **Diagnosis, tying directly back
+to the diagnostics that motivated this generation**: 33.3% (newblue1) to
+60.0% (bigblue1) of every net that ever escalates to slow-tier MSMV
+still overflows despite the best search this router has -- the honest
+read of that number, now confirmed by this generation's own result, is
+genuine shared-capacity contention, not a pricing gap. Making a
+contested edge more expensive doesn't create capacity that isn't there;
+it only changes which net loses the contest, or pushes a net into a
+detour that lands on a different already-scarce resource instead -- and
+the halo's own added cost on top compounds that redistribution rather
+than resolving it. This is the same lesson region-level aggregate
+congestion pricing taught at a coarser spatial scale (`uroute`/Part 18,
+`vr1route`/Part 20: a real, decisively self-tested signal that
+nonetheless landed as a wash on both the weakest and strongest search
+architectures this project has), now confirmed again at the finer,
+single-hop scale this generation tested, on the most powerful search
+architecture available (nv4route's own negotiated fast/slow-tier
+pipeline). **The "nearby congestion also matters" family of mechanisms
+has now been tried at two very different spatial scales, on two very
+different search strengths, and lost every time** -- a considerably
+stronger basis than either result alone for treating this as a real
+property of this router's own negotiation dynamics on these benchmarks,
+not an artifact of one particular implementation.

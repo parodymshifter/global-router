@@ -41,6 +41,7 @@ mt1route
 mt2route
 nv3route
 nv4route
+nv5route
 *.o
 bench/
 *.gr
