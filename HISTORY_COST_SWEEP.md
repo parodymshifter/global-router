@@ -4253,3 +4253,54 @@ individual mechanisms' own local correctness composed into global
 improvement earlier this session. The search for a genuinely positive
 joint-mechanism combination continues; this specific combination is
 closed.
+
+## Part 40: RSMT topology bias into MSMV escalation eligibility -- checked, not a real separate effect
+
+Part 31 originally named three open items. Two were investigated and
+closed (the RSMT degree cap, Part 32; the 2D pricing loop's own
+convergence gap, Parts 33-35). The third -- *"the RSMT-seeded fast tier's
+own topology bias into MSMV eligibility"* -- had never been touched by
+anything since. The question: since a net's own initial topology
+(`exactSteinerTree` for K<=8, `steinerizeTree`'s cheap heuristic
+fallback above that, both purely geometric and price-blind) is built
+once and frozen for the fast tier's entire life, and since
+`steinerizeTree`'s own fallback leaves real, measured slack at degree>=3
+branch points (Part 24), a longer/worse fallback topology touches
+strictly more grid edges by construction -- independent of real
+congestion -- which could mechanically raise a net's odds of tripping
+`netOverflowed`'s edge-based check and escalating to the slow tier,
+whether or not escalation is actually warranted. Direct code reading
+confirmed the topology is genuinely discarded on escalation (`
+routeNetSlowMSMV` regrows the tree from scratch via `netFootprint`,
+never reading `rn.mst` -- confirmed by an explicit comment in the file
+itself), so any effect is necessarily confined to the fast-tier side:
+does better topology change *how many* nets escalate, not what happens
+once they do.
+
+Part 32 already measured the overall effect of raising the exact-Steiner
+degree cap (giving more nets the truly-optimal topology instead of the
+fallback) and found it real-overflow-negative -- but never recorded
+escalation counts, only final overflow. The cheapest possible test: rerun
+Part 32's own exact configuration (cap=8/10/12, same reduced-round
+adaptec1 screen) with `VROUTE_TRACE=1` added, purely to read the
+"escalating N of M nets" line Part 32 never looked at. Result: escalation
+count does not drop as topology quality rises -- it rises slightly and
+monotonically alongside the cap (60075 -> 60368 -> 60542 nets initially
+escalated; 74945 -> 75295 -> 75209 nets in the slow tier by the end),
+the same direction as the already-known overflow regression, not counter
+to it. Final overflow numbers (92952/94778/98416) reproduce Part 32's own
+original pattern closely (small differences from nv3route's own
+giant-fast-tier fix layered on top, expected and immaterial to this
+question).
+
+**Decision: topology quality does not measurably bias escalation count in
+the hypothesized direction.** The mechanism is real and code-confirmed
+(a longer fallback tree does touch more edges, and the tree is frozen
+through the fast tier), but it is not producing the predicted "better
+topology -> less over-escalation" effect in practice -- if anything, the
+opposite, mildly. This is not a separate, exploitable lever; it's fully
+subsumed by Part 32's own already-recorded negative finding, not an
+independent channel worth its own dedicated mechanism. This closes the
+last of Part 31's three originally-named open items -- every direction
+that investigation flagged has now been checked at least once, all three
+negative or null.
