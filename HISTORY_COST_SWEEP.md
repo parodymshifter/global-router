@@ -4084,3 +4084,101 @@ independent, ordinary-sized nets rather than one monolithic unit
 reacting all at once -- remains untried and is the more structurally
 different option still on the table; a piecemeal local tweak to the
 existing monolithic mechanism has now failed twice.
+
+## Part 38: subnet decomposition of large nets -- built, self-tested, a calibration bug caught and fixed, still negative once corrected
+
+CLAUDE.md's own long-standing prescription -- *"Decompose giant nets... a
+200-terminal net should be split at the coarse level into subnets, not
+routed as a monolith"* -- was finally built. Qualification: a net
+decomposes if its raw pin count exceeds `NV4ROUTE_DECOMPOSE_PIN_THRESHOLD`
+(default 500) OR its own bounding-box half-perimeter, as a fraction of
+the chip's own half-perimeter, exceeds `NV4ROUTE_DECOMPOSE_BBOX_PCT`
+(default 0.30) -- design confirmed with the user, replacing
+`routeGiantNet` entirely for any qualifying net (it survives only as a
+fallback for a >1000-pin net that somehow misses the lower decompose
+threshold -- dead code at default settings). Clustering: cut the k-1
+longest edges of the net's own already-computed plain MST, no new
+algorithm. Each cluster becomes its own ordinary (non-giant) `RoutedNet`,
+plus a backbone connecting one representative point per cluster -- every
+piece gets full fast-tier negotiation and slow-tier escalation eligibility,
+unlike a monolithic giant net. Since nothing downstream of `route()`
+(`negotiateViaAssignment`, `writeSolution` -- confirmed by direct grep)
+tolerates more than one output block per net name, all pieces plus the
+backbone are merged into a single `RoutedNet` immediately before
+`route()` returns. Scoped in
+`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+
+**Self-tests**: 58 functions, 278 checks, all passing, including two
+decisive fixtures built specifically for this mechanism -- one proving a
+monolithic giant net can be permanently stuck (no alternate corner exists
+for a same-row edge, and it structurally never reaches the slow tier)
+while decomposed pieces reach the slow tier's real MSMV search and find a
+genuine detour the monolith never gets a chance to search for; a second
+confirming `NV4ROUTE_DECOMPOSE=0` reproduces nv3route's exact prior giant-
+net behavior. Regression continuity also confirmed on a real benchmark:
+`NV4ROUTE_DECOMPOSE=0` on adaptec1's own reduced-round screen matched
+nv3route's committed screen result exactly (92952, `gr_verify`-confirmed
+legal).
+
+**First real screen, default settings: a large, decisive-looking
+regression** -- 121860 vs. the 92952 baseline, **+31.1% worse**,
+`gr_verify`-confirmed legal. Before writing this off as decomposition
+failing, a throwaway diagnostic (`diag_decompose_qual.cpp`, not part of
+the repo) counted how many of adaptec1's 176716 routed nets actually
+qualify for decomposition under the default bbox threshold: **2 by pin
+count** (exactly the population Parts 36-37 characterized) but **1596 by
+bbox ratio** -- 800x more than intended. A sweep of the threshold showed
+why: population size collapses steeply as the percentage rises (1596 at
+30% -> 181 at 50% -> 11 at 70% -> 7 at 80% -> 2 at 90%, converging on the
+same population pin-count already catches). **The bug: a purely
+percentage-based spatial threshold, calibrated by a plausible-sounding
+guess (30%), doesn't scale the way a fixed pin-count threshold does --**
+on adaptec1's real 324x324 grid, an entirely ordinary long net can easily
+span 30% of the chip's own half-perimeter; nothing about that guess
+accounted for real chip scale. The original screen's own +31.1% mostly
+reflects 1594 unrelated ordinary nets getting needlessly decomposed, not
+decomposition hurting its actual intended target.
+
+**Corrected screens, properly scoped to the intended small population**:
+at `NV4ROUTE_DECOMPOSE_BBOX_PCT=0.70` (11 qualifying nets), 92978 vs.
+92952 -- **+0.028%, an effective tie**. Isolating decomposition's effect
+on exactly the 2 pin-count-qualifying nets alone (bbox disabled
+entirely), 93700 vs. 92952 -- **+0.81% worse**. Both `gr_verify`-confirmed
+legal. Neither is the large, obviously-miscalibrated regression the
+original screen showed, confirming the diagnosis -- but neither is a real
+win either, unlike nv3route's own -0.63% fast-tier-only screen result for
+the identical population. Per this project's own precedent (a clear
+screen-level result -- tie or loss -- doesn't need the round-budget
+sanity check, which exists to catch wins evaporating at scale, not to
+double-check a result that was never a win), no further real-budget
+verification was run.
+
+**Diagnosis**: the pins-only comparison is the cleanest test available --
+it decomposes exactly the same 2 nets nv3route's own giant-fast-tier fix
+already treats specially, so the result is a direct, apples-to-apples
+"decompose them" vs. "keep them monolithic but let them use fast-tier
+negotiation" comparison, and decomposition loses it. Decomposition's own
+unique differentiator over nv3route's already-committed fix is slow-tier
+(MSMV) eligibility for pieces -- but Part 37 already found MSMV
+eligibility for this exact population to be net-negative in aggregate,
+despite succeeding cleanly at the individual-call level. It's plausible
+decomposition's own pieces inherit the same underlying issue at smaller
+scale: whatever makes MSMV's own real search interact badly with the
+broader many-rounds negotiation once applied to former-giant-net
+material doesn't disappear just because the material is now split into
+smaller pieces first.
+
+**Decision: subnet decomposition, as implemented, is not an improvement
+over `gr/nv3route.cpp`.** `nv3route` remains the committed best; no
+`gr/nv4route.cpp` is created. This closes CLAUDE.md's own long-prescribed
+mechanism as honestly tried and negative, not merely deferred --
+`routeGiantNet`'s replacement, backbone construction, and the
+merge-before-return step all worked exactly as designed (confirmed by
+the decisive self-tests and the clean regression-continuity match), but
+the mechanism's own real value-add over the simpler already-committed fix
+doesn't materialize once correctly scoped. A separate, genuinely useful
+methodological finding survives this investigation regardless of the
+mechanism's own fate: **a percentage-based spatial qualifier needs an
+absolute floor sized to the real problem's own scale, not just a
+plausible starting guess** -- worth remembering for any future mechanism
+that reasons about "a significant fraction of the chip."
