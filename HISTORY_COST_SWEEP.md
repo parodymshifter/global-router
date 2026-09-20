@@ -4182,3 +4182,74 @@ mechanism's own fate: **a percentage-based spatial qualifier needs an
 absolute floor sized to the real problem's own scale, not just a
 plausible starting guess** -- worth remembering for any future mechanism
 that reasons about "a significant fraction of the chip."
+
+## Part 39: delayed fast-tier supervision -- a well-motivated joint-mechanism hypothesis, still reverses at the real budget
+
+With `gr/nv3route.cpp` the sole committed win after six straight
+negative/mixed generations (Parts 32-38), the user asked whether some of
+those individually-negative mechanisms might combine into something
+positive -- this project's own repeated finding that locally-good ideas
+fail in aggregate cuts both ways: the same nonlinear interaction effects
+that make good ideas fail alone could plausibly make two failed ideas
+cancel each other's specific flaw. This part tests the most directly
+motivated such combination available: Part 33's own trace found the fast
+tier's *unsupervised* round-1 churn drives its entire early win (347048
+-> 248780) but the tier then climbs/oscillates for the rest of the run;
+Part 35 found *full* accept/revert supervision (every round) prevents
+that oscillation but costs the early win itself (round 1 only reaches
+288650 when every move is checked), landing +30.8% worse overall.
+**Delayed supervision** -- unsupervised for the first N rounds, then
+supervised from round N onward -- combines both diagnoses directly rather
+than guessing blindly: keep the early win, then stabilize before it
+oscillates away. Scoped in
+`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+
+**A fast-tier-only trace (N=2, `FR1ROUTE_TWOD_ONLY=1`, 25 rounds) looked
+dramatic**: round 1 reaches 248800 (matching unsupervised exactly), then
+rounds 2-24 decline smoothly and monotonically with zero oscillation,
+reaching 230876 by round 24 -- roughly 16% better than either pure
+approach at the same round count in isolation.
+
+**A screen sweep of N (adaptec1, reduced rounds) found that signal
+mostly does not survive contact with the rest of the real pipeline**
+(cleanup pass, slow tier, via negotiation) -- only N=2 was a real win, and
+a modest one:
+
+| N | screen overflow | vs. baseline (92952) |
+|---|---|---|
+| 1 | 105738 | +13.75% |
+| 2 | 92404 | **-0.59%** |
+| 3 | 92954 | +0.002% (tie) |
+| 5 | 96408 | +3.72% |
+
+All four `gr_verify`-confirmed legal. N=2's own -0.59% is a real signal,
+but an order of magnitude smaller than the isolated fast-tier trace's own
+16% -- itself an informative, disclosed-in-advance risk that materialized
+exactly as expected: a fast-tier-only improvement measures a necessary
+but not sufficient condition for a real end-to-end win.
+
+**The mandatory round-budget sanity check reversed N=2's own screen win
+entirely**: at the real 2D round budget, 87072 vs. the same-conditions
+baseline of 76384 -- **+14.0% worse**, `gr_verify`-confirmed legal. This
+is the third time this session a promising screen-level result has
+completely reversed at real scale (after Part 33's coefficient sweep and
+Part 37's MSMV eligibility for giant nets), reinforcing the same
+practical lesson each time: this specific system's own convergence
+dynamics change character over the FULL round budget in ways a truncated
+screen can systematically misjudge, in either direction. Per this
+project's own established gate, no promotion, no `eval2008.pl`
+cross-check was run.
+
+**Decision: delayed fast-tier supervision is a real, decisive negative,
+despite being directly motivated by two already-diagnosed root causes
+from this exact session.** `nv3route` remains the committed best; no
+`gr/nv4route.cpp` is created from this mechanism. The finding itself is
+still useful: it's not enough for a joint hypothesis to correctly address
+each individual diagnosis in isolation (delayed supervision genuinely
+does keep the early win AND prevent the fast-tier's own oscillation,
+confirmed directly in the trace) -- the two diagnosed problems don't
+compose additively into their two respective fixes any more than the
+individual mechanisms' own local correctness composed into global
+improvement earlier this session. The search for a genuinely positive
+joint-mechanism combination continues; this specific combination is
+closed.
