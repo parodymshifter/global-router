@@ -4304,3 +4304,104 @@ independent channel worth its own dedicated mechanism. This closes the
 last of Part 31's three originally-named open items -- every direction
 that investigation flagged has now been checked at least once, all three
 negative or null.
+
+## Part 41: `gr/nv4route.cpp` -- retuning fast-tier coefficients on top of nv3route's giant-fast-tier win, the first positive joint-mechanism combination this session
+
+Every open item from Part 31's own list closed by Part 40 (see that
+Part's own closing line). The user's own next direction was to pursue
+joint-mechanism combinations specifically: retuning Part 33's coefficient
+sweep (`VROUTE_THRESHOLD`/`VROUTE_POWER`) on top of nv3route's own
+already-committed giant-fast-tier mechanism, rather than in isolation the
+way Part 33 originally tried it (before nv3route existed). Two joint
+attempts earlier this session -- corner-choice combined with
+giant-fast-tier, and delayed supervision's own two-phase combination
+(Parts 37/39) -- were both negative, leaving the search for a genuinely
+positive combination explicitly open at the end of Part 39.
+
+**Methodology change.** Three separate dynamics- or coefficient-altering
+mechanisms this session had their screen-level result reverse or
+collapse at the real round budget (Part 33's coefficient sweep -9.6% ->
+~0%; Part 37's MSMV eligibility -1.03% -> +1.47% worse; Part 39's delayed
+supervision -0.59% -> +14.0% worse), all screened at the lineage's
+original reduced budget (`VROUTE_FAST_ROUNDS=15 VROUTE_SLOW_ROUNDS=25
+NV2ROUTE_VIA_ROUNDS=20`). Rather than repeat that budget a fourth time,
+this sweep screened at roughly half the real operating point
+(`VROUTE_FAST_ROUNDS=30 VROUTE_SLOW_ROUNDS=75 NV2ROUTE_VIA_ROUNDS=100`,
+~35 minutes per run on adaptec1 instead of under a minute) -- a real
+cost/reliability tradeoff, made affordable by the abundant-compute
+authorization already in effect (10 concurrent processes) for this
+investigation.
+
+**Screen** (adaptec1, nv3route's own `nv3route` binary, giant-fast-tier
+left at its default-on setting, baseline 76550 at this larger budget): a
+3x3 grid of `VROUTE_THRESHOLD` x `VROUTE_POWER` around Part 33's own
+winning region, all 10 combinations run at once:
+
+| threshold \ power | 0.5 | 1.0 | 1.5 |
+|---|---|---|---|
+| 0.0 | 78052 (+2.0%) | 74984 (-2.1%) | 76390 (-0.2%) |
+| 0.05 | 76432 (-0.2%) | 76048 (-0.7%) | 74984 (-2.1%) |
+| 0.1 | 79186 (+3.5%) | 75522 (-1.3%) | 76026 (-0.7%) |
+
+All 10 `gr_verify`-confirmed legal (0 malformed/disconnected/incomplete/
+unrouted). Two combinations tied for best at -2.05%: threshold=0.0/
+power=1.0 and threshold=0.05/power=1.5 -- both visibly smaller edges than
+Part 33's own -9.6% screen-level result at the shorter budget, exactly
+the pattern the larger screen budget was chosen to surface rather than
+be misled by.
+
+**Mandatory round-budget sanity check**, both tied candidates, adaptec1,
+real committed operating point (default 60/150 2D rounds,
+`NV2ROUTE_VIA_ROUNDS=200`), against nv3route's own already-committed
+adaptec1 baseline (74210, Part 36):
+
+| combination | overflow | delta |
+|---|---|---|
+| threshold=0.0, power=1.0 | 73024 | -1.60% |
+| threshold=0.05, power=1.5 | 72882 | **-1.79%** |
+
+Both `gr_verify`-confirmed legal. **Neither reversed** -- the first
+coefficient- or dynamics-related sweep in this entire session whose
+screen-stage signal survived the real-budget check intact, after three
+straight reversals (Parts 33, 37, 39). threshold=0.05/power=1.5 was
+slightly better and carried forward.
+
+**Full three-benchmark result** at the committed operating point,
+`gr_verify`-confirmed legal on all three (0 malformed/out-of-bounds/
+disconnected/incomplete/unrouted) and cross-checked exactly against
+`eval2008.pl` (total overflow, max overflow, and scored wirelength
+matching to the unit on every benchmark):
+
+| benchmark | nv3route (committed best) | nv4route (threshold=0.05, power=1.5) | delta |
+|---|---|---|---|
+| adaptec1 | 74210 | 72882 | **-1.79%** |
+| newblue1 | 21634 | 21418 | **-1.00%** |
+| bigblue1 | 185246 | 183044 | **-1.19%** |
+| **sum** | **281090** | **277344** | **-1.33%** |
+
+**Decision: `gr/nv4route.cpp` is this project's new best real result,
+replacing `gr/nv3route.cpp`.** Unanimous across all three benchmarks --
+clears this project's own promotion bar cleanly, the same bar kroute and
+nv2route (both unanimous) and nv3route (unanimous non-negative) cleared.
+Self-tests: a decisive hand-built fixture proving the two retuned
+defaults are wired through the real `priceExponentTerm`/
+`defaultThreshold` functions and produce a materially different pricing
+curve than nv3route's old defaults at an identical usage/capacity ratio
+(0.44 vs. 0.18, not a rounding-level difference), plus every inherited
+nv3route self-test unchanged and passing (58 test functions total, clean
+`-Wall -Wextra` build).
+
+**This is the first genuinely positive joint-mechanism combination found
+in this session's own explicit search for one**, after two negative
+attempts (Parts 37, 39). It is a concrete, if small-sample, data point in
+favor of a specific shape of combination: a structural fix (nv3route --
+changes *which nets* reach fast-tier negotiation) composing well with a
+dynamics fix (this generation -- changes *how* that negotiation prices
+congestion once nets reach it), where two dynamics-only fixes stacked on
+each other (delayed supervision) or a structural fix stacked with a
+second small structural tweak (corner-choice) both failed. Not proof
+that's the general rule for this router's own many-body negotiation
+dynamics -- a sample of three joint attempts is far too small to
+generalize from -- but worth keeping in mind when scoping the next
+candidate. `nv4route.cpp`'s own header carries the full derivation and
+result table.
