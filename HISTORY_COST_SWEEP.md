@@ -4765,3 +4765,100 @@ own coefficient sweep, Part 40's topology-bias check) -- seeding changes
 *when* the fast tier's own convergence happens, not reliably *where* it
 ends up, exactly as this file's own header predicted before any number was
 measured.
+
+## Part 45: `gr/nv8route.cpp` -- joint test of three more NTHU-Route 2.0
+## mechanisms, combined with Part 44's two: does not win
+
+Direct follow-up to a question raised after Part 44: NTHU-Route 2.0 is a
+single integrated pipeline, tuned as a whole, not as independently-ablated
+pieces -- what if its real win only shows up *in combination*, and Part
+44's one-mechanism-at-a-time approach could never show that, structurally?
+Three more pieces of that pipeline had never been tried here, even alone:
+a congestion-seeded, self-limiting clustering primitive (replacing plain
+tile-adjacency union-find), a Gompertz-decaying base wirelength cost, and
+a two-stage overflow-prediction pricing term (folding in iteration count
+and how long an edge has stayed overflowed, not just its current usage/
+capacity ratio -- exact formulas in `gr/nv8route.cpp`'s own header and
+`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`).
+
+Built as `gr/nv8route.cpp`, forked from `gr/nv7route.cpp` (inheriting
+Part 44's own two mechanisms, both left ON by default per this
+generation's own "include them, test in combination" design). All five
+mechanisms independently toggleable; each toggle's off setting reproduces
+its parent generation's exact prior behavior -- confirmed by a shell-level
+parity run (all four new toggles off) producing a byte-identical `.route`
+file against `nv7route.cpp` on the same adaptec1 input. 5 new self-tests,
+73 total, 0 failures, clean `-Wall -Wextra` build.
+
+**Results**, adaptec1, the same screen round budget Part 44 used
+(`VROUTE_FAST_ROUNDS=30 VROUTE_SLOW_ROUNDS=75 NV2ROUTE_VIA_ROUNDS=100`),
+all `gr_verify`-confirmed legal:
+
+| config (nv7's two mechanisms ON unless noted) | real overflow | delta* |
+|---|---|---|
+| baseline (nv7's two ON, C/D/E all OFF) | 75750 | -- |
+| Mechanism C alone (seeded clustering) | 75750 | +0.00% |
+| Mechanism D alone (Gompertz decay) | 74968 | -1.03% |
+| Mechanism E alone (overflow prediction) | 78134 | +3.15% |
+| Joint: nv7's two + C + D + E (all five ON) | 78140 | +3.15% |
+| Bonus: C+D+E alone, nv7's two OFF | 76898 | +2.55%** |
+
+\* vs the 75750 baseline. \** vs nv7's own recorded 74984 all-off baseline
+at this same budget (Part 44).
+
+**Mechanism C (seeded clustering): zero measurable effect, and now
+explained structurally rather than merely observed.** A `VROUTE_TRACE`
+diagnostic at a cheaper round budget shows `clusterRescuePass` attempts
+933 clusters and accepts exactly 0 with seeded clustering on -- the
+identical 0-accepted signature Part 44's own Mechanism A found for
+reordering. This extends that finding past processing order to the
+clustering PRIMITIVE itself: when every attempted batch reverts regardless
+of composition, which specific nets got grouped together cannot matter,
+because rejection restores usage to its exact pre-attempt state either
+way. The mechanism's own self-test proves it genuinely produces a
+different grouping on a fixture built to trigger it (1 union-find cluster
+splits into 2 seeded ones under a sharp within-cluster congestion
+gradient) -- it works exactly as designed; it simply cannot matter
+downstream of a batch-acceptance gate that three prior generations
+(`broute`, `nv6route`, `nv7route`) already found rejects everything on
+real data.
+
+**Mechanism D (Gompertz decay): a small, real, consistent win in
+isolation** -- -1.03% against the nv7-mechanisms baseline, and -0.02%
+against nv7's own all-off 74984 baseline (i.e. Gompertz decay alone very
+nearly matches nv6's own committed number even riding on top of nv7's own
+net-negative-to-negligible mechanisms). Small, but the only one of the
+three new pieces that moved in the direction the literature predicted.
+
+**Mechanism E (overflow prediction): a consistent, meaningful regression
+everywhere it appears** -- +3.15% alone, +3.15% in the full joint
+combination (nearly identical to its own solo number, meaning it
+dominates whatever else is present in the mix), and the C+D+E-alone
+configuration (76898) sits almost exactly between D's own gain and E's own
+loss -- consistent with E's drag simply outweighing D's gain, not a
+sharper negative interaction. `k1`/`k2`/`k3` were explicit, disclosed-up-
+front unvalidated guesses (not paper-sourced -- only beta=5, gamma=0.1
+were actually recovered from the paper text); this result indicts *this
+specific untuned coefficient choice*, not necessarily the underlying
+formula. A coefficient sweep was not run here -- out of scope for this
+generation's own approved plan (which asked whether the five mechanisms
+combine to a win, not to re-run a Part 33/44-style coefficient-tuning
+exercise a third time) -- left as a disclosed, real candidate for a future
+generation, not chased further here.
+
+**Decision: the joint five-mechanism combination does not win** -- 78140
+vs the 75750 same-conditions baseline, a real regression, not noise. The
+"must they be combined" hypothesis is not supported by this evidence: the
+combination is dominated by its worst component (Mechanism E), not
+elevated by any synergy between the three new pieces or with nv7's own
+two. Per the plan's own gate, the mandatory real-budget sanity check and
+the three-benchmark run are both skipped -- no configuration measured here
+clears a real win to justify spending them. `gr/nv4route.cpp` remains the
+committed best. `nv8route.cpp` stays in the repository, frozen, as a real,
+decisive answer to a real question rather than a positive result:
+replicating more of a competition router's own literature, even genuinely
+combined rather than tested piecemeal, does not automatically transfer a
+win onto a differently-structured codebase -- a batch-acceptance gate
+already closed by three prior generations, and one untuned pricing
+formula, both mattered more here than whether the pieces were tested
+together or apart.
