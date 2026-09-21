@@ -43,6 +43,7 @@ nv3route
 nv4route
 nv5route
 nv6route
+nv7route
 *.o
 bench/
 *.gr

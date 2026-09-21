@@ -4662,3 +4662,106 @@ overflow this diagnostic pair characterized appears to be a genuine
 structural property of these benchmarks' placement and capacity, not a
 lever this router's own negotiation or batching machinery can pull
 further without a fundamentally different capability.
+
+## Part 44: `gr/nv7route.cpp` -- reversed ordering + demand-seeded prices, both closed negative
+
+A literature-reading pass (reading NTHU-Route 2.0's own ICCAD 2008 paper --
+the router that won 1st place at the ISPD 2008 global routing contest on
+these exact benchmarks) found two things directly relevant to open
+questions in this project. First: every batch mechanism built here
+(`broute.cpp` Part 12, `nv6route.cpp` Part 43) sorts clusters largest-first
+and member nets by worst-overflow-magnitude first, unquestioned --
+NTHU-Route 2.0's own validated ablation found the OPPOSITE of both wins on
+these benchmarks (least-congested region first, releasing capacity inward
+rather than pushing nets into unprocessed regions; largest-bounding-box net
+first, since it has more routing freedom to clear out of the way). Second:
+CLAUDE.md's own "Seed prices from a demand estimate" design decision has
+never been implemented anywhere in this project's lineage -- `gr/groute.cpp`
+has an on-the-record deferral note ("Revisit this once stage 7 makes the
+stampede real"), never revisited since.
+
+Built as `gr/nv7route.cpp`, forked from `gr/nv6route.cpp` (Mechanism A
+modifies nv6's own `clusterRescuePass` directly). `hpwlOf` and
+`computeRudyDensity` ported verbatim from `gr/droute.cpp`. Both mechanisms
+independently toggleable (`NV7ROUTE_CLUSTER_LEAST_FIRST`,
+`NV7ROUTE_NET_LARGEST_BBOX_FIRST`, `NV7ROUTE_PRICE_SEED` +
+`NV7ROUTE_PRICE_SEED_STRENGTH`), each defaulting to the new behavior, each
+toggle-off reproducing nv6/nv4's own exact prior behavior. 72 test
+functions, 0 failures, clean `-Wall -Wextra` build -- 4 new decisive
+fixtures, including a genuinely hard-won one: the first version of the
+per-pass net-order test gave an order-INDEPENDENT result (the same net
+always won, regardless of the toggle) because the test net with the
+"boosted magnitude" carried an extra overflowed edge that formed its OWN
+separate cluster; since clusters are always processed smallest-first
+regardless of the net-order toggle, that second cluster silently got
+rescued (rebuilding the shared-edge charges) before the shared cluster's
+own ranking was even computed. Fixed by keeping the magnitude-boosting
+charge within the SAME cluster's own tile set -- a real, instructive
+example of exactly the kind of confound this project's own testing
+discipline exists to catch before trusting an assertion.
+
+**Mechanism A screen (cheap first checkpoint, per the plan's own explicit
+staging given the strength of the prior negative precedent)**: adaptec1,
+the same very reduced round budget nv6route's own checkpoint used
+(`VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=15 NV2ROUTE_VIA_ROUNDS=20`), all
+three non-trivial toggle combinations, `gr_verify`-confirmed legal:
+
+| `(CLUSTER_LEAST_FIRST, NET_LARGEST_BBOX_FIRST)` | clusters attempted | accepted | real overflow |
+|---|---|---|---|
+| (1,1) | 370 | 0 | 96166 |
+| (1,0) | 370 | 0 | 96166 |
+| (0,1) | 370 | 0 | 96166 |
+
+All three identical, and identical to nv6route's own original (unreversed)
+checkpoint number (96166) -- not just the same cluster-rescue counters but
+the entire downstream pipeline landed byte-for-byte the same. Reversing
+either ordering dimension, or both together, changed **nothing at all**.
+Per the plan's own pre-committed stop condition, this closes Mechanism A
+immediately without spending a full screen.
+
+**Mechanism B screen**: adaptec1, half the real round budget
+(`VROUTE_FAST_ROUNDS=30 VROUTE_SLOW_ROUNDS=75 NV2ROUTE_VIA_ROUNDS=100`),
+cluster-rescue ordering left at nv6's own defaults, sweeping
+`NV7ROUTE_PRICE_SEED_STRENGTH` against a same-conditions unseeded baseline
+(74984), all `gr_verify`-confirmed legal:
+
+| `NV7ROUTE_PRICE_SEED_STRENGTH` | real overflow | delta |
+|---|---|---|
+| 0.02 | 75522 | +0.72% |
+| 0.05 | 74736 | **-0.33%** (best) |
+| 0.1 | 74862 | -0.16% |
+| 0.2 (calibrated default) | 75750 | +1.02% (worst) |
+| 0.4 | 75712 | +0.97% |
+
+No monotonic trend, no value clearing a real improvement -- every tested
+strength lands within about 1% of baseline, bouncing in both directions.
+Given no candidate value shows a genuine win, the mandatory real-budget
+sanity check and three-benchmark run are both skipped per this project's
+own discipline (nothing here is worth confirming further).
+
+**Decision: neither mechanism improves on `gr/nv6route.cpp`** (equivalently
+on `gr/nv4route.cpp`, the actual committed best, since nv6's own mechanism
+is itself already closed-negative). `nv4route` remains the committed best;
+`nv7route.cpp` stays in the repository, frozen, as two real,
+independently-measured negative results.
+
+**Mechanism A is the more informative of the two.** A validated technique
+from a real ISPD-contest-winning router, tested directly against the exact
+same benchmarks it was validated on, produced literally zero measurable
+effect on this codebase's own batch-rescue mechanism -- not a small loss,
+not noise, an EXACT match to the unreversed baseline across every metric
+checked. This is strong, direct confirmation of nv6's own structural
+diagnosis: the failure mode here isn't which end of the congestion you
+start clearing from, it's that sequential single-net rerouting inside a
+batch is a greedy churn that never becomes a joint solve, regardless of
+order. Three generations (`broute`, `nv6route`, `nv7route`) have now
+exhausted ordering, magnitude, real MSMV, and multi-pass as levers on this
+specific mechanism; per the plan's own stop condition, a fourth variant of
+"reroute a contiguous region as one supervised batch" should not be
+attempted without a genuinely different capability. **Mechanism B lands in
+the same "real idea, negligible effect" category this project has now
+found repeatedly for coefficient-level and dynamics-level tuning** (Part 33's
+own coefficient sweep, Part 40's topology-bias check) -- seeding changes
+*when* the fast tier's own convergence happens, not reliably *where* it
+ends up, exactly as this file's own header predicted before any number was
+measured.

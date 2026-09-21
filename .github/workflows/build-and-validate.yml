@@ -58,6 +58,7 @@ jobs:
           - nv4route
           - nv5route
           - nv6route
+          - nv7route
     steps:
       - uses: actions/checkout@v4
 
