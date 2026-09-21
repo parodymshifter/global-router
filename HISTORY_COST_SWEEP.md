@@ -4520,3 +4520,145 @@ different search strengths, and lost every time** -- a considerably
 stronger basis than either result alone for treating this as a real
 property of this router's own negotiation dynamics on these benchmarks,
 not an artifact of one particular implementation.
+
+## Part 43: `gr/nv6route.cpp` -- post-convergence cluster rescue, a second closed-negative on the same idea
+
+Motivated by the same clustering diagnostic that motivated Part 42
+(overflow concentrates into a small number of large contiguous regions --
+bigblue1: one connected component covers 71.9% of every overflow-touched
+tile) and the tier cross-tab finding that 33.3%-60.0% of every net that
+ever escalates to slow-tier MSMV still overflows despite the best search
+available. Where Part 42 (`nv5route`, jolt/halo pricing) tested pricing a
+congested region and found it redistributes who loses rather than
+helping, this generation tests the other natural response: jointly
+reroute the nets sharing a contiguous region, as one supervised batch,
+instead of pricing it.
+
+**Extremely relevant precedent, checked before building anything**:
+`gr/broute.cpp` (Part 12, this project's older pre-MSMV, pre-2D-collapse
+architecture) already tried almost exactly this -- cluster overflowed
+tiles by tile-adjacency, batch-reroute contending nets sequentially,
+accept/reject the whole cluster as one supervised unit. Result: 218
+clusters attempted, 0 accepted, on two variants (uncapped and capped to
+the top-12 worst-offending nets by overflow magnitude). Its own
+post-mortem named three not-yet-distinguished reasons: (a) sequential
+per-net rerouting within a batch is a better-ordered greedy pass, not a
+real joint solve; (b) the round budget tested may have left clusters
+still actively forming, not at a stable local minimum; (c) member nets
+were selected by overflow magnitude but *processed* in net-id order, not
+magnitude order.
+
+Built as `gr/nv6route.cpp`, forked from `gr/nv4route.cpp` (the committed
+best -- not `nv5route.cpp`, whose own mechanism is a separate, already-
+closed experiment). Specifically targets all three reasons using
+capabilities broute never had: runs only after nv4route's own full
+fast+slow-tier convergence completes (addressing (b)); processes each
+cluster's members in descending overflow-magnitude order, **re-ranked at
+the start of every pass** rather than fixed once (addressing (c) --
+broute capped by magnitude but then processed in net-id order); uses
+real MSMV (`routeNetSlowMSMV`, attach-anywhere-on-committed-wire search)
+instead of broute's older fixed-topology `routeNetSlow` (broute was
+forked from the pre-MSMV kroute lineage); and a bounded multi-pass sweep
+per cluster (default 5, capped since MSMV is markedly more expensive per
+call than broute's own fixed-topology Dijkstra), partially addressing
+(a). New `findOverflowClusters2D`/`clusterNets2D` adapt broute's own
+proven clustering/membership logic to nv4route's 2D-collapsed `Usage`
+directly (no per-layer loop needed). A critical correctness step,
+confirmed necessary by direct code reading before writing anything: the
+live `usage` after nv4route's slow-tier loop exits may not correspond to
+`rep.nets` (only reassigned mid-loop when a round improves on the
+historical best) -- the existing usage-rebuild idiom already used twice
+elsewhere in `route()` (after phase A, after cleanup) is applied a third
+time before the new pass runs, so it starts from a genuinely
+self-consistent snapshot. 68 test functions total, 0 failures, clean
+`-Wall -Wextra` build -- 5 new decisive fixtures adapted directly from
+broute's own proven-correct test suite: pure clustering correctness on a
+hand-built two-group `Usage`; cap-trims-by-magnitude-not-list-order
+(3 nets inserted in ascending overflow order specifically so a
+list-order bug would fail visibly); a hand-verified two-net jammed-edge
+fixture resolving cleanly to zero overflow (with the same honest framing
+broute's own equivalent test used -- proves the mechanics are correct,
+not that MSMV specifically was necessary for that particular synthetic
+case, which a hand-verifiable fixture can't settle by construction any
+better than broute's own could); toggle-disabled inertness; and a
+usage-consistency regression guard.
+
+One inherited self-test (`testGiantNetJoinsFastTierAndEscapesA...`)
+needed updating: the cluster-rescue pass, left at its default-on
+setting, correctly discovered it could reroute the fixture's own
+`blocker` net (not giant, which cluster rescue always excludes) off the
+shared edge on its own -- a real, correct interaction, but one that
+defeated that fixture's own purpose of isolating
+`NV3ROUTE_GIANT_FAST_TIER`'s effect in isolation. Fixed by explicitly
+passing `clusterRescueEnabled=false` in that one test's own two calls,
+same "isolate the flag under test" fix pattern Part 41/42 both needed
+for their own inherited fixtures.
+
+**Honest assessment, stated in the plan before any empirical run**:
+reason (b) (post-convergence timing) was judged the strongest of the
+three candidate fixes -- a genuinely different architectural condition.
+Reason (c) (magnitude-first ordering) was judged plausible but modest --
+it changes *which* net claims freed capacity first, not whether joint
+capacity exists at all. Real MSMV was judged the one difference with a
+mechanism that could actually change the feasible set. Multi-pass was
+disclosed as only a partial mitigation of (a) -- if two nets must move
+*simultaneously* to both legalize, no number of sequential passes finds
+that, a structural ceiling on the whole approach. The plan's own stated
+stop condition: given `broute`, `froute`, and the escalation-still-fails
+diagnostic already point at the same "real shared-capacity contention"
+read, a second closed-negative result here should end this specific
+line, not motivate a third variant.
+
+**Cheap first diagnostic checkpoint** (per the plan's own explicit
+staging, given the strength of the prior precedent): adaptec1, a very
+reduced round budget (`VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=15
+NV2ROUTE_VIA_ROUNDS=20`, well under even the half-budget screen),
+`NV6ROUTE_CLUSTER_LOG` + `VROUTE_TRACE=1` on, purely to check whether
+clustering/membership/capping fire on real data and whether the accept
+rate is obviously zero again before spending a full screen's time.
+`gr_verify`-confirmed legal (0 malformed/disconnected/incomplete/
+unrouted):
+
+    370 clusters attempted, 0 accepted (0%)
+    370 of 370 batches (100%) made local overflow strictly worse --
+      not one tie, not one improvement, across every single cluster
+    every cluster ran its full 5-pass cap without ever early-stopping
+      (MSMV kept finding different routes each pass, never converging
+      to a stable, no-further-change state within a cluster)
+
+**This is broute's own exact failure signature, reproduced immediately
+on the current best architecture**, despite all three targeted
+mechanism differences and a multi-pass allowance broute never had. The
+"every cluster used its full pass budget without ever converging"
+pattern is itself informative: it points at reason (a) -- sequential
+rerouting is still a better-ordered greedy churn, not a joint solve, and
+more passes just means more churn, not convergence toward a stable
+optimum -- rather than a simple capacity-exhaustion-with-nothing-to-try
+signature (which would show early-stop-at-pass-1 with zero changes
+instead). Per the plan's own pre-committed stop condition, this result
+alone is decisive enough to close the investigation without spending the
+full screen's time: **skipped the half-budget screen, the mandatory
+real-budget sanity check, and the three-benchmark run** -- all
+conditioned on the screen showing a win, which this checkpoint already
+rules out unambiguously.
+
+**Decision: `gr/nv6route.cpp` does not improve on `gr/nv4route.cpp`.**
+`nv4route` remains the committed best; `nv6route.cpp` stays in the
+repository, frozen, as a real negative result. **Three separate
+mechanisms now point at the same conclusion** -- `broute`'s original
+batch rescue, `froute`'s heat-map reorder, and this generation's
+post-convergence/magnitude-ordered/MSMV-powered/multi-pass variant --
+joined by the diagnostic finding that motivated this generation in the
+first place (escalated nets failing MSMV at a 33-60% rate is real
+shared-capacity contention, not a search-quality or batching-strategy
+gap). Per the plan's own explicit stop condition, no third variant of
+"reroute a contiguous overflow region as one supervised batch" should be
+attempted without a genuinely new capability beyond what MSMV +
+magnitude-ordering + post-convergence timing + multi-pass already bring.
+Combined with Part 42's own closed-negative result on the pricing side
+(jolt/halo), **both natural responses to the spatial-clustering finding
+-- price it, or batch-reroute it -- are now closed.** The remaining
+overflow this diagnostic pair characterized appears to be a genuine
+structural property of these benchmarks' placement and capacity, not a
+lever this router's own negotiation or batching machinery can pull
+further without a fundamentally different capability.
