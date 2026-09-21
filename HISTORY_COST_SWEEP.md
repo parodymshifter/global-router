@@ -4862,3 +4862,28 @@ win onto a differently-structured codebase -- a batch-acceptance gate
 already closed by three prior generations, and one untuned pricing
 formula, both mattered more here than whether the pieces were tested
 together or apart.
+
+### Part 45 addendum: cross-benchmark check confirms the negative, unevenly
+
+User-requested follow-up beyond the plan's own gate (Stage 5's three-
+benchmark run is normally skipped after a losing screen) -- run
+baseline-vs-joint on newblue1 and bigblue1 too, to see whether adaptec1's
+own regression is representative. Same screen round budget, `gr_verify`-
+confirmed legal and `eval2008.pl`-cross-checked exactly on both:
+
+| benchmark | baseline | joint (all five ON) | delta |
+|---|---|---|---|
+| adaptec1 | 75750 | 78140 | +3.16% |
+| newblue1 | 22442 | 22404 | -0.17% |
+| bigblue1 | 186864 | 199102 | +6.55% |
+
+Genuinely different behavior across benchmarks, not a uniform effect --
+bigblue1 regresses roughly twice as badly as adaptec1, while newblue1 is
+essentially flat (a hair better, well inside noise). This strengthens
+rather than complicates Part 45's own "does not win" conclusion: two of
+three benchmarks show a real regression (one of them, bigblue1, the worst
+single number in the whole experiment), and the third shows no real
+movement in either direction -- no benchmark clears a win. Bigblue1's own
+larger regression is consistent with Mechanism E's disclosed-unvalidated
+k1/k2/k3 constants generalizing poorly to its own congestion profile,
+rather than adaptec1's own number being an unrepresentative outlier.

@@ -72,6 +72,32 @@
 //   (* delta vs the 75750 baseline; ** compare instead to nv7's own
 //   recorded 74984 all-off baseline at this budget, Part 44 -- +2.55%)
 //
+// **Cross-benchmark check (user-requested, beyond the plan's own gate --
+// Stage 5's three-benchmark run is normally skipped after a losing
+// screen, but baseline-vs-joint was run on all three anyway since the
+// question "does behavior differ by benchmark" is itself informative even
+// for a negative).** Same screen budget, baseline (nv7's two ON, C/D/E
+// OFF) vs the full joint combination, `gr_verify`-confirmed legal and
+// `eval2008.pl`-cross-checked exactly on both newblue1 and bigblue1
+// (adaptec1's own numbers above were gr_verify-only, per this project's
+// own screen-stage convention):
+//
+//   benchmark    baseline   joint (all five ON)   delta
+//   adaptec1     75750      78140                 +3.16%
+//   newblue1     22442      22404                 -0.17%
+//   bigblue1     186864     199102                +6.55%
+//
+// Genuinely different behavior across benchmarks, not a uniform effect --
+// bigblue1 regresses roughly twice as badly as adaptec1, while newblue1 is
+// essentially flat (a hair better, well inside noise). This strengthens
+// rather than complicates the "does not win" conclusion: two of three
+// benchmarks show a real regression (one of them the worst single number
+// in this whole experiment), and the third shows no real movement either
+// direction -- no benchmark clears a win. Bigblue1's own larger regression
+// is consistent with Mechanism E's own untuned k1/k2/k3 constants
+// generalizing poorly to its own congestion profile rather than adaptec1's
+// number being an unrepresentative outlier.
+//
 // **Mechanism C: zero measurable effect, and now explained structurally,
 // not just observed.** A VROUTE_TRACE diagnostic at a cheaper round budget
 // confirms clusterRescuePass attempts 933 clusters and accepts exactly 0,
