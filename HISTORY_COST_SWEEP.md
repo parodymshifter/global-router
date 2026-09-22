@@ -4887,3 +4887,111 @@ movement in either direction -- no benchmark clears a win. Bigblue1's own
 larger regression is consistent with Mechanism E's disclosed-unvalidated
 k1/k2/k3 constants generalizing poorly to its own congestion profile,
 rather than adaptec1's own number being an unrepresentative outlier.
+
+## Part 46: `gr/nv9route.cpp` -- congestion-based region ordering and
+## multi-round cluster rescue, both closed negative, for two different
+## reasons
+
+Direct follow-up to a question raised after Part 45's own negative
+result: why does NTHU-Route 2.0's own literature keep failing to transfer
+here -- is something missing that only shows up in real contest-winning
+code, or something written about but not fully integrated? Direct code
+inspection (not speculation) found two concrete, disclosed gaps in what
+this project had actually built versus what the paper describes:
+
+1. `clusterRescuePass`'s own cluster-level sort has always used tile
+   COUNT, even after Part 45 built a real congestion-seeded clustering
+   primitive that computes each region's own average congestion as a
+   byproduct. NTHU-Route 2.0's own finding is specifically "process the
+   least CONGESTED region first" -- never actually tried until this
+   generation (Mechanism F).
+2. `clusterRescuePass` runs exactly once, post-convergence, but direct
+   inspection of `undoCharge` (nv8route.cpp:1630) confirms it only
+   subtracts from `usage.h/v` -- it never touches `Prices`. Every rejected
+   cluster's own attempt still called `negotiateWire` on every edge it
+   tried (via `routeNetSlowMSMV` -> `commitPath`), raising prices
+   unconditionally at commit time. So a rejected batch leaves usage
+   exactly as it was but leaves prices permanently higher on the contended
+   edges. Four generations (`broute`, `nv6`, `nv7`, `nv8`) all call this
+   pass exactly once and report the result as final -- never giving a
+   later attempt the chance to react to price pressure an earlier,
+   rejected attempt already left behind (Mechanism G).
+
+Built as `gr/nv9route.cpp`, forked from `gr/nv8route.cpp`. Mechanism E
+(overflow-prediction pricing) defaults OFF here -- Part 45 found it a
+consistent regression on all three benchmarks with disclosed-unvalidated
+constants, and carrying a known-bad mechanism into this experiment would
+confound the result. 7 new self-tests, 76 total, 0 failures, clean
+`-Wall -Wextra` build. `NV9ROUTE_CLUSTER_ORDER_BY_CONGESTION=0
+NV9ROUTE_MULTIROUND_RESCUE=0 NV8ROUTE_OVERFLOW_PREDICTION=1` reproduces
+nv8's own default run byte-for-byte (confirmed via a shell-level parity
+diff, adaptec1, reduced round budget: 81746/94936 identical on both
+sides).
+
+**Mechanism G's own cheap checkpoint (mandatory before any screen spend,
+given the size of the claim): closed immediately, without a screen.**
+adaptec1, a very reduced round budget, `VROUTE_TRACE=1`, Mechanism F off
+to isolate G alone. Overflow is completely FLAT across all three
+meta-rounds the patience budget (3) allowed before stopping:
+
+    cluster rescue meta-round 0: overflow now 81196 (best so far 81196)
+    cluster rescue meta-round 1: overflow now 81196 (best so far 81196)
+    cluster rescue meta-round 2: overflow now 81196 (best so far 81196)
+
+Re-run with `NV6ROUTE_CLUSTER_PASSES=1` (forcing exactly one internal pass
+per meta-round, specifically to rule out "5 internal passes already
+reaches whatever equilibrium is reachable" as the explanation before
+closing this out): identical, still completely flat. The mechanism's own
+crux self-test
+(`testMultiRoundRescueSucceedsWherePriceStaysElevatedAfterRevert`) proves
+the underlying claim is mechanically real -- a hand-built 2-net fixture,
+prices starting flat at 1.0, genuinely resolves on meta-round 3 where a
+single `clusterRescuePass` call cannot, because `undoCharge` really never
+reverts prices and enough cumulative growth (~2x) eventually flips a path
+preference. But real edges reach `clusterRescuePass` only after dozens of
+main-loop rounds have already shaped their prices, often already
+substantially elevated -- a few more rescue-attempt price bumps are a
+small RELATIVE change against an already-large base, and within a
+patience-bounded handful of meta-rounds, apparently never enough to flip
+any real net's own path preference. The mechanism is real; the scale
+mismatch between what a hand-built fixture needs and what a fully-
+negotiated real benchmark's prices already look like is what closes it.
+Per the plan's own gate, the full screen is skipped.
+
+**Mechanism F's screen: zero measurable effect, a third independent
+confirmation of the same structural finding.** adaptec1, screen round
+budget, `gr_verify`-clean:
+
+| config | real overflow |
+|---|---|
+| baseline (Mechanism F off) | 74968 |
+| Mechanism F alone (order by congestion) | 74968 |
+
+Byte-for-byte identical -- same wirelength (3914397), vias (3336673), max
+overflow (26), overflowed edges (22735). `orderByCongestion` genuinely
+reorders clusters (proven by its own three self-tests, including a fixture
+where congestion and size orderings disagree), but a `VROUTE_TRACE`
+diagnostic confirms `clusterRescuePass` still attempts 928 clusters and
+accepts exactly 0 -- the identical 0%-acceptance signature Part 44's
+Mechanism A (reorder by size) and Part 45's Mechanism C (swap the
+clustering primitive) already found for their own respective changes.
+Three independently-varied changes to what gets clustered and what order
+clusters get processed in all land on the identical wall.
+
+**Decision: neither mechanism improves on `gr/nv8route.cpp`'s own
+individually-positive-or-neutral baseline (nv7's two mechanisms +
+Mechanism D, 74968).** `gr/nv4route.cpp` remains the committed best.
+`nv9route.cpp` stays in the repository, frozen, as two more real
+negatives -- but unusually informative ones. Repeated batch-supervision
+has now been tested past ordering (Part 44), past the clustering primitive
+(Part 45), and past congestion-aware ordering AND repetition itself (this
+generation) without a single acceptance-rate improvement anywhere across
+five independently-varied changes and four generations
+(`broute`, `nv6`, `nv7`, `nv8`, `nv9`). The honest reading is that
+`clusterRescuePass`'s own core design -- propose a whole batch, judge it
+once against its own pre-batch baseline, keep or revert as one unit -- is
+itself the ceiling, not any of the specific things that have been varied
+around it. A future attempt at this family would need to change that core
+judgment itself (e.g. a genuinely joint/simultaneous solve across a
+cluster's members, rather than sequential per-net reroutes judged as one
+batch), not another clustering, ordering, or repetition variant.
