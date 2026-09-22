@@ -5112,3 +5112,24 @@ entirely (the "cooperative eviction" idea oroute/qroute found, or
 something else), not another refinement of joint candidate search itself,
 which this generation has now tested about as thoroughly as this
 codebase's own tooling allows.
+
+### Part 47 addendum: cross-benchmark check confirms the negative, more completely than adaptec1 alone
+
+User-requested follow-up beyond the plan's own gate. Same screen round
+budget, same 40-net Mechanism H scale, baseline vs joint on all three
+benchmarks, `gr_verify`-legal and `eval2008.pl`-cross-checked exactly:
+
+| benchmark | baseline | Mechanism H | delta |
+|---|---|---|---|
+| adaptec1 | 74968 | 74968 | exact tie |
+| newblue1 | 22472 | 22484 | +0.05% (regression) |
+| bigblue1 | 187256 | 187256 | exact tie |
+
+Unlike Part 45's own cross-benchmark check (which found real, benchmark-
+dependent effects on nv8's mechanisms -- flat on one, a real regression on
+another), the story here doesn't change across benchmarks: two of three
+are byte-for-byte ties, the third a small regression. No benchmark shows
+a win. This is the most complete negative this project has produced for
+the "does a genuinely joint solve help" question -- real signal exists in
+the search itself (the 40-net checkpoint's own 1-of-928 acceptance), it
+just never translates into a real-budget, real-benchmark win anywhere.

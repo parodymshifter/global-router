@@ -103,6 +103,24 @@
 // MSMV-quality candidates that the original aroute-qroute lineage never
 // had access to, still closes negative.
 //
+// **Cross-benchmark check (user-requested, beyond the plan's own gate),
+// screen budget, same 40-net scale, `gr_verify`-legal and
+// `eval2008.pl`-cross-checked exactly on all three:**
+//
+//   benchmark    baseline   Mechanism H   delta
+//   adaptec1     74968      74968         exact tie
+//   newblue1     22472      22484         +0.05% (regression)
+//   bigblue1     187256     187256        exact tie
+//
+// Unlike Part 45's own cross-benchmark check (which found real,
+// benchmark-dependent effects on nv8's mechanisms), the story here
+// doesn't change across benchmarks -- two of three are byte-for-byte
+// ties, the third a small regression. No benchmark shows a win. This is
+// the most complete negative this project has produced for the "does a
+// genuinely joint solve help" question: real signal exists in the search
+// (the 40-net checkpoint's own 1/928 acceptance), it just never
+// translates into a real-budget, real-benchmark win anywhere.
+//
 // --- nv9route.cpp's own header material below, inherited unchanged as
 // accurate history of the mechanisms this generation builds on. ---
 //
