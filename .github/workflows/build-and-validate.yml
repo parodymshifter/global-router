@@ -63,6 +63,7 @@ jobs:
           - nv9route
           - nv10route
           - ac1route
+          - ac2route
     steps:
       - uses: actions/checkout@v4
 

@@ -5229,3 +5229,122 @@ price stability (pheromone learning chases a moving target if price
 whipsaws), are implemented as `gr/ac2route.cpp` (species `ac`, generation
 2) -- see that file's own header and this document's next Part for the
 result.
+
+## Part 49: per-net-supervised ACO, AIMD pricing, and B&B-scoped marginal-cost pricing (`gr/ac2route.cpp`) -- the supervision fix works, but all three mechanisms still close negative
+
+Direct follow-up to Part 48. `ac1route.cpp` tested two ideas and both
+taught something concrete but neither won; this generation (species `ac`,
+generation 2, forked from `ac1route.cpp`) responds to both findings with
+three targeted, narrower mechanisms, plus a user-asked question mid-run
+("are there any other router paradigms that have promise with marginal-
+cost pricing, or a different pricing model with ACO?") that motivated two
+of the three.
+
+**Mechanism 1: per-net-supervised ACO.** Reverts ac1route's own colony
+round from round-level (frozen-baseline, simultaneous-commit) supervision
+back to Phase B's original single-pass sequential structure -- K ants per
+net, best-of-K, commit-or-revert immediately, exactly like Phase B's own
+existing revert rule. Circuit breaker removed (unnecessary once
+supervision is per-net). Reuses `constructAntRoute`/`trialEvaluateCandidate`
+completely unchanged from ac1route.
+
+**Mechanism 2: AIMD-style price update.** A genuinely different price
+UPDATE RULE -- additive growth over capacity, multiplicative decay
+(floored at 1.0) under it -- instead of another term inside the existing
+`price *= exp(epsilon * term)` formula. Motivated by TCP's own AIMD
+convergence theory and specifically by ACO's own need for price
+stability (pheromone reinforcement chases a moving target if price
+whipsaws).
+
+**Mechanism 3: marginal-cost pricing scoped to joint B&B only.**
+`jointClusterAssign` gains a `Prices::marginalCostScopeActive` flag (RAII-
+guarded, restored on every return including early ones) and its own new
+`negotiateWire` call for an ACCEPTED cluster's committed edges -- nv10's
+own inherited `jointClusterAssign` never called `negotiateWire` at all,
+so this mechanism needed that added before the scope flag had anything
+real to gate.
+
+All three self-tested (9 new tests beyond ac1route's own 361 checks, 382
+total, all passing), including a decisive per-net-revert fixture (a
+pheromone-biased ant forced onto an already-at-capacity path, confirmed
+individually reverted), a real multi-net congestion-pileup proof that
+per-net supervision's own monotonic-non-increase guarantee holds through
+the REAL `route()` pipeline (not a hand-rolled mirror), and an
+integration-level check that the marginal-cost scope guard actually
+restores itself inside the real `jointClusterAssign`, not just in
+isolation.
+
+**Stage 0 -- shell-level parity.** All three toggles set to reproduce
+ac1route's own exact behavior: byte-for-byte identical output, confirmed
+directly (`gr_verify`-legal, `eval2008.pl`-cross-checked: 261614/76/6618144
+on both sides at a small reduced-round fixture). The fork changed nothing
+when configured to reproduce its parent.
+
+**Stage 1 -- Mechanism 1 alone, no cluster rescue (isolating Phase A/B).**
+The actual fix works at the level it targeted. Re-running the exact
+scenario that spiked ac1route to 5,883,060 (26x its own fast-tier
+baseline): slow round 0 now lands at 173,460 -- already BELOW every
+fast-tier round's own overflow -- and keeps improving round over round
+(168,128, then 166,256), no spike, no rollback needed. But at this
+checkpoint, correctly-supervised ACO still doesn't beat the plain
+sequential baseline it replaces:
+
+| config | real overflow (no cluster rescue) |
+|---|---|
+| baseline (no ACO, no marginal-cost, no AIMD) | 146066 |
+| Mechanism 1 alone (per-net-supervised ACO) | 180820 |
+
++23.8%, legal, cross-checked. K=2 noisy ants with best-of-2 selection
+lose more often than they win against one deterministic MSMV search at
+this scale -- per-net revert guarantees no net's own state gets WORSE,
+not that the stochastic search finds routes as good as the deterministic
+one finds by default.
+
+**Stage 2 -- Mechanism 2 alone, no cluster rescue.**
+
+| config | real overflow (no cluster rescue) |
+|---|---|
+| baseline (same as above) | 146066 |
+| Mechanism 2 alone (AIMD pricing) | 156506 |
+
++7.1%, legal, cross-checked. A real, working alternative pricing rule
+that simply routes worse on its own -- price stability for pheromone's
+own future benefit (never tested combined with ACO here, since neither
+piece showed enough signal alone to justify Stage 4) didn't translate
+into better routing by itself.
+
+**Stage 3 -- Mechanism 3 alone, cluster rescue ON (required for B&B to
+run at all).**
+
+| config | real overflow (cluster rescue on, same budget) |
+|---|---|
+| nv10/ac1route clean baseline | 95040 |
+| Mechanism 3 alone (marginal-cost, B&B-scoped) | 136086 |
+
++43.2%, legal, cross-checked -- WORSE than ac1route's own globally-applied
+version's +17.6% regression. This falsifies the scoping hypothesis
+outright, and the reason is itself the finding: B&B's own one-shot,
+independently-re-verified search structure is robust to a sharper cost
+signal AS A SEARCH, but that robustness was conflated with a different
+question -- whether the PRICE CHANGES an accepted cluster commits stay
+contained to B&B. They don't: once committed, they ripple forward into
+every later round's own main-loop routing exactly the same way a
+globally-applied signal would. At this checkpoint's own reduced
+convergence, cluster rescue accepts real cluster reassignments far more
+often than the near-zero acceptance rate this project's history otherwise
+documents at full convergence, so the new scoped `negotiateWire` call
+fires often enough to destabilize the whole downstream loop rather than
+staying rare and contained.
+
+**Decision: all three mechanisms close negative, no combination stage
+run.** Per the plan's own Stage 4 gate ("only for pieces that showed real
+signal in Stages 1-3"), none did, so no combined configuration was
+tested. All three negatives are mechanistically understood, not just
+measured: Mechanism 1 solves the SAFETY problem (no catastrophic spike)
+without solving the PERFORMANCE problem (stochastic search still loses to
+deterministic search here); Mechanism 2 is a genuinely different, working
+pricing rule that still routes worse; Mechanism 3's scoping argument had
+a real gap its own design note didn't anticipate (search robustness is
+not the same as price-change containment). `gr/nv4route.cpp` remains the
+committed best. No further tuning or combination pass is planned for the
+`ac` species on this specific set of three mechanisms.
