@@ -5133,3 +5133,99 @@ a win. This is the most complete negative this project has produced for
 the "does a genuinely joint solve help" question -- real signal exists in
 the search itself (the 40-net checkpoint's own 1-of-928 acceptance), it
 just never translates into a real-budget, real-benchmark win anywhere.
+
+## Part 48: ant colony optimization + marginal-cost pricing (`gr/ac1route.cpp`) -- both close negative, both mechanistically understood
+
+User-requested pivot after Part 47's own comprehensive negative closed
+the joint-B&B question: research cross-domain paradigms (traffic
+engineering, structural engineering, ant colony optimization) for
+genuinely different approaches, rather than another refinement of the
+mechanisms already swept. ACO stood out as the one candidate that is
+actually a different core solve method -- every router from `kroute`
+through `nv10route` (roughly five dozen files) is stochastic-free, single-
+shot deterministic search judged and kept-or-reverted; ACO is population-
+based and stochastic, with a pheromone trail that learns across rounds
+instead of one net committing to one guess. Marginal-cost pricing was
+scoped alongside it per the user's own explicit request, motivated by
+real congestion-pricing theory: this project's price has always tracked
+usage/capacity ratio, a proxy for AVERAGE congestion cost; the Pigouvian-
+tax result says the incentive-aligning price is the MARGINAL cost, the
+derivative of that curve.
+
+New species `ac` (ant colony), generation 1, forked from `nv10route.cpp`.
+Two mechanisms, tested in isolation (not combined), both `gr_verify`-legal
+and `eval2008.pl`-cross-checked. Checkpoint scale throughout: adaptec1,
+`VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3`.
+
+**Stage 0 (parity, both mechanisms off):** byte-for-byte identical to
+`nv10route` on the same fixture (81196 2D overflow / 95040 real overflow,
+both sides). Confirms the fork introduces zero behavioral change when
+untoggled.
+
+**Stage 1a -- Mechanism 2 alone, marginal-cost pricing, ACO off:**
+
+| config | real overflow |
+|---|---|
+| baseline (`nv10route`, same checkpoint budget) | 95040 |
+| marginal-cost pricing (global scope) | 111744 |
+
++17.6%, legal. A theoretically sharper, "more correct" congestion signal
+made results worse, not better -- consistent with every prior experiment
+in this project that made the reactive price signal more aggressive
+(overflow-prediction terms, threshold tuning): iterative negotiated-
+congestion search wants a SMOOTHER signal, not a more accurate
+instantaneous one, because a sharper derivative near the threshold
+amplifies round-to-round oscillation faster than it corrects underpricing.
+
+**Stage 1b -- Mechanism 1 alone, ACO, marginal-cost off**
+(`AC1ROUTE_ANTS=2`): the first colony round escalated ~60000 nets at
+once. Every net's own best-of-K ant candidate (K=2, pheromone-biased,
+noise-perturbed MSMV) was generated against a FROZEN round-start
+baseline, then every winner committed SIMULTANEOUSLY -- round-level
+supervision, deliberately matching Phase A's own trusted pattern instead
+of Phase B's finer-grained one, on the reasoning that K-ants-per-net
+already costs an order of magnitude more per net than a single
+deterministic search, so re-serializing on top of that would be
+prohibitively slow.
+
+That reasoning was wrong in exactly the way CLAUDE.md's own escalation-
+supervision rule already warns about. Round 0's overflow spiked to
+**5,883,060** -- over 26x the 219,866 fast-tier baseline -- an almost
+exact replay of Phase B's own inherited, already-documented 5.6M-overflow
+historical incident (`nv10route.cpp`'s own header: 53,840 nets escalated
+at once, overflow spiked to 5.6 million). The circuit breaker
+(`circuitBreakerMultiple=5.0`) tripped correctly and rolled the whole
+round back to the frozen baseline cleanly -- the safety net itself worked
+exactly as designed, with zero net damage. But it exists to catch a
+design choice that should not have been made in the first place: the
+underlying ant-construction primitives (pheromone bias, noise-driven
+diversity, best-of-K selection, evaporation/reinforcement) all passed
+their own self-tests on the first try and are not implicated -- the
+failure is specifically the round-level batch-commit architecture, the
+same failure shape Phase B's own sequential per-net loop was built to
+prevent and that this mechanism knowingly bypassed.
+
+**Diagnosis independent of Mechanism 2.** Both mechanisms were tested in
+isolation, never combined -- the ACO spike happened with marginal-cost
+pricing OFF. The two findings are orthogonal: one is a pricing-model
+question (does a sharper signal help), the other is a supervision-
+architecture question (must escalation stay per-net). Neither result
+implicates the other's mechanism.
+
+**Decision: neither mechanism, as built, is a net win, and both closes
+are mechanistically understood rather than merely negative.** Both point
+at concrete, narrower follow-ups rather than a dead end: Mechanism 2's
+failure mode (global-scope aggressive signal destabilizing iterative
+search) suggests scoping it to a context that doesn't iterate the same
+way -- cluster-rescue's own joint B&B, which generates a fixed candidate
+set once per cluster and searches it near-exhaustively in one shot,
+independently re-verified before any commit. Mechanism 1's failure mode
+is a pure architecture bug, not a primitive failure -- reverting to
+Phase B's own per-net sequential commit-or-revert structure, keeping the
+already-proven ant-construction pieces unchanged, directly restores
+CLAUDE.md's own escalation-supervision rule. Both follow-ups, plus a
+genuinely new AIMD-style price update motivated by ACO's own need for
+price stability (pheromone learning chases a moving target if price
+whipsaws), are implemented as `gr/ac2route.cpp` (species `ac`, generation
+2) -- see that file's own header and this document's next Part for the
+result.
