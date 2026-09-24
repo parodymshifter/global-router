@@ -49,6 +49,7 @@ nv9route
 nv10route
 ac1route
 ac2route
+fw1route
 *.o
 bench/
 *.gr

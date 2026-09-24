@@ -5348,3 +5348,106 @@ a real gap its own design note didn't anticipate (search robustness is
 not the same as price-change containment). `gr/nv4route.cpp` remains the
 committed best. No further tuning or combination pass is planned for the
 `ac` species on this specific set of three mechanisms.
+
+## Part 50: fractional-relaxation joint assignment (`gr/fw1route.cpp`) -- a small, real regression at equal footing against exact B&B
+
+Direct response to a user question raised while reviewing this project's
+own full retrospective: every mechanism that tried to make net routing
+"cooperative" rather than independently-greedy has been either exact
+discrete joint search (B&B, `broute` through `qroute`/`nv6route` through
+`nv10route`'s own Mechanism H -- combinatorial, capped at 20-40 nets
+across five generations, near-zero real acceptance at that cap) or
+independent sequential search with cross-round bias (MSMV/ACO -- order-
+dependent within a round, no genuine within-round coordination). Neither
+tested the third option from combinatorial optimization: a continuous
+relaxation solved to local convergence for a batch of contending nets,
+then rounded to an integral choice -- the LP-relaxation-then-round
+paradigm, mathematically continuous with CLAUDE.md's own Garg-Koenemann
+citation, just applied to per-candidate probability within a small batch
+instead of per-edge price across the whole design.
+
+New species `fw` (fractional weights), generation 1, forked from
+`ac2route.cpp`. `fractionalRelaxationAssign` is a drop-in alternative to
+`branchAndBoundAssign`, dispatched from the identical `jointClusterAssign`
+slot on the identical clusters/candidates `generateJointCandidatesForNet`
+already produces -- a direct A/B test, not a new pipeline stage. Each
+net's own candidate set starts with a uniform fractional weight; a fixed
+number of cheap inner iterations compute the fractional usage every batch
+edge would see under the current weights, price each candidate's own
+local cost against that via the existing, plain `priceExponentTerm`
+(deliberately not `marginalCostTerm` -- `ac2route`'s own Stage 3 found
+marginal-cost pricing regresses badly even scoped to this exact commit
+path, and combining that confound with a new assignment algorithm would
+make any result unreadable), and multiplicatively reweight
+(`exp(-eta * cost)`, renormalized). After convergence (or the inner-
+iteration cap), each net picks its own single committed candidate via a
+seeded-deterministic weighted sample -- not argmax, since argmax alone
+would just be independent per-net greedy picking again.
+
+8 new self-tests, all passing (403 total checks, up from `ac2route`'s
+382), including: hand-computed fractional-usage and reweighting-factor
+checks (exact logistic-function values verified to 1e-9), a renormalization
+invariant, seeded-sample determinism plus genuine sample diversity across
+20 seeds, a decisive fixture where the new mechanism reaches the exact
+same hand-verified true optimum `testJointBranchAndBoundFindsTrueOptimum`
+already proves for exact B&B (via the fundamentally different continuous
+mechanism, not exhaustive enumeration), the background-overflow-seed term
+carrying over correctly, a `found=false` correctness check, and shell-
+level parity through the dispatch wrapper at its default.
+
+**A note on honesty about scope, disclosed up front rather than
+discovered late:** the original framing for this generation's own
+decisive self-test (item 5 in the plan) was "construct a fixture where
+sequential order-dependent greedy is provably worse than joint
+relaxation." That fixture could not be honestly constructed using this
+project's own real, purely overflow-based cost function -- real-time
+per-net price/usage feedback (the same reactive mechanism this whole
+project has run since `hroute`) turns out to be surprisingly hard to fool
+on small assignment instances, because any option that would actually
+cause real overflow is already priced at a value no clean zero-overflow
+alternative can lose to. The test that shipped instead proves a real,
+still-decisive claim (reaches the known true optimum via a structurally
+different mechanism) rather than the more ambitious, unconstructable one.
+
+**Stage 0 -- shell-level parity.** `FW1ROUTE_ASSIGNMENT_METHOD` unset:
+byte-for-byte identical to `ac2route`'s own output, `gr_verify`-legal
+(193262/42/6815126 both sides, small reduced-round fixture).
+
+**Stage 1 -- the headline comparison.** `FW1ROUTE_MAX_CLUSTER_NETS=20`
+(matching `jointMaxClusterNets`' own default exactly, adaptec1,
+checkpoint round budget, both sides otherwise at `ac2route`'s own current
+defaults):
+
+| config | real overflow |
+|---|---|
+| `bnb` (exact B&B, this project's own trusted baseline) | 148962 |
+| `fractional` (this file's own new mechanism) | 151842 |
+
++1.93%, legal per `gr_verify` (0 malformed/out-of-bounds/disconnected/
+incomplete/unrouted), cross-checked exactly against `eval2008.pl`
+(148962/36/6978563 and 151842/34/6969270 respectively, both sides
+matching to the unit). A small, real regression at equal batch size, not
+the positive signal the plan's own Stage 2 gate required before sweeping
+`FW1ROUTE_MAX_CLUSTER_NETS` to sizes B&B cannot structurally attempt.
+
+**Decision: no further stage run, per this project's own consistent
+gating discipline** (matching `nv9route`'s own header and `ac1route`/
+`ac2route`'s own Stage-4 gates: no combination or further sweep without a
+positive signal to chase first). The continuous relaxation's own
+approximation error -- fractional usage feeding the inner iterations,
+then a weighted-sample rounding step that can pick something other than
+the converged argmax -- has no obvious reason to shrink at larger batch
+sizes rather than compound further, so extending the sweep without first
+clearing the equal-footing bar wasn't justified.
+
+**The retrospective question this generation set out to answer gets a
+partial, honest answer.** "Does B&B's own near-zero acceptance rate
+across five generations reflect nothing left to find, or batches that
+were always too small?" -- at EQUAL batch size, continuous relaxation
+does not find something exact search misses; if anything it loses a
+little to search's own exactness. Whether relaxation's real selling
+point -- tolerating batches B&B cannot even attempt at all -- would ever
+pay for this small per-batch quality gap remains genuinely untested; the
+negative result at equal footing was reason enough to stop here rather
+than commit to a further multi-hour sweep chasing it. `gr/nv4route.cpp`
+remains this project's own best real result.
