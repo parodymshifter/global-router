@@ -5548,16 +5548,30 @@ binary, every run under `gr/run_tracked.sh`.
 | 6 (default) | 63910 | 74984 | 24 | 7247067 | 1790s | 1021MB |
 | 12 | 48386 | 59124 (-21.2%) | 24 | 7383636 (+1.9%) | 2292s | 878MB |
 | 24 | 33978 | 44336 (-40.9%) | 20 | 7584937 (+4.7%) | 3349s | 989MB |
-| 48 | 22410 | **31778** (-57.6%) | 18 | 7845406 (+8.3%) | 5724s | 972MB |
+| 48 | 22410 | 31778 (-57.6%) | 18 | 7845406 (+8.3%) | 5724s | 972MB |
+| 96 | 18642 | **28452** (-62.1%) | 16 | 8059455 (+11.2%) | 10238s | 1013MB |
 
 All four `gr_verify`-legal (0 malformed/out-of-bounds/disconnected/
 incomplete/unrouted) and `eval2008.pl`-cross-checked, matching `gr_verify`
 exactly. Every doubling of the margin still helps: the absolute gain per
 doubling shrinks slightly (15860, then 14788, then 12558), but the
 relative gain per doubling grows (-21.2%, then -25.0%, then -28.3% against
-the previous step) -- no plateau yet. Runtime grows much more slowly than
-the margin (1790s, 2292s, 3349s, 5724s: 8x the margin, 3.2x the
-runtime). Wirelength grows as detours
+the previous step) through 48. Margin 96 (added later, also verified both
+ways: 28452 / 16 / 8059455) breaks that trend: the 48 -> 96 doubling
+gains only -10.5%, at nearly double the runtime (10238s) -- returns from
+a uniform fixed box are now flattening. Runtime through 48 grew much more
+slowly than the margin (1790s, 2292s, 3349s, 5724s: 8x the margin, 3.2x
+the runtime).
+
+*Measurement note (2026-09-24):* `gr/run_tracked.sh` split
+`/usr/bin/time`'s report from router stderr by matching lines containing
+"real ", which also matched the router's own "real (wire+via) overflow"
+summary and filed it in `<prefix>.time` instead of `<prefix>.stderr`. No
+number was lost (every real-overflow figure in Parts 51-53 was read from
+`.time` and independently re-scored with `gr_verify` and `eval2008.pl`),
+but the split was wrong. Fixed by anchoring the patterns to `time -l`'s
+line shape (leading whitespace and a number); runs launched before the
+fix still have the line in `.time`. Wirelength grows as detours
 lengthen (+8.3% at 48). Margin 6 reproduces Part 41's previously recorded 74984 at this
 budget exactly (same settings run via the `nv3route` binary then), so the
 baseline is sound.
@@ -5727,7 +5741,72 @@ bad-input rejection for the settings parser.
 `VROUTE_FAST_ROUNDS=3 VROUTE_SLOW_ROUNDS=2 NV2ROUTE_VIA_ROUNDS=3`: route
 file byte-identical to `nv4route`'s (164174 real overflow both).
 
-**Stage 1 -- screens** (adaptec1, 30/75/100, running):
-`pernet` INIT 6 / GROW 6 / CAP 96, and `round` INIT 24 / GROW 1 / CAP 160
-(24 -> 98 over 75 slow rounds), against Part 51's fixed margins
-6 / 12 / 24 / 48 (74984 / 59124 / 44336 / 31778) and fixed 96 (running).
+**Stage 1 -- screens** (adaptec1, 30/75/100), against Part 51's fixed
+margins 6 / 12 / 24 / 48 (74984 / 59124 / 44336 / 31778 real overflow):
+
+| config | margin over the run | 2D overflow | real overflow | max | scored WL | runtime | peak RSS |
+|---|---|---|---|---|---|---|---|
+| `round` 24 / +1 / cap 160 | 24 -> 98 (mean per trace) | 21112 | 30428 | 18 | 7838364 | 5781s | 993MB |
+| `pernet` 6 / +6 / cap 96 | mean 6 -> 27 (round 4) -> 82 (round 14) -> 93-95 (round 24 on) | 18400 | **27394** | 16 | 7914430 | 7753s | 1108MB |
+
+`gr_verify`-legal, `eval2008.pl`-cross-checked (matching exactly). The
+trace confirms the wiring: mean margin 24 in slow round 0, 48 at round
+24, 73 at round 49, 98 at round 74, none at cap. Slightly better than
+fixed margin 48 (31778) at nearly the same runtime (5724s).
+
+`pernet` 6 / +6 / cap 96: `gr_verify`-legal, `eval2008.pl`-cross-checked
+(27394 / 16 / 7914430). Best screen so far, but the trace shows why and at
+what cost: margins climb fast, and from slow round 24 on nearly every net
+still being rerouted sits at the cap (26746 of 28947 at round 24, 22901 of
+22973 at round 74) -- in practice "fixed 96 for the persistent nets." It
+is also the slowest screen (7753s vs `round`'s 5781s).
+
+Running: fixed margin 96 (`nv4route`) and `round` 48 / +2 / cap 200
+(48 -> 196).
+
+## Part 54: `gr/nv12route.cpp` -- evidence-driven progressive box growth (`pressure` mode) -- in progress
+
+The user asked for a search perimeter that grows progressively rather
+than in big jumps, and chose the evidence-driven version: widen a net's
+box by a small step only when its own search was actually limited by it.
+`nv11route`'s schemes grow blindly (`round` widens everyone every round;
+`pernet` +6 drove nearly every hard net to the 96 cap by round 24).
+
+**The signal.** For each node the MSMV search expands on an extendable
+box edge (grid-border edges can't grow and don't count), record a lower
+bound on any route leaving the box there: its exact cost so far plus the
+cheapest possible edge cost (`1 + amount`) times its Manhattan distance to
+the nearest sink. If no such bound is below the found route's cost, no
+route outside the box can be cheaper. The proof (in `multiSourceDijkstra`)
+rests on A* with a consistent heuristic popping nodes in nondecreasing
+f = g + h, and on every edge costing at least `1 + amount` -- true because
+prices start at 1 and never decrease in this lineage and history never
+drops below 1; `main()` rejects pressure mode with history settings that
+could break that. A first version used plain pop order ("an edge node was
+expanded before the sink"); worked arithmetic showed that would flag most
+long nets as box-limited even when uncongested (the heuristic counts 1
+per tile while real edges cost at least 2), so the tighter bound replaced
+it before any run.
+
+**`pressure` mode** (inherited `NV11ROUTE_BOX_MODE=pressure`, with nv11's
+INIT/GROW/CAP): start at INIT; after each supervised reroute, grow by GROW
+only if the net is still overflowed AND its last search was box-limited.
+
+**Self-tests** (323 checks, all passing): binding detected on a walled
+fixture and not detected on an open one; a box covering the whole grid
+never reports binding even when forced through a wall; the helper grows
+only when overflowed AND binding and clamps at CAP; and the soundness
+property on the real search -- 60 deterministic fixtures shaped like real
+router state (floor prices everywhere, 1-3 hot spots near the pins): in
+all 38 cases reporting "not binding", a whole-grid search found exactly
+the same cost; 22 reported binding, 4 of which really were cheaper
+outside. (A first fixture priced every edge 1..20 -- nothing like real
+router state -- and there the floor-based bound was too loose for any
+binding case to be genuinely limiting; the fixture was made realistic
+rather than the assertion weakened.) So the signal never widens a box
+that provably can't help, but it is conservative: most flagged searches
+turn out not to be limited.
+
+Stage 0 parity and Stage 1 screens (`pressure` 6 / +1 / cap 96 and
+12 / +2 / cap 96, adaptec1, 30/75/100) are queued behind step 2 of the
+current re-test queue (B&B / cluster rescue under wide boxes).

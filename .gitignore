@@ -51,6 +51,7 @@ ac1route
 ac2route
 fw1route
 nv11route
+nv12route
 *.o
 bench/
 *.gr

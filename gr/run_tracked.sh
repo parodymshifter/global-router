@@ -79,8 +79,15 @@ router_exit=$?
 # the router itself wrote there -- split them apart so <log_prefix>.stderr
 # matches every prior run's plain-router-stderr convention, and the time
 # report gets its own file.
-grep -E "real |maximum resident|peak memory|page (reclaims|faults)|instructions retired|cycles elapsed" "${prefix}.stderr.tmp" > "${prefix}.time"
-grep -vE "real |maximum resident|peak memory|page (reclaims|faults)|instructions retired|cycles elapsed|average (shared|unshared)|swaps|block (input|output)|messages (sent|received)|signals received|voluntary|involuntary" "${prefix}.stderr.tmp" > "${prefix}.stderr"
+#
+# Every /usr/bin/time -l line starts with whitespace and a number
+# ("  5723.67 real ...", "  1013088256  maximum resident set size"); router
+# output starts with words. The patterns are anchored to that shape: an
+# earlier unanchored "real " also matched the router's own
+# "real (wire+via) overflow: ..." summary and moved it into <prefix>.time.
+time_line='^[[:space:]]*[0-9.]+[[:space:]]+'
+grep -E "${time_line}(real|maximum resident|peak memory|page (reclaims|faults)|instructions retired|cycles elapsed)" "${prefix}.stderr.tmp" > "${prefix}.time"
+grep -vE "${time_line}(real|maximum resident|peak memory|page (reclaims|faults)|instructions retired|cycles elapsed|average (shared|unshared)|swaps|block (input|output)|messages (sent|received)|signals received|voluntary|involuntary)" "${prefix}.stderr.tmp" > "${prefix}.stderr"
 rm -f "${prefix}.stderr.tmp"
 
 if [ -s "${prefix}.vsz" ]; then
