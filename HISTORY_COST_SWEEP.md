@@ -5546,15 +5546,27 @@ binary, every run under `gr/run_tracked.sh`.
 | `VROUTE_MAX_MARGIN` | 2D overflow | real overflow | max | scored WL | runtime | peak RSS |
 |---|---|---|---|---|---|---|
 | 6 (default) | 63910 | 74984 | 24 | 7247067 | 1790s | 1021MB |
-| 24 | 33978 | **44336** (-40.9%) | 20 | 7584937 (+4.7%) | 3349s | 989MB |
+| 12 | 48386 | 59124 (-21.2%) | 24 | 7383636 (+1.9%) | 2292s | 878MB |
+| 24 | 33978 | 44336 (-40.9%) | 20 | 7584937 (+4.7%) | 3349s | 989MB |
+| 48 | 22410 | **31778** (-57.6%) | 18 | 7845406 (+8.3%) | 5724s | 972MB |
 
-Both `gr_verify`-legal (0 malformed/out-of-bounds/disconnected/
+All four `gr_verify`-legal (0 malformed/out-of-bounds/disconnected/
 incomplete/unrouted) and `eval2008.pl`-cross-checked, matching `gr_verify`
-exactly. Margin 6 reproduces Part 41's previously recorded 74984 at this
+exactly. Every doubling of the margin still helps: the absolute gain per
+doubling shrinks slightly (15860, then 14788, then 12558), but the
+relative gain per doubling grows (-21.2%, then -25.0%, then -28.3% against
+the previous step) -- no plateau yet. Runtime grows much more slowly than
+the margin (1790s, 2292s, 3349s, 5724s: 8x the margin, 3.2x the
+runtime). Wirelength grows as detours
+lengthen (+8.3% at 48). Margin 6 reproduces Part 41's previously recorded 74984 at this
 budget exactly (same settings run via the `nv3route` binary then), so the
 baseline is sound.
 
-Margins 12 and 48 are running. This is a screen-budget result on one
+Full-budget confirmation of margin 24
+(`VROUTE_FAST_ROUNDS=60 VROUTE_SLOW_ROUNDS=150 NV2ROUTE_VIA_ROUNDS=200`,
+the Part 41 committed operating point) is running on adaptec1 and
+bigblue1 and newblue1; the margin-6 full-budget comparison is
+`nv4route`'s own committed 72882 / 21418 / 183044. This is a screen-budget result on one
 benchmark: per this project's own history (Parts 33, 37, 39: screen
 results reversing at the real budget), it is not a result until
 confirmed at the full 60/150/200 budget on all three benchmarks.
