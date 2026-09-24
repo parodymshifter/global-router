@@ -5153,11 +5153,18 @@ tax result says the incentive-aligning price is the MARGINAL cost, the
 derivative of that curve.
 
 New species `ac` (ant colony), generation 1, forked from `nv10route.cpp`.
-Two mechanisms, tested in isolation (not combined), both `gr_verify`-legal
-and `eval2008.pl`-cross-checked. Checkpoint scale throughout: adaptec1,
-`VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3`.
+Two mechanisms, tested in isolation (not combined). Adaptec1 only.
 
-**Stage 0 (parity, both mechanisms off):** byte-for-byte identical to
+*Corrected 2026-09-24 (see "Corrections to Parts 48-50" below): this
+section originally said "checkpoint scale throughout:
+`VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3`" and that both mechanisms'
+results were `eval2008.pl`-cross-checked. Stage 0 and Stage 1a actually
+ran at 10/15; only Stage 1b ran at 10/3. The `eval2008.pl` cross-check
+for Stages 0 and 1a was first run on 2026-09-24 and agrees with
+`gr_verify` exactly. Stage 1b has no route file, so no legality check
+exists for it.*
+
+**Stage 0 (parity, both mechanisms off, 10/15):** byte-for-byte identical to
 `nv10route` on the same fixture (81196 2D overflow / 95040 real overflow,
 both sides). Confirms the fork introduces zero behavioral change when
 untoggled.
@@ -5166,16 +5173,17 @@ untoggled.
 
 | config | real overflow |
 |---|---|
-| baseline (`nv10route`, same checkpoint budget) | 95040 |
-| marginal-cost pricing (global scope) | 111744 |
+| baseline (`nv10route`, 10/15) | 95040 |
+| marginal-cost pricing (global scope, 10/15) | 111744 |
 
-+17.6%, legal. A theoretically sharper, "more correct" congestion signal
-made results worse, not better -- consistent with every prior experiment
-in this project that made the reactive price signal more aggressive
-(overflow-prediction terms, threshold tuning): iterative negotiated-
-congestion search wants a SMOOTHER signal, not a more accurate
-instantaneous one, because a sharper derivative near the threshold
-amplifies round-to-round oscillation faster than it corrects underpricing.
++17.6%, legal, `eval2008.pl`-cross-checked (95040/22/7167738 and
+111744/26/7146052). A theoretically sharper, "more correct" congestion
+signal made results worse, not better -- consistent with every prior
+experiment in this project that made the reactive price signal more
+aggressive (overflow-prediction terms, threshold tuning). The proposed
+reason -- iterative negotiated-congestion search wants a smoother signal,
+because a sharper derivative near the threshold amplifies round-to-round
+oscillation -- is a hypothesis; oscillation was not measured.
 
 **Stage 1b -- Mechanism 1 alone, ACO, marginal-cost off**
 (`AC1ROUTE_ANTS=2`): the first colony round escalated ~60000 nets at
@@ -5230,7 +5238,7 @@ whipsaws), are implemented as `gr/ac2route.cpp` (species `ac`, generation
 2) -- see that file's own header and this document's next Part for the
 result.
 
-## Part 49: per-net-supervised ACO, AIMD pricing, and B&B-scoped marginal-cost pricing (`gr/ac2route.cpp`) -- the supervision fix works, but all three mechanisms still close negative
+## Part 49: per-net-supervised ACO, AIMD pricing, and B&B-scoped marginal-cost pricing (`gr/ac2route.cpp`) -- the supervision fix works, two mechanisms close negative, the third's first measurement was invalid (corrected below)
 
 Direct follow-up to Part 48. `ac1route.cpp` tested two ideas and both
 taught something concrete but neither won; this generation (species `ac`,
@@ -5274,6 +5282,12 @@ integration-level check that the marginal-cost scope guard actually
 restores itself inside the real `jointClusterAssign`, not just in
 isolation.
 
+*Round budgets (added 2026-09-24; the original text did not state them):
+Stage 0 ran at `VROUTE_FAST_ROUNDS=3 VROUTE_SLOW_ROUNDS=2` with cluster
+rescue off; Stages 1-3 ran at `VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3`,
+not the 10/15 budget Part 48's own baseline used. Numbers in this Part
+compare only with each other, not with Part 48's 95040.*
+
 **Stage 0 -- shell-level parity.** All three toggles set to reproduce
 ac1route's own exact behavior: byte-for-byte identical output, confirmed
 directly (`gr_verify`-legal, `eval2008.pl`-cross-checked: 261614/76/6618144
@@ -5316,38 +5330,30 @@ into better routing by itself.
 **Stage 3 -- Mechanism 3 alone, cluster rescue ON (required for B&B to
 run at all).**
 
-| config | real overflow (cluster rescue on, same budget) |
-|---|---|
-| nv10/ac1route clean baseline | 95040 |
-| Mechanism 3 alone (marginal-cost, B&B-scoped) | 136086 |
+Mechanism 3 alone (marginal-cost, B&B-scoped), cluster rescue on,
+`VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3`: **136086** real overflow,
+legal, `eval2008.pl`-cross-checked.
 
-+43.2%, legal, cross-checked -- WORSE than ac1route's own globally-applied
-version's +17.6% regression. This falsifies the scoping hypothesis
-outright, and the reason is itself the finding: B&B's own one-shot,
-independently-re-verified search structure is robust to a sharper cost
-signal AS A SEARCH, but that robustness was conflated with a different
-question -- whether the PRICE CHANGES an accepted cluster commits stay
-contained to B&B. They don't: once committed, they ripple forward into
-every later round's own main-loop routing exactly the same way a
-globally-applied signal would. At this checkpoint's own reduced
-convergence, cluster rescue accepts real cluster reassignments far more
-often than the near-zero acceptance rate this project's history otherwise
-documents at full convergence, so the new scoped `negotiateWire` call
-fires often enough to destabilize the whole downstream loop rather than
-staying rare and contained.
+*Corrected 2026-09-24 (see "Corrections to Parts 48-50" below): this
+section originally compared 136086 against the 95040 "nv10/ac1route clean
+baseline", reported "+43.2%, WORSE than ac1route's own globally-applied
+version's +17.6% regression", and said this "falsifies the scoping
+hypothesis outright." That comparison was invalid: 95040 was measured at
+`VROUTE_SLOW_ROUNDS=15`, this run at `VROUTE_SLOW_ROUNDS=3`, so the gap
+between them is mostly round budget, not Mechanism 3. The explanation
+offered for the "regression" -- accepted-cluster price commits rippling
+into later rounds, driven by a high cluster-rescue acceptance rate at this
+checkpoint -- was never checked (the acceptance rate was not measured) and
+is withdrawn. The valid comparison is a same-budget control with
+Mechanism 3 off; its result is recorded below.*
 
-**Decision: all three mechanisms close negative, no combination stage
-run.** Per the plan's own Stage 4 gate ("only for pieces that showed real
-signal in Stages 1-3"), none did, so no combined configuration was
-tested. All three negatives are mechanistically understood, not just
-measured: Mechanism 1 solves the SAFETY problem (no catastrophic spike)
-without solving the PERFORMANCE problem (stochastic search still loses to
-deterministic search here); Mechanism 2 is a genuinely different, working
-pricing rule that still routes worse; Mechanism 3's scoping argument had
-a real gap its own design note didn't anticipate (search robustness is
-not the same as price-change containment). `gr/nv4route.cpp` remains the
-committed best. No further tuning or combination pass is planned for the
-`ac` species on this specific set of three mechanisms.
+**Decision (corrected): Mechanisms 1 and 2 close negative on valid,
+same-budget comparisons; Mechanism 3's first measurement was invalid.**
+No combination stage was run. Mechanism 1 solves the SAFETY problem (no
+catastrophic spike) without solving the PERFORMANCE problem (stochastic
+search still loses to deterministic search here); Mechanism 2 is a
+genuinely different, working pricing rule that still routes worse.
+`gr/nv4route.cpp` remains the committed best.
 
 ## Part 50: fractional-relaxation joint assignment (`gr/fw1route.cpp`) -- a small, real regression at equal footing against exact B&B
 
@@ -5375,10 +5381,11 @@ net's own candidate set starts with a uniform fractional weight; a fixed
 number of cheap inner iterations compute the fractional usage every batch
 edge would see under the current weights, price each candidate's own
 local cost against that via the existing, plain `priceExponentTerm`
-(deliberately not `marginalCostTerm` -- `ac2route`'s own Stage 3 found
-marginal-cost pricing regresses badly even scoped to this exact commit
-path, and combining that confound with a new assignment algorithm would
-make any result unreadable), and multiplicatively reweight
+(deliberately not `marginalCostTerm` -- changing the pricing curve at the
+same time as the assignment algorithm would make any result unreadable;
+the original text here also cited `ac2route`'s Stage 3 "regression" as a
+reason, which turned out to be an invalid comparison, see the corrections
+below), and multiplicatively reweight
 (`exp(-eta * cost)`, renormalized). After convergence (or the inner-
 iteration cap), each net picks its own single committed candidate via a
 seeded-deterministic weighted sample -- not argmax, since argmax alone
@@ -5415,8 +5422,15 @@ byte-for-byte identical to `ac2route`'s own output, `gr_verify`-legal
 
 **Stage 1 -- the headline comparison.** `FW1ROUTE_MAX_CLUSTER_NETS=20`
 (matching `jointMaxClusterNets`' own default exactly, adaptec1,
-checkpoint round budget, both sides otherwise at `ac2route`'s own current
-defaults):
+`VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3`, both sides otherwise at
+`ac2route`'s own current defaults).
+
+*Clarified 2026-09-24: those defaults include per-net-supervised ACO (a
+measured regression -- 148962 with it on vs 136086 with it off at this same
+budget, +9.5%) and B&B-scoped marginal-cost pricing (effect unmeasured when
+this was written; see the corrections below), both active equally on both
+arms. The A/B comparison below is fair, but it ran on a weaker
+configuration than a clean baseline would have been.*
 
 | config | real overflow |
 |---|---|
@@ -5451,3 +5465,47 @@ pay for this small per-batch quality gap remains genuinely untested; the
 negative result at equal footing was reason enough to stop here rather
 than commit to a further multi-hour sweep chasing it. `gr/nv4route.cpp`
 remains this project's own best real result.
+
+## Corrections to Parts 48-50 (2026-09-24)
+
+A review of what was still unverified, checked against the exact commands
+recorded in the session transcript, found these errors in Parts 48-50 and
+the matching headers in `gr/ac1route.cpp`, `gr/ac2route.cpp`, and
+`gr/fw1route.cpp`. All were comment/documentation errors; no router's
+behavior changes. Each affected passage above now carries an inline
+correction note.
+
+1. **Invalid cross-budget comparison (Part 49, Stage 3).** Mechanism 3
+   (B&B-scoped marginal-cost pricing) was run at `VROUTE_FAST_ROUNDS=10
+   VROUTE_SLOW_ROUNDS=3` (136086) and compared against Part 48's 95040
+   baseline, which ran at `VROUTE_SLOW_ROUNDS=15`. The reported "+43.2%,
+   worse than the global version" measured round budget, not the
+   mechanism. The explanation written for it (price commits rippling
+   forward, driven by a high cluster-rescue acceptance rate) was never
+   checked and is withdrawn. This error went into `ac2route.cpp`'s
+   header, Part 49, `fw1route.cpp`'s own design rationale, and Part 50's
+   design rationale.
+2. **Wrong round budget stated (Part 48).** Part 48 and `ac1route.cpp`
+   said everything ran at 10/3. Stage 0 and Stage 1a ran at 10/15; only
+   Stage 1b ran at 10/3. The Stage 1a comparison itself was same-budget
+   and stands.
+3. **Cross-check claimed but not run (Part 48).** Part 48 and
+   `ac1route.cpp` said results were `eval2008.pl`-cross-checked; they had
+   not been. The check was run on 2026-09-24 against the still-present
+   route files and agrees with `gr_verify` exactly: 95040/22/7167738
+   (`nv10route` and `ac1route` parity, identical) and 111744/26/7146052
+   (Stage 1a). Stage 1b never produced a route file, so it has no
+   legality result at all; its numbers are from the router's trace.
+4. **Unstated defaults (Part 50).** `fw1route`'s bnb-vs-fractional
+   comparison ran with `ac2route`'s defaults, which include per-net ACO
+   (a measured +9.5% regression at the same budget: 148962 on vs 136086
+   off, both with cluster rescue and Mechanism 3 on) and Mechanism 3.
+   The comparison is still fair (identical on both arms) but was not run
+   on a clean baseline.
+
+**Same-budget control for Mechanism 3.** `ac2route`, `VROUTE_FAST_ROUNDS=10
+VROUTE_SLOW_ROUNDS=3 NV2ROUTE_VIA_ROUNDS=20`, cluster rescue on, ACO off,
+global marginal cost off, AIMD off -- identical to Part 49's Stage 3 run
+except `AC2ROUTE_MARGINAL_COST_SCOPE=0`. Run under `gr/run_tracked.sh`.
+
+*Result: pending (run in progress when this section was written).*

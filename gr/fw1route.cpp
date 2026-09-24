@@ -53,9 +53,10 @@
 // batch edge would see under the current weights, price each candidate's
 // own local cost against that fractional usage via the existing, plain
 // `priceExponentTerm` curve (deliberately not `marginalCostTerm` --
-// ac2route's own Stage 3 found marginal-cost pricing regresses badly even
-// scoped to this exact commit path, and combining that confound with a
-// new assignment algorithm would make any result unreadable), and
+// changing the pricing curve at the same time as the assignment algorithm
+// would make any result unreadable; ac1route measured global marginal-
+// cost pricing as a real regression, and ac2route's B&B-scoped measurement
+// turned out to be invalid, see ac2route.cpp's own correction), and
 // multiplicatively reweight each net's own distribution by
 // `exp(-eta * cost)`, renormalizing back to a probability distribution.
 // After the inner iterations converge (or hit the cap), each net picks
@@ -93,14 +94,21 @@
 // exactly; gr_verify-legal and eval2008.pl-cross-checked; full record in
 // HISTORY_COST_SWEEP.md Part 50).
 //
-// Stage 0 (shell-level parity, FW1ROUTE_ASSIGNMENT_METHOD unset): byte-
-// for-byte identical to ac2route's own output (193262 real overflow both
-// sides, small fixture). The fork changed nothing when untoggled.
+// Stage 0 (shell-level parity, FW1ROUTE_ASSIGNMENT_METHOD unset, run at
+// VROUTE_FAST_ROUNDS=3 VROUTE_SLOW_ROUNDS=2 with cluster rescue off):
+// byte-for-byte identical to ac2route's own output (193262 real overflow
+// both sides). The fork changed nothing when untoggled.
 //
 // Stage 1 (the headline comparison -- bnb vs fractional, identical
 // clusters and candidate sets, both sides otherwise at ac2route's own
-// current defaults, i.e. per-net-supervised ACO also active equally on
-// both sides):
+// current defaults). Clarified 2026-09-24: those defaults include TWO
+// inherited mechanisms active equally on both sides -- per-net-supervised
+// ACO (a measured regression, +9.5% at this same budget per ac2route's
+// own correction note) and B&B-scoped marginal-cost pricing (effect
+// unmeasured; ac2route's original "+43.2%" for it was an invalid
+// cross-budget comparison). The bnb-vs-fractional comparison is still
+// fair, since both arms carry identical defaults, but it was run on a
+// weaker configuration than a clean baseline would have been:
 //
 //     bnb (exact B&B, this project's own trusted baseline): 148962
 //     fractional (this file's own new mechanism):           151842
@@ -251,35 +259,24 @@
 // its own, independent of any ACO interaction (never combined here).
 //
 // Stage 3, Mechanism 3 alone (marginal-cost pricing scoped to B&B only,
-// cluster rescue ON since B&B only runs inside it): 136,086 vs nv10/
-// ac1route's own clean baseline at the identical budget, 95,040 --
-// +43.2%, WORSE than ac1route's own globally-applied version's +17.6%.
-// This refutes the scoping hypothesis outright: the reasoning that B&B's
-// own one-shot, independently-re-verified search structure would
-// insulate the mechanism from the oscillation that sank the global
-// version conflated B&B's own SEARCH robustness with the separate
-// question of whether the PRICE CHANGES an accepted cluster commits keep
-// rippling forward into every later round exactly the same way a
-// globally-applied signal would -- B&B's own commit doesn't stay
-// contained to B&B. At this checkpoint's own reduced convergence, cluster
-// rescue accepts real cluster reassignments (unlike the well-converged,
-// full-budget near-zero-acceptance rate this project's own history
-// otherwise documents), so the new scoped negotiateWire call fires often
-// enough to destabilize the whole downstream loop, not rarely enough to
-// stay contained.
+// cluster rescue ON since B&B only runs inside it): 136,086 real
+// overflow at VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3.
 //
-// All three mechanisms close negative, and all three negatives are
-// mechanistically understood, not just measured: Mechanism 1 solves the
-// SAFETY problem it targeted (no more catastrophic batch-commit spike)
-// without solving the PERFORMANCE problem (stochastic search still loses
-// to deterministic search here); Mechanism 2 is a real, working
-// alternative pricing rule that simply routes worse; Mechanism 3's own
-// scoping hypothesis was falsified by a mechanism this generation's own
-// design note did not anticipate (accepted-cluster price commits are not
-// actually contained to B&B's own scope of EFFECT, only to its own scope
-// of WHEN they're computed). No further combination or tuning pass is
-// planned for this species; see HISTORY_COST_SWEEP.md Part 49 for the
-// full record.
+// CORRECTION (2026-09-24, applied to ac2route.cpp and to this inherited
+// copy): ac2route's header originally compared that 136,086 against
+// 95,040 and reported "+43.2%, WORSE than the global version." That
+// comparison was invalid -- 95,040 was measured at VROUTE_SLOW_ROUNDS=15,
+// not 3 -- and the explanation it gave (accepted-cluster price commits
+// rippling forward, driven by a high cluster-rescue acceptance rate) was
+// never checked and is withdrawn. Mechanism 3's effect is recorded from a
+// same-budget control in HISTORY_COST_SWEEP.md's Part 49 correction.
+//
+// Mechanisms 1 and 2 close negative on valid, same-budget comparisons:
+// Mechanism 1 solves the SAFETY problem it targeted (no more catastrophic
+// batch-commit spike) without solving the PERFORMANCE problem (stochastic
+// search still loses to deterministic search here); Mechanism 2 is a
+// real, working alternative pricing rule that routes worse. See
+// HISTORY_COST_SWEEP.md Part 49 and its correction for the full record.
 //
 // --- ac1route.cpp's own header material below, inherited unchanged as
 // accurate history of the mechanism this generation refines. ---
@@ -327,17 +324,25 @@
 // congestion cost is convex -- it is, here). `marginalCostTerm` is the
 // closed-form derivative of `priceExponentTerm`'s own curve.
 //
-// RESULTS (checkpoint scale, adaptec1, VROUTE_FAST_ROUNDS=10
-// VROUTE_SLOW_ROUNDS=3; gr_verify-legal both stages; full record and
-// eval2008.pl cross-check in HISTORY_COST_SWEEP.md Part 48). Both
-// mechanisms tested in isolation, not combined, so each result is clean:
+// RESULTS (checkpoint scale, adaptec1; full record in
+// HISTORY_COST_SWEEP.md Part 48). Both mechanisms tested in isolation,
+// not combined, so each result is clean.
 //
-// Stage 0 (both mechanisms off): byte-for-byte identical to nv10route on
-// the same fixture (81196 2D overflow / 95040 real overflow both sides).
-// The fork changed nothing when untoggled.
+// CORRECTION (2026-09-24, applied to ac1route.cpp and to this inherited
+// copy): the original text said all stages ran at VROUTE_FAST_ROUNDS=10
+// VROUTE_SLOW_ROUNDS=3 and were gr_verify-legal and eval2008.pl-cross-
+// checked. Stage 0 and Stage 1a actually ran at 10/15; only Stage 1b ran
+// at 10/3. The eval2008.pl cross-check was run on 2026-09-24 and agrees
+// with gr_verify exactly (95040/22/7167738 and 111744/26/7146052). Stage
+// 1b never produced a route file, so it has no gr_verify or eval2008.pl
+// result; its numbers come from the router's own trace.
 //
-// Stage 1a, Mechanism 2 alone (marginal-cost pricing, ACO off): 111744
-// real overflow vs the 95040 baseline at the same reduced budget --
+// Stage 0 (both mechanisms off, 10/15): byte-for-byte identical to
+// nv10route on the same fixture (81196 2D overflow / 95040 real overflow
+// both sides). The fork changed nothing when untoggled.
+//
+// Stage 1a, Mechanism 2 alone (marginal-cost pricing, ACO off, 10/15):
+// 111744 real overflow vs the 95040 baseline at the same budget --
 // +17.6%, legal but clearly worse. The sharper, theoretically "more
 // correct" marginal-cost signal destabilizes this project's own
 // iterative reactive search rather than improving it, the same direction
@@ -4001,11 +4006,10 @@ AssignmentResult branchAndBoundAssign(const RoutingGrid &g, const Usage &usage,
 // the full framing and HISTORY_COST_SWEEP.md for the measured result.
 //
 // Deliberately uses priceExponentTerm (the plain, historically-default
-// pricing curve), not marginalCostTerm: ac2route's own Stage 3 found
-// marginal-cost pricing regresses badly even scoped to jointClusterAssign's
-// own commit path, and using it here too would conflate "does fractional
-// relaxation help" with "does a sharper pricing curve help" -- exactly
-// the confound this generation's own scope discipline exists to avoid.
+// pricing curve), not marginalCostTerm: using it here would conflate
+// "does fractional relaxation help" with "does a sharper pricing curve
+// help" -- exactly the confound this generation's own scope discipline
+// exists to avoid.
 // Extracted for direct self-testing (see testFractionalUsageMatchesHandComputation):
 // background usage (from outside this cluster) plus every net's own
 // weighted contribution across every one of its own candidates. Only

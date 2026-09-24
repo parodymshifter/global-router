@@ -46,17 +46,30 @@
 // the K-ants cost multiplier and the round-level-not-per-net supervision
 // departure): `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
 //
-// RESULTS (checkpoint scale, adaptec1, VROUTE_FAST_ROUNDS=10
-// VROUTE_SLOW_ROUNDS=3; gr_verify-legal both stages; full record and
-// eval2008.pl cross-check in HISTORY_COST_SWEEP.md Part 48). Both
-// mechanisms tested in isolation, not combined, so each result is clean:
+// RESULTS (checkpoint scale, adaptec1; full record in
+// HISTORY_COST_SWEEP.md Part 48). Both mechanisms tested in isolation,
+// not combined, so each result is clean.
 //
-// Stage 0 (both mechanisms off): byte-for-byte identical to nv10route on
-// the same fixture (81196 2D overflow / 95040 real overflow both sides).
-// The fork changed nothing when untoggled.
+// CORRECTION (2026-09-24): this header originally said all stages ran at
+// VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3 and that both stages were
+// gr_verify-legal and eval2008.pl-cross-checked. Checked against the
+// actual commands: Stage 0 and Stage 1a ran at VROUTE_FAST_ROUNDS=10
+// VROUTE_SLOW_ROUNDS=15; only Stage 1b ran at 10/3. The eval2008.pl
+// cross-check had not been run when this was written -- it was run on
+// 2026-09-24 against the still-present route files and agrees with
+// gr_verify exactly (Stage 0: 95040/22/7167738 on both nv10route and this
+// file; Stage 1a: 111744/26/7146052), so the Stage 1a comparison below
+// stands. Stage 1b never produced a route file (the run was stopped during
+// cluster rescue after the circuit-breaker finding was captured), so it
+// has no gr_verify or eval2008.pl result at all; its numbers come from
+// the router's own trace.
 //
-// Stage 1a, Mechanism 2 alone (marginal-cost pricing, ACO off): 111744
-// real overflow vs the 95040 baseline at the same reduced budget --
+// Stage 0 (both mechanisms off, 10/15): byte-for-byte identical to
+// nv10route on the same fixture (81196 2D overflow / 95040 real overflow
+// both sides). The fork changed nothing when untoggled.
+//
+// Stage 1a, Mechanism 2 alone (marginal-cost pricing, ACO off, 10/15):
+// 111744 real overflow vs the 95040 baseline at the same budget --
 // +17.6%, legal but clearly worse. The sharper, theoretically "more
 // correct" marginal-cost signal destabilizes this project's own
 // iterative reactive search rather than improving it, the same direction

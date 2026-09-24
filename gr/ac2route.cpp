@@ -116,35 +116,37 @@
 // its own, independent of any ACO interaction (never combined here).
 //
 // Stage 3, Mechanism 3 alone (marginal-cost pricing scoped to B&B only,
-// cluster rescue ON since B&B only runs inside it): 136,086 vs nv10/
-// ac1route's own clean baseline at the identical budget, 95,040 --
-// +43.2%, WORSE than ac1route's own globally-applied version's +17.6%.
-// This refutes the scoping hypothesis outright: the reasoning that B&B's
-// own one-shot, independently-re-verified search structure would
-// insulate the mechanism from the oscillation that sank the global
-// version conflated B&B's own SEARCH robustness with the separate
-// question of whether the PRICE CHANGES an accepted cluster commits keep
-// rippling forward into every later round exactly the same way a
-// globally-applied signal would -- B&B's own commit doesn't stay
-// contained to B&B. At this checkpoint's own reduced convergence, cluster
-// rescue accepts real cluster reassignments (unlike the well-converged,
-// full-budget near-zero-acceptance rate this project's own history
-// otherwise documents), so the new scoped negotiateWire call fires often
-// enough to destabilize the whole downstream loop, not rarely enough to
-// stay contained.
+// cluster rescue ON since B&B only runs inside it): 136,086 real
+// overflow at VROUTE_FAST_ROUNDS=10 VROUTE_SLOW_ROUNDS=3.
 //
-// All three mechanisms close negative, and all three negatives are
-// mechanistically understood, not just measured: Mechanism 1 solves the
-// SAFETY problem it targeted (no more catastrophic batch-commit spike)
-// without solving the PERFORMANCE problem (stochastic search still loses
-// to deterministic search here); Mechanism 2 is a real, working
-// alternative pricing rule that simply routes worse; Mechanism 3's own
-// scoping hypothesis was falsified by a mechanism this generation's own
-// design note did not anticipate (accepted-cluster price commits are not
-// actually contained to B&B's own scope of EFFECT, only to its own scope
-// of WHEN they're computed). No further combination or tuning pass is
-// planned for this species; see HISTORY_COST_SWEEP.md Part 49 for the
-// full record.
+// CORRECTION (2026-09-24): this header originally compared that 136,086
+// against 95,040 and reported "+43.2%, WORSE than the global version."
+// That comparison was invalid -- 95,040 was measured at
+// VROUTE_SLOW_ROUNDS=15, not 3 (confirmed from the actual commands), so
+// the two numbers differ by round budget, not by this mechanism. The
+// explanation this header then gave for the "regression" (accepted-
+// cluster price commits rippling forward, driven by a high cluster-rescue
+// acceptance rate at this checkpoint) was never checked either -- the
+// acceptance rate was not measured -- and is withdrawn. No run at the
+// 10/3 budget with Mechanism 3 OFF and everything else identical existed
+// when this was written; that control is the only valid comparison and
+// its result is recorded in HISTORY_COST_SWEEP.md's Part 49 correction.
+// Until then, Mechanism 3's effect is UNMEASURED, not negative.
+//
+// Mechanisms 1 and 2 close negative on valid, same-budget comparisons:
+// Mechanism 1 solves the SAFETY problem it targeted (no more catastrophic
+// batch-commit spike) without solving the PERFORMANCE problem (stochastic
+// search still loses to deterministic search here); Mechanism 2 is a
+// real, working alternative pricing rule that routes worse. See
+// HISTORY_COST_SWEEP.md Part 49 and its correction for the full record.
+//
+// Note on this file's own DEFAULTS: per-net-supervised ACO
+// (AC1ROUTE_ANTS_ENABLED, inherited default on) and B&B-scoped marginal
+// cost (AC2ROUTE_MARGINAL_COST_SCOPE, default on) are both enabled by
+// default here, so an unconfigured run of this binary carries Mechanism
+// 1's measured regression. A same-budget pair (10/3, cluster rescue on,
+// Mechanism 3 on) measured 148,962 with ACO on vs 136,086 with it off
+// (+9.5%). Any comparison built on this file's defaults should say so.
 //
 // --- ac1route.cpp's own header material below, inherited unchanged as
 // accurate history of the mechanism this generation refines. ---
@@ -192,17 +194,25 @@
 // congestion cost is convex -- it is, here). `marginalCostTerm` is the
 // closed-form derivative of `priceExponentTerm`'s own curve.
 //
-// RESULTS (checkpoint scale, adaptec1, VROUTE_FAST_ROUNDS=10
-// VROUTE_SLOW_ROUNDS=3; gr_verify-legal both stages; full record and
-// eval2008.pl cross-check in HISTORY_COST_SWEEP.md Part 48). Both
-// mechanisms tested in isolation, not combined, so each result is clean:
+// RESULTS (checkpoint scale, adaptec1; full record in
+// HISTORY_COST_SWEEP.md Part 48). Both mechanisms tested in isolation,
+// not combined, so each result is clean.
 //
-// Stage 0 (both mechanisms off): byte-for-byte identical to nv10route on
-// the same fixture (81196 2D overflow / 95040 real overflow both sides).
-// The fork changed nothing when untoggled.
+// CORRECTION (2026-09-24, applied to ac1route.cpp and to this inherited
+// copy): the original text said all stages ran at VROUTE_FAST_ROUNDS=10
+// VROUTE_SLOW_ROUNDS=3 and were gr_verify-legal and eval2008.pl-cross-
+// checked. Stage 0 and Stage 1a actually ran at 10/15; only Stage 1b ran
+// at 10/3. The eval2008.pl cross-check was run on 2026-09-24 and agrees
+// with gr_verify exactly (95040/22/7167738 and 111744/26/7146052). Stage
+// 1b never produced a route file, so it has no gr_verify or eval2008.pl
+// result; its numbers come from the router's own trace.
 //
-// Stage 1a, Mechanism 2 alone (marginal-cost pricing, ACO off): 111744
-// real overflow vs the 95040 baseline at the same reduced budget --
+// Stage 0 (both mechanisms off, 10/15): byte-for-byte identical to
+// nv10route on the same fixture (81196 2D overflow / 95040 real overflow
+// both sides). The fork changed nothing when untoggled.
+//
+// Stage 1a, Mechanism 2 alone (marginal-cost pricing, ACO off, 10/15):
+// 111744 real overflow vs the 95040 baseline at the same budget --
 // +17.6%, legal but clearly worse. The sharper, theoretically "more
 // correct" marginal-cost signal destabilizes this project's own
 // iterative reactive search rather than improving it, the same direction
