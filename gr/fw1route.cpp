@@ -104,9 +104,10 @@
 // current defaults). Clarified 2026-09-24: those defaults include TWO
 // inherited mechanisms active equally on both sides -- per-net-supervised
 // ACO (a measured regression, +9.5% at this same budget per ac2route's
-// own correction note) and B&B-scoped marginal-cost pricing (effect
-// unmeasured; ac2route's original "+43.2%" for it was an invalid
-// cross-budget comparison). The bnb-vs-fractional comparison is still
+// own correction note) and B&B-scoped marginal-cost pricing (+0.11%,
+// essentially no effect, per a same-budget control; ac2route's original
+// "+43.2%" for it was an invalid cross-budget comparison). The
+// bnb-vs-fractional comparison is still
 // fair, since both arms carry identical defaults, but it was run on a
 // weaker configuration than a clean baseline would have been:
 //
@@ -268,8 +269,9 @@
 // comparison was invalid -- 95,040 was measured at VROUTE_SLOW_ROUNDS=15,
 // not 3 -- and the explanation it gave (accepted-cluster price commits
 // rippling forward, driven by a high cluster-rescue acceptance rate) was
-// never checked and is withdrawn. Mechanism 3's effect is recorded from a
-// same-budget control in HISTORY_COST_SWEEP.md's Part 49 correction.
+// never checked and is withdrawn. A same-budget control (HISTORY_COST_SWEEP.md's
+// Part 49 correction) measured 135,938 off vs 136,086 on -- +0.11%,
+// essentially no effect.
 //
 // Mechanisms 1 and 2 close negative on valid, same-budget comparisons:
 // Mechanism 1 solves the SAFETY problem it targeted (no more catastrophic

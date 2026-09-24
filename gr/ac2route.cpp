@@ -130,8 +130,9 @@
 // acceptance rate was not measured -- and is withdrawn. No run at the
 // 10/3 budget with Mechanism 3 OFF and everything else identical existed
 // when this was written; that control is the only valid comparison and
-// its result is recorded in HISTORY_COST_SWEEP.md's Part 49 correction.
-// Until then, Mechanism 3's effect is UNMEASURED, not negative.
+// its result is recorded in HISTORY_COST_SWEEP.md's Part 49 correction:
+// 135,938 with Mechanism 3 off vs 136,086 on -- +0.11%, essentially no
+// effect at this budget, not a regression.
 //
 // Mechanisms 1 and 2 close negative on valid, same-budget comparisons:
 // Mechanism 1 solves the SAFETY problem it targeted (no more catastrophic

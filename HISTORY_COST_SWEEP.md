@@ -5427,8 +5427,8 @@ byte-for-byte identical to `ac2route`'s own output, `gr_verify`-legal
 
 *Clarified 2026-09-24: those defaults include per-net-supervised ACO (a
 measured regression -- 148962 with it on vs 136086 with it off at this same
-budget, +9.5%) and B&B-scoped marginal-cost pricing (effect unmeasured when
-this was written; see the corrections below), both active equally on both
+budget, +9.5%) and B&B-scoped marginal-cost pricing (+0.11%, essentially no
+effect, per the same-budget control in the corrections below), both active equally on both
 arms. The A/B comparison below is fair, but it ran on a weaker
 configuration than a clean baseline would have been.*
 
@@ -5508,4 +5508,53 @@ VROUTE_SLOW_ROUNDS=3 NV2ROUTE_VIA_ROUNDS=20`, cluster rescue on, ACO off,
 global marginal cost off, AIMD off -- identical to Part 49's Stage 3 run
 except `AC2ROUTE_MARGINAL_COST_SCOPE=0`. Run under `gr/run_tracked.sh`.
 
-*Result: pending (run in progress when this section was written).*
+| config (10/3, cluster rescue on, ACO off, global marginal off, AIMD off) | real overflow | max | scored WL |
+|---|---|---|---|
+| Mechanism 3 off (control) | 135938 | 32 | 7022688 |
+| Mechanism 3 on (Part 49's Stage 3) | 136086 | 34 | 7023298 |
+
+Both `gr_verify`-legal (0 malformed/out-of-bounds/disconnected/incomplete/
+unrouted) and `eval2008.pl`-cross-checked, matching `gr_verify` exactly
+(Stage 3's max overflow and wirelength were not written into Part 49; they
+were re-read from its route file on 2026-09-24). Control runtime 16819s,
+peak RSS 986MB.
+
+**Corrected result: B&B-scoped marginal-cost pricing is +0.11% --
+essentially no effect**, not the "+43.2%" originally recorded. The whole
+original gap was the round-budget mismatch. The scoping hypothesis is
+neither confirmed nor refuted in any meaningful sense; the mechanism just
+doesn't move the number at this budget.
+
+## Part 51: search-box margin sweep on `gr/nv4route.cpp` -- raw results (in progress)
+
+A re-check of CLAUDE.md's "Bound maze search with a fixed margin" rule
+in the current architecture. That rule's supporting sweep ran on the full
+3D grid (it cites a call covering the whole 324x324x6 grid), before MSMV
+and the 2D collapse. `nv4route` (the committed best) caps both
+`routeSegment`'s and `routeStepMSMV`'s search box at `VROUTE_MAX_MARGIN`
+tiles (default 6) and widens it only when no path exists at all -- never
+when every path inside the box is congested. For comparison, NTHU-Route
+2.0 (ISPD 2008 winner) starts its main-stage search box at 25 tiles on
+adaptec1 and grows it by 1 tile per iteration (per its own benchmark
+script, `luckyrantanplan/nthu-route`'s `bin/benchmark.sh`).
+
+No code change: `VROUTE_MAX_MARGIN` is an existing env var. Screen budget
+is this project's own 30/75/100 (`VROUTE_FAST_ROUNDS=30
+VROUTE_SLOW_ROUNDS=75 NV2ROUTE_VIA_ROUNDS=100`), adaptec1, `nv4route`
+binary, every run under `gr/run_tracked.sh`.
+
+| `VROUTE_MAX_MARGIN` | 2D overflow | real overflow | max | scored WL | runtime | peak RSS |
+|---|---|---|---|---|---|---|
+| 6 (default) | 63910 | 74984 | 24 | 7247067 | 1790s | 1021MB |
+| 24 | 33978 | **44336** (-40.9%) | 20 | 7584937 (+4.7%) | 3349s | 989MB |
+
+Both `gr_verify`-legal (0 malformed/out-of-bounds/disconnected/
+incomplete/unrouted) and `eval2008.pl`-cross-checked, matching `gr_verify`
+exactly. Margin 6 reproduces Part 41's previously recorded 74984 at this
+budget exactly (same settings run via the `nv3route` binary then), so the
+baseline is sound.
+
+Margins 12 and 48 are running. This is a screen-budget result on one
+benchmark: per this project's own history (Parts 33, 37, 39: screen
+results reversing at the real budget), it is not a result until
+confirmed at the full 60/150/200 budget on all three benchmarks.
