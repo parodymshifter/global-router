@@ -5593,6 +5593,18 @@ incomplete/unrouted) and `eval2008.pl`-cross-checked, matching `gr_verify`
 exactly. The screen result survived the full budget -- unlike Parts 33,
 37 and 39 -- and it is unanimous and large on every benchmark.
 
+**Longer budget, margin 24** (queue step 1: does "more rounds don't help"
+survive wide boxes?). adaptec1, `VROUTE_SLOW_ROUNDS=300` (double the full
+budget's 150; fast 60, via 200): **41750** real overflow vs 42052 at 150 --
+only -0.7% for about 60% more runtime (8698s vs 5405s). `gr_verify`-legal,
+`eval2008.pl`-cross-checked (41750 / 18 / 7604119). The trace is a real
+plateau (2D overflow 33978 at slow round 74, 32112 at 149, 31678 at 224),
+and `kSlowPatience=5` ended the run at slow round 295 of 300 -- so that
+compile-time limit does bind on long runs (Part 55). Conclusion: at a
+fixed margin, more rounds still don't help, even with wide boxes. The
+growth schemes in Part 53 kept improving to the round cap only because
+their boxes kept widening -- width, not round count, is the lever.
+
 **Decision: `nv4route` with `VROUTE_MAX_MARGIN=24` is this project's new
 best real result** (sum 159592, down from 277344), the largest single
 improvement since `vroute`'s MSMV and `fr1route`'s 2D collapse. No code
@@ -5812,9 +5824,12 @@ rather than the assertion weakened.) So the signal never widens a box
 that provably can't help, but it is conservative: most flagged searches
 turn out not to be limited.
 
-Stage 0 parity and Stage 1 screens (`pressure` 6 / +1 / cap 96 and
-12 / +2 / cap 96, adaptec1, 30/75/100) are queued behind step 2 of the
-current re-test queue (B&B / cluster rescue under wide boxes).
+**Stage 0 -- parity.** adaptec1 at 3/2/3: `nv12route` vs `nv11route`
+route files byte-identical in the default (fixed) mode and in `pernet`
+6 / +6 / 96.
+
+**Stage 1 -- screens** (adaptec1, 30/75/100): `pressure` 6 / +1 / cap 96
+running; 12 / +2 / cap 96 next.
 
 ## Part 55: provenance audit of `nv4route`'s inherited defaults
 
