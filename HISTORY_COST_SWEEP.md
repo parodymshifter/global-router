@@ -5636,5 +5636,36 @@ What this settles:
   net this project routes is not one the contest rules require (worth a
   look, not a correctness issue).
 
-newblue1 and bigblue1 reference runs are in progress (authors' own
-per-benchmark settings, release build).
+**bigblue1** (authors' settings: initial box 10, grows by 1, overflow
+threshold 340, monotonic off; release build): **0 total overflow, 0 max,
+`gr_verify` PASS**, `eval2008.pl` agrees exactly (0 / 0 / 5657290;
+wirelength 3765813 + vias 1891477). 268s, peak RSS 1029MB. `nv4route`'s
+committed full-budget bigblue1 result is 183044.
+
+**newblue1** (authors' settings: initial box 12, grows by 1, overflow
+threshold 4, monotonic ON; release build): the port's own trace shows its
+2D stage finishing at 2D overflow 18, but its layer assignment then
+produced 859138 real overflow (max 2) across 429569 edges -- every
+overflowed edge over by exactly 2, one net's width+spacing. Tallying the
+output by direction and layer shows why: horizontal wires on vertical-only
+layers (38474 H segments on layer 2, 32292 on layer 4, 10934 on layer 6)
+and vertical wires on horizontal-only layers (49421 V on layer 1, 34838 on
+layer 3, 12386 on layer 5) -- every one of which lands on a zero-capacity
+edge. The port's own log reports the same 3D overflow, so this is a real
+failure of the port's layer assignment on this benchmark, not a scoring
+disagreement (`gr_verify` and `eval2008.pl` agree: 859138 / 2 / 4133320).
+It is not a routing-quality result and says nothing about what the
+original NTHU-Route 2.0 achieved on newblue1. A diagnostic re-run with
+monotonic routing off (newblue1's settings also differ in initial box
+size and overflow threshold, but monotonic routing is the one on/off mode
+switch the two successful runs never enabled) produced identical output --
+same 2D overflow (18), same 859138 real overflow, same wirelength -- so
+monotonic routing is not the trigger. One observable difference remains:
+newblue1 is the only benchmark of the three where the port's 2D stage
+ended above zero, and its layer assignment may mishandle leftover 2D
+overflow. That is an untested hypothesis about third-party code and was
+not pursued; the net result is that this port provides no usable newblue1
+reference. (For context, `fr1route.cpp`'s own summary of the contest
+record names adaptec1 and bigblue1 among the benchmarks solved to zero and
+does not mention newblue1 either way; whether contest routers reached
+zero on newblue1 has not been checked.)
