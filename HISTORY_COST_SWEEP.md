@@ -5870,3 +5870,33 @@ settles. One trap is not a tuning question at all: `NV2ROUTE_VIA_ROUNDS`
 defaults to 60 in the binary while every committed result used 200, so
 running any router without that variable silently under-performs the
 recorded best.
+
+## Part 56: cluster rescue / joint B&B re-tested with wide boxes -- still accepts nothing
+
+Queue step 2. Parts 44-47's cluster-rescue and joint branch-and-bound
+mechanisms (`nv6route`-`nv10route`) accepted essentially nothing at real
+scale. Part 55's reading suggested a cause: their candidate routes came
+from `routeNetSlowMSMV` inside the same 6-tile box, so the candidates may
+have been near-duplicates. Re-tested with the box widened.
+
+`nv10route`, adaptec1, 30/75/100 screen, `VROUTE_MAX_MARGIN=24`, its own
+defaults (cluster rescue + joint B&B on) vs the same with
+`NV6ROUTE_CLUSTER_RESCUE=0`:
+
+| config | 2D overflow | real overflow | max | scored WL | runtime |
+|---|---|---|---|---|---|
+| rescue on (default) | 33766 | 44264 | 20 | 7601615 | 6958s |
+| rescue off | 33766 | 44264 | 20 | 7601615 | 3546s |
+| (`nv4route` margin 24, Part 51) | 33978 | 44336 | 20 | 7584937 | 3349s |
+
+Both `nv10route` runs `gr_verify`-legal and `eval2008.pl`-cross-checked;
+their route files are **byte-identical**. The trace: 1443 clusters
+attempted over three meta-rounds, **0 accepted**, overflow unchanged at
+33766 throughout. The rescue stage contributes nothing and nearly doubles
+runtime.
+
+**The narrow-box explanation for B&B's near-zero acceptance is refuted, at
+least at margin 24.** Whatever limits these mechanisms, it isn't the 6-tile
+box. (`nv10route`'s small edge over `nv4route`, 44264 vs 44336, -0.16%, comes
+from its other inherited nv5-nv9 defaults, not the rescue stage -- not
+pursued.) No further rescue/B&B work is planned.
