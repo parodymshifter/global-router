@@ -5747,7 +5747,8 @@ margins 6 / 12 / 24 / 48 (74984 / 59124 / 44336 / 31778 real overflow):
 | config | margin over the run | 2D overflow | real overflow | max | scored WL | runtime | peak RSS |
 |---|---|---|---|---|---|---|---|
 | `round` 24 / +1 / cap 160 | 24 -> 98 (mean per trace) | 21112 | 30428 | 18 | 7838364 | 5781s | 993MB |
-| `pernet` 6 / +6 / cap 96 | mean 6 -> 27 (round 4) -> 82 (round 14) -> 93-95 (round 24 on) | 18400 | **27394** | 16 | 7914430 | 7753s | 1108MB |
+| `pernet` 6 / +6 / cap 96 | mean 6 -> 27 (round 4) -> 82 (round 14) -> 93-95 (round 24 on) | 18400 | 27394 | 16 | 7914430 | 7753s | 1108MB |
+| `round` 48 / +2 / cap 200 | 48 -> 96 (round 24) -> 146 (round 49) -> 196 (round 74) | 18022 | **27094** | 16 | 8004059 | 9214s | 1096MB |
 
 `gr_verify`-legal, `eval2008.pl`-cross-checked (matching exactly). The
 trace confirms the wiring: mean margin 24 in slow round 0, 48 at round
@@ -5761,8 +5762,12 @@ still being rerouted sits at the cap (26746 of 28947 at round 24, 22901 of
 22973 at round 74) -- in practice "fixed 96 for the persistent nets." It
 is also the slowest screen (7753s vs `round`'s 5781s).
 
-Running: fixed margin 96 (`nv4route`) and `round` 48 / +2 / cap 200
-(48 -> 196).
+`round` 48 / +2 / cap 200: `gr_verify`-legal, `eval2008.pl`-cross-checked
+(27094 / 16 / 8004059). Best screen so far, narrowly ahead of `pernet`
+(27394) but slower (9214s vs 7753s); by the last rounds its boxes average
+196 tiles on a 324-tile-wide grid. Fixed margin 96 (Part 51) scored 28452
+in 10238s -- both growth schemes beat it on overflow, and `pernet` on
+runtime too.
 
 ## Part 54: `gr/nv12route.cpp` -- evidence-driven progressive box growth (`pressure` mode) -- in progress
 
