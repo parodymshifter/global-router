@@ -5810,3 +5810,43 @@ turn out not to be limited.
 Stage 0 parity and Stage 1 screens (`pressure` 6 / +1 / cap 96 and
 12 / +2 / cap 96, adaptec1, 30/75/100) are queued behind step 2 of the
 current re-test queue (B&B / cluster rescue under wide boxes).
+
+## Part 55: provenance audit of `nv4route`'s inherited defaults
+
+Prompted by Part 51: the 6-tile search-box margin was a constant set once
+in `mroute.cpp` for speed, inherited untested by every later router, and
+turned out to be the biggest hidden limiter in the project. This audit
+asks the same question of every other default in `nv4route` (the base of
+`nv11route`/`nv12route`): when was it set, on which architecture, and has
+it been re-tested since. Architecture milestones: MSMV maze growth
+(`vroute`, 2026-09-07, Part 9); 2D collapse (`fr1route`, 2026-09-12, Part
+21); negotiated via pricing (`nv1route`, 2026-09-15, Part 29). And the
+new confound: every sweep before Part 51 ran inside the 6-tile box.
+Sources: `git log -S` for the introducing commit; every mention in this
+file for whether it was actually varied.
+
+| default (where) | value | set in | architecture then | varied since? | re-test priority |
+|---|---|---|---|---|---|
+| search-box margin `VROUTE_MAX_MARGIN` | 6 | `mroute`, 09-05 | 3D, fixed topology | Part 51 | done: 24 at full budget -42.5% |
+| history step `VROUTE_HIST_STEP` | 0.05 | `iroute`, 09-06 (9-config sweep, Parts 1-5) | 3D, fixed topology, pre-MSMV | never | **high**: history cost is what pushes nets onto detours, and its right strength depends on whether detours are reachable -- tuned when they mostly weren't |
+| price step `VROUTE_EPS` | 0.02 | `nproute`, 09-04 | pattern router | once, Part 33 (2D era, 6-tile box): mixed, negligible | **high**: same reasoning, and its only sweep was inside the narrow box |
+| cleanup pass `VROUTE_CLEANUP_THRESHOLD` / `_PASSES` | 0.5 / 30 | pass from `nproute`; these variables added in `vroute`, 09-07 | MSMV, 3D | never mentioned in this file | medium |
+| slow-tier patience `kSlowPatience` | 5 (compile-time) | `hroute`, 09-05 | 3D, fixed topology | never | medium: not binding in the wide-box screens (all hit the round cap), but decides when longer runs stop -- step 1's long run will show it |
+| fast-tier patience `kFastPatience` | 20 (compile-time) | `hroute`, 09-05 | 3D, fixed topology | never (Part 33 observed it stopping the fast tier at round 21) | medium |
+| via rounds `NV2ROUTE_VIA_ROUNDS` | **60 in the binary, 200 in every committed result** | `nv1route`, 09-15 | 2D + negotiated vias | used as a budget knob, not swept | fix the mismatch: an unconfigured run is weaker than the recorded best |
+| via patience `NV2ROUTE_VIA_PATIENCE` | 20 | `nv1route`, 09-15 | same | never | low |
+| via weight `NV2ROUTE_VIA_WEIGHT` | 1.0 | `fr6route`, 09-13 | 2D + one-pass layer DP | Part 27 -- before negotiated via pricing existed | low-medium |
+| threshold / power `VROUTE_THRESHOLD` / `_POWER` | 0.05 / 1.5 | retuned `nv4route` | 2D + MSMV | Parts 33, 41 (6-tile box) | medium |
+| exact-Steiner pin cap `FR4ROUTE_EXACT_MAX_PINS` | 8 | `fr4route`, 09-13 | 2D | Part 32 | low: shapes fast-tier trees, which never use the search box |
+| no-path retry (6 doublings), `routeSegment` span/8 | -- | `mroute`, 09-05 | 3D | never | low: only fire when no path exists, or on the non-default fixed-topology path |
+| history factor `VROUTE_HIST_FACTOR` | 1.1 | `iroute`, 09-05 | 3D | Part 1 | none: unused (default history mode is additive) |
+
+**Reading.** Two defaults stand out the way the margin did: the history
+step and the price step. Both control how hard the negotiation pushes a
+net off a congested edge, both were tuned when a net pushed off an edge
+had nowhere far to go, and neither has been varied since boxes were
+widened. They are the natural next sweep once the box-growth work
+settles. One trap is not a tuning question at all: `NV2ROUTE_VIA_ROUNDS`
+defaults to 60 in the binary while every committed result used 200, so
+running any router without that variable silently under-performs the
+recorded best.
