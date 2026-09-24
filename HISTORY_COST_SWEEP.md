@@ -5525,7 +5525,7 @@ original gap was the round-budget mismatch. The scoping hypothesis is
 neither confirmed nor refuted in any meaningful sense; the mechanism just
 doesn't move the number at this budget.
 
-## Part 51: search-box margin sweep on `gr/nv4route.cpp` -- raw results (in progress)
+## Part 51: search-box margin sweep on `gr/nv4route.cpp` -- margin 24 cuts total overflow 42.5% at full budget on all three benchmarks (new best)
 
 A re-check of CLAUDE.md's "Bound maze search with a fixed margin" rule
 in the current architecture. That rule's supporting sweep ran on the full
@@ -5562,14 +5562,30 @@ lengthen (+8.3% at 48). Margin 6 reproduces Part 41's previously recorded 74984 
 budget exactly (same settings run via the `nv3route` binary then), so the
 baseline is sound.
 
-Full-budget confirmation of margin 24
+**Full-budget confirmation, margin 24, all three benchmarks**
 (`VROUTE_FAST_ROUNDS=60 VROUTE_SLOW_ROUNDS=150 NV2ROUTE_VIA_ROUNDS=200`,
-the Part 41 committed operating point) is running on adaptec1 and
-bigblue1 and newblue1; the margin-6 full-budget comparison is
-`nv4route`'s own committed 72882 / 21418 / 183044. This is a screen-budget result on one
-benchmark: per this project's own history (Parts 33, 37, 39: screen
-results reversing at the real budget), it is not a result until
-confirmed at the full 60/150/200 budget on all three benchmarks.
+the Part 41 committed operating point; `nv4route` binary; the margin-6
+column is `nv4route`'s own committed Part 41 result at that same budget):
+
+| benchmark | margin 6 (committed) | margin 24 | delta | 2D overflow | max | scored WL | runtime | peak RSS |
+|---|---|---|---|---|---|---|---|---|
+| adaptec1 | 72882 | **42052** | **-42.3%** | 32112 | 20 | 7602387 | 5405s | 994MB |
+| newblue1 | 21418 | **13294** | **-37.9%** | 9742 | 20 | 6753642 | 2228s | 1072MB |
+| bigblue1 | 183044 | **104246** | **-43.0%** | 99076 | 32 | 7913617 | 4448s | 1042MB |
+| **sum** | **277344** | **159592** | **-42.5%** | | | | | |
+
+All three `gr_verify`-legal (0 malformed/out-of-bounds/disconnected/
+incomplete/unrouted) and `eval2008.pl`-cross-checked, matching `gr_verify`
+exactly. The screen result survived the full budget -- unlike Parts 33,
+37 and 39 -- and it is unanimous and large on every benchmark.
+
+**Decision: `nv4route` with `VROUTE_MAX_MARGIN=24` is this project's new
+best real result** (sum 159592, down from 277344), the largest single
+improvement since `vroute`'s MSMV and `fr1route`'s 2D collapse. No code
+changed: the gain came entirely from undoing a search-box cap inherited,
+untested, from `mroute.cpp` (see CLAUDE.md's revised rule). Margins 48 and
+96 and growth schemes that widen boxes only where needed are the next
+tests.
 
 ## Part 52: a known-good reference router, run and scored here -- zero overflow on adaptec1 is reachable, and this project's scoring is correct
 
@@ -5681,3 +5697,37 @@ reference. (For context, `fr1route.cpp`'s own summary of the contest
 record names adaptec1 and bigblue1 among the benchmarks solved to zero and
 does not mention newblue1 either way; whether contest routers reached
 zero on newblue1 has not been checked.)
+
+## Part 53: `gr/nv11route.cpp` -- search-box growth (per-round and per-net) -- in progress
+
+Forked from `nv4route.cpp` (the committed best; the nv5-nv10 mechanisms,
+all closed negative, are deliberately not carried). Each net carries its
+own search-box margin, passed to both slow-tier search entry points in
+place of `VROUTE_MAX_MARGIN`. `NV11ROUTE_BOX_MODE`:
+- `fixed` (default): `nv4route` exactly.
+- `round`: NTHU-Route 2.0's main-stage scheme, confirmed from its source
+  (the port's `Construct_2d_tree.cpp`): every net's margin in slow round
+  k is `INIT + k*GROW`. (NTHU-Route also only maze-routes a two-pin
+  connection when its cheap monotonic route overflows -- `nv4route`'s
+  existing fast-tier/escalation split plays the same role here.)
+- `pernet`: a net starts at `INIT` and widens by `GROW` after each round in
+  which it is still overflowed; nets that resolve stop growing.
+Both clamp at `NV11ROUTE_BOX_CAP`. Invalid settings fail loudly.
+
+Self-tests (308 checks, all passing), including the decisive one on the
+real `routeStepMSMV`: on a 40x40 grid with a 1e6-priced wall across the
+direct route and one cheap gap 15 rows away, margin 6 is forced through
+the wall (the gap is outside its box, and a path exists, so the no-path
+doubling never fires), margin 16 detours through the gap, and no override
+behaves exactly like margin 6. Plus hand-verified growth arithmetic (cap
+clamp, int-overflow guard), the Phase B helpers for all three modes, and
+bad-input rejection for the settings parser.
+
+**Stage 0 -- parity.** `NV11ROUTE_BOX_MODE` unset, adaptec1 at
+`VROUTE_FAST_ROUNDS=3 VROUTE_SLOW_ROUNDS=2 NV2ROUTE_VIA_ROUNDS=3`: route
+file byte-identical to `nv4route`'s (164174 real overflow both).
+
+**Stage 1 -- screens** (adaptec1, 30/75/100, running):
+`pernet` INIT 6 / GROW 6 / CAP 96, and `round` INIT 24 / GROW 1 / CAP 160
+(24 -> 98 over 75 slow rounds), against Part 51's fixed margins
+6 / 12 / 24 / 48 (74984 / 59124 / 44336 / 31778) and fixed 96 (running).
