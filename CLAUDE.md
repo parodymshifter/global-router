@@ -198,18 +198,32 @@ that silently hides real capacity consumption from every other net's pricing
 decisions, and the bug won't show up in that net's own routability, only as
 an unexplained mismatch against an independent overflow count.
 
-**Bound maze search with a fixed margin, not one scaled to net span.** Cap the
-search box around a tree edge's two endpoints at a small absolute constant,
-and only expand it (doubling) if that fails to connect. A margin scaled to
-point separation lets a handful of long nets search close to the entire grid —
-one call needed a 629856-cell region (the whole 324x324x6 grid) against a
-4184-cell average, enough on its own to make a round take 105 seconds. A
-direct sweep of the cap found overflow flat across the whole range while
-runtime scaled smoothly with it, so the extra search breadth was never buying
-anything. Once real shortest-path search is in play, use A* over plain
-Dijkstra: a Manhattan-distance heuristic (ignoring layer) is admissible, since
-every H/V/via edge costs at least 1, so it changes nothing about which path is
-found and roughly halves the work again.
+**Size maze search boxes for real detours, and grow them for nets that stay
+overflowed -- don't cap them at a small constant.** (Revised 2026-09-24; the
+earlier rule said the opposite.) The earlier rule came from `mroute.cpp`,
+where the box scaled with net span (`span/2`, uncapped) and a handful of long
+nets searched nearly the whole grid -- one call covered all 629856 cells of
+324x324x6 against a 4184-cell average, making a round take 105 seconds. A
+sweep of a fixed cap from 2 to 20 then found overflow flat (458-461K) while
+runtime rose, and 6 was chosen for speed. That sweep was real, but it ran at
+~460K total overflow on a 3D fixed-topology router, where search breadth
+wasn't the binding constraint; every later router inherited the 6 without
+re-testing it. Re-tested on `nv4route` (MSMV, 2D collapse) in
+`HISTORY_COST_SWEEP.md` Part 51, adaptec1 at the 30/75/100 screen budget:
+margin 6 -> 74984 overflow, 12 -> 59124, 24 -> 44336, 48 -> 31778, still
+improving; runtime grew far more slowly than the margin. The ISPD 2008
+winner (NTHU-Route 2.0, Part 52), which reaches zero on adaptec1 and bigblue1
+here, starts its search box at 10-25 tiles and grows it every iteration.
+
+What still holds from the old rule: never scale the box with net span alone
+(that's what blew up runtime), and keep the retry-on-no-path doubling as a
+safety net. Grow the box by congestion history -- for nets that remain
+overflowed, round after round -- with a hard cap, so breadth is spent where
+it buys detours instead of on every search. Once real shortest-path search is
+in play, use A* over plain Dijkstra: a Manhattan-distance heuristic (ignoring
+layer) is admissible, since every H/V/via edge costs at least 1, so it
+changes nothing about which path is found and roughly halves the work again;
+it matters more, not less, with wider boxes.
 
 **Combine a cheap solver and an expensive solver by escalating individual
 nets, not by choosing one algorithm for the whole design.** A real per-tree-
