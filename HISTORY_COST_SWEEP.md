@@ -5558,3 +5558,83 @@ Margins 12 and 48 are running. This is a screen-budget result on one
 benchmark: per this project's own history (Parts 33, 37, 39: screen
 results reversing at the real budget), it is not a result until
 confirmed at the full 60/150/200 budget on all three benchmarks.
+
+## Part 52: a known-good reference router, run and scored here -- zero overflow on adaptec1 is reachable, and this project's scoring is correct
+
+CLAUDE.md planned a known-good baseline (a FastRoute-derived router at
+the OpenROAD stage) to compare against; it was never run in ~70 routers'
+worth of work. Every claim that "contest routers reach zero on these
+benchmarks" came from papers, never from a run on this machine scored by
+this project's own tools -- which left open whether the remaining gap was
+algorithmic or an input/capacity/scoring interpretation problem (CLAUDE.md:
+"the verifier's dominant yield is bad input data").
+
+**The reference.** NTHU-Route 2.0 (ISPD 2008 Global Routing Contest, 1st
+place), as the modern C++ port `luckyrantanplan/nthu-route` on GitHub
+(GPL-3.0; port by Florian Prud'homme of the original by Yen-Jung Chang,
+Yu-Ting Lee, Tsung-Hsien Lee, Jhih-Rong Gao and Pei-Ci Wu, advised by
+Ting-Chi Wang; commit `ce22279`, 2026-02-16). It reads the ISPD'08 `.gr`
+format directly. Cloned to `~/Code/nthu-route`, deliberately outside this
+repository (license, and this project's own no-dependency rule for its own
+code). Built from source on Apple Silicon; Boost 1.92.0 headers from
+Homebrew. Its bundled adaptec1 input is byte-identical (SHA-256) to this
+project's `gr/bench` copy.
+
+**The port did not run as published; three local fixes were needed, none
+touching routing logic:**
+1. Build fix for Clang: a friend declaration named a nested class before
+   it was declared (GCC accepts this, Clang does not); forward-declared
+   the class.
+2. Real memory bug: `RoutingRegion`'s per-layer wire-width, wire-spacing
+   and via-spacing vectors were brace-initialized with the layer count,
+   which for `std::vector<int>` creates ONE element holding that count
+   instead of that many elements. Parsing any multi-layer `.gr` file
+   writes past the end (it segfaulted immediately here). Introduced by the
+   port's own "refactoring constructors" commit; fixed with parenthesized
+   construction.
+3. AddressSanitizer-reported container overflow in the two-pin-list
+   construction: a reference to `path.back()` was held across a call that
+   clears and refills `path`. Benign in practice (the refilled element is
+   the same coordinate), but undefined behavior; fixed by copying the value.
+
+After fix 3, a full adaptec1 run under AddressSanitizer reported no
+further memory errors.
+
+**Result, adaptec1** (authors' own adaptec1 settings from the port's
+`bin/benchmark.sh`: main stage 150 iterations, initial box 25, box grows
+by 1 per iteration, overflow threshold 200, refinement 20 iterations with
+initial box 10 growing by 15, monotonic routing off). Run under
+AddressSanitizer, so its runtime is inflated:
+
+| router | real overflow | max | wirelength | vias | scored WL | runtime |
+|---|---|---|---|---|---|---|
+| NTHU-Route 2.0 (port, patched) | **0** | **0** | 3585305 | 1774596 | 5359901 | 760s (ASan build) |
+| `nv4route` (committed best, full budget, Part 41) | 72882 | -- | -- | -- | -- | -- |
+| `nv4route`, margin 6, 30/75/100 screen (Part 51) | 74984 | 24 | -- | -- | 7247067 | 1790s |
+| `nv4route`, margin 24, 30/75/100 screen (Part 51) | 44336 | 20 | -- | -- | 7584937 | 3349s |
+
+**This project's own `gr_verify` scores the reference output PASS** -- 0
+total overflow, 0 max overflow, 0 overflowed edges, 0 malformed/out-of-
+bounds/disconnected/incomplete/unrouted -- the first `gr_verify` PASS on a
+real benchmark recorded anywhere in this file. `eval2008.pl` agrees exactly
+(0 / 0 / 5359901).
+
+What this settles:
+- **The input parsing, capacity model and scoring in this project are
+  correct.** A known-good router's solution scores zero under this
+  project's own tools. The gap is algorithmic, not an interpretation
+  problem.
+- **Zero is reachable on adaptec1 on this machine**, in about 12.5 minutes
+  even with AddressSanitizer's slowdown -- against `nv4route`'s multi-hour
+  full budget ending at 72882.
+- NTHU-Route's own trace shows its 2D stage reaching 2D overflow 0 before
+  layer assignment, and its layer assignment preserving zero. The gap is
+  in the 2D stage first; `nv4route`'s 2D overflow at the screen budget is
+  63910.
+- Minor: NTHU-Route routes 176715 nets, this project's routers 176716.
+  `gr_verify` reports no unrouted nets for the reference, so the extra
+  net this project routes is not one the contest rules require (worth a
+  look, not a correctness issue).
+
+newblue1 and bigblue1 reference runs are in progress (authors' own
+per-benchmark settings, release build).
