@@ -5828,8 +5828,29 @@ turn out not to be limited.
 route files byte-identical in the default (fixed) mode and in `pernet`
 6 / +6 / 96.
 
-**Stage 1 -- screens** (adaptec1, 30/75/100): `pressure` 6 / +1 / cap 96
-running; 12 / +2 / cap 96 next.
+**Stage 1 -- screens** (adaptec1, 30/75/100), with Parts 51/53 for
+comparison:
+
+| config | real overflow | 2D overflow | max | scored WL | runtime |
+|---|---|---|---|---|---|
+| fixed 24 (Part 51) | 44336 | 33978 | 20 | 7584937 | 3349s |
+| fixed 48 (Part 51) | 31778 | 22410 | 18 | 7845406 | 5724s |
+| `round` 24 / +1 (Part 53) | 30428 | 21112 | 18 | 7838364 | 5781s |
+| `pernet` 6 / +6 (Part 53) | 27394 | 18400 | 16 | 7914430 | 7753s |
+| `round` 48 / +2 (Part 53) | 27094 | 18022 | 16 | 8004059 | 9214s |
+| **`pressure` 6 / +1 / 96** | **31916** | 22622 | 18 | 7650573 | **4722s** |
+
+`pressure` 6 / +1: `gr_verify`-legal, `eval2008.pl`-cross-checked (31916 /
+18 / 7650573), peak RSS 1054MB. It matches fixed 48's overflow in 18% less
+time and with lower wirelength, but trails the best screens. The trace
+shows why: its boxes grew slowly (mean margin 6 -> 13 at slow round 14 ->
+18 at 24 -> 29 at 49 -> 38 at 74, none at the cap) and overflow was still
+falling at the end (2D 28678 -> 22622 from round 49 to 74) -- the +1 step,
+not the evidence gate, is what limits it. The gate filters more as the run
+goes: 47254 of 64163 searches (74%) were box-limited in round 0, 8123 of
+25905 (31%) in round 74.
+
+`pressure` 12 / +2 / cap 96 is running.
 
 ## Part 55: provenance audit of `nv4route`'s inherited defaults
 
