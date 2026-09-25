@@ -5941,3 +5941,20 @@ least at margin 24.** Whatever limits these mechanisms, it isn't the 6-tile
 box. (`nv10route`'s small edge over `nv4route`, 44264 vs 44336, -0.16%, comes
 from its other inherited nv5-nv9 defaults, not the rescue stage -- not
 pursued.) No further rescue/B&B work is planned.
+
+## Part 57: full-budget confirmation of the two best growth schemes -- in progress
+
+The two best adaptec1 screens (Parts 53-54) -- `round` 48 / +2 / cap 200
+(27094) and `pernet` 6 / +6 / cap 96 (27394), both ~38% below fixed margin
+24's 44336 at the same 30/75/100 screen -- have only been measured on one
+benchmark at a reduced budget. This Part runs both at the full committed
+budget (`VROUTE_FAST_ROUNDS=60 VROUTE_SLOW_ROUNDS=150
+NV2ROUTE_VIA_ROUNDS=200`) on all three benchmarks, `nv11route`,
+`run_tracked.sh`, `VROUTE_TRACE=1`, against the current best, `nv4route`
+margin 24 at the same budget: 42052 / 13294 / 104246 (sum 159592, Part 51).
+
+Batch 1 (running): `pernet` 6 / +6 / 96 on adaptec1, newblue1, bigblue1.
+Batch 2 (next): `round` 48 / +2 / 200 on all three. At 150 slow rounds its
+margin reaches the 200 cap at slow round 76 and stays there -- the screen
+(75 slow rounds) never reached the cap, so its second half is untested
+territory.
