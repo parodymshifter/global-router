@@ -5781,7 +5781,7 @@ is also the slowest screen (7753s vs `round`'s 5781s).
 in 10238s -- both growth schemes beat it on overflow, and `pernet` on
 runtime too.
 
-## Part 54: `gr/nv12route.cpp` -- evidence-driven progressive box growth (`pressure` mode) -- in progress
+## Part 54: `gr/nv12route.cpp` -- evidence-driven progressive box growth (`pressure` mode) -- sound, but on the same trade-off curve as blind growth
 
 The user asked for a search perimeter that grows progressively rather
 than in big jumps, and chose the evidence-driven version: widen a net's
@@ -5839,6 +5839,7 @@ comparison:
 | `pernet` 6 / +6 (Part 53) | 27394 | 18400 | 16 | 7914430 | 7753s |
 | `round` 48 / +2 (Part 53) | 27094 | 18022 | 16 | 8004059 | 9214s |
 | **`pressure` 6 / +1 / 96** | **31916** | 22622 | 18 | 7650573 | **4722s** |
+| **`pressure` 12 / +2 / 96** | **29422** | 20088 | 18 | 7820802 | **6499s** |
 
 `pressure` 6 / +1: `gr_verify`-legal, `eval2008.pl`-cross-checked (31916 /
 18 / 7650573), peak RSS 1054MB. It matches fixed 48's overflow in 18% less
@@ -5850,7 +5851,24 @@ not the evidence gate, is what limits it. The gate filters more as the run
 goes: 47254 of 64163 searches (74%) were box-limited in round 0, 8123 of
 25905 (31%) in round 74.
 
-`pressure` 12 / +2 / cap 96 is running.
+`pressure` 12 / +2: `gr_verify`-legal, `eval2008.pl`-cross-checked (29422 /
+18 / 7820802), peak RSS 1104MB. Mean margin 12 -> 26 (round 14) -> 34
+(24) -> 48 (49) -> 49 (74). By round 49, 7312 nets sat at the 96 cap and
+growth had nearly stopped (276 nets grew in round 74) -- the cap, not the
+evidence gate, became the limit; `round` 48 / +2 (cap 200) is the scheme
+that pulled ahead.
+
+**Stage 1 verdict.** Both `pressure` screens sit on the same overflow-vs-
+runtime trade-off curve as the blind schemes rather than below it: 31916 at
+4722s, 29422 at 6499s, against `round` 24 / +1 30428 at 5781s, `pernet`
+27394 at 7753s, `round` 48 / +2 27094 at 9214s. `pressure` 6 / +1 does
+match fixed 48's overflow in 18% less time, but the plan's success bar --
+match `pernet`'s overflow at clearly lower runtime, or beat it -- is not
+met (12 / +2 is 7% worse at 16% less time). The evidence gate is sound and
+does filter (31-74% of searches box-limited, falling over the run), yet
+filtering out non-binding nets saves less than hoped: the nets it skips
+are mostly ones whose extra breadth was cheap anyway. Per the plan, no
+full-budget Stage 2 for `pressure` on this evidence.
 
 ## Part 55: provenance audit of `nv4route`'s inherited defaults
 
