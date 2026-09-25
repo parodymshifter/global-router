@@ -5866,8 +5866,10 @@ match fixed 48's overflow in 18% less time, but the plan's success bar --
 match `pernet`'s overflow at clearly lower runtime, or beat it -- is not
 met (12 / +2 is 7% worse at 16% less time). The evidence gate is sound and
 does filter (31-74% of searches box-limited, falling over the run), yet
-filtering out non-binding nets saves less than hoped: the nets it skips
-are mostly ones whose extra breadth was cheap anyway. Per the plan, no
+filtering out non-binding nets saves less than hoped. A plausible but
+unmeasured reason: the searches it skips widening may be the ones where
+extra breadth was cheap anyway (a non-binding search's A* frontier never
+reaches the box edge, so a wider box costs it little). Per the plan, no
 full-budget Stage 2 for `pressure` on this evidence.
 
 ## Part 55: provenance audit of `nv4route`'s inherited defaults
