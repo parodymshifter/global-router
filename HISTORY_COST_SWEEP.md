@@ -5958,3 +5958,55 @@ Batch 2 (next): `round` 48 / +2 / 200 on all three. At 150 slow rounds its
 margin reaches the 200 cap at slow round 76 and stays there -- the screen
 (75 slow rounds) never reached the cap, so its second half is untested
 territory.
+
+## Part 58: side-by-side -- NTHU-Route 2.0 (zero overflow here) vs `nv4route` (this project's best)
+
+NTHU-Route 2.0 reaches zero overflow on adaptec1 and bigblue1 on this
+machine (Part 52). Its source (the patched `luckyrantanplan/nthu-route`
+port in `~/Code/nthu-route`, ~5300 lines) was read directly; every item
+below is from the code, not from the port's own `docs/algorithms.md`,
+which gets at least one thing wrong (it places post-processing after
+layer assignment; the code does all 2D work, refinement included, first).
+The `nv4route` side was re-checked against `gr/nv4route.cpp`.
+
+| aspect | NTHU-Route 2.0 | `nv4route` |
+|---|---|---|
+| **edge cost** | recomputed from *current* demand on every insert/remove: `cost = WL + history * cong^5`, `cong = (demand+1) / (cap * (1 - (history-1) / (iter * (1.5 + 3*factor))))` -- falls the moment nets leave an edge | `hist * (1 + lambda * amount)` with `lambda <- lambda * exp(eps * term)` on every commit -- **never decreases**; only the separate LIFO history term relaxes |
+| **history** | per-edge count of iterations overflowed (starts at 1); multiplies the congestion term AND shrinks effective capacity ("overflow prediction") | LIFO-relaxable additive term (kroute); prediction tried once (`nv8route` Mechanism E, on top of the monotone lambda, unvalidated constants -- regressed) |
+| **wirelength weight** | scheduled per iteration: `factor = 1 - exp(-5 * exp(-0.1 * iter))`, decays from ~0.99 toward 0; bend penalty `int(4 * factor)` | fixed 1 (the Gompertz schedule was tried in the `nv8` lineage, not in `nv4`) |
+| **initial routing** | FLUTE trees; a pre-routing demand estimate (each 2-pin segment's bounding-box frame, +1); nets routed smallest bounding box first, each removing its own estimate, running **edge shifting** (move Steiner points to cheaper spots), then the cheaper of two L-shapes | exact RSMT (<= 8 pins) / cheap Steinerization; L/Z pattern menu; no demand estimate, no edge shifting |
+| **what gets rerouted** | only **2-pin segments crossing an overflowed edge**; the rest of the net's tree stays | the **whole net**, regrown from scratch by MSMV, for every escalated net still overflowed |
+| **acceptance** | the new route is **always kept** (no revert) | **reverted** if local overflow got worse (CLAUDE.md's supervision rule) |
+| **order** | overflowed edges bucketed into 10 congestion bands, **least congested band first**; around each edge a region grows until its border's congestion falls below the band floor (+ iter/10) | net order, every escalated net each round |
+| **search** | cheap **monotonic route first** (in the segment's bounding box); maze (multi-source multi-sink at the segment level; the net's own wires cost 0) only if that fails or overflows | MSMV maze for every escalated net |
+| **box** | segment bounding box + `BOXSIZE_INC`: starts 25 (adaptec1) / 10 (bigblue1), **+1 per iteration** | `VROUTE_MAX_MARGIN` (6 in the committed best; Parts 51-54 test wider / growing) |
+| **topology** | 2-pin decomposition **rebuilt from the actually-routed tree every iteration** | fixed Steiner topology for fast-tier nets; MSMV nets are topology-free |
+| **stages** | main stage until overflow <= threshold (200 adaptec1, 340 bigblue1), then **refinement**: cost switches to 1 per full edge / 0 otherwise (minimise full edges crossed), box 10 **+15 per iteration**, up to 20 iterations | fast tier -> cleanup -> slow tier, one pricing model throughout |
+| **capacity** | per-layer sum / 2, 1 unit per net | per-layer sum, width + spacing (= 2) per net -- equivalent here |
+
+**What stands out.**
+1. **The pricing model is the deepest difference.** NTHU-Route's cost is
+   a steep function of the edge's *present* demand; ours is an
+   accumulated price that only ever rises. Under NTHU's model, ripping a
+   net off an edge makes that edge cheap again immediately; under ours it
+   stays as expensive as its worst history made it. This is not a
+   coefficient: it's a different negotiation dynamic, and it is also the
+   model under which "always keep the new route" converges.
+2. **Rip-up granularity and acceptance** follow from it: small pieces (2-pin
+   segments crossing overflow), always accepted, with topology rebuilt
+   each iteration -- vs whole-net regrowth with revert-if-worse.
+3. **A two-regime schedule**: congestion-and-wirelength pricing until
+   overflow is small, then a pure "cross fewer full edges" objective with
+   fast-expanding boxes.
+4. **Cheap monotonic routing before maze search** -- a runtime lever that
+   would make the wide boxes of Parts 51-54 cheaper.
+
+**Implication for the queued steps.** Step 2 as planned (sweep the history
+step and price step `VROUTE_EPS`) tunes a pricing model NTHU-Route doesn't
+use. The side-by-side suggests a structurally different step 2 instead: a
+new router that swaps in NTHU-Route's present-demand cost (with its
+history count and capacity shrink), tested first on its own and then with
+segment-level rip-up and no-revert acceptance -- CLAUDE.md's supervision
+rule was established under the ever-rising-price model and would need
+re-testing under the new one rather than being assumed. To be planned once
+Part 57's full-budget results are in.
