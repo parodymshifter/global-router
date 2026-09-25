@@ -5961,7 +5961,7 @@ frees.
 |---|---|---|---|---|---|
 | adaptec1 | 42052 | **26480** (max 16, scored WL 7931976, 11042s, 1130MB) | **-37.0%** | (running) | |
 | newblue1 | 13294 | **12536** (max 18, scored WL 6853028, 12103s, 1061MB) | **-5.7%** | (running) | |
-| bigblue1 | 104246 | **74062** (max 28, scored WL 8044846, 7361s, 1019MB) | **-29.0%** | (running) | |
+| bigblue1 | 104246 | **74062** (max 28, scored WL 8044846, 7361s, 1019MB) | **-29.0%** | 73714 (max 28, scored WL 8071598, 7737s, 1148MB) | -29.3% |
 
 Every entry `gr_verify`-legal and `eval2008.pl`-cross-checked before it is
 entered here.
@@ -5982,7 +5982,16 @@ nearly every net still being rerouted sits at the 96-tile cap (10052 of
 (9460 at round 74, 9018 at round 149). The cap is the binding limit there --
 the planned cap-raise step targets exactly this. For scale: NTHU-Route's own
 2D stage ended at 2D overflow 18 on newblue1 (Part 52; its layer assignment
-then failed), against 9018 here. At 150 slow rounds its
+then failed), against 9018 here.
+
+**`round` 48 / +2 / 200 on bigblue1: 73714** (`gr_verify`-legal,
+`eval2008.pl`-cross-checked), marginally better than `pernet` (-0.5%). Its
+trace is the more important result: bigblue1's grid is 227 tiles wide, so
+from slow round ~76 the box (200-tile cap) covers nearly all of it, yet 2D
+overflow barely moves after that (69662 at slow round 75, 68606 at 149).
+**On bigblue1, search breadth is exhausted**: the remaining overflow is not
+a matter of how far nets may look. That points at the pricing /
+negotiation model (Part 58) rather than further box growth. At 150 slow rounds its
 margin reaches the 200 cap at slow round 76 and stays there -- the screen
 (75 slow rounds) never reached the cap, so its second half is untested
 territory.
