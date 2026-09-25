@@ -5960,11 +5960,29 @@ frees.
 | benchmark | margin 24 (current best) | `pernet` 6/+6/96 | delta | `round` 48/+2/200 | delta |
 |---|---|---|---|---|---|
 | adaptec1 | 42052 | **26480** (max 16, scored WL 7931976, 11042s, 1130MB) | **-37.0%** | (running) | |
-| newblue1 | 13294 | (running) | | (queued) | |
+| newblue1 | 13294 | **12536** (max 18, scored WL 6853028, 12103s, 1061MB) | **-5.7%** | (running) | |
 | bigblue1 | 104246 | **74062** (max 28, scored WL 8044846, 7361s, 1019MB) | **-29.0%** | (running) | |
 
 Every entry `gr_verify`-legal and `eval2008.pl`-cross-checked before it is
-entered here. At 150 slow rounds its
+entered here.
+
+**`pernet` 6 / +6 / 96, all three benchmarks: 26480 + 12536 + 74062 =
+113078, down from margin 24's 159592 (-29.1%), and down from the committed
+margin-6 `nv4route`'s 277344 (-59.2%).** Better on every benchmark, verified
+both ways -- it clears this project's promotion bar. **Decision:
+`nv11route` with `NV11ROUTE_BOX_MODE=pernet NV11ROUTE_BOX_INIT=6
+NV11ROUTE_BOX_GROW=6 NV11ROUTE_BOX_CAP=96` at the 60/150/200 budget is the
+new best real result.** (`round` 48 / +2 / 200's full-budget runs are still
+in progress and may displace it.)
+
+The gain is uneven: -37.0% on adaptec1, -29.0% on bigblue1, only -5.7% on
+newblue1. newblue1's trace shows the likely reason: from slow round 24 on,
+nearly every net still being rerouted sits at the 96-tile cap (10052 of
+11216 at round 24, 7282 of 7297 at round 149) and 2D overflow barely moves
+(9460 at round 74, 9018 at round 149). The cap is the binding limit there --
+the planned cap-raise step targets exactly this. For scale: NTHU-Route's own
+2D stage ended at 2D overflow 18 on newblue1 (Part 52; its layer assignment
+then failed), against 9018 here. At 150 slow rounds its
 margin reaches the 200 cap at slow round 76 and stays there -- the screen
 (75 slow rounds) never reached the cap, so its second half is untested
 territory.
