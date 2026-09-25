@@ -5953,8 +5953,18 @@ NV2ROUTE_VIA_ROUNDS=200`) on all three benchmarks, `nv11route`,
 `run_tracked.sh`, `VROUTE_TRACE=1`, against the current best, `nv4route`
 margin 24 at the same budget: 42052 / 13294 / 104246 (sum 159592, Part 51).
 
-Batch 1 (running): `pernet` 6 / +6 / 96 on adaptec1, newblue1, bigblue1.
-Batch 2 (next): `round` 48 / +2 / 200 on all three. At 150 slow rounds its
+Batch 1: `pernet` 6 / +6 / 96 on adaptec1, newblue1, bigblue1.
+Batch 2: `round` 48 / +2 / 200 on all three, each launched as a batch-1 slot
+frees.
+
+| benchmark | margin 24 (current best) | `pernet` 6/+6/96 | delta | `round` 48/+2/200 | delta |
+|---|---|---|---|---|---|
+| adaptec1 | 42052 | (running) | | (queued) | |
+| newblue1 | 13294 | (running) | | (queued) | |
+| bigblue1 | 104246 | **74062** (max 28, scored WL 8044846, 7361s, 1019MB) | **-29.0%** | (running) | |
+
+Every entry `gr_verify`-legal and `eval2008.pl`-cross-checked before it is
+entered here. At 150 slow rounds its
 margin reaches the 200 cap at slow round 76 and stays there -- the screen
 (75 slow rounds) never reached the cap, so its second half is untested
 territory.
