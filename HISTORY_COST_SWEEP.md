@@ -5959,7 +5959,7 @@ frees.
 
 | benchmark | margin 24 (current best) | `pernet` 6/+6/96 | delta | `round` 48/+2/200 | delta |
 |---|---|---|---|---|---|
-| adaptec1 | 42052 | (running) | | (queued) | |
+| adaptec1 | 42052 | **26480** (max 16, scored WL 7931976, 11042s, 1130MB) | **-37.0%** | (running) | |
 | newblue1 | 13294 | (running) | | (queued) | |
 | bigblue1 | 104246 | **74062** (max 28, scored WL 8044846, 7361s, 1019MB) | **-29.0%** | (running) | |
 
