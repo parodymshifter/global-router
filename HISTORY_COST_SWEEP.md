@@ -6206,8 +6206,16 @@ screen's 27094 (Part 53) and pd1route S1 (pd + revert, `std::pow`).
 | run | pricing | acceptance | overflow | max | scored WL | runtime | peak RSS |
 |---|---|---|---|---|---|---|---|
 | J1 | pd | keep | **7570** (2D **0**) | 14 | 8497680 | 3643s | 1089MB |
-| J3 | lambda | keep | (pending) | | | | |
+| J3 | lambda | keep | 231136 (2D 219786 = the pre-escalation snapshot) | 74 | 6592644 | 7499s | 997MB |
 | J2 | pd | revert (control; speed fix vs S1) | (pending) | | | | |
+
+Part 60b (launched): J1's exact settings on bigblue1 and newblue1, one
+batch. No same-budget (30/75/100) lambda screens exist for them; the
+comparison points are the full-budget (60/150/200) `round` 48/+2/200
+results, 73714 / 12524 (Part 57) -- a looser bar than same-budget, since a
+screen of the same lambda setting would score no better than its full
+budget. A win at a quarter of the budget is therefore conclusive; a loss
+would need same-budget controls before any claim.
 
 **J1 -- present-demand pricing + keep every reroute: the 2D stage converged
 to zero overflow on adaptec1 at slow round 65**, the first time any router
@@ -6242,8 +6250,20 @@ monotonically-ish by roughly a quarter to a third per round, with the
 number of nets still being rerouted shrinking with it -- where every
 revert-rule run in Parts 53-59 plateaued in the tens of thousands.
 **Part 59's hypothesis holds: present-demand pricing and keep-every-reroute
-are a matched pair; either one alone loses (Part 59 for pd + revert; J3,
-pending, for lambda + keep).**
+are a matched pair; either one alone loses (Part 59 for pd + revert; J3
+for lambda + keep).**
+
+**J3 -- lambda pricing + keep every reroute: 231136**, legal and
+`eval2008.pl`-agreed. Its slow tier never beat the fast tier's own snapshot
+(2D 219786 after cleanup): keeping every reroute under lambda pricing sent
+2D overflow to 8026318 in slow round 0 (67784 of 103404 reroutes locally
+worse), and it wandered between ~0.75M and ~1.0M for the remaining 74
+rounds (754234 at round 29, 950108 at round 74) without converging. This is
+CLAUDE.md's "supervise every escalation" finding reproduced exactly: under
+an ever-rising price the revert rule is load-bearing. Under present-demand
+pricing it is the obstacle. **The supervision rule is right for the pricing
+model it was found under and wrong for NTHU's** -- CLAUDE.md's rule needs
+that qualification, not deletion.
 
 What the 7570 now is: all of it comes from layer assignment
 (`negotiateViaAssignment`), which has to fit a 2D solution with zero 2D
