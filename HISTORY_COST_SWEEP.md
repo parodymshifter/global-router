@@ -6128,8 +6128,50 @@ the same-budget `nv11route` screens: `round` 48/+2/200 = 27094, `pernet`
 | run | setting | overflow | max | scored WL | runtime | peak RSS |
 |---|---|---|---|---|---|---|
 | S1 | pd, `round` 48/+2/200 | (pending) | | | | |
-| S2 | pd, `pernet` 6/+6/96 | (pending) | | | | |
-| S3 | pd, `round` 48/+2/200, WL floor 1 | (pending) | | | | |
+| S2 | pd, `pernet` 6/+6/96 | 37578 (2D 27968) | 20 | 7713380 | 29576s | 1039MB |
+| S3 | pd, `round` 48/+2/200, WL floor 1 | 43250 (2D 32346) | 20 | 7127504 | 29560s | 961MB |
 
 S3 separates the two halves of NTHU's cost: present-demand congestion
 pricing with a WL weight that never decays (and a full-strength A*).
+
+S2 and S3 are legal (`gr_verify`: 0 malformed / out-of-bounds /
+disconnected / incomplete / unrouted) and `eval2008.pl` agrees on total
+overflow, max and scored WL for both. **Both lose to their same-budget
+lambda baselines: S2 37578 vs 27394 (+37.2%), S3 43250 vs 27094 (+59.6%),
+at 3.2-3.8x the runtime (29576s vs 7753s, 29560s vs 9214s).** Neither had
+stalled -- both hit the round cap still improving (S2 -8.4%, S3 -3.9% over
+their last 15 slow rounds) -- but the lambda runs are far flatter by then
+and far lower.
+
+Slow-tier 2D overflow, same budget, same box settings (lambda = the Part 53
+`nv11route` screens):
+
+| slow round | lambda `round` | S3 pd `round` floor 1 | lambda `pernet` | S2 pd `pernet` |
+|---|---|---|---|---|
+| 0 | 135632 (acc 24166) | **101980** (acc 22418) | 163440 (acc 23815) | **128356** (acc 23740) |
+| 9 | **52742** (acc 13731) | 72152 (acc 9026) | **61214** (acc 15370) | 71894 (acc 9585) |
+| 29 | **25810** (acc 8251) | 46050 (acc 6533) | **26524** (acc 8826) | 42982 (acc 6473) |
+| 49 | **20096** (acc 6525) | 36126 (acc 5064) | **20540** (acc 6850) | 32396 (acc 4322) |
+| 74 | **18022** (acc 5477) | 32346 (acc 3421) | **18400** (acc 5446) | 27968 (acc 3412) |
+
+(acc = reroutes kept by the supervision rule that round.) Present-demand
+pricing starts the slow tier ~25% lower, then falls behind by round 9 and
+stays behind. The trace points at why: the supervision rule keeps far fewer
+of its reroutes -- by round 9, 9026 / 9585 accepted against lambda's 13731 /
+15370, with most of the rest reverted as locally worse. Under NTHU's cost an
+edge exactly at capacity is barely more expensive than one just below it
+(cong^5 is ~1 there, not a cliff), and a net ripped off an edge makes it
+cheap again immediately, so reroutes often land on just-full edges and push
+them over -- which the revert-if-worse rule then undoes. NTHU never reverts:
+it keeps every new route and lets history sort it out, and it rips up
+2-pin segments, not whole nets. **The pricing model and the acceptance rule
+look coupled: present-demand pricing under this project's supervision rule
+is worse than lambda pricing under it.** That is a result about the pair,
+not about present-demand pricing alone.
+
+Runtime: S3 runs A* at full strength (WL term 1, heuristic scale 1) and is
+still 3.2x slower than lambda while rerouting a similar number of nets per
+round, so the decaying heuristic is not the main cost. The likely cost is
+`std::pow(cong, 5)` in every edge relaxation, where lambda pricing does one
+multiply-add; any follow-up should compute cong^5 by multiplication and
+re-check.
