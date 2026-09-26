@@ -119,6 +119,14 @@ newblue1 4694, bigblue1 2922 -- 15186 total, -86.5% vs 112086**, legal and
 `eval2008.pl`-cross-checked, at a third of the runtime (Part 60b). The
 remaining overflow is now mostly layer assignment's, not 2D routing's.
 
+**Later the same day: adaptec1 reaches zero total overflow** (`gr/pd3route.cpp`,
+`gr_verify` and `eval2008.pl` both 0 / max 0). `pd3route` replaces layer
+assignment with NTHU-Route's approach -- per-tile layer choice, wire
+capacity as a hard constraint, the via count as the objective (ISPD 2008
+gives vias no capacity), NTHU's net order -- and real overflow now equals
+2D overflow on all three benchmarks: adaptec1 0, bigblue1 58, newblue1 1186
+(`HISTORY_COST_SWEEP.md` Part 62). What remains is the 2D stage's.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

@@ -3078,7 +3078,17 @@ struct NetTree {
 // disclose: giant nets and other least-exercised shapes degrade to
 // fr5route's own already-proven-correct behavior rather than risking a
 // new correctness bug on unusual topology.
-bool buildNetTree(const std::vector<Seg> &segs, NetTree &t) {
+// pd3route: `dropCycles` (kNthu mode) skips a tile stretch that would
+// close a cycle instead of failing the whole net -- a cycle-closing
+// stretch is redundant wire (its ends are already connected), so dropping
+// it keeps the net connected and only removes wire. Without it a net whose
+// wires form a cycle (e.g. a giant net's fixed-pattern route) fell back to
+// the old greedy per-segment layer choice, which put adaptec1's 2271-pin
+// n7807 on zero-capacity layers (all 16 of its remaining overflow, Part
+// 62). `pinTiles`: pins lying on a wire become nodes too, so every edge is
+// split at pins and a dropped stretch can never contain one.
+bool buildNetTree(const std::vector<Seg> &segs, NetTree &t, bool dropCycles = false,
+                  const std::vector<Point> *pinTiles = nullptr) {
   t = NetTree();
   std::map<std::pair<int, int>, int> nodeIndex;
   auto nodeFor = [&](int x, int y) -> int {
@@ -3106,6 +3116,14 @@ bool buildNetTree(const std::vector<Seg> &segs, NetTree &t) {
     nodeFor(s->x1, s->y1);
     nodeFor(s->x2, s->y2);
   }
+  if (pinTiles)
+    for (const Point &p : *pinTiles)
+      for (const Seg *s : legs)
+        if ((s->y1 == s->y2 && p.y == s->y1 && p.x >= std::min(s->x1, s->x2) && p.x <= std::max(s->x1, s->x2)) ||
+            (s->x1 == s->x2 && p.x == s->x1 && p.y >= std::min(s->y1, s->y2) && p.y <= std::max(s->y1, s->y2))) {
+          nodeFor(p.x, p.y);
+          break;
+        }
 
   std::map<int, std::vector<int>> pointsByY, pointsByX;
   for (int i = 0; i < static_cast<int>(t.nodes.size()); ++i) {
@@ -3152,13 +3170,13 @@ bool buildNetTree(const std::vector<Seg> &segs, NetTree &t) {
     int prevNode = nodeFor(horizontal ? lo : cross, horizontal ? cross : lo);
     int prevCoord = lo;
     for (auto &pr : onLine) {
-      if (!addEdge(prevNode, pr.second, horizontal, cross, prevCoord, pr.first))
+      if (!addEdge(prevNode, pr.second, horizontal, cross, prevCoord, pr.first) && !dropCycles)
         return false;
       prevNode = pr.second;
       prevCoord = pr.first;
     }
     int lastNode = nodeFor(horizontal ? hi : cross, horizontal ? cross : hi);
-    if (!addEdge(prevNode, lastNode, horizontal, cross, prevCoord, hi))
+    if (!addEdge(prevNode, lastNode, horizontal, cross, prevCoord, hi) && !dropCycles)
       return false;
   }
 
@@ -4045,7 +4063,10 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     for (size_t i = 0; i < nets.size(); ++i) {
       dropDegenerateSegs(nets[i]);
       NetTree legs;
-      if (buildNetTree(nets[i].segs, legs)) {
+      std::vector<Point> pinTiles;
+      for (const Pin &pn : nets[i].net->pins)
+        pinTiles.push_back({pn.x, pn.y});
+      if (buildNetTree(nets[i].segs, legs, /*dropCycles=*/true, &pinTiles)) {
         splitToUnitEdges(legs, trees[i]);
         prebuilt[i] = 1;
       }
@@ -7632,6 +7653,28 @@ void testNthuLayerAssignmentEndToEndAndRoundTrip() {
   check(same, "written -> projected solution has exactly the 2D stage's tile edges, net by net");
 }
 
+// A net whose wires form a cycle -- a square ring, with a pin partway along
+// its bottom side. The inherited reconstruction rejects it (and the net
+// falls back to greedy per-segment layers); dropCycles keeps a spanning
+// tree of the same nodes, with the pin as a node of degree >= 1, so no
+// dropped stretch can have cut it off.
+void testDropCyclesKeepsARingNetAndItsPin() {
+  std::vector<Seg> ring = {{0, 0, 0, 4, 0, 0}, {4, 0, 0, 4, 4, 0}, {4, 4, 0, 0, 4, 0}, {0, 4, 0, 0, 0, 0}};
+  std::vector<Point> pins = {{2, 0}, {4, 4}};
+  NetTree t;
+  check(!buildNetTree(ring, t), "inherited reconstruction rejects a ring (sanity)");
+  check(buildNetTree(ring, t, true, &pins), "dropCycles reconstruction accepts it");
+  check(t.nodes.size() == 5 && t.edges.size() == 4, "5 nodes (4 corners + the pin), 4 edges: a spanning tree");
+  int pinNode = -1;
+  for (size_t i = 0; i < t.nodes.size(); ++i)
+    if (t.nodes[i].x == 2 && t.nodes[i].y == 0)
+      pinNode = static_cast<int>(i);
+  check(pinNode >= 0 && !t.adj[pinNode].empty(), "the mid-side pin is a node, still attached");
+  NetTree loose;
+  check(buildNetTree({{0, 0, 0, 4, 0, 0}, {0, 2, 0, 4, 2, 0}}, loose, true) == false,
+        "two disjoint wires are still rejected -- dropCycles never hides a real disconnection");
+}
+
 void testParseLaMode() {
   LaMode m = LaMode::kInherited;
   std::string err;
@@ -7725,6 +7768,7 @@ int run() {
   testReadRouteAs2DProjectsWiresAndDropsVias();
   testNthuLayerAssignmentEndToEndAndRoundTrip();
   testParseLaMode();
+  testDropCyclesKeepsARingNetAndItsPin();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }

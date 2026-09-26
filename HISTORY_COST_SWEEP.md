@@ -6380,3 +6380,34 @@ layer instead.
 
 Part 61's full-budget pd2route runs are still going; their 2D solutions
 feed straight into `PD3ROUTE_LA_FROM` when they finish.
+
+**Part 62 follow-up: adaptec1 reaches ZERO total overflow.** The 16 was not
+capacity rounding (no adjusted layer edge on adaptec1 has an odd capacity;
+the hypothesis above is refuted). All 8 overflowed layer edges belonged to
+one net, n7807 (2271 pins, a giant net routed by the fixed-pattern
+`routeGiantNet`), sitting on layers whose adjusted capacity is 0 there while
+other layers had room (2D demand 26-34 against 38 usable). Its wires form
+cycles, so `buildNetTree` rejected it and it fell back to the old greedy
+per-segment layer choice. Fix (kNthu only): `buildNetTree(dropCycles)`
+skips a cycle-closing stretch (redundant wire; its ends are already
+connected) instead of failing the net, and pin tiles lying on a wire become
+nodes, so a dropped stretch can never contain a pin. Self-test 388 checks
+(a ring net with a mid-side pin keeps a spanning tree with the pin
+attached; two disjoint wires are still rejected).
+
+Rerun, layer assignment alone on the same J1 2D solutions (`run_checked.sh`,
+all `status=OK`, `gr_verify` and `eval2008.pl` agree):
+
+| benchmark | real overflow | max | scored WL | 2D overflow of the input |
+|---|---|---|---|---|
+| adaptec1 | **0** | **0** | 8572564 | 0 |
+| bigblue1 | **58** | 2 | 8470679 | 58 |
+| newblue1 | **1186** | 2 | 7410777 | 1186 |
+| **total** | **1244** | | | 1244 |
+
+**adaptec1: zero total overflow, zero max overflow -- the first real ISPD
+benchmark this project has routed with no overflow at all.** On all three,
+real overflow now equals the 2D overflow exactly: layer assignment is
+lossless, and everything left is the 2D stage's (bigblue1 58, still
+falling when the screen hit its round cap; newblue1 1186, a plateau).
+Total 1244, -98.9% vs the lambda-pricing full-budget best (112086).
