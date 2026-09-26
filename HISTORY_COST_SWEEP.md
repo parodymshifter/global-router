@@ -6217,6 +6217,36 @@ screen of the same lambda setting would score no better than its full
 budget. A win at a quarter of the budget is therefore conclusive; a loss
 would need same-budget controls before any claim.
 
+**Part 60b results** (both `status=OK`: legal, `gr_verify` and
+`eval2008.pl` agree on total, max and scored WL):
+
+| benchmark | pd2 pd+keep, 30/75/100 | 2D overflow | full-budget best (Part 57, `round`, 60/150/200) | delta | runtime (vs full-budget best's) |
+|---|---|---|---|---|---|
+| adaptec1 | **7570** (max 14, WL 8497680) | **0** (slow round 65) | 25848 | **-70.7%** | 3643s (12653s) |
+| newblue1 | **4694** (max 10, WL 7219904) | 1186 | 12524 | **-62.5%** | 5899s (21313s) |
+| bigblue1 | **2922** (max 8, WL 8288492) | 58 | 73714 | **-96.0%** | 4772s (7737s) |
+| **total** | **15186** | 1244 | 112086 | **-86.5%** | 14314s (41703s) |
+
+**`pd2route` with `PD1ROUTE_COST=pd PD2ROUTE_ACCEPT=keep` and `round`
+48/+2/200 at the 30/75/100 screen budget is the new best real result:
+15186 total, -86.5% vs the full-budget best (112086) at a quarter of the
+budget and a third of the runtime, better on all three.** (Cross-budget
+in the conservative direction, per the note above.)
+
+Traces:
+- bigblue1 2D: 2287636 (slow round 0) -> 313264 (9) -> 51040 (19) -> 4668
+  (29) -> 838 (39) -> 178 (49) -> 102 (59) -> 66 (74), still falling at the
+  round cap. Its layer assignment stalled (patience) at real 2922.
+- newblue1 2D: 376334 -> 28320 (9) -> 6092 (19) -> 2052 (29) -> 1426 (39)
+  -> 1274 (49) -> 1222 (59) -> 1214 (74): a plateau from ~round 40, ~4600
+  nets still rerouted every round. newblue1 is also where NTHU-Route's own
+  2D stage stopped short (2D 18) and its layer assignment failed (Part 52).
+
+Where the remaining 15186 is: adaptec1's 7570 is all layer assignment (2D
+is 0); bigblue1's 2922 is ~98% layer assignment (2D 58); newblue1's 4694 is
+layer assignment on top of a 2D residue of 1186. **Layer assignment is now
+the dominant source of real overflow on all three.**
+
 **J1 -- present-demand pricing + keep every reroute: the 2D stage converged
 to zero overflow on adaptec1 at slow round 65**, the first time any router
 in this project has reached 2D zero on a real benchmark. After layer
