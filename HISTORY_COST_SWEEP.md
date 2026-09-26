@@ -5942,7 +5942,7 @@ box. (`nv10route`'s small edge over `nv4route`, 44264 vs 44336, -0.16%, comes
 from its other inherited nv5-nv9 defaults, not the rescue stage -- not
 pursued.) No further rescue/B&B work is planned.
 
-## Part 57: full-budget confirmation of the two best growth schemes -- in progress
+## Part 57: full-budget confirmation of the two best growth schemes
 
 The two best adaptec1 screens (Parts 53-54) -- `round` 48 / +2 / cap 200
 (27094) and `pernet` 6 / +6 / cap 96 (27394), both ~38% below fixed margin
@@ -5960,7 +5960,7 @@ frees.
 | benchmark | margin 24 (current best) | `pernet` 6/+6/96 | delta | `round` 48/+2/200 | delta |
 |---|---|---|---|---|---|
 | adaptec1 | 42052 | **26480** (max 16, scored WL 7931976, 11042s, 1130MB) | **-37.0%** | 25848 (max 18, scored WL 8012799, 12653s, 1104MB) | -38.5% |
-| newblue1 | 13294 | **12536** (max 18, scored WL 6853028, 12103s, 1061MB) | **-5.7%** | (running) | |
+| newblue1 | 13294 | **12536** (max 18, scored WL 6853028, 12103s, 1061MB) | **-5.7%** | 12524 (max 18, scored WL 6938408, 21313s, 1136MB) | -5.8% |
 | bigblue1 | 104246 | **74062** (max 28, scored WL 8044846, 7361s, 1019MB) | **-29.0%** | 73714 (max 28, scored WL 8071598, 7737s, 1148MB) | -29.3% |
 
 Every entry `gr_verify`-legal and `eval2008.pl`-cross-checked before it is
@@ -5972,8 +5972,7 @@ margin-6 `nv4route`'s 277344 (-59.2%).** Better on every benchmark, verified
 both ways -- it clears this project's promotion bar. **Decision:
 `nv11route` with `NV11ROUTE_BOX_MODE=pernet NV11ROUTE_BOX_INIT=6
 NV11ROUTE_BOX_GROW=6 NV11ROUTE_BOX_CAP=96` at the 60/150/200 budget is the
-new best real result.** (`round` 48 / +2 / 200's full-budget runs are still
-in progress and may displace it.)
+new best real result.** (Superseded below by `round` 48 / +2 / 200.)
 
 The gain is uneven: -37.0% on adaptec1, -29.0% on bigblue1, only -5.7% on
 newblue1. newblue1's trace shows the likely reason: from slow round 24 on,
@@ -5995,6 +5994,34 @@ negotiation model (Part 58) rather than further box growth. At 150 slow rounds i
 margin reaches the 200 cap at slow round 76 and stays there -- the screen
 (75 slow rounds) never reached the cap, so its second half is untested
 territory.
+
+**`round` 48 / +2 / 200 on newblue1: 12524** (`gr_verify`-legal,
+`eval2008.pl`-cross-checked: 12524 / max 18 / scored WL 6938408 both ways),
+-0.1% vs `pernet`, at 1.76x its runtime (21313s vs 12103s). The trace
+answers the planned cap-raise question for newblue1 directly: this run's
+boxes pass `pernet`'s 96 cap at slow round 24 and sit at 200 for every
+rerouted net from round ~100 on (6949 of 6949 at round 149), yet 2D overflow
+ends at 8990 vs `pernet`'s 9018 (-0.3%). Slow-round 2D overflow: 34184 (0),
+11962 (24), 10218 (49), 9602 (74), 9302 (99), 9058 (124), 8990 (149).
+**Raising the cap from 96 to 200 buys newblue1 essentially nothing -- search
+breadth is exhausted there too.**
+
+**`round` 48 / +2 / 200, all three benchmarks: 25848 + 12524 + 73714 =
+112086**, vs `pernet`'s 113078 (-0.9%), better on all three (-2.4%, -0.1%,
+-0.5%), at more runtime (41703s vs 30506s summed, +37%). **Decision:
+`nv11route` with `NV11ROUTE_BOX_MODE=round NV11ROUTE_BOX_INIT=48
+NV11ROUTE_BOX_GROW=2 NV11ROUTE_BOX_CAP=200` at the 60/150/200 budget is the
+new best real result (112086; -29.8% vs margin 24's 159592, -59.6% vs the
+committed margin-6 `nv4route`'s 277344).** `pernet` 6/+6/96 stays the
+recommended setting when runtime matters: within 0.9% at 73% of the time.
+
+What Part 57 settles: on bigblue1 and newblue1, boxes covering most of the
+grid leave 2D overflow flat for the last ~75 slow rounds, and on adaptec1
+the 96 -> 200 cap difference is worth 2.4%. Box growth has delivered its
+gain (277344 -> 112086); the remaining overflow is not a search-breadth
+problem. The next lever is the pricing / negotiation model -- see Part 58
+for how NTHU-Route 2.0, which reaches zero on adaptec1 and bigblue1 here,
+differs.
 
 ## Part 58: side-by-side -- NTHU-Route 2.0 (zero overflow here) vs `nv4route` (this project's best)
 
