@@ -67,6 +67,7 @@ jobs:
           - fw1route
           - nv11route
           - nv12route
+          - pd1route
     steps:
       - uses: actions/checkout@v4
 

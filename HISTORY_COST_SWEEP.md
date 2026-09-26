@@ -6074,3 +6074,62 @@ segment-level rip-up and no-revert acceptance -- CLAUDE.md's supervision
 rule was established under the ever-rising-price model and would need
 re-testing under the new one rather than being assumed. To be planned once
 Part 57's full-budget results are in.
+
+## Part 59: `gr/pd1route.cpp` -- NTHU-Route 2.0's present-demand pricing -- in progress
+
+Step 2 of the post-Part-57 plan. Part 57 showed box growth has delivered its
+gain (277344 -> 112086) and that breadth is exhausted on bigblue1 and
+newblue1; Part 58 found the pricing model to be the deepest difference from
+NTHU-Route 2.0. `pd1route` (new species `pd`, forked from `nv11route`)
+replaces the one thing: every 2D wire-edge cost becomes NTHU's
+
+    cong = (demand + inc) / (cap * (1 - (hist - 1) / (iter * (1.5 + 3 f))))
+    cost = f + hist * cong^5,   f = 1 - exp(-5 exp(-0.1 iter))
+
+read from live demand (a net leaving an edge makes it cheaper at once),
+with hist = round boundaries at which the edge ended overflowed (from 1),
+and iter advancing at every round boundary of the 2D loop. The search,
+rip-up, supervision (revert if local overflow got worse), box growth and
+layer assignment are `nv11route`'s. `PD1ROUTE_COST=lambda` reproduces
+`nv11route`; `PD1ROUTE_WL_FLOOR` holds the WL term at max(f, floor).
+
+A* needed one change: under this cost an edge can cost far below 1 (f is
+0.0017 by iteration 80), so the inherited Manhattan heuristic overestimates.
+It is now scaled by a true per-edge lower bound (1 under lambda, the WL term
+under pd). Self-test `testAStarStaysExactUnderPdPricing` checks the scaled
+search against an in-test reference Dijkstra on 30 hash-priced fixtures
+(30/30 exact) and shows the unscaled heuristic returning a strictly costlier
+path on 30/30 -- so the scaling is load-bearing. The runtime consequence
+(A* degrading toward Dijkstra as f decays) is measured, not assumed.
+
+Self-test: 347 checks pass, including hand-computed NTHU cost values, the
+zero/negative-capacity cases, the hist <= iter invariant that keeps the
+capacity shrink above 1/3 (500 iterations of a permanently overflowed edge),
+the cost returning exactly to its prior value when demand leaves (the
+lambda model's stays raised), and an end-to-end detour-only fixture reaching
+zero.
+
+**Stage 0 parity**: `PD1ROUTE_COST=lambda pd1route` vs `nv11route`, both
+`round` 48/+2/200, adaptec1 at 3/2/3 -- route files byte-identical (121349321
+bytes, `cmp` clean; real overflow 122872 both).
+
+**Smoke** (pd, `round` 48/+2/200, adaptec1, 3/3/3, 126s): legal per
+`gr_verify` (0 malformed / disconnected / incomplete / unrouted), 2D
+overflow 42342, real 60668. Trace: fast rounds 343082 -> 240286 -> 219704
+(lambda at full budget, same rounds: 336938 -> 236446 -> 229744), cleanup ->
+214106, slow rounds 83702 -> 57498 -> 42342 (lambda's first three slow
+rounds in its full-budget run: 135632 -> 110290 -> 96686). An early signal
+only -- not a same-budget result.
+
+**Screen** (adaptec1, 30/75/100, `run_tracked.sh`, `VROUTE_TRACE=1`), against
+the same-budget `nv11route` screens: `round` 48/+2/200 = 27094, `pernet`
+6/+6/96 = 27394 (Parts 53-54):
+
+| run | setting | overflow | max | scored WL | runtime | peak RSS |
+|---|---|---|---|---|---|---|
+| S1 | pd, `round` 48/+2/200 | (pending) | | | | |
+| S2 | pd, `pernet` 6/+6/96 | (pending) | | | | |
+| S3 | pd, `round` 48/+2/200, WL floor 1 | (pending) | | | | |
+
+S3 separates the two halves of NTHU's cost: present-demand congestion
+pricing with a WL weight that never decays (and a full-strength A*).
