@@ -6127,7 +6127,7 @@ the same-budget `nv11route` screens: `round` 48/+2/200 = 27094, `pernet`
 
 | run | setting | overflow | max | scored WL | runtime | peak RSS |
 |---|---|---|---|---|---|---|
-| S1 | pd, `round` 48/+2/200 | (pending) | | | | |
+| S1 | pd, `round` 48/+2/200 | 37494 (2D 27644) | 18 | 7833781 | 40518s | 1124MB |
 | S2 | pd, `pernet` 6/+6/96 | 37578 (2D 27968) | 20 | 7713380 | 29576s | 1039MB |
 | S3 | pd, `round` 48/+2/200, WL floor 1 | 43250 (2D 32346) | 20 | 7127504 | 29560s | 961MB |
 
@@ -6168,6 +6168,13 @@ it keeps every new route and lets history sort it out, and it rips up
 look coupled: present-demand pricing under this project's supervision rule
 is worse than lambda pricing under it.** That is a result about the pair,
 not about present-demand pricing alone.
+
+**S1 (NTHU's cost exactly, WL term decaying, `round` 48/+2/200): 37494**,
+legal, `eval2008.pl`-agreed (37494 / 18 / 7833781) -- +38.4% vs lambda's
+27094 at 4.4x its runtime (40518s vs 9214s). Same shape as S2/S3: 95702 at
+slow round 0 (lambda 135632), behind by round 9 (69318 vs 52742, accepted
+8707 vs 13731), 27644 2D at round 74 vs lambda's 18022. All three pd1route
+screens lose under revert-if-worse; Part 60 tests the keep rule.
 
 Runtime: S3 runs A* at full strength (WL term 1, heuristic scale 1) and is
 still 3.2x slower than lambda while rerouting a similar number of nets per
