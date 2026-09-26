@@ -6175,3 +6175,29 @@ round, so the decaying heuristic is not the main cost. The likely cost is
 `std::pow(cong, 5)` in every edge relaxation, where lambda pricing does one
 multiply-add; any follow-up should compute cong^5 by multiplication and
 re-check.
+
+## Part 60: `gr/pd2route.cpp` -- present-demand pricing with NTHU's acceptance rule -- in progress
+
+Part 59's diagnosis: present-demand pricing lost under this project's
+revert-if-worse supervision rule because the rule undid most of its
+reroutes. NTHU-Route keeps every reroute. `pd2route` (forked from
+`pd1route`) adds `PD2ROUTE_ACCEPT=keep`: every slow-tier reroute is kept;
+the slow tier's patience stop is off under keep (the best snapshot is still
+returned); the cleanup pass stays supervised. It also computes cong^5 by
+multiplication instead of `std::pow` (agrees to 1e-13 relative over 2100
+evaluations), the suspected cause of pd1route's 3.2-3.8x runtime.
+
+Self-test: 361 checks pass. Stage 0 parity: `PD1ROUTE_COST=lambda
+pd2route` vs `nv11route`, `round` 48/+2/200, adaptec1 3/2/3 --
+byte-identical.
+
+Screens, one `run_batch.sh` batch (each job `gr_verify`- and
+`eval2008.pl`-checked in the batch; summary in the job file's `.summary`):
+adaptec1, 30/75/100, `round` 48/+2/200, vs the same-budget lambda + revert
+screen's 27094 (Part 53) and pd1route S1 (pd + revert, `std::pow`).
+
+| run | pricing | acceptance | overflow | max | scored WL | runtime | peak RSS |
+|---|---|---|---|---|---|---|---|
+| J1 | pd | keep | (pending) | | | | |
+| J3 | lambda | keep | (pending) | | | | |
+| J2 | pd | revert (control; speed fix vs S1) | (pending) | | | | |

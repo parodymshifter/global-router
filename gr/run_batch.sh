@@ -13,8 +13,15 @@
 #   pd1_S1_adaptec1 bench/adaptec1.capo70.3d.35.50.90.gr ./pd1route VROUTE_TRACE=1 NV11ROUTE_BOX_MODE=round
 #
 # Each job's files land under <out_dir>/<name>.*; the VAR=value pairs are
-# exported to that job only. Plain bash 3.2 (macOS /bin/bash): no wait -n,
-# so the throttle polls the running-job count every 20s.
+# exported to that job only.
+#
+# The cap is machine-wide, not per batch: the throttle counts every router
+# running under run_tracked.sh (each is a `/usr/bin/time -l <router>`
+# process), including runs started outside this batch, so a batch launched
+# while other tracked runs are still going never pushes the total past
+# MAX_JOBS. Plain bash 3.2 (macOS /bin/bash): no wait -n, so it polls every
+# 20s, and waits 5s after each launch so the new job's process is visible
+# before the next count.
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 <jobfile> <out_dir>" >&2
@@ -41,9 +48,10 @@ run_one() { # name bench router [VAR=value ...]
 
 while read -r line; do
   case "$line" in ''|'#'*) continue ;; esac
-  while [ "$(jobs -rp | wc -l)" -ge "$max_jobs" ]; do sleep 20; done
+  while [ "$(pgrep -f '^/usr/bin/time -l ' | wc -l)" -ge "$max_jobs" ]; do sleep 20; done
   # shellcheck disable=SC2086
   run_one $line < /dev/null &
+  sleep 5
 done < "$jobfile"
 wait
 
