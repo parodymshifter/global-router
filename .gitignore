@@ -54,6 +54,7 @@ nv11route
 nv12route
 pd1route
 pd2route
+pd3route
 *.o
 bench/
 *.gr

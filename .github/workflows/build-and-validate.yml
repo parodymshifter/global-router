@@ -69,6 +69,7 @@ jobs:
           - nv12route
           - pd1route
           - pd2route
+          - pd3route
     steps:
       - uses: actions/checkout@v4
 

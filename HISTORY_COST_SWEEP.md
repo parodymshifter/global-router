@@ -6322,3 +6322,61 @@ still falling) reach zero; does newblue1's 2D plateau (~1200) move; and how
 much do the extra layer-assignment rounds (200 vs 100) cut the
 layer-assignment overflow that now dominates. Baseline: Part 60b's screen,
 7570 / 4694 / 2922 = 15186.
+
+## Part 62: `gr/pd3route.cpp` -- NTHU-Route 2.0's layer assignment
+
+Part 60b left layer assignment as the dominant source of real overflow
+(adaptec1: 2D 0, real 7570). The inherited DP (`nv2route`) assigns one
+layer per whole straight leg, prices wire with a soft usage/capacity ratio
+averaged over the leg (no cliff at capacity), and prices vias against a
+via-site capacity model ISPD 2008 scoring does not have. NTHU-Route's
+`Layerassignment.cpp` (read in full, 413 lines): per-tile layer choice via a
+DP over the net's tree; wire capacity as a hard constraint (a layer is only
+entered where its 3D edge still has room, unless the 2D edge is itself
+overflowed); objective = via overflow then via count (its via edges have
+no capacity in ISPD terms either); nets ordered by pins per 2D edge used,
+descending, ties to fewer pins; one pass.
+
+`pd3route` (forked from `pd2route`; 2D stage unchanged) ports that as
+`PD3ROUTE_LA=nthu` (default; `inherited` restores the old DP): trees split
+to unit edges, a per-tile overflow penalty (1e6 per unit, dominating any
+via count) with a 1e-4 fill tie-break, vias at 1 per layer crossed with no
+via-capacity term, NTHU's net order, and the existing repair rounds limited
+to nets with real wire overflow. `PD3ROUTE_LA_FROM=<route>` reruns layer
+assignment alone on an existing solution, projected back to 2D.
+
+Self-test: 383 checks pass, including a fixture where the inherited
+whole-leg DP must overflow and the nthu DP switches layers mid-leg to
+zero overflow despite saturated via sites, and a route() -> nthu layer
+assignment -> write -> project round trip that recovers exactly the 2D
+stage's tile edges.
+
+**Results -- layer assignment alone, on Part 60b's J1 2D solutions**
+(`run_checked.sh`: all `status=OK`, `gr_verify` and `eval2008.pl` agree):
+
+| benchmark | pd2route (inherited LA) | **pd3route nthu LA** | 2D overflow of the input | scored WL (vs pd2route) | LA time |
+|---|---|---|---|---|---|
+| adaptec1 | 7570 | **16** (max 2) | 0 | 8607270 (+1.3%) | 9.5s |
+| bigblue1 | 2922 | **58** (max 2) | 58 | 8480063 (+2.3%) | 11.5s |
+| newblue1 | 4694 | **1212** (max 4) | 1186 | 7442304 (+3.1%) | 11.4s |
+| **total** | 15186 | **1286** | 1244 | | |
+
+**-91.5% vs Part 60b, and -98.9% vs the lambda-pricing full-budget best
+(112086).** Real overflow now equals the 2D overflow on bigblue1 and is
+within 26 of it on newblue1: layer assignment went from the dominant loss
+to almost none. The repair rounds find nothing further (adaptec1 stalls
+after one round at 16). Control: the inherited LA on the same projected
+input gives 7528 (vs 7570 from the original in-process run -- the
+projection reorders segments, nothing else), so the gain is the method,
+not the projection.
+
+The 16 on adaptec1 (8 tile edges at overflow 2 = one net each, with 2D
+overflow 0) is probably capacity rounding: the 2D stage pools raw
+capacity across layers, and a layer whose capacity is not a multiple of
+a net's width + spacing (2) wastes the remainder -- e.g. layer capacities 3
++ 3 + 3 pool to 9 = 4 nets in 2D, but hold only 3 on real layers. Not yet
+verified. If it holds, the 2D stage should pool floor(cap_l / 2) * 2 per
+layer instead.
+
+Part 61's full-budget pd2route runs are still going; their 2D solutions
+feed straight into `PD3ROUTE_LA_FROM` when they finish.
