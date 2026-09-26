@@ -6205,6 +6205,50 @@ screen's 27094 (Part 53) and pd1route S1 (pd + revert, `std::pow`).
 
 | run | pricing | acceptance | overflow | max | scored WL | runtime | peak RSS |
 |---|---|---|---|---|---|---|---|
-| J1 | pd | keep | (pending) | | | | |
+| J1 | pd | keep | **7570** (2D **0**) | 14 | 8497680 | 3643s | 1089MB |
 | J3 | lambda | keep | (pending) | | | | |
 | J2 | pd | revert (control; speed fix vs S1) | (pending) | | | | |
+
+**J1 -- present-demand pricing + keep every reroute: the 2D stage converged
+to zero overflow on adaptec1 at slow round 65**, the first time any router
+in this project has reached 2D zero on a real benchmark. After layer
+assignment the real (wire + via) overflow is **7570**, max 14 -- legal
+(`gr_verify` 0/0/0/0/0) and `eval2008.pl`-agreed (7570 / 14 / 8497680) --
+**-72.1% vs the same-budget lambda + revert screen's 27094**, and -70.7% vs
+the full-budget best's adaptec1 25848 (Part 57) at a quarter of the budget.
+Runtime 3643s: 2.5x *faster* than the lambda screen (9214s) and 11x faster
+than pd1route S1 (40518s). Scored WL 8497680, +6.2% vs the lambda screen's
+8004059 (NTHU-Route: 5359901).
+
+Slow-tier 2D overflow (every reroute kept; "kept-worse" = kept reroutes
+that made local overflow worse):
+
+| slow round | 2D overflow | rerouted | kept-worse | box margin | WL term |
+|---|---|---|---|---|---|
+| 0 | 1387698 | 90356 | 36916 | 48 | 0.168 |
+| 1 | 688352 | 86032 | 32066 | 50 | 0.154 |
+| 5 | 253908 | 63387 | 16328 | 58 | 0.106 |
+| 9 | 123430 | 51354 | 9931 | 66 | 0.072 |
+| 19 | 15630 | 26798 | 2713 | 86 | 0.027 |
+| 29 | 1144 | 8873 | 380 | 106 | 0.010 |
+| 39 | 148 | 2139 | 42 | 126 | 0.0037 |
+| 49 | 50 | 706 | 38 | 146 | 0.0014 |
+| 59 | 6 | 132 | 6 | 166 | 0.0005 |
+| 65 | **0** | 10 | 0 | 178 | 0.0003 |
+
+The dynamic is NTHU's, not this project's: the first keep round blows 2D
+overflow up tenfold (202780 after cleanup -> 1387698), then it falls
+monotonically-ish by roughly a quarter to a third per round, with the
+number of nets still being rerouted shrinking with it -- where every
+revert-rule run in Parts 53-59 plateaued in the tens of thousands.
+**Part 59's hypothesis holds: present-demand pricing and keep-every-reroute
+are a matched pair; either one alone loses (Part 59 for pd + revert; J3,
+pending, for lambda + keep).**
+
+What the 7570 now is: all of it comes from layer assignment
+(`negotiateViaAssignment`), which has to fit a 2D solution with zero 2D
+overflow onto 6 real layers plus vias. The binding stage for adaptec1 has
+moved from 2D routing to layer assignment. NTHU-Route reaches real 0 on
+adaptec1 from its own 2D-zero solution, so its layer assignment (Part 58:
+dynamic-programming over each net's tree, per-layer capacity aware) is the
+next thing to compare against.
