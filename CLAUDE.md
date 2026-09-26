@@ -102,6 +102,23 @@ improvement on top (-21.36% vs kroute-equivalent on a reduced-round
 screen, only marginally beyond MSMV alone) -- see `HISTORY_COST_SWEEP.md`
 Parts 10-11.
 
+**2026-09-26 update: `gr/pd2route.cpp` is the new current best, and it
+reaches zero 2D overflow on adaptec1.** Two steps got here. First, search
+boxes: the 6-tile slow-tier margin every router since mroute inherited was
+the hidden limiter; growing boxes (`nv11route`, `round` 48/+2/200) took the
+full-budget total from 277344 to 112086 (`HISTORY_COST_SWEEP.md` Parts
+51-57), then flattened -- breadth was exhausted. Second, the negotiation
+model: `pd1route`/`pd2route` replace the ever-rising lambda price with
+NTHU-Route 2.0's present-demand cost (`cost = f + hist * cong^5`, recomputed
+from current demand, so an edge gets cheap the moment nets leave it) *and*
+NTHU's acceptance rule (keep every slow-tier reroute; no revert). Either half
+alone loses (Parts 59-60): present-demand pricing under revert-if-worse
++38%; lambda pricing with keep-every-reroute never beat its starting point.
+Together, at the reduced 30/75/100 screen budget: **adaptec1 7570 (2D 0),
+newblue1 4694, bigblue1 2922 -- 15186 total, -86.5% vs 112086**, legal and
+`eval2008.pl`-cross-checked, at a third of the runtime (Part 60b). The
+remaining overflow is now mostly layer assignment's, not 2D routing's.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned
@@ -244,6 +261,20 @@ pass should already follow. This is not a hypothetical guard: accepting every
 escalated net's reroute unconditionally in one pass put 30% of a design's nets
 on the expensive tier at once, spiked overflow to roughly 25x the cheap tier's
 own result, and never recovered past it even after further rounds.
+
+**This rule belongs to the pricing model it was found under** (revised
+2026-09-26). Under the lambda price, which only ever rises, it is
+load-bearing: `pd2route` with lambda pricing and every reroute kept sent 2D
+overflow from 219786 to 8 million and never came back below its starting
+point (`HISTORY_COST_SWEEP.md` Part 60, J3). Under NTHU-Route's
+present-demand price it is the obstacle: the revert rule undid most
+reroutes (an edge at capacity is barely dearer than one just under it, so
+reroutes land on just-full edges), and the run plateaued at +38% vs lambda
+(Part 59). Keeping every reroute under that price converged adaptec1's 2D
+stage to zero (Part 60). So: supervise per net under a monotone price;
+under a present-demand price with history, keep every reroute and let the
+history term do the policing. Changing the pricing model means re-testing
+this rule, not inheriting it.
 
 **The per-round pricing threshold is fixed, not a scheduled or excused one.**
 Ramping it up or down across rounds, or permanently excusing nets that stayed

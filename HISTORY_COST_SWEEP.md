@@ -6207,7 +6207,7 @@ screen's 27094 (Part 53) and pd1route S1 (pd + revert, `std::pow`).
 |---|---|---|---|---|---|---|---|
 | J1 | pd | keep | **7570** (2D **0**) | 14 | 8497680 | 3643s | 1089MB |
 | J3 | lambda | keep | 231136 (2D 219786 = the pre-escalation snapshot) | 74 | 6592644 | 7499s | 997MB |
-| J2 | pd | revert (control; speed fix vs S1) | (pending) | | | | |
+| J2 | pd | revert (control; speed fix vs S1) | stopped at slow round 42 (2D 34602), 4.2h | | | | |
 
 Part 60b (launched): J1's exact settings on bigblue1 and newblue1, one
 batch. No same-budget (30/75/100) lambda screens exist for them; the
@@ -6302,3 +6302,23 @@ moved from 2D routing to layer assignment. NTHU-Route reaches real 0 on
 adaptec1 from its own 2D-zero solution, so its layer assignment (Part 58:
 dynamic-programming over each net's tree, per-layer capacity aware) is the
 next thing to compare against.
+
+J2 (pd + revert with the multiplication speed fix) was stopped by decision
+after 4.2h at slow round 42, to free its slot once J1/J3 had settled the
+question it controlled for. Its trajectory tracked pd1route S1 closely (2D
+94622 / 68054 / 42220 at slow rounds 0 / 9 / 29 vs S1's 95702 / 69318 /
+41592), as expected -- the fix changes only the last bits. The speed fix's
+runtime effect on the revert configuration was not measured to completion;
+pd+keep's speed (J1: 3643s) comes mainly from the shrinking set of nets
+rerouted each round, not from the fix alone.
+
+## Part 61: `pd2route` pd + keep at the full budget -- in progress
+
+Part 60b's settings (`PD1ROUTE_COST=pd PD2ROUTE_ACCEPT=keep`, `round`
+48/+2/200) at the full committed budget (`VROUTE_FAST_ROUNDS=60
+VROUTE_SLOW_ROUNDS=150 NV2ROUTE_VIA_ROUNDS=200`) on all three, one
+`run_batch.sh` batch. Questions: does bigblue1's 2D (58 at the screen's cap,
+still falling) reach zero; does newblue1's 2D plateau (~1200) move; and how
+much do the extra layer-assignment rounds (200 vs 100) cut the
+layer-assignment overflow that now dominates. Baseline: Part 60b's screen,
+7570 / 4694 / 2922 = 15186.
