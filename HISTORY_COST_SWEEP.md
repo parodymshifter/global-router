@@ -6635,7 +6635,7 @@ revert refinement 60 iterations (box 10 + 5) -> nthu layer assignment. Note:
 in-process, a net's `pts` still carry the 2D stage's Steiner points (the
 from-file runs of Parts 63-64 used pins only).
 
-## Part 67: `gr/pd6route.cpp` -- 2-pin-piece reroutes -- queued
+## Part 67: `gr/pd6route.cpp` -- 2-pin-piece reroutes
 
 `pd6route` (forked from `pd5route`) adds `PD6ROUTE_PIECES=1`: refinement
 and region negotiation reroute a net's pieces (maximal paths between pins
@@ -6650,3 +6650,27 @@ nearest-sink on 20 multi-sink fixtures; both stages clear the
 three-on-one-row fixture in piece mode). Screen on newblue1 from the Part
 61 2D solution (1108): region(pieces, 200) + revert refine(pieces); keep
 refine(pieces) alone; revert refine(pieces) alone.
+
+**Part 67 results** (newblue1, from the Part 61 2D solution 1108, then
+nthu LA; all `status=OK`, `gr_verify` and `eval2008.pl` agree):
+
+| run | stage trace | real overflow | max | scored WL | time |
+|---|---|---|---|---|---|
+| region (pieces, 200 rounds) + revert refine (pieces, 60) | region 1108 -> 13430 (round 0, 48905 pieces rerouted) -> 8324 -> 498 (39) -> 198 (79) -> 160 (119) -> 152 (159) -> 116 (199), best 114; refine -> 100 -> 94 -> 90 | **90** | 2 | 7854897 | 2260s |
+| keep refine (pieces, 60) alone | 2996 (iter 0) -> 2522 -> 1634 (19) -> 1588; best kept 1108 | 1108 | 2 | 7923750 | 398s |
+| revert refine (pieces, 60) alone | 890 -> 854 -> 788 -> 784 | 784 | 2 | 7871481 | 545s |
+
+**newblue1: 90** (-62% vs 236), in 38 minutes. Piece granularity is what
+the hotspot rip-up needed: whole-net region negotiation (Part 64c) peaked
+~16500 and plateaued ~320-360 after 200 rounds; by pieces it peaks 13430
+and reaches 116, still falling at the round cap. For refinement alone,
+pieces are *worse* than whole nets under revert (784 vs 484) and keep
+still fails -- piece-level moves need the negotiation (present-demand
+pricing + history), not the 0/1 full-edge cost.
+
+**Part 66 (one command) so far: adaptec1 0 (max 0, WL 8679261, 4797s) and
+bigblue1 0 (max 0, WL 7962328, 7261s)** -- both `status=OK` -- from
+`pd5route` with identical settings; newblue1 still running.
+
+Follow-up (Part 67b): piece-mode region 500 rounds from 1108, and 200 more
+region rounds from the 90 state.
