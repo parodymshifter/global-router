@@ -6565,3 +6565,26 @@ rounds ran out in all three runs**; from the 484 state it had not yet come
 back below its start, so the best-state rule kept the input. The refinement
 after it then took the 1108 run's 556 to 344. Next: the same with 200
 region rounds (Part 64c).
+
+**Part 64c -- hotspot rip-up with 200 region rounds** (then revert
+refinement 60 iterations, nthu LA; all `status=OK`, `gr_verify` and
+`eval2008.pl` agree):
+
+| start | region nets | region 2D, rounds 24 / 49 / 99 / 149 / 199 | region best | after refinement = real | max | scored WL | time |
+|---|---|---|---|---|---|---|---|
+| Part 61 2D (1108) | 14446 | 1006 / 630 / 418 / 370 / 318 | 318 | **236** | 2 | 7890296 | 14596s |
+| best 484 state | 11537 | 1042 / 670 / 448 / 414 / 364 | 330 | 260 | 2 | 7866279 | 14563s |
+| 344 state (64b) | 10527 | 1010 / 738 / 422 / 392 / 354 | 320 | 252 | 2 | 7847046 | 14622s |
+
+**newblue1: 236** (-31% vs 344). More region rounds keep paying, but slowly
+and noisily: from rounds 100 to 200 the region's 2D overflow drifts from
+~420 to ~320-360, and refinement takes another ~70-80 off. Restarting from
+a better state does not compound (from 344 -> 252, from 484 -> 260, from
+1108 -> 236): each run's first region round reroutes every net in the box
+and discards most of the starting state. Runtime is the cost: ~4h per run
+for 200 rounds (vs ~20 min for 60), since the set of overflowed nets
+rerouted each round stays in the thousands (3000-3500) and the MSMV margin
+grows 2 per round.
+
+**Best per benchmark: adaptec1 0, bigblue1 0, newblue1 236 -- total 236**
+(-99.8% vs 112086; -99.9% vs the committed margin-6 nv4route's 277344).
