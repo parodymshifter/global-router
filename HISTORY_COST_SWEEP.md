@@ -6312,7 +6312,7 @@ runtime effect on the revert configuration was not measured to completion;
 pd+keep's speed (J1: 3643s) comes mainly from the shrinking set of nets
 rerouted each round, not from the fix alone.
 
-## Part 61: `pd2route` pd + keep at the full budget -- in progress
+## Part 61: `pd2route` pd + keep at the full budget
 
 Part 60b's settings (`PD1ROUTE_COST=pd PD2ROUTE_ACCEPT=keep`, `round`
 48/+2/200) at the full committed budget (`VROUTE_FAST_ROUNDS=60
@@ -6411,3 +6411,27 @@ real overflow now equals the 2D overflow exactly: layer assignment is
 lossless, and everything left is the 2D stage's (bigblue1 58, still
 falling when the screen hit its round cap; newblue1 1186, a plateau).
 Total 1244, -98.9% vs the lambda-pricing full-budget best (112086).
+
+**Part 61 results (full budget 60/150/200, pd2route pd + keep; then
+pd3route's nthu layer assignment on each output via `PD3ROUTE_LA_FROM`,
+200 repair rounds).** Every run `status=OK` (legal; `gr_verify` and
+`eval2008.pl` agree):
+
+| benchmark | pd2route real (inherited LA) | 2D overflow | + pd3route nthu LA | scored WL | 2D runtime |
+|---|---|---|---|---|---|
+| adaptec1 | 6216 | 0 | **0** (max 0) | 8678482 | 5013s |
+| bigblue1 | 2712 | 60 | **60** (max 2) | 8512687 | 6982s |
+| newblue1 | 3994 | 1108 | **1108** (max 2) | 7923750 | 16063s |
+| **total** | 12922 | 1168 | **1168** | | |
+
+vs the 30/75/100 screen + nthu LA (Part 62): 0 / 58 / 1186 = 1244. The
+full budget buys -6% in total (newblue1 -78, bigblue1 +2) at 2-3x the
+runtime and 1-7% more wirelength. **Both remaining benchmarks sit on 2D
+plateaus, not round caps:** bigblue1's 2D reaches ~100 by slow round 70 and
+oscillates 84-126 for the last 80 rounds (best 60), still rerouting ~2500
+nets a round; newblue1's reaches ~1200 by round 50 and oscillates
+1108-1186, rerouting ~4700 a round. More of the same negotiation will not
+close them. NTHU-Route switches regimes at this point: its main stage stops
+once overflow falls below a threshold (340 on bigblue1), and a refinement
+stage takes over whose cost is 1 per *full* edge crossed and 0 otherwise,
+with search boxes starting at 10 and growing 15 per iteration (Part 58).
