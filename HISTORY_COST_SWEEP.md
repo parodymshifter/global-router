@@ -6472,3 +6472,28 @@ made the refinement worse (the first iteration's ~4000 whole-net reroutes
 pushed 2D overflow up 7x and 20 iterations never recovered); the
 best-state rule passed the unrefined 1108 through. Part 63b runs newblue1's
 refinement with revert-if-worse.
+
+**Part 63b -- newblue1 refinement with `PD4ROUTE_REFINE_ACCEPT=revert`**,
+from the same Part 61 2D solution (2D 1108), then nthu layer assignment
+(all `status=OK`; `gr_verify` and `eval2008.pl` agree):
+
+| variant | boxes | iterations | 2D after refine | real overflow | max | scored WL | time |
+|---|---|---|---|---|---|---|---|
+| NTHU boxes | 10 + 15/it | 20 | 488 | 488 | 2 | 7827708 | 168s |
+| wide boxes | 50 + 25/it | 20 | 486 | 486 | 2 | 7825021 | 281s |
+| long, slow growth | 10 + 5/it | 60 | **484** | **484** | 2 | 7820777 | 515s |
+
+Revert-if-worse refinement cuts newblue1 by 56% (1108 -> 484-488), almost
+all of it in the first 10 iterations (744 after iteration 0), then stops
+moving whatever the box size or iteration count -- while still rerouting
+~2900 nets per iteration and reverting ~170-190. On bigblue1 the keep rule
+already reached 0 (Part 63a). **Best per benchmark now: adaptec1 0,
+bigblue1 0, newblue1 484 -- total 484** (-99.6% vs the lambda-pricing
+full-budget best 112086; -99.8% vs the committed margin-6 `nv4route`'s
+277344). newblue1 is also the benchmark NTHU-Route itself did not finish
+here (Part 52: 2D 18, layer assignment failed).
+
+Open question: is newblue1's ~484 a routing limit or close to an
+unavoidable floor (e.g. pin tiles with more nets leaving them than their
+four edges can carry)? A per-tile lower bound over a checkerboard of
+disjoint tiles would say, without any routing.
