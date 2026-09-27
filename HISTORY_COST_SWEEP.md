@@ -6497,3 +6497,20 @@ Open question: is newblue1's ~484 a routing limit or close to an
 unavoidable floor (e.g. pin tiles with more nets leaving them than their
 four edges can carry)? A per-tile lower bound over a checkerboard of
 disjoint tiles would say, without any routing.
+
+**newblue1's 484 -- where it is and whether it is forced** (analysis only,
+no routing; scripts in the session scratchpad):
+- All of it is one hotspot: 233 2D edges, each over by exactly one net,
+  bounding box x 174-203, y 47-75 (30 x 29 tiles); none on a
+  capacity-adjusted edge.
+- Lower bounds find nothing forcing it. Per-tile (nets that must leave a
+  pin tile vs its four edges' capacity, summed over a checkerboard of
+  disjoint tiles): 0. Rectangle cuts around the hotspot (nets with pins both
+  inside and outside vs the rectangle's boundary capacity): demand 5552 vs
+  capacity 7316 on the hotspot's own box, with slack growing as the box
+  grows (expand 40: 8498 vs 26260). Full-chip straight cuts: every one has
+  >11000 units of slack.
+- So the hotspot is internal congestion, not a boundary shortage these
+  bounds can see: the 484 is probably a routing limit rather than a floor,
+  though not proven avoidable (these bounds are weak -- they ignore demand
+  from nets routed wholly inside the region and through-traffic).
