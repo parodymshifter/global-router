@@ -6514,3 +6514,35 @@ no routing; scripts in the session scratchpad):
   bounds can see: the 484 is probably a routing limit rather than a floor,
   though not proven avoidable (these bounds are weak -- they ignore demand
   from nets routed wholly inside the region and through-traffic).
+
+## Part 64: `gr/pd5route.cpp` -- two attacks on newblue1's hotspot
+
+`pd5route` (forked from `pd4route`) adds two switches, both off by default
+(defaults byte-identical to `pd4route`: bigblue1 refinement output `cmp`-
+identical, and identical to Part 63a's zero-overflow file). Self-test 424
+checks.
+
+1. `PD5ROUTE_REFINE_ORDER=shuffle` (`PD5ROUTE_SEED`): each refinement
+   iteration reroutes its overflowed nets in a seeded permutation that
+   differs per iteration, instead of NTHU's fixed order.
+2. `PD5ROUTE_REGION=1`: hotspot rip-up before refinement -- every non-giant
+   net with wire in the overflow's bbox (+ `PD5ROUTE_REGION_EXPAND`, 5) is
+   rerouted, overflowed or not, under pd2route's negotiation (present-demand
+   pricing, keep every reroute), then the still-overflowed ones for
+   `PD5ROUTE_REGION_ROUNDS` (60) rounds with margin 10 + 2/round; best state
+   kept.
+
+**Part 64a -- option 1, shuffled refinement** (newblue1, revert, 60
+iterations, box 10 + 5/it; all `status=OK`, `gr_verify` and `eval2008.pl`
+agree):
+
+| start | seed | real overflow | max | scored WL | time |
+|---|---|---|---|---|---|
+| Part 61 2D (1108) | 1 | 490 | 2 | 7823884 | 519s |
+| Part 61 2D (1108) | 2 | **480** | 2 | 7816381 | 522s |
+| Part 63b best (484) | 1 | 482 | 2 | 7819995 | 506s |
+
+Shuffling the order moves the plateau by at most 4 nets (480 vs 484) and
+seed-to-seed spread is ~10: the refinement stage itself is exhausted on
+newblue1, not stuck in an order-induced cycle. newblue1 best: 480. Part 64b
+(option 2) is running.
