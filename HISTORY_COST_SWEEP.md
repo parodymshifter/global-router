@@ -6588,3 +6588,25 @@ grows 2 per round.
 
 **Best per benchmark: adaptec1 0, bigblue1 0, newblue1 236 -- total 236**
 (-99.8% vs 112086; -99.9% vs the committed margin-6 nv4route's 277344).
+
+## Part 65: is newblue1's last overflow forced? `gr/lpbound.cpp` -- in progress
+
+`lpbound` (an analysis tool, not a router) computes a certified lower bound
+on total overflow by weak LP duality for fractional min-overflow routing:
+for any edge lengths 0 <= l_e <= 1, overflow >= sum_k d_k T_k(l) - sum_e
+c_e l_e, with T_k a lower bound on net k's Steiner cost under l (exact for 2
+terminals; max(longest pair, MST/2) otherwise). Lengths are nonzero only
+around a region; outside tiles merge into one free node, which keeps the
+bound valid for the whole chip. The lengths are chosen by Frank-Wolfe on a
+smoothed overflow (gradient = sigmoid, always in (0,1), so every iterate is
+a valid dual point); the averaged Frank-Wolfe usage is a genuine fractional
+routing, giving an upper bound on the relaxed optimum. Self-test: a forced
+corridor (3 nets through two 1-net edges) -- bound 8 = true minimum, and the
+averaged routing also 8; an uncongested net -- bound 0, routing 0. (A first
+version with projected subgradient ascent bang-banged its lengths and never
+left 0; replaced.)
+
+newblue1, box x 165-210, y 39-83 (2071 nodes, 4231 edges, 14442 nets with a
+pin inside), beta 50, 150 iterations: certified lower bound 0; averaged
+fractional routing overflow 1894 and still falling ~10% per 10 iterations
+-- inconclusive (Frank-Wolfe converges at O(1/t)). 1000 iterations running.
