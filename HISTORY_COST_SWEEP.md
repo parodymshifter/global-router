@@ -6674,3 +6674,18 @@ bigblue1 0 (max 0, WL 7962328, 7261s)** -- both `status=OK` -- from
 
 Follow-up (Part 67b): piece-mode region 500 rounds from 1108, and 200 more
 region rounds from the 90 state.
+
+**Part 67b** (newblue1, piece mode; all `status=OK`, both scorers agree):
+
+| run | region 2D at rounds 49 / 99 / 199 / 299 / 399 / 499 | region best | after revert refine = real | max | scored WL | time |
+|---|---|---|---|---|---|---|
+| region 500 rounds from 1108 | 328 / 164 / 116 / 86 / 70 / 88 | 62 | **56** | 2 | 7946278 | 5646s |
+| region 200 rounds from the 90 state | 302 / 182 / 120 (199) | 90 (kept input) | 90 | 2 | 7853091 | 2178s |
+
+**newblue1: 56.** More piece-mode region rounds keep paying (200 -> 90,
+500 -> 56), with diminishing, noisy returns (86 at round 299, 70 at 399,
+88 at 499). Continuing from a good state does not: the region's round 0
+reroutes every piece in the box and discards it (the from-90 run climbs back
+to hundreds and never returns below 90 in 200 rounds).
+
+**Best per benchmark: adaptec1 0, bigblue1 0, newblue1 56 -- total 56.**
