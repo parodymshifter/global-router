@@ -70,6 +70,7 @@ jobs:
           - pd1route
           - pd2route
           - pd3route
+          - pd4route
     steps:
       - uses: actions/checkout@v4
 

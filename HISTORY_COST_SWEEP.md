@@ -6435,3 +6435,40 @@ close them. NTHU-Route switches regimes at this point: its main stage stops
 once overflow falls below a threshold (340 on bigblue1), and a refinement
 stage takes over whose cost is 1 per *full* edge crossed and 0 otherwise,
 with search boxes starting at 10 and growing 15 per iteration (Part 58).
+
+## Part 63: `gr/pd4route.cpp` -- NTHU-Route 2.0's refinement stage
+
+After Part 62 the remaining overflow was the 2D stage's, on plateaus
+(Part 61). NTHU's `Post_processing.cpp` (read in full): once the main
+stage ends, cost switches to 1 per *full* edge, 0 otherwise (`MADEOF_COST`;
+the maze breaks ties by full-edge distance, then bends); 2-pin pieces that
+cross overflow are rerouted, sorted by (their overflow, bounding box)
+descending, with boxes 10 + 15 per iteration for up to 20 iterations, every
+reroute kept.
+
+`pd4route` (forked from `pd3route`) adds that as `refine2D`, run after the
+2D stage (or after `PD3ROUTE_LA_FROM`'s projection) and before layer
+assignment: `CostModel::kRefine` (1 for an edge one more net would
+overflow, 1e-5 otherwise -- length only breaks ties; A* scaled by 1e-5),
+whole-net MSMV reroutes in NTHU's order, `PD4ROUTE_REFINE_{ITERS,BOX_INIT,
+BOX_INC,ACCEPT}` defaulting to NTHU's 20 / 10 / 15 / keep, and the best
+state seen passed on. Self-test 408 checks (including a wall of full edges
+the refinement search detours around by 10 tiles where the lambda search
+goes straight through, and a three-nets-on-a-one-net-row fixture refined
+from 2D overflow 28 to 0 with every net connected).
+
+**Part 63a -- refinement from Part 61's full-budget 2D solutions, then
+nthu layer assignment** (`run_checked.sh`, both `status=OK`, `gr_verify`
+and `eval2008.pl` agree):
+
+| benchmark | 2D before | refinement | real overflow | max | scored WL | time |
+|---|---|---|---|---|---|---|
+| bigblue1 | 60 | -> 4 (iter 0, 24 nets rerouted) -> **0** (iter 1, 2 nets) | **0** | **0** | 8510946 | 9.9s |
+| newblue1 | 1108 | keep: -> 7850 (iter 0) -> 2018 (iter 19); best kept = 1108 | 1108 | 2 | 7923750 | 187s |
+
+**bigblue1: zero total overflow, zero max overflow** -- the second real
+ISPD benchmark at zero (adaptec1, Part 62). On newblue1 NTHU's keep rule
+made the refinement worse (the first iteration's ~4000 whole-net reroutes
+pushed 2D overflow up 7x and 20 iterations never recovered); the
+best-state rule passed the unrefined 1108 through. Part 63b runs newblue1's
+refinement with revert-if-worse.
