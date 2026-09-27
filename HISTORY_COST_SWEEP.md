@@ -6626,3 +6626,27 @@ question needs a real LP solver (and exact or tighter Steiner handling), a
 much larger build with no guarantee of a decisive answer. `lpbound` stays
 as a tool: it gives valid certificates whenever one exists at its lengths
 (the forced-corridor self-test reaches the exact minimum).
+
+## Part 66: one command, one setting, all three benchmarks -- running
+
+`pd5route` from scratch, identical settings everywhere: 2D full budget
+(60/150/200, `round` 48/+2/200, pd + keep) -> hotspot rip-up 200 rounds ->
+revert refinement 60 iterations (box 10 + 5) -> nthu layer assignment. Note:
+in-process, a net's `pts` still carry the 2D stage's Steiner points (the
+from-file runs of Parts 63-64 used pins only).
+
+## Part 67: `gr/pd6route.cpp` -- 2-pin-piece reroutes -- queued
+
+`pd6route` (forked from `pd5route`) adds `PD6ROUTE_PIECES=1`: refinement
+and region negotiation reroute a net's pieces (maximal paths between pins
+and branch tiles) instead of the whole net -- the piece is removed and the
+two parts of the tree reconnected by one MSMV search from every tile of one
+part to any tile of the other; the rest of the net stays put. Pieces-off
+default is byte-identical to `pd5route` (bigblue1 refinement output
+`cmp`-identical). Self-test 436 checks (a T-shaped net where only the piece
+through a full edge moves, the left piece stays tile for tile, usage stays
+exact; an admissible sink-bbox heuristic finds the same optimal costs as
+nearest-sink on 20 multi-sink fixtures; both stages clear the
+three-on-one-row fixture in piece mode). Screen on newblue1 from the Part
+61 2D solution (1108): region(pieces, 200) + revert refine(pieces); keep
+refine(pieces) alone; revert refine(pieces) alone.
