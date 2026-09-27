@@ -6546,3 +6546,22 @@ Shuffling the order moves the plateau by at most 4 nets (480 vs 484) and
 seed-to-seed spread is ~10: the refinement stage itself is exhausted on
 newblue1, not stuck in an order-induced cycle. newblue1 best: 480. Part 64b
 (option 2) is running.
+
+**Part 64b -- option 2, hotspot rip-up** (newblue1; region 60 rounds, then
+revert refinement 60 iterations box 10 + 5/it, then nthu LA; all
+`status=OK`, `gr_verify` and `eval2008.pl` agree):
+
+| start | region box | region nets | region 2D (best) | after refinement = real | max | scored WL | time |
+|---|---|---|---|---|---|---|---|
+| Part 61 2D (1108) | x 165-210, y 39-83 | 14446 | 1108 -> 556 | **344** | 2 | 7702952 | 1229s |
+| best 484 state | x 169-208, y 42-81 | 11537 | 484 -> 484 (548 at round 59) | 482 | 2 | 7819552 | 1284s |
+| best 484, expand 15 | x 159-218, y 32-91 | 22062 | 484 -> 484 (580 at round 59) | 482 | 2 | 7819552 | 1294s |
+
+**newblue1: 344** (-28% vs 480). The region negotiation's first round --
+rerouting every net in the box -- blows 2D overflow up to ~16000-18000, then
+it falls steadily (from 1108: 16488 / 11168 / 8110 / 1556 / 874 / 706 / 556
+at rounds 0 / 1 / 2 / 14 / 29 / 44 / 59) and was **still falling when its 60
+rounds ran out in all three runs**; from the 484 state it had not yet come
+back below its start, so the best-state rule kept the input. The refinement
+after it then took the 1108 run's 556 to 344. Next: the same with 200
+region rounds (Part 64c).
