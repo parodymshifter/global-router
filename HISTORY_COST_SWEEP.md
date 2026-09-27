@@ -6589,7 +6589,7 @@ grows 2 per round.
 **Best per benchmark: adaptec1 0, bigblue1 0, newblue1 236 -- total 236**
 (-99.8% vs 112086; -99.9% vs the committed margin-6 nv4route's 277344).
 
-## Part 65: is newblue1's last overflow forced? `gr/lpbound.cpp` -- in progress
+## Part 65: is newblue1's last overflow forced? `gr/lpbound.cpp`
 
 `lpbound` (an analysis tool, not a router) computes a certified lower bound
 on total overflow by weak LP duality for fractional min-overflow routing:
@@ -6610,3 +6610,19 @@ newblue1, box x 165-210, y 39-83 (2071 nodes, 4231 edges, 14442 nets with a
 pin inside), beta 50, 150 iterations: certified lower bound 0; averaged
 fractional routing overflow 1894 and still falling ~10% per 10 iterations
 -- inconclusive (Frank-Wolfe converges at O(1/t)). 1000 iterations running.
+
+1000 iterations (same box, beta 50, ~70 min): averaged fractional routing
+overflow 1267 / 788 / 609 / 518 / 463 / 427 / 404 / 386 / **374** at
+iterations 200 / 300 / ... / 1000, still falling but slowly; certified lower
+bound still **0** (every gradient iterate's dual value negative, -9320 at
+the end).
+
+**Verdict: inconclusive, and not worth pushing further this way.** Nothing
+certifies any of newblue1's 236 as forced, and the Frank-Wolfe fractional
+routing (374) is still worse than the router's own integral 236 -- partly
+because its linear step routes each net on an MST of shortest paths, up to
+2x the Steiner minimum, so it is not a strong primal either. Settling the
+question needs a real LP solver (and exact or tighter Steiner handling), a
+much larger build with no guarantee of a decisive answer. `lpbound` stays
+as a tool: it gives valid certificates whenever one exists at its lengths
+(the forced-corridor self-test reaches the exact minimum).
