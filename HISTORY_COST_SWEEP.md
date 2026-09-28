@@ -6952,3 +6952,20 @@ under Rosetta).
 **Decision, per the Part 73 rule:** the pattern stage is significantly
 faster at equal quality, so the eight larger ISPD 2008 benchmarks run on
 `pd11route` (CPU build, the verified configuration) -- Part 73b.
+
+**Part 73a -- the five smallest new benchmarks, pd9route, Part 71 settings
+unchanged** (all `status=OK`, `gr_verify` and `eval2008.pl` agree):
+
+| benchmark | nets | slow tier stopped at | region / refine | real overflow | max | scored WL | runtime |
+|---|---|---|---|---|---|---|---|
+| adaptec2 | 260159 | 230 | region -> 0 (20 rounds) | **0** | 0 | 5267444 | 1933s |
+| newblue2 | 463213 | 286 | region -> 0 (7 rounds) | **0** | 0 | 7614709 | 141s |
+| adaptec3 | 466295 | 280 | region -> 0 (22 rounds) | **0** | 0 | 13235180 | 5899s |
+| bigblue2 | 576816 | 276 | region -> 0 (437 rounds) | **0** | 0 | 9443492 | 4148s |
+| newblue4 | 636195 | 292 | region -> 168 (500), refine -> 148 | 148 | 2 | 13069979 | 21026s |
+
+The one setting tuned on adaptec1 / bigblue1 / newblue1 generalizes: four
+of five new benchmarks reach zero overflow with no per-benchmark tuning.
+newblue4, like newblue1, keeps a residue after the region stage's 500
+rounds. Across the eight ISPD 2008 benchmarks routed so far: seven at zero
+(adaptec1-3, bigblue1-2, newblue2), newblue1 54, newblue4 148.
