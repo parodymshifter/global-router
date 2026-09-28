@@ -17,6 +17,13 @@
 # incomplete or unrouted nets) AND gr_verify and eval2008.pl agree on total
 # overflow, max overflow and scored wirelength. Anything else is flagged, not
 # hidden: the summary is written either way.
+#
+# Disk: once both checks and the summary are done, the route file is
+# gzip-compressed to <log_prefix>.route.gz (route files run 100-170 MB each
+# and filled ~33 GB of disk before this). Reuse one with
+#   gunzip -k <log_prefix>.route.gz
+# Set KEEP_ROUTE=1 for a job whose route file is a planned input to later
+# runs (e.g. PD3ROUTE_LA_FROM); it is then left uncompressed.
 
 if [ "$#" -ne 3 ]; then
   echo "usage: $0 <log_prefix> <benchmark.gr> <router_binary>" >&2
@@ -70,4 +77,7 @@ fi
 echo "$name status=$status of=$of max=$max wl=$wl eval_of=$eval_of eval_max=$eval_max" \
      "eval_wl=$eval_wl 2d=$twod real_s=$real_s rss_mb=$rss legal=$m/$o/$d/$i/$u" \
      > "${prefix}.summary"
+if [ "${KEEP_ROUTE:-0}" != "1" ]; then
+  gzip -f "${prefix}.route"
+fi
 [ "$status" = OK ]
