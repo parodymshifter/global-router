@@ -6812,3 +6812,29 @@ reroutes *whole* nets under a WL weight decayed to ~1e-3, so every part of
 an escalated net takes congestion-only shapes, where NTHU reroutes only the
 2-pin piece that crosses overflow and leaves the rest on its short initial
 route. That is the runtime item too (next).
+
+## Part 71: `gr/pd9route.cpp` -- the search stage's cost -- running
+
+Why NTHU-Route takes minutes where this pipeline takes hours (from its
+code, Parts 52/58/63, and this project's traces): it reroutes only the
+2-pin pieces crossing overflow (this project's slow tier regrows ~90000
+whole nets in adaptec1's first slow round); its boxes are the piece's bbox
++ 10-25 growing 1/iteration (here net bbox + 48 growing 2/round to 200,
+near-whole-grid); it tries a cheap monotonic route before any maze search
+(here always MSMV A*, which degrades toward Dijkstra as the WL weight
+decays to ~1e-4); it stops the main stage at an overflow threshold and
+refines at most 20 iterations (here 60 fast + 150 slow + up to 500 region
+rounds); and its FLUTE/edge-shifting/L-shape start leaves most nets never
+rerouted. The whole-net slow tier is also where this project's extra
+wirelength is made (Part 70).
+
+`pd9route` (forked from `pd8route`): `PD9ROUTE_SLOW_PIECES=1` makes the
+slow tier reroute only a net's pieces that cross overflow
+(`rerouteNetPieces`, under the stage's pricing and acceptance), and
+`PD9ROUTE_STOP_AT=N` ends the slow tier once 2D overflow <= N. Both off by
+default. Self-test 467 checks (slow-tier pieces clear the detour fixture;
+on a fixture that cannot converge, 21 rounds without the threshold vs 2
+with it).
+
+Screen, adaptec1, full pipeline from scratch (Part 68 settings, pd7/pd8
+defaults): base; slow pieces; slow pieces + stop at 300.
