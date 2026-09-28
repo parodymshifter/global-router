@@ -386,6 +386,12 @@ unroutable.
 
 ## Parallelism plan (stage 7, not before)
 
+(2026-09-28) Concrete GPU plan: `GPU_BACKEND_PLAN.md` -- batched pattern
+routing on Metal (local, M4 Pro, kernel compiled at run time since only
+the Command Line Tools are installed) and CUDA (cloud GPU CI), one binary
+choosing its backend at run time (`GR_GPU=auto|cuda|metal|cpu`), integer
+fixed-point costs so every backend is bit-identical to the CPU reference.
+
 - **Over nets, given prices.** Once prices are fixed, every net's tree is
   independent. Hazard is stampede: all nets see the same stale prices and pile
   into the same cheap region. Parallel runs want a smaller epsilon than
@@ -521,7 +527,25 @@ helps.
 
 ## Conventions
 
-- C++17, no dependencies beyond the standard library at the standalone stage.
+- C++17. **Dependencies beyond the standard library are allowed where they
+  enable the roadmap's required improvements** (revised 2026-09-28; the
+  earlier rule was "no dependencies beyond the standard library at the
+  standalone stage"). The roadmap, in order: CPU runtime work including a
+  batched pattern-routing stage; the remaining ISPD 2008 benchmarks; the
+  ISPD 2024 `.cap`/`.net` format; CPU multithreading; a GPU port of the
+  pattern-routing kernel (Metal locally, CUDA on a cloud GPU -- see
+  `GPU_BACKEND_PLAN.md`); OpenROAD. Conditions on every dependency:
+  - It is isolated behind an interface in new files. The CPU path stays
+    buildable and testable with only a C++17 compiler (the one-line `g++`
+    build every router uses today), and the CPU implementation is the
+    reference any accelerated path must match bit for bit.
+  - It is optional at run time where the hardware may be absent: a GPU
+    build detects its device and falls back to the CPU backend.
+  - Its reason is recorded where it is introduced (the file header, and
+    the plan or `HISTORY_COST_SWEEP.md` Part that motivated it). Vendored
+    code (e.g. `third_party/metal-cpp`) keeps its license file.
+  - A build system beyond the one-line `g++` (CMake) is allowed for the
+    targets that need it.
 - Build with `-Wall -Wextra`, keep it warning-clean.
 - Tile coordinates zero based internally; `.gr` layers are one based, convert
   at the reader boundary.
