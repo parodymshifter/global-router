@@ -1,6 +1,18 @@
 # GPU backend plan: batched pattern routing on Metal (local) and CUDA (cloud CI)
 
-Status: plan, 2026-09-28. Nothing here is built yet. This fills in step 5 of
+Status (2026-09-28): **phase B's kernel library is built and verified**
+(`gr/gpu/`): contract `pattern_kernel.h` (canonical candidate order,
+fixed-point costs, CPU reference backend), Metal backend `pattern_metal.mm`
++ `pattern_kernel.metal` (Objective-C++ against the system Metal framework
+rather than vendored metal-cpp -- no download needed, same C++ interface),
+`backend_select.cpp` (`GR_GPU`), CMake build with offline `.metallib` and a
+run-time-compile fallback, and `pattern_selftest`. Measured on the M4 Pro:
+Metal bit-identical to the CPU reference on 21/21 random batches (2x2 to
+399x399, up to 100000 pieces) and on a 1,000,000-piece batch, with both the
+offline library and the run-time compile; 1M pieces on 399x399 in 0.018 s vs
+0.087 s on one CPU core (4.7x, including per-call buffer setup). Not yet
+wired into a router (that is phase A's CPU pattern stage + the batch
+driver). This fills in step 5 of
 the roadmap agreed in the session that produced `pd9route`:
 
 1. CPU runtime work, including a **CPU pattern-routing stage** (L/Z and
