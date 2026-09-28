@@ -79,6 +79,52 @@ inline int64_t candidateCount(int dx, int dy) {
   return 2 + (dx - 1) + (dy - 1);
 }
 
+// Calls f(horizontal, x, y) for every tile edge of candidate k of the piece
+// (x1,y1)->(x2,y2), in the canonical order above (horizontal edge (x,y) is
+// (x,y)-(x+1,y); vertical is (x,y)-(x,y+1)). Out-of-range k emits nothing.
+// This is how a chosen index is committed; its edges' costs sum to exactly
+// the cost the backend reported (pattern_selftest checks it).
+template <class F> inline void forEachCandidateEdge(int x1, int y1, int x2, int y2, int64_t k, F f) {
+  auto rowRun = [&](int y, int a, int c) {
+    for (int x = a < c ? a : c; x < (a < c ? c : a); ++x)
+      f(true, x, y);
+  };
+  auto colRun = [&](int x, int a, int c) {
+    for (int y = a < c ? a : c; y < (a < c ? c : a); ++y)
+      f(false, x, y);
+  };
+  if (k < 0 || (x1 == x2 && y1 == y2))
+    return;
+  if (x1 == x2 || y1 == y2) {
+    if (k == 0) {
+      if (y1 == y2)
+        rowRun(y1, x1, x2);
+      else
+        colRun(x1, y1, y2);
+    }
+    return;
+  }
+  int adx = x1 < x2 ? x2 - x1 : x1 - x2, ady = y1 < y2 ? y2 - y1 : y1 - y2;
+  int sx = x2 > x1 ? 1 : -1, sy = y2 > y1 ? 1 : -1;
+  if (k == 0) {
+    rowRun(y1, x1, x2);
+    colRun(x2, y1, y2);
+  } else if (k == 1) {
+    colRun(x1, y1, y2);
+    rowRun(y2, x1, x2);
+  } else if (k < 2 + (adx - 1)) {
+    int m = x1 + sx * static_cast<int>(k - 1);
+    rowRun(y1, x1, m);
+    colRun(m, y1, y2);
+    rowRun(y2, m, x2);
+  } else if (k < 2 + (adx - 1) + (ady - 1)) {
+    int m = y1 + sy * static_cast<int>(k - 1 - (adx - 1));
+    colRun(x1, y1, m);
+    rowRun(m, x1, x2);
+    colRun(x2, m, y2);
+  }
+}
+
 class IPatternBackend {
 public:
   virtual ~IPatternBackend() = default;

@@ -49,3 +49,9 @@ target_link_libraries(gr_gpu PUBLIC ${GR_GPU_LIBS})
 
 add_executable(pattern_selftest pattern_selftest.cpp)
 target_link_libraries(pattern_selftest PRIVATE gr_gpu)
+
+# pd11route with run-time backend selection (GR_GPU=auto|cpu|metal|cuda).
+# The plain `g++ pd11route.cpp` build uses the CPU reference only.
+add_executable(pd11route_gpu ${CMAKE_CURRENT_SOURCE_DIR}/../pd11route.cpp)
+target_compile_definitions(pd11route_gpu PRIVATE GR_PATTERN_SELECT)
+target_link_libraries(pd11route_gpu PRIVATE gr_gpu)

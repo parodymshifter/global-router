@@ -155,6 +155,25 @@ int main() {
   check(identical == total, chosen + " vs cpu: bit-identical best index and cost on " + std::to_string(identical) + "/" +
                                 std::to_string(total) + " random batches (2x2 up to 399x399, up to 100000 pieces)");
 
+  // Decoding: every chosen index's edges sum to exactly the reported cost.
+  {
+    PatternGrid g;
+    PatternBatch b;
+    randomCase(99, 150, 120, 20000, 50, g, b);
+    PatternResult r;
+    cpu.solve(g, b, r);
+    size_t okCount = 0;
+    for (size_t i = 0; i < b.size(); ++i) {
+      int64_t sum = 0;
+      forEachCandidateEdge(b.x1[i], b.y1[i], b.x2[i], b.y2[i], r.best[i], [&](bool h, int x, int y) {
+        sum += h ? g.h[static_cast<size_t>(y) * (g.nx - 1) + x] : g.v[static_cast<size_t>(y) * g.nx + x];
+      });
+      okCount += sum == r.cost[i];
+    }
+    check(okCount == b.size(), "decoded edges of the chosen candidate sum to the reported cost on " +
+                                   std::to_string(okCount) + "/" + std::to_string(b.size()) + " pieces");
+  }
+
   // Timing on a large batch (the scale the GPU is for).
   {
     PatternGrid g;
