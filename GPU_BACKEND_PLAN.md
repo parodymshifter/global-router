@@ -82,12 +82,16 @@ Determinism therefore does not depend on scheduling.
 - **Structure-of-arrays inputs:** piece endpoints, box bounds and candidate
   counts. They are laid out identically for all three backends, so one
   packing function feeds every backend.
-- **Metal without Xcode.** This machine has only the Command Line Tools,
-  which have no offline `metal` compiler. The kernel source is embedded in
-  the binary and compiled at startup with `MTLDevice::newLibrary(source,
-  ...)`, which needs only `Metal.framework`, and that is present. If full
-  Xcode is installed later, an offline `.metallib` can replace it with no
-  code changes.
+- **Metal shader build.** (Updated 2026-09-28.) Xcode 27.0 and its separately
+  downloaded Metal toolchain (`xcodebuild -downloadComponent MetalToolchain`;
+  metal 32023.921) are now installed on the M4 Pro and verified: a test kernel
+  using 64-bit integers (`device long *`) compiles with `xcrun metal` and links
+  with `xcrun metallib`. So the build compiles `pattern_kernel.metal` to a
+  `.metallib` offline, which catches shader errors at build time and skips
+  compilation at startup. The embedded-source runtime compile
+  (`MTLDevice::newLibrary(source, ...)`, needing only `Metal.framework`) stays
+  as the fallback for machines with only the Command Line Tools, and CMake
+  chooses between them by probing for `xcrun -f metal`.
 - **CUDA without a hard runtime dependency.** Link `cudart_static`. On a
   machine with no NVIDIA driver, `cudaGetDeviceCount` returns an error,
   which the probe treats as "no CUDA", and the run proceeds on CPU. The
