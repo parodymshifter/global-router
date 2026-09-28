@@ -6854,3 +6854,32 @@ with no wire penalty, while the extra 40-60 slow rounds of congestion-only
 negotiation (WL weight ~1e-3) had cost ~0.56M of scored wirelength.
 **adaptec1: 0 overflow at 5410200 -- within 0.9% of NTHU-Route's 5359901.**
 Running bigblue1 and newblue1 with the same settings (Part 71b).
+
+## Part 73: the full ISPD 2008 suite -- downloaded
+
+The 13 remaining ISPD 2008 benchmarks, downloaded 2026-09-28 from the
+contest site (ispd.cc/contests/07/rcontest/benchmark/ and
+ispd.cc/contests/08/benchmark/, 311 MB gzipped, 1.1 GB total in
+`gr/bench/`, git-ignored) and parse-checked with `gr_verify`:
+
+| benchmark | grid | nets |
+|---|---|---|
+| adaptec1 | 324 x 324 x 6 | 219794 |
+| adaptec2 | 424 x 424 x 6 | 260159 |
+| adaptec3 | 774 x 779 x 6 | 466295 |
+| adaptec4 | 774 x 779 x 6 | 515304 |
+| adaptec5 | 465 x 468 x 6 | 867441 |
+| bigblue1 | 227 x 227 x 6 | 282974 |
+| bigblue2 | 468 x 471 x 6 | 576816 |
+| bigblue3 | 555 x 557 x 8 | 1122340 |
+| bigblue4 | 403 x 405 x 8 | 2228903 |
+| newblue1 | 399 x 399 x 6 | 331663 |
+| newblue2 | 557 x 463 x 6 | 463213 |
+| newblue3 | 973 x 1256 x 6 | 551667 |
+| newblue4 | 455 x 458 x 6 | 636195 |
+| newblue5 | 637 x 640 x 6 | 1257555 |
+| newblue6 | 463 x 464 x 6 | 1286452 |
+| newblue7 | 488 x 490 x 8 | 2635625 |
+
+Runs queue behind Part 72 (which picks the router/settings), smallest
+first, as `run_batch.sh` batches.
