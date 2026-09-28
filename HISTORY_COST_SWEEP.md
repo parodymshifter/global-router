@@ -6813,7 +6813,7 @@ an escalated net takes congestion-only shapes, where NTHU reroutes only the
 2-pin piece that crosses overflow and leaves the rest on its short initial
 route. That is the runtime item too (next).
 
-## Part 71: `gr/pd9route.cpp` -- the search stage's cost -- running
+## Part 71: `gr/pd9route.cpp` -- the search stage's cost
 
 Why NTHU-Route takes minutes where this pipeline takes hours (from its
 code, Parts 52/58/63, and this project's traces): it reroutes only the
@@ -6838,3 +6838,19 @@ with it).
 
 Screen, adaptec1, full pipeline from scratch (Part 68 settings, pd7/pd8
 defaults): base; slow pieces; slow pieces + stop at 300.
+
+**Part 71 results, adaptec1** (full pipeline from scratch, Part 68 settings
++ pd7/pd8 defaults; all `status=OK`, `gr_verify` and `eval2008.pl` agree):
+
+| run | 2D after slow tier | real overflow | scored WL | runtime |
+|---|---|---|---|---|
+| base | 0 (slow round 104) | 0 | 5967713 | 5032s |
+| `PD9ROUTE_SLOW_PIECES=1` | 0 (slow round 83) | 0 | 5988471 | 3334s (-34%) |
+| **pieces + `PD9ROUTE_STOP_AT=300`** | 264 (stopped at slow round 45) | **0** | **5410200** (-9.3%) | **3283s (-35%)** |
+
+**Stopping the slow tier early is a wirelength win as well as a runtime
+one:** the region / refinement / recovery stages cleared the remaining 264
+with no wire penalty, while the extra 40-60 slow rounds of congestion-only
+negotiation (WL weight ~1e-3) had cost ~0.56M of scored wirelength.
+**adaptec1: 0 overflow at 5410200 -- within 0.9% of NTHU-Route's 5359901.**
+Running bigblue1 and newblue1 with the same settings (Part 71b).
