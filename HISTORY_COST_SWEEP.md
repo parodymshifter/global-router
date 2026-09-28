@@ -6982,6 +6982,6 @@ build), Part 71 settings unchanged.** Finished so far (all `status=OK`,
 | newblue5 | 1257555 | 212 | **0** | 0 | 23383430 | 6572s | 3920MB |
 
 Running: newblue3, newblue6, bigblue4; queued: newblue7. **Twelve ISPD 2008
-benchmarks routed so far, eleven at zero overflow** (adaptec1-5,
+benchmarks routed so far, ten at zero overflow** (adaptec1-5,
 bigblue1-3, newblue2, newblue5; newblue1 54, newblue4 148), from one
 setting with no per-benchmark tuning.
