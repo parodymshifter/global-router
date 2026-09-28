@@ -6855,6 +6855,21 @@ negotiation (WL weight ~1e-3) had cost ~0.56M of scored wirelength.
 **adaptec1: 0 overflow at 5410200 -- within 0.9% of NTHU-Route's 5359901.**
 Running bigblue1 and newblue1 with the same settings (Part 71b).
 
+**Part 71b -- the same settings (pieces + stop at 300) on bigblue1 and
+newblue1**, full pipeline from scratch (`status=OK`, both scorers agree):
+
+| benchmark | slow tier stopped at | region / refine | real overflow | max | scored WL | runtime |
+|---|---|---|---|---|---|---|
+| adaptec1 (71a) | 264 | -> 0 | **0** | 0 | 5410200 | 3283s |
+| bigblue1 | 280 | region 280 -> 0 in 44 rounds | **0** | 0 | 5701936 | 3835s |
+| newblue1 | 296 | region 296 -> 68 (500 rounds), refine -> 54 | **54** | 2 | 5021599 | 7741s |
+
+**One pd9route command, one setting: 0 / 0 / 54 -- the best on all three
+(newblue1 54 < the from-file 56), at 3.3-7.7 thousand seconds per
+benchmark** vs ~4.8-21.8 thousand for Part 68's one command (newblue1 -64%,
+bigblue1 -46%), with scored WL 5.41M / 5.70M / 5.02M (adaptec1 within 0.9%
+of NTHU-Route).
+
 ## Part 73: the full ISPD 2008 suite -- downloaded
 
 The 13 remaining ISPD 2008 benchmarks, downloaded 2026-09-28 from the
