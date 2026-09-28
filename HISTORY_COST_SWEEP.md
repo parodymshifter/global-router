@@ -6627,7 +6627,7 @@ much larger build with no guarantee of a decisive answer. `lpbound` stays
 as a tool: it gives valid certificates whenever one exists at its lengths
 (the forced-corridor self-test reaches the exact minimum).
 
-## Part 66: one command, one setting, all three benchmarks -- running
+## Part 66: one command, one setting, all three benchmarks
 
 `pd5route` from scratch, identical settings everywhere: 2D full budget
 (60/150/200, `round` 48/+2/200, pd + keep) -> hotspot rip-up 200 rounds ->
@@ -6689,3 +6689,24 @@ reroutes every piece in the box and discards it (the from-90 run climbs back
 to hundreds and never returns below 90 in 200 rounds).
 
 **Best per benchmark: adaptec1 0, bigblue1 0, newblue1 56 -- total 56.**
+
+**Part 66 results** (`pd5route`, one setting, from scratch; all
+`status=OK`, `gr_verify` and `eval2008.pl` agree):
+
+| benchmark | 2D after search | region (whole nets, 200) | refine (revert) | real | max | scored WL | time |
+|---|---|---|---|---|---|---|---|
+| adaptec1 | 0 | -- | -- | **0** | 0 | 8679261 | 4797s |
+| bigblue1 | 60 | -> ... | -> 0 | **0** | 0 | 7962328 | 7261s |
+| newblue1 | 1108 | 1108 -> **1056** | -> 818 | 818 | 2 | 7898515 | 39239s |
+
+adaptec1 and bigblue1 reach zero from one command. newblue1 does not
+reproduce the from-file result for the same settings (Part 64c: region
+1108 -> 318, final 236): in-process, each net's `pts` still carry the 2D
+stage's Steiner points (route() replaces pts with the exact-Steiner
+solution's points), so every whole-net MSMV reroute must reconnect those
+old branch points too, which pins the region negotiation in place; the
+from-file path (`prepareFor2DRefine`) uses pin tiles only. The fix is to
+give the post-2D stages pin-only terminals in-process as well (a new
+generation, since pd5route is committed). Piece mode (pd6route, Part 68,
+running) builds its trees from the wiring and the pins, not from `pts`, so
+it may not be affected.
