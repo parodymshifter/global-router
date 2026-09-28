@@ -6784,3 +6784,31 @@ overflow. What is left against NTHU: 2D corners (+63%) and wire (+13%) --
 the negotiation's trees carry more branches and turns than NTHU's
 FLUTE-plus-L-shape starting routes, and recovery only reroutes a piece
 within its own tree.
+
+## Part 70: `gr/pd8route.cpp` -- whole-net tree rebuild (small)
+
+`pd8route` (forked from `pd7route`) adds `rebuild2D` before piece recovery:
+each net (<= 32 pins) regrown from its pins alone, Prim-style, by the
+bend-aware search over only tile edges with room, kept if its shape cost
+(tile edges + 3 x corner tiles) is strictly lower. `PD8ROUTE_REBUILD=0` is
+byte-identical to pd7route (adaptec1 from the Part 68 solution, `cmp`).
+Self-test 464 checks (a wasteful 3-pin tree, cost 34 -> 13, rebuilt to the
+optimal 10 tile edges; an optimal L left untouched).
+
+adaptec1 from the Part 68 solution (all `status=OK`, 0 overflow; pd7route
+default 5991707):
+
+| rebuild setting | nets rebuilt | 2D wire after rebuild | scored WL |
+|---|---|---|---|
+| margin 8, <= 32 pins | 48989 | 4172124 | 5991122 |
+| **margin 16**, <= 32 pins | 49411 | 4133703 | **5958029** (-0.6%) |
+| margin 8, <= 200 pins | 50378 | 4152523 | 5981535 |
+
+A small gain: the rebuild does shorten ~49000 nets, but pd7route's piece
+recovery had already captured almost all of it. Near zero overflow nearly
+every edge is full, so capacity-respecting local moves are locked in. The
+extra wire is made earlier, by the search stage: pd2route's slow tier
+reroutes *whole* nets under a WL weight decayed to ~1e-3, so every part of
+an escalated net takes congestion-only shapes, where NTHU reroutes only the
+2-pin piece that crosses overflow and leaves the rest on its short initial
+route. That is the runtime item too (next).
