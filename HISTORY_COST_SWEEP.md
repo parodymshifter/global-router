@@ -6737,3 +6737,50 @@ is within the region negotiation's round-to-round noise (70-88 over rounds
 399-499 there). Against the session's starting point -- `nv11route`
 `round` 48/+2/200 at 112086 -- that is -99.94%; against the committed
 margin-6 `nv4route` (277344), -99.98%.
+
+## Part 69: `gr/pd7route.cpp` -- wirelength
+
+With overflow at 0 / 0 / 66, the next ranking criterion is scored
+wirelength (wire + 1 per via), where Part 68 scores 8.68M / 7.80M / 7.92M
+against NTHU-Route's 5.36M on adaptec1 (regenerated here: wire 3585305,
+vias 1774596). Via breakdown (script over the route files; a via is
+charged to a tile that is a 2D corner of its net, else to a pin tile, else
+"straight"):
+
+| adaptec1 | wire | 2D corners | vias | at corners | at pins | straight |
+|---|---|---|---|---|---|---|
+| Part 68 + WL recovery (bend 2), old LA | 4039828 | 619040 | 3452675 | 1179408 | **2218029** | 55238 |
+| + pin-aware LA | 4039828 | 619040 | 2028932 | 922757 | 1029367 | 76808 |
+| NTHU-Route 2.0 | 3585305 | 379140 | 1774596 | 655127 | 1074241 | 45228 |
+
+Two mechanisms, both unable to raise overflow:
+1. **Pin-aware layer assignment** (`PD7ROUTE_LA_PINS=1`): a pin node's
+   via stack in the nthu DP must reach its pins' layers, so pin access is
+   priced in the DP (as NTHU's `rec_count` does); before, the DP chose
+   layers blind to pins and pin stitching then added 4-5 vias per pin to
+   reach wires on the top layers. Alone: adaptec1 8.68M -> 7.23M.
+2. **Wirelength and bend recovery** (`PD7ROUTE_WL=1`): every piece of every
+   net regrown by a bend-aware search (1 per tile edge + `bend` per corner)
+   over only tile edges with room, kept only if strictly cheaper.
+
+adaptec1 sweep from the Part 68 solution (all `status=OK`, 0 overflow):
+old LA + recovery bend 1 / 2 -> 7511021 / 7492503; pin-aware LA alone
+7233158; both, bend 2 -> 6068760; bend 3 / 4 passes -> 6050170; bend 4 ->
+6048934; bend 3 / 4 passes / margin 8 -> **5991707** (defaults). Parity:
+`PD7ROUTE_WL=0 PD7ROUTE_LA_PINS=0` is byte-identical to pd6route.
+Self-test 457 checks.
+
+**All three, pd7route defaults on the Part 68 2D solutions** (`status=OK`;
+`gr_verify` and `eval2008.pl` agree):
+
+| benchmark | overflow | scored WL, Part 68 | **scored WL, pd7route** | change | post-2D time |
+|---|---|---|---|---|---|
+| adaptec1 | 0 | 8679261 | **5991707** | -31.0% | 107s |
+| bigblue1 | 0 | 7798929 | **5751121** | -26.3% | 91s |
+| newblue1 | 66 | 7919994 | **5056905** | -36.1% | 59s |
+
+adaptec1 is now within 11.8% of NTHU-Route's 5359901 at the same zero
+overflow. What is left against NTHU: 2D corners (+63%) and wire (+13%) --
+the negotiation's trees carry more branches and turns than NTHU's
+FLUTE-plus-L-shape starting routes, and recovery only reroutes a piece
+within its own tree.

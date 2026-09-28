@@ -138,6 +138,12 @@ newblue1's last few dozen sit in one 30 x 29-tile hotspot; `gr/lpbound.cpp`
 forced. Wirelength (7.8-8.7M scored) is well above NTHU-Route's (5.36M on
 adaptec1) -- the next frontier after overflow.
 
+**Wirelength, same day** (`gr/pd7route.cpp`, Part 69): pin-aware layer
+assignment (a pin node's via stack must reach its pin layer inside the DP)
+and an overflow-safe wirelength/bend recovery pass cut scored wirelength to
+**5.99M / 5.75M / 5.06M** (-26 to -36%) at unchanged overflow 0 / 0 / 66 --
+adaptec1 within 12% of NTHU-Route's 5.36M.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

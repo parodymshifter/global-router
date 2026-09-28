@@ -58,6 +58,7 @@ pd3route
 pd4route
 pd5route
 pd6route
+pd7route
 lpbound
 *.o
 bench/
