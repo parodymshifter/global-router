@@ -2,6 +2,19 @@
 #   cmake -S gr/gpu -B gr/gpu/build && cmake --build gr/gpu/build
 #   gr/gpu/build/pattern_selftest
 cmake_minimum_required(VERSION 3.20)
+# Build natively on Apple silicon even when cmake itself is an Intel binary
+# running under Rosetta (as /usr/local/bin/cmake is here): otherwise every
+# target is x86_64, runs translated, and its floating point differs from the
+# native one-line g++ build (arm64 fuses multiply-adds) -- which is exactly
+# how pd11route_gpu first diverged from pd11route (HISTORY_COST_SWEEP.md
+# Part 72). Must be set before project().
+if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
+  execute_process(COMMAND sysctl -n hw.optional.arm64 OUTPUT_VARIABLE GR_ARM64 ERROR_QUIET
+                  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(GR_ARM64 STREQUAL "1")
+    set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "Target architecture" FORCE)
+  endif()
+endif()
 project(gr_gpu LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,6 +22,13 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 add_compile_options(-Wall -Wextra)
+# Same optimization as every router's one-line `g++ -std=c++17 -O2 -Wall
+# -Wextra` build -- not CMake's Release default (-O3 -DNDEBUG). The router's
+# floating-point paths round differently at -O3, so a CMake-built router
+# diverged from the g++-built one (HISTORY_COST_SWEEP.md Part 72); with
+# identical flags the builds must produce byte-identical routes.
+set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+set(CMAKE_OBJCXX_FLAGS_RELEASE "-O2")
 
 # The Metal source is embedded as a string for the run-time-compile fallback.
 file(READ ${CMAKE_CURRENT_SOURCE_DIR}/pattern_kernel.metal MSL_SOURCE)
