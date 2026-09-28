@@ -6969,3 +6969,19 @@ of five new benchmarks reach zero overflow with no per-benchmark tuning.
 newblue4, like newblue1, keeps a residue after the region stage's 500
 rounds. Across the eight ISPD 2008 benchmarks routed so far: seven at zero
 (adaptec1-3, bigblue1-2, newblue2), newblue1 54, newblue4 148.
+
+**Part 73b (in progress) -- the eight larger benchmarks, pd11route (CPU
+build), Part 71 settings unchanged.** Finished so far (all `status=OK`,
+`gr_verify` and `eval2008.pl` agree):
+
+| benchmark | nets | 2D at slow-tier stop | real overflow | max | scored WL | runtime | peak RSS |
+|---|---|---|---|---|---|---|---|
+| adaptec4 | 515304 | 260 | **0** | 0 | 12234727 | 545s | 2822MB |
+| adaptec5 | 867441 | 296 | **0** | 0 | 15851373 | 5253s | 3480MB |
+| bigblue3 | 1122340 | 266 | **0** | 0 | 13189107 | 1605s | 2816MB |
+| newblue5 | 1257555 | 212 | **0** | 0 | 23383430 | 6572s | 3920MB |
+
+Running: newblue3, newblue6, bigblue4; queued: newblue7. **Twelve ISPD 2008
+benchmarks routed so far, eleven at zero overflow** (adaptec1-5,
+bigblue1-3, newblue2, newblue5; newblue1 54, newblue4 148), from one
+setting with no per-benchmark tuning.
