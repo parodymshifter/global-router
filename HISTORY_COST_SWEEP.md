@@ -6906,3 +6906,35 @@ newblue3, newblue5, newblue6, newblue7) run only on whichever code proves
 significantly faster** -- if Part 72's pattern stage (pd11route, CPU or
 Metal) cuts runtime materially at equal quality, they run on that; they do
 not start on pd9route.
+
+## Part 72: `gr/pd11route.cpp` -- the batched pattern stage
+
+**Part 72a** (adaptec1, full pipeline from scratch, Part 71 settings; all
+`status=OK`, `gr_verify` and `eval2008.pl` agree):
+
+| run | pattern stage | slow tier stopped at | real overflow | scored WL | runtime |
+|---|---|---|---|---|---|
+| pd9route (Part 71a) | -- (60 fast rounds + cleanup) | 264 | 0 | 5410200 | 3283s |
+| **pd11route, CPU backend** | 602280 pieces, 30 rounds, 2D 175338 | 224 | **0** | **5414046** (+0.07%) | **2065s (-37%)** |
+| pd11route_gpu, Metal backend | same, 2D 175338 | 264 | 0 | 5416153 | 2669s |
+
+The pattern stage replaces the 60 fast rounds and the 30-pass cleanup at
+the same quality and 37% less total runtime. Of 2938504 slow-tier piece
+reroutes in the CPU run, 443400 (15%) were settled by an L/Z shape without a
+maze search (pd10route's pattern-first).
+
+Parity (small budget, `cmp`): pd10route with `PD10ROUTE_PATTERN_FIRST=0` ==
+pd9route; pd11route with `PD11ROUTE_PATTERN=0` == pd10route.
+
+**The CPU and Metal full runs are not byte-identical** although the kernel is
+(pattern_selftest) and both runs leave the pattern stage at the same 2D
+overflow; they diverge in the slow tier (stopped at 224 vs 264). Suspected
+cause: the binaries differ -- `pd11route` is the one-line `g++ -O2` build,
+`pd11route_gpu` CMake's Release (`-O3`) -- and the router's floating-point
+paths (pricing, pow/exp) can round differently between them. Being isolated
+at a small budget (same CMake binary, `GR_GPU=cpu` vs `=metal`; and the g++
+build vs the CMake build on CPU).
+
+**Decision, per the Part 73 rule:** the pattern stage is significantly
+faster at equal quality, so the eight larger ISPD 2008 benchmarks run on
+`pd11route` (CPU build, the verified configuration) -- Part 73b.
