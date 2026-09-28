@@ -6935,6 +6935,20 @@ paths (pricing, pow/exp) can round differently between them. Being isolated
 at a small budget (same CMake binary, `GR_GPU=cpu` vs `=metal`; and the g++
 build vs the CMake build on CPU).
 
+**Resolved: it was the build, not the backend.** Isolation (small budget):
+the same CMake binary gave byte-identical routes with `GR_GPU=cpu` and
+`GR_GPU=metal`, but differed from the g++ binary. Cause: `/usr/local/bin/cmake`
+is an Intel binary running under Rosetta, so CMake built **x86_64** targets
+(`-arch x86_64` in flags.make) that ran translated on the M4 Pro -- different
+floating point (arm64 fuses multiply-adds; this x86_64 build does not) and
+slower (the Metal full run's 2669s vs 2065s). Fix in `gr/gpu/CMakeLists.txt`:
+on Apple silicon (`sysctl hw.optional.arm64`), force
+`CMAKE_OSX_ARCHITECTURES=arm64`, and pin `-O2` to match the one-line build.
+Now **the g++ CPU build and the native CMake Metal build produce
+byte-identical route files end to end.** Native kernel timing (1M pieces,
+399x399): CPU 0.061s, Metal 0.014s (4.4x; the earlier 4.7x was measured
+under Rosetta).
+
 **Decision, per the Part 73 rule:** the pattern stage is significantly
 faster at equal quality, so the eight larger ISPD 2008 benchmarks run on
 `pd11route` (CPU build, the verified configuration) -- Part 73b.

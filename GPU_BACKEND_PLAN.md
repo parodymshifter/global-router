@@ -10,7 +10,12 @@ run-time-compile fallback, and `pattern_selftest`. Measured on the M4 Pro:
 Metal bit-identical to the CPU reference on 21/21 random batches (2x2 to
 399x399, up to 100000 pieces) and on a 1,000,000-piece batch, with both the
 offline library and the run-time compile; 1M pieces on 399x399 in 0.018 s vs
-0.087 s on one CPU core (4.7x, including per-call buffer setup). Not yet
+0.087 s on one CPU core (4.7x, including per-call buffer setup) -- measured
+under Rosetta; natively (arm64, after the CMake fix) 0.014 s vs 0.061 s,
+4.4x. End to end, the native Metal build of pd11route is byte-identical to
+the one-line g++ CPU build (HISTORY_COST_SWEEP.md Part 72). Build note: an
+Intel `cmake` under Rosetta builds x86_64 targets unless told otherwise;
+CMakeLists.txt forces arm64 on Apple silicon. Not yet
 wired into a router (that is phase A's CPU pattern stage + the batch
 driver). This fills in step 5 of
 the roadmap agreed in the session that produced `pd9route`:
