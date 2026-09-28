@@ -6883,3 +6883,11 @@ ispd.cc/contests/08/benchmark/, 311 MB gzipped, 1.1 GB total in
 
 Runs queue behind Part 72 (which picks the router/settings), smallest
 first, as `run_batch.sh` batches.
+
+Plan (user instruction, 2026-09-28): Part 73a runs the five smallest new
+benchmarks (adaptec2, newblue2, adaptec3, bigblue2, newblue4) on pd9route's
+Part 71 settings. **The larger ones (adaptec4, adaptec5, bigblue3, bigblue4,
+newblue3, newblue5, newblue6, newblue7) run only on whichever code proves
+significantly faster** -- if Part 72's pattern stage (pd11route, CPU or
+Metal) cuts runtime materially at equal quality, they run on that; they do
+not start on pd9route.
