@@ -127,6 +127,17 @@ gives vias no capacity), NTHU's net order -- and real overflow now equals
 2D overflow on all three benchmarks: adaptec1 0, bigblue1 58, newblue1 1186
 (`HISTORY_COST_SWEEP.md` Part 62). What remains is the 2D stage's.
 
+**2026-09-27: bigblue1 reaches zero too, and one command reproduces the
+best on all three.** `gr/pd6route.cpp` (Part 68) adds NTHU's refinement
+stage (`pd4route`), a hotspot rip-up that renegotiates every net around the
+remaining overflow (`pd5route`), and NTHU's 2-pin-piece rip-up granularity
+(`pd6route`). One setting, from scratch: **adaptec1 0, bigblue1 0, newblue1
+66** (legal, `eval2008.pl`-cross-checked; the exact command is in Part 68).
+newblue1's last few dozen sit in one 30 x 29-tile hotspot; `gr/lpbound.cpp`
+(an LP-duality lower-bound tool, Part 65) could not certify any of it as
+forced. Wirelength (7.8-8.7M scored) is well above NTHU-Route's (5.36M on
+adaptec1) -- the next frontier after overflow.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

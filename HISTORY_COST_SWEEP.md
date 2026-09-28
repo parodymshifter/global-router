@@ -6710,3 +6710,30 @@ give the post-2D stages pin-only terminals in-process as well (a new
 generation, since pd5route is committed). Piece mode (pd6route, Part 68,
 running) builds its trees from the wiring and the pins, not from `pts`, so
 it may not be affected.
+
+## Part 68: one `pd6route` command, one setting, all three benchmarks
+
+    VROUTE_FAST_ROUNDS=60 VROUTE_SLOW_ROUNDS=150 NV2ROUTE_VIA_ROUNDS=200
+    NV11ROUTE_BOX_MODE=round NV11ROUTE_BOX_INIT=48 NV11ROUTE_BOX_GROW=2 NV11ROUTE_BOX_CAP=200
+    PD1ROUTE_COST=pd PD2ROUTE_ACCEPT=keep PD6ROUTE_PIECES=1
+    PD5ROUTE_REGION=1 PD5ROUTE_REGION_ROUNDS=500
+    PD4ROUTE_REFINE_ACCEPT=revert PD4ROUTE_REFINE_ITERS=60 PD4ROUTE_REFINE_BOX_INC=5
+    ./pd6route <benchmark.gr> <out.route>        (layer assignment: nthu, the default)
+
+All `status=OK` (legal; `gr_verify` and `eval2008.pl` agree):
+
+| benchmark | 2D after search | region (pieces) | refine | **real overflow** | max | scored WL | time |
+|---|---|---|---|---|---|---|---|
+| adaptec1 | 0 | -- | -- | **0** | 0 | 8679261 | 4817s |
+| bigblue1 | 60 | box x 0-220 y 85-155, 85716 nets: 60 -> 0 in 31 rounds | -- | **0** | 0 | 7798929 | 7085s |
+| newblue1 | 1108 | 1108 -> 80 (500 rounds) | -> 66 | **66** | 2 | 7919994 | 21759s |
+| **total** | | | | **66** | | | 33661s |
+
+**One reproducible command, one setting: adaptec1 0, bigblue1 0, newblue1
+66 -- total 66.** Piece mode also removes Part 66's in-process problem
+(whole-net region negotiation pinned by Steiner-point terminals: 1108 ->
+1056 there, 1108 -> 80 here). newblue1's 66 vs the from-file 56 (Part 67b)
+is within the region negotiation's round-to-round noise (70-88 over rounds
+399-499 there). Against the session's starting point -- `nv11route`
+`round` 48/+2/200 at 112086 -- that is -99.94%; against the committed
+margin-6 `nv4route` (277344), -99.98%.
