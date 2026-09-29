@@ -71,6 +71,7 @@ runs/
 gr/gpu/build/
 pd10route
 pd11route
+pd12route
 pd11route_gpu
 gr/pattern_kernel.metallib
 gr/*.run

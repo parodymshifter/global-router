@@ -76,6 +76,9 @@ jobs:
           - pd7route
           - pd8route
           - pd9route
+          - pd10route
+          - pd11route
+          - pd12route
           - lpbound
     steps:
       - uses: actions/checkout@v4
