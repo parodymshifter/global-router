@@ -6981,6 +6981,19 @@ build), Part 71 settings unchanged.** Finished so far (all `status=OK`,
 | bigblue3 | 1122340 | 266 | **0** | 0 | 13189107 | 1605s | 2816MB |
 | newblue5 | 1257555 | 212 | **0** | 0 | 23383430 | 6572s | 3920MB |
 | newblue6 | 1286452 | 288 | **0** | 0 | 18321622 | 6382s | 3707MB |
+| bigblue4 | 1133537 | 408 | 378 | 2 | 24851982 | 83888s | 4363MB |
+| newblue7 | 1647412 | 634 | 106 | 2 | 36163657 | 97346s | 4665MB |
+
+bigblue4: region box x 197-217 y 127-152 (9887 nets), 408 -> 406 over all
+500 rounds -- ~22 of its 23.3 hours for 2 units; refinement 406 -> 378.
+newblue7: region box x 98-234 y 240-354 (265927 nets), 634 -> 138 (500
+rounds), refinement -> 106. Against the contest routers (LMgr Table II,
+above): bigblue4 378 is worse than all four (166-256), wirelength +9% vs
+NTHU-Route 2.0's 22.80M; newblue7 106 beats NTUgr (364) and FastRoute 3.0
+(580), behind NTHU-Route 2.0 (68) and LMgr (88), wirelength +1.8% vs
+NTHU's 35.52M. The region stage's MSMV margin grows boxInit + 2 per round
+with no cap (10 -> 1008 tiles by round 499), which is a likely reason its
+late rounds cost ~2.5 min each even on bigblue4's 20 x 25-tile box.
 
 Running: newblue3, bigblue4, newblue7. **Thirteen ISPD 2008 benchmarks
 routed so far, eleven at zero overflow** (adaptec1-5, bigblue1-3,
@@ -7054,3 +7067,13 @@ three route files must be byte-identical; pd12route with an active window
 (floor 0, 50% gain) must stop early and stay legal. Then newblue3, Part 71
 settings + `PD12ROUTE_REGION_PLATEAU=50 _REFINE_PLATEAU=10 _PLATEAU_GAIN=1
 _PLATEAU_MIN=1000`, alongside the still-running pd11route newblue3.
+
+Parity (all `status=OK`, `gr_verify` = `eval2008.pl`): pd11route,
+pd12route default and pd12route with windows 2/1 but floor 10^9 -- route
+files **byte-identical** (156556683 bytes each), real overflow 310, WL
+5470515; stage times now reported (region 8 rounds 79.1s, refinement 4
+iterations 10.3s). With an active window (floor 0, gain 50%): region stops
+after 2 rounds ("plateau stop", best still the starting 26046 -- round 0
+reroutes every net in the box and overflow spikes before it falls, so a
+window must be longer than that recovery), refinement after 1; legal,
+real overflow 21986.
