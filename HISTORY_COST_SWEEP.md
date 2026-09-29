@@ -7077,3 +7077,25 @@ after 2 rounds ("plateau stop", best still the starting 26046 -- round 0
 reroutes every net in the box and overflow spikes before it falls, so a
 window must be longer than that recovery), refinement after 1; legal,
 real overflow 21986.
+
+**newblue3 on pd12route** (Part 71 settings + region window 50, refine
+window 10, gain 1%, floor 1000; `status=OK`, `gr_verify` = `eval2008.pl`):
+real overflow **38704**, max 364, scored WL 10779692, **29754s (8.3 h)**,
+peak RSS 3144MB. Slow tier 150 rounds -> 41000; region stopped by the
+plateau rule after **59 rounds, 2035s** (41000 -> 38836: 62286 at round 0,
+39052 at 9, 38864 at 19, then flat); refinement stopped after 10
+iterations, 87s (38836 -> 38704); tree rebuild and WL recovery 7886356 ->
+7598221 2D wire. The pd11route run of the same benchmark was, at the same
+moment, 37 h in and at region round 265 with the same best 38836.
+
+The stage times say where pd11route's region hours went: 59 rounds took
+34 s each here, while pd11route's rounds 200+ take 10-13 minutes each --
+the region MSMV margin grows 10 + 2 per round, uncapped, so late rounds
+search boxes of hundreds of tiles for every net still overflowed. The
+plateau stop removes the rounds; a margin cap would make each remaining
+round cheap (the likely fix for bigblue4, whose residue is under the
+floor).
+
+Against the contest routers (LMgr Table II): 38704 is 22-25% above NTUgr
+31024, FastRoute 3.0 31642 and NTHU-Route 2.0 31810; wirelength 10.78M vs
+NTHU 10.63M (+1.4%) and LMgr 10.54M (+2.3%).
