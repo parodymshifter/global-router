@@ -144,6 +144,18 @@ and an overflow-safe wirelength/bend recovery pass cut scored wirelength to
 **5.99M / 5.75M / 5.06M** (-26 to -36%) at unchanged overflow 0 / 0 / 66 --
 adaptec1 within 12% of NTHU-Route's 5.36M.
 
+**2026-09-29: the full ISPD 2008 suite.** One setting (Part 71's), no
+per-benchmark tuning, all sixteen benchmarks legal and
+`eval2008.pl`-cross-checked: **eleven at zero overflow** (adaptec1-5,
+bigblue1-3, newblue2, newblue5, newblue6); newblue1 54, newblue4 148,
+newblue7 106, bigblue4 378, newblue3 38704 (every published router leaves
+~31000 there). Wirelength +0.3% to +9.2% vs NTHU-Route 2.0. Runtime is
+the remaining gap -- up to 27 h on the largest non-zero benchmarks.
+Routers: `pd9route`, then `pd11route` (batched pattern stage, -37% runtime
+at equal quality; Metal backend bit-identical to the CPU), then
+`pd12route` (plateau stop for the late stages). Table:
+`HISTORY_COST_SWEEP.md` Part 75.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

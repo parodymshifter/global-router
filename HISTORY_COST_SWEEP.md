@@ -7099,3 +7099,56 @@ floor).
 Against the contest routers (LMgr Table II): 38704 is 22-25% above NTUgr
 31024, FastRoute 3.0 31642 and NTHU-Route 2.0 31810; wirelength 10.78M vs
 NTHU 10.63M (+1.4%) and LMgr 10.54M (+2.3%).
+
+**pd11route newblue3 stopped** (2026-09-29, on the user's instruction):
+killed at 37 h, region round 273 of 500, best 38836 (reached at round 16,
+unchanged for the ~257 rounds since); `status=ROUTER_FAILED exit=143`, no
+route file. pd12route's result above (38704) is newblue3's entry.
+
+## Part 75 -- the full ISPD 2008 suite
+
+All sixteen benchmarks, one setting (Part 71's), no per-benchmark tuning;
+every result `status=OK`, `gr_verify` and `eval2008.pl` agreeing on total
+overflow, max overflow and wirelength. Router: pd9route (Parts 71, 73a),
+pd11route (73b; same pipeline plus the pattern stage), pd12route (74;
+plus the plateau stop -- newblue3 only). Reference: NTHU-Route 2.0, the
+2008 winner, as re-run in LMgr (ISQED 2013) Table II on a 1.6 GHz quad
+core (overflow / WL x 1e5 / minutes), and the best overflow of the four
+routers in that table (NTHU-Route 2.0, NTUgr, FastRoute 3.0, LMgr).
+
+| benchmark | overflow | max | scored WL | runtime | router | NTHU-Route 2.0 (LMgr re-run) | best of four | WL vs NTHU |
+|---|---|---|---|---|---|---|---|---|
+| adaptec1 | **0** | 0 | 5410200 | 3283s | pd9route | 0 / 53.6 / 10 min | 0 | +0.9% |
+| adaptec2 | **0** | 0 | 5267444 | 1933s | pd9route | 0 / 52.4 / 5 min | 0 | +0.5% |
+| adaptec3 | **0** | 0 | 13235180 | 5899s | pd9route | 0 / 131.5 / 10 min | 0 | +0.6% |
+| adaptec4 | **0** | 0 | 12234727 | 545s | pd11route | 0 / 121.8 / 3 min | 0 | +0.4% |
+| adaptec5 | **0** | 0 | 15851373 | 5253s | pd11route | 0 / 155.4 / 27 min | 0 | +2.0% |
+| bigblue1 | **0** | 0 | 5701936 | 3835s | pd9route | 0 / 55.7 / 20 min | 0 | +2.4% |
+| bigblue2 | **0** | 0 | 9443492 | 4148s | pd9route | 86 / 90.0 / 21 min | 0 | +4.9% |
+| bigblue3 | **0** | 0 | 13189107 | 1605s | pd11route | 32 / 130.7 / 15 min | 0 | +0.9% |
+| bigblue4 | 378 | 2 | 24851982 | 83888s | pd11route | 256 / 228.0 / 135 min | 166 | +9.0% |
+| newblue1 | 54 | 2 | 5021599 | 7741s | pd9route | 164 / 46.0 / 28 min | 0 | +9.2% |
+| newblue2 | **0** | 0 | 7614709 | 141s | pd9route | 0 / 75.9 / 2 min | 0 | +0.3% |
+| newblue3 | 38704 | 364 | 10779692 | 29754s | pd12route | 31810 / 106.3 / 22 min | 31024 | +1.4% |
+| newblue4 | 148 | 2 | 13069979 | 21026s | pd9route | 222 / 128.9 / 56 min | 144 | +1.4% |
+| newblue5 | **0** | 0 | 23383430 | 6572s | pd11route | 18 / 231.4 / 40 min | 0 | +1.1% |
+| newblue6 | **0** | 0 | 18321622 | 6382s | pd11route | 0 / 176.9 / 52 min | 0 | +3.6% |
+| newblue7 | 106 | 2 | 36163657 | 97346s | pd11route | 68 / 355.2 / 1491 min | 68 | +1.8% |
+
+**Eleven of sixteen at zero overflow**, every benchmark any router in the
+table routes to zero except newblue1 (LMgr reaches 0; ours 54). Against
+NTHU-Route 2.0's re-run: better overflow on five (bigblue2, bigblue3,
+newblue5 -- zero where it is not -- and newblue1, newblue4), worse on
+three (bigblue4, newblue3, newblue7). Wirelength within +0.3% to +2.4% on
+twelve; +3.6% to +9.2% on bigblue2, newblue6, bigblue4 and newblue1.
+(LMgr's re-run of NTHU-Route 2.0 left residues on some benchmarks its
+contest submission cleared -- the comparison is to that re-run, on slower
+hardware, not to the contest-day numbers, which are no longer online.)
+
+Runtime is the gap: 2 minutes (newblue2) to 27 hours (newblue7) here, vs
+2 minutes to 25 hours for NTHU-Route 2.0 on a slower machine, and the
+slow cases are the non-zero ones -- the region stage's uncapped margin
+growth (Part 74) and the slow tier's 150 rounds on residues that never
+reach the 300 stop. Next runtime targets, in order: cap the region
+margin; extend the plateau rule's evidence to the slow tier; then roadmap
+step 4 (multithreading).
