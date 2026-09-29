@@ -6980,8 +6980,77 @@ build), Part 71 settings unchanged.** Finished so far (all `status=OK`,
 | adaptec5 | 867441 | 296 | **0** | 0 | 15851373 | 5253s | 3480MB |
 | bigblue3 | 1122340 | 266 | **0** | 0 | 13189107 | 1605s | 2816MB |
 | newblue5 | 1257555 | 212 | **0** | 0 | 23383430 | 6572s | 3920MB |
+| newblue6 | 1286452 | 288 | **0** | 0 | 18321622 | 6382s | 3707MB |
 
-Running: newblue3, newblue6, bigblue4; queued: newblue7. **Twelve ISPD 2008
-benchmarks routed so far, ten at zero overflow** (adaptec1-5,
-bigblue1-3, newblue2, newblue5; newblue1 54, newblue4 148), from one
+Running: newblue3, bigblue4, newblue7. **Thirteen ISPD 2008 benchmarks
+routed so far, eleven at zero overflow** (adaptec1-5, bigblue1-3,
+newblue2, newblue5, newblue6; newblue1 54, newblue4 148), from one
 setting with no per-benchmark tuning.
+
+Mid-run (2026-09-29 08:24), 2D overflow, best so far: bigblue4 region
+stage done (500 rounds, best 406, reached long before round 500),
+refinement 378 at iteration 55 of 60; newblue7 region round 375, best 166,
+~2.4 min/round; newblue3 region round 229, best 38836 (flat within 0.1%
+since round ~50), ~13 min/round -- ~59 more hours of region rounds alone.
+Slow tier (all 150 rounds, none reached the 300 stop): newblue3 best 41000
+(42968 at round 50, 41682 at 100), bigblue4 408, newblue7 634.
+
+For reference, the contest routers on these three (LMgr, ISQED 2013,
+Table II: all re-run on one 1.6 GHz quad core; overflow / WL x 1e5 /
+minutes): newblue3 -- NTHU-Route 2.0 31810 / 106.3 / 22 (iterations cut
+to finish), NTUgr 31024 / 188.3 / 884 (from its paper), FastRoute 3.0
+31642 / 109.5 / 271, LMgr 34860 / 105.4 / 245; bigblue4 -- 256 / 228.0 /
+135, 184 / 240.5 / 1237, 228 / 244.2 / 52, LMgr 166 / 224.8 / 197;
+newblue7 -- 68 / 355.2 / 1491, 364 / 365.4 / 1404, 580 / 358.7 / 347,
+LMgr 88 / 348.1 / 183. Same table, for the two finished residues:
+newblue1 164 / 32 / 64 / LMgr 0 (ours 54); newblue4 222 / 152 / 208 /
+LMgr 144 (ours 148). No contest router reaches zero on newblue3,
+bigblue4, newblue4 or newblue7.
+
+## Part 74 -- pd12route: a plateau stop for the hotspot and refinement stages
+
+The region (hotspot) stage runs all `PD5ROUTE_REGION_ROUNDS` (500) and
+refinement all `PD4ROUTE_REFINE_ITERS` (60) unless overflow reaches zero;
+on the large non-zero benchmarks that is most of the run (Part 73b). Both
+stages already keep the best state seen, so a stop can only lose
+improvements later rounds would have found. `gr/pd12route.cpp`
+(forked from pd11route): `PD12ROUTE_REGION_PLATEAU=N` / `_REFINE_PLATEAU=N`
+stop a stage once its best has not fallen by `max(1, GAIN% of the best N
+rounds earlier)` over the last N rounds (`PD12ROUTE_PLATEAU_GAIN`, default
+1), applied only while the best is `>= PD12ROUTE_PLATEAU_MIN`. All off by
+default (pd11route byte for byte); the stage summaries now print each
+stage's wall time. 504 checks (474 inherited), including: on a stuck
+fixture (three nets, one-track row) each stage in both whole-net and piece
+mode runs all 40 rounds without a window, exactly 5 with window 5, and all
+40 again when the floor is one above the stuck overflow.
+
+**Replay of the rule on the recorded traces (no router time)** -- round at
+which it would stop -> best at that point, vs the full run:
+
+| run | stage | full run | W25 g1% | W50 g1% | W100 g1% |
+|---|---|---|---|---|---|
+| newblue1 (Part 71) | region | 500 rounds, best 68 | 169 -> 94 | 194 -> 94 | 244 -> 94 |
+| bigblue2 (73a) | region | 437 rounds -> **0** | 104 -> 10 | 129 -> 10 | 337 -> 4 |
+| newblue4 (73a) | region | 500, best 168 | 86 -> 220 | 259 -> 174 | 408 -> 168 |
+| bigblue4 (73b) | region | 500, best 406 | 99 -> 414 | 154 -> 406 | 204 -> 406 |
+| newblue7 (73b) | region | 377 so far, best 166 | 174 -> 212 | 199 -> 212 | (no stop) |
+| newblue3 (73b) | region | 231 so far, best 38836 | 34 -> 38836 | 59 -> 38836 | 109 -> 38836 |
+| newblue4 (73a) | refine | 60, best 148 | W5: 11 -> 150 | W10: 16 -> 150 | W20: 26 -> 150 |
+
+A window alone would cost results: bigblue2 reached zero only at round 437
+after long flat stretches (10 -> 4 -> 0), and newblue1's best region state
+came late (68 vs 94). The long tail is where small residues close. Hence
+the floor: the rule applies only to residues far from zero. With
+`MIN=1000` only newblue3 (~39000, unroutable to zero by every published
+router) is affected -- its region stage would stop at round 59 instead of
+500 with the same best (38836), roughly 70-90 hours saved. The slow tier
+is not given the rule: on newblue3 it still improves ~1% per 25 rounds at
+round 150.
+
+**Runs (batch `part74.jobs`)**: parity at a small budget on adaptec1 with
+region (8 rounds) and refinement (4 iterations) exercised -- pd11route vs
+pd12route default, and pd12route with windows set but floor 10^9 -- all
+three route files must be byte-identical; pd12route with an active window
+(floor 0, 50% gain) must stop early and stay legal. Then newblue3, Part 71
+settings + `PD12ROUTE_REGION_PLATEAU=50 _REFINE_PLATEAU=10 _PLATEAU_GAIN=1
+_PLATEAU_MIN=1000`, alongside the still-running pd11route newblue3.
