@@ -7172,3 +7172,25 @@ Screens (batch `part76.jobs`, Part 71 settings + Part 74 plateau settings
 margin 882 -- the risk), newblue4, bigblue4 (the runtime target: 23.3 h,
 ~22 h of it in region rounds), newblue1, newblue7. Judged on overflow
 (must not lose bigblue2's zero or worsen the residues) and runtime.
+
+## Part 77 -- ISPD 2024 format: verifier cross-checked against the contest evaluator
+
+Roadmap step 3, verification first. `gr/g24_verify.cpp` replicates the
+contest evaluator's scoring (`ISPD24_FORMAT.md`); `gr/g24_lroute.cpp` is
+the throwaway L-router that exists to feed it. Downloaded (user-approved)
+from `cuhk-eda/InstantGR`: `run/evaluator.cpp` (the evaluator source,
+compiled locally, BSD-3 license kept beside it) and the small benchmark
+`mempool_tile_rank` (.cap 5.6 MB, .net 20 MB: 135666 nets, 482811 pins,
+556569 access points -- 552966 on metal 1, 2895 on metal 3, 708 on metal 5
+-- on a 429 x 581 x 10 grid, first column pitch 1995, the rest 3800).
+
+| solution | WL cost | via cost | overflow cost | total | opens |
+|---|---|---|---|---|---|
+| empty | 0 | 0 | 2538617.8007 | -- | (all missing) |
+| L-router, lowest layer pair (ours = official) | 7828346.6313 | 4359252.0000 | 9327069661506788392960.0000 | 9327069661506799927296.0000 | 0 |
+| L-router, all layer pairs (ours = official) | 7828346.6313 | 14457436.0000 | 214189305.5220 | 236475088.1534 | 0 |
+
+Every printed digit agrees in both. The first L-router run left 7575 nets
+open in both scorers (the official one exits on the first): nets whose
+pins share one access point, for which it wrote nothing -- the evaluator
+only reaches access points a net covers.

@@ -81,6 +81,7 @@ jobs:
           - pd12route
           - pd13route
           - g24_verify
+          - g24_lroute
           - lpbound
     steps:
       - uses: actions/checkout@v4

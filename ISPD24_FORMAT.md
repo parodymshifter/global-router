@@ -65,10 +65,19 @@ instead.
 
 ## Status and plan
 
-1. **Verifier/scorer -- done**: `gr/g24_verify.cpp` (hand-computed
-   fixture, via-demand edge rules, zero-capacity rules, ten kinds of
-   broken solution). Next: cross-check against the official evaluator on
-   a real benchmark and solution, to the printed digit.
+1. **Verifier/scorer -- done and cross-checked**: `gr/g24_verify.cpp`
+   (hand-computed fixture, via-demand edge rules, zero-capacity rules, ten
+   kinds of broken solution). On `mempool_tile_rank` (135666 nets, 429 x
+   581 x 10) with solutions from the throwaway `gr/g24_lroute.cpp`, it
+   agrees with the official evaluator to every printed digit: lowest layer
+   pair -- WL cost 7828346.6313, via cost 4359252.0000, overflow cost
+   9327069661506788392960.0000; nets spread over all layer pairs
+   (`G24_LROUTE_SPREAD=1`) -- 7828346.6313 / 14457436.0000 /
+   214189305.5220 / total 236475088.1534, 0 open nets both. Learned on the
+   way: the evaluator reaches only access points the net itself covers,
+   so a net whose pins share one access point still needs a via there
+   (7575 such nets in this design; with no segment written they are open).
+   An empty solution already costs 2538617.8 in overflow (idle GCells).
 2. **Reader into the router's `Design`/`RoutingGrid`** (the porting seam:
    nothing below the grid learns the format). What the 2008 path lacks:
    non-uniform pitches (the wirelength term becomes per-edge length),
