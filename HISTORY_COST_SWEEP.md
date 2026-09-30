@@ -7276,3 +7276,23 @@ perturbations reaches 3.5%, far above the plan's 0.5% pass line.**
 Part 79, WL floors on bigblue2: 0.01 -> 0 / 9434596 / 2802s (-0.78% vs
 c200_bigblue2); 0.05 -> 0 / 9476788 / 2636s (-0.33%). Both inside the
 spread the noise runs show elsewhere; bigblue2's own noise is unmeasured.
+
+**Part 79 complete** (all `status=OK`, `gr_verify` = `eval2008.pl`),
+with the mechanism checked directly by `grdiag` (wire over the pins' MST):
+
+| run | overflow | scored WL | vs baseline | wire | vias | detour | runtime |
+|---|---|---|---|---|---|---|---|
+| bigblue2 c200 (baseline) | 0 | 9508527 | -- | 5113222 | 4395305 | +7.60% | 2735s |
+| bigblue2 floor 0.01 | 0 | 9434596 | -0.78% | 5061041 | 4373555 | +6.50% | 2802s |
+| bigblue2 floor 0.05 | 0 | 9476788 | -0.33% | 5089076 | 4387712 | +7.09% | 2636s |
+| newblue6 l (baseline) | 0 | 18321622 | -- | 10565127 | 7756495 | +5.92% | 6382s |
+| newblue6 floor 0.01 | 0 | 18524032 | +1.10% | 10726147 | 7797885 | +7.54% | 6062s |
+| newblue6 floor 0.05 | 0 | 18333295 | +0.06% | 10576574 | 7756721 | +6.04% | 6106s |
+
+No consistent direction, and not monotone in the floor: the stronger
+floor (0.05) cuts detour less than 0.01 on bigblue2, and 0.01 *adds*
+detour on newblue6. If the decayed WL term were the cause of the global
+detour, raising it should cut detour more the higher it goes. It does
+not, so on this evidence the WL-term decay is **not** the detour's
+source. Verdict pending bigblue2's own noise runs (Part 78b); detour
+itself varies by ~1 point between runs.
