@@ -7245,3 +7245,12 @@ Findings:
 only on newblue3 -- round 96 of 150, best 41744 handed to the region
 stage instead of 41000 (~2.5 of its 8.3 hours). Every other slow tier
 reaches its 300 stop or is still gaining > 1% per 25 rounds.
+
+## Part 79 -- WL floor screens (IDEAS_TEST_PLAN phase 2, step 1), queued
+
+`PD1ROUTE_WL_FLOOR` 0.01 and 0.05 on bigblue2 and newblue6 (zero overflow,
+wire +6.7% / +5.9% over the pins' MST, Part 78), Part 76's configuration
+(pd13route, caps 200). Baselines: c200_bigblue2 (Part 76) and l_newblue6
+(Part 73b: 0 / 18321622 / 6382s; equivalent, since neither the caps nor
+the plateau stop engage on it). Pass: scored wirelength better by > 0.5%
+with overflow still 0; then newblue1 against its noise spread.
