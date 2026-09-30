@@ -7254,3 +7254,25 @@ wire +6.7% / +5.9% over the pins' MST, Part 78), Part 76's configuration
 (Part 73b: 0 / 18321622 / 6382s; equivalent, since neither the caps nor
 the plateau stop engage on it). Pass: scored wirelength better by > 0.5%
 with overflow still 0; then newblue1 against its noise spread.
+
+**Results so far (2026-09-30 07:37; all `status=OK`, `gr_verify` = `eval2008.pl`).**
+
+Part 76, caps 200 (pd13route; the baselines are pd9route's Part 73a runs,
+which lack the pattern stage, so these compare pipelines, not only caps):
+
+| benchmark | overflow | scored WL | runtime | baseline (pd9) |
+|---|---|---|---|---|
+| bigblue2 | **0** | 9508527 | 2735s | 0 / 9443492 / 4148s |
+| newblue1 | 48 | 4824414 | 5608s | 54 / 5021599 / 7741s |
+| newblue4 | 144 | 13660587 | 8871s | 148 / 13069979 / 21026s |
+
+Part 78, noise floor (same configuration, pattern color cell 7 / 9):
+newblue1 46 / 4882558 / 5106s and 48 / 4803733 / 5273s -- with c200:
+overflow 46-48, WL 4.80-4.88M (1.6% spread). newblue4 cell 7: 144 /
+13190527 / 9070s -- WL 13.19-13.66M across two runs (3.5% spread) at
+identical overflow. **Wirelength noise between quality-neutral
+perturbations reaches 3.5%, far above the plan's 0.5% pass line.**
+
+Part 79, WL floors on bigblue2: 0.01 -> 0 / 9434596 / 2802s (-0.78% vs
+c200_bigblue2); 0.05 -> 0 / 9476788 / 2636s (-0.33%). Both inside the
+spread the noise runs show elsewhere; bigblue2's own noise is unmeasured.
