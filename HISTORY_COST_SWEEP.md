@@ -7343,3 +7343,8 @@ cheaply); newblue1 500 in 4181s; newblue4 500 in 5802s; **bigblue4 500 in
 54346s (15.1 h) for 408 -> 404**, even at margin cap 200 (vs ~22 h
 uncapped). bigblue4 finished at 2D 370 after refinement, 72896s total
 (vs 83888s uncapped); verification pending.
+
+**bigblue4, caps 200, verified**: `status=OK`, `gr_verify` = `eval2008.pl`:
+overflow **370** (max 2), scored WL 24861323, 72897s (20.2 h), peak RSS
+3769MB -- vs uncapped 378 / 24851982 / 83888s: overflow -8, WL +0.04%,
+runtime -13%.
