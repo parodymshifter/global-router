@@ -7318,3 +7318,28 @@ detour; 0.05: +0.06%) -- but newblue6's own noise is unmeasured. Verdict:
 established.** The guard rule "losing a zero rejects" also needs revising:
 a neutral perturbation can lose bigblue2's zero, so one lost zero is
 evidence, not proof.
+
+**Part 78c, newblue6 noise floor** (c200 configuration, pattern cell 7 /
+9; `status=OK`, `gr_verify` = `eval2008.pl`): cell 7 -> 0 / 18615319 /
+6092s, detour +8.30%; cell 9 -> 0 / 18522873 / 6248s, detour +7.54%. With
+the Part 73b run (0 / 18321622, +5.92%; same configuration in effect):
+WL 18321622-18615319 (1.6%), detour +5.9 to +8.3%.
+
+**WL floor verdict (Part 79), both benchmarks against their own noise:**
+
+| | baseline runs (mean) | floor 0.01 | floor 0.05 |
+|---|---|---|---|
+| bigblue2 WL | 9508527 / 9622819 / 9675318 (9602221) | 9434596 (-1.75% vs mean, below all three) | 9476788 (-1.31%, below all three) |
+| newblue6 WL | 18321622 / 18615319 / 18522873 (18486605) | 18524032 (+0.20%, inside) | 18333295 (-0.83%, inside) |
+
+Neither floor hurts; 0.05 is at or below the baseline mean on both, 0.01
+helps bigblue2 and is neutral on newblue6. A small, benchmark-dependent
+gain at best -- nothing near the 4-9% gap to NTHU-Route 2.0. Next check
+where overflow is the reliable signal: newblue1 (overflow noise 46-48).
+
+**Region stage cost, per benchmark (c200 runs):** bigblue2 500 rounds in
+277s (its zero comes late -- rounds 308-442 across the five runs -- but
+cheaply); newblue1 500 in 4181s; newblue4 500 in 5802s; **bigblue4 500 in
+54346s (15.1 h) for 408 -> 404**, even at margin cap 200 (vs ~22 h
+uncapped). bigblue4 finished at 2D 370 after refinement, 72896s total
+(vs 83888s uncapped); verification pending.
