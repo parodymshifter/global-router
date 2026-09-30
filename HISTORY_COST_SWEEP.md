@@ -7152,3 +7152,23 @@ growth (Part 74) and the slow tier's 150 rounds on residues that never
 reach the 300 stop. Next runtime targets, in order: cap the region
 margin; extend the plateau rule's evidence to the slow tier; then roadmap
 step 4 (multithreading).
+
+## Part 76 -- pd13route: a hard cap on the late stages' search margins
+
+`gr/pd13route.cpp` (forked from pd12route): `PD13ROUTE_REGION_BOX_CAP` and
+`PD13ROUTE_REFINE_BOX_CAP` cap the region margin (10 + 2 per round) and
+the refinement margin (10 + 5 per iteration under Part 71's settings) --
+the one breadth knob CLAUDE.md's box rule says must be capped that the
+slow tier had (NV11ROUTE_BOX_CAP 200) and these stages did not. Both 0 by
+default (pd12route byte for byte). 517 checks.
+
+Parity (adaptec1, small budget, region and refinement exercised; all
+`status=OK`, `gr_verify` = `eval2008.pl`): pd12route, pd13route default,
+and pd13route with both caps 100000 -- route files **byte-identical**,
+real overflow 310, WL 5470515.
+
+Screens (batch `part76.jobs`, Part 71 settings + Part 74 plateau settings
++ both caps 200): bigblue2 (the case whose zero came at region round 437,
+margin 882 -- the risk), newblue4, bigblue4 (the runtime target: 23.3 h,
+~22 h of it in region rounds), newblue1, newblue7. Judged on overflow
+(must not lose bigblue2's zero or worsen the residues) and runtime.
