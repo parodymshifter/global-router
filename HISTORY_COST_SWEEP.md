@@ -7302,3 +7302,19 @@ itself varies by ~1 point between runs.
 newblue1 overflow 46-48, WL 4803733-4882558 (1.6%); newblue4 overflow
 144-146, WL 13190527-13661746 (3.6%). Overflow is stable to a few units;
 wirelength is not.
+
+**Part 78b, bigblue2 noise floor** (c200 configuration, pattern cell 7 /
+9; `status=OK`, `gr_verify` = `eval2008.pl`): cell 7 -> overflow **2**
+(max 2) / 9622819 / 2684s, detour +9.36%; cell 9 -> 0 / 9675318 / 2662s,
+detour +10.23%. With c200 (0 / 9508527, +7.60%): **bigblue2's zero is
+fragile** -- one of three quality-neutral perturbations ends at 2 -- and
+its WL spread is 9508527-9675318 (1.8%), detour +7.6 to +10.2%.
+
+Against that spread, both WL floors land **below all three baseline
+runs** on bigblue2 in WL (9434596, 9476788) and detour (+6.50%, +7.09%),
+and keep the zero. On newblue6 they do not (0.01: +1.10% WL, +7.54%
+detour; 0.05: +0.06%) -- but newblue6's own noise is unmeasured. Verdict:
+**suggestive on bigblue2, contradicted or neutral on newblue6; not
+established.** The guard rule "losing a zero rejects" also needs revising:
+a neutral perturbation can lose bigblue2's zero, so one lost zero is
+evidence, not proof.
