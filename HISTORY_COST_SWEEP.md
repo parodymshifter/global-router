@@ -7296,3 +7296,9 @@ detour, raising it should cut detour more the higher it goes. It does
 not, so on this evidence the WL-term decay is **not** the detour's
 source. Verdict pending bigblue2's own noise runs (Part 78b); detour
 itself varies by ~1 point between runs.
+
+**Part 78 noise floor complete.** newblue4 cell 9: 146 / 13661746 /
+9408s. Three-run spreads (c200 + cells 7, 9), same configuration:
+newblue1 overflow 46-48, WL 4803733-4882558 (1.6%); newblue4 overflow
+144-146, WL 13190527-13661746 (3.6%). Overflow is stable to a few units;
+wirelength is not.
