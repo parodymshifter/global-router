@@ -176,3 +176,32 @@ Expected order, and why:
 These attributions come from the published descriptions of those routers
 and the papers cited in Part 75. They were not checked against source
 code, so treat "yes" as "described in their papers".
+
+## Phase 1 results (2026-09-29, `HISTORY_COST_SWEEP.md` Part 78) and the revised order
+
+- Every remaining overflow is the 2D stage's; layer assignment adds none.
+- Hotspots are single or tightly grouped on newblue1, newblue4 and
+  bigblue4. Only newblue7's are scattered (5.7x fewer nets with one box
+  per hotspot).
+- The wirelength gap follows detour (wire over the pins' MST) rather than
+  via share. bigblue4 carries +13.4% detour, spread across the whole chip;
+  newblue1 +12.4%, half of it in its hotspot. On adaptec1 our wire is
+  shorter than NTHU's and the whole gap is vias.
+- The slow-tier plateau fires only on newblue3.
+
+Revised Phase 2 order:
+1. **Idea 4 first, as a detour problem: small WL floors.** No new code
+   (`PD1ROUTE_WL_FLOOR`). Screen floors 0.01 and 0.05 on bigblue2 and
+   newblue6 (zero overflow, +6-7% detour, 1-2 h each), then newblue1.
+   Decision rule: wirelength better by > 0.5% with zeros kept, and overflow
+   outside the noise spread on newblue1. If it pays, it also reaches
+   bigblue4.
+2. **Idea 2 on newblue7:** a box per hotspot. A runtime idea with a
+   possible quality gain, judged on newblue7 plus the guard set.
+3. **Idea 5, narrowed to corner vias:** the remaining adaptec1 gap is 10%
+   more 2D corners than NTHU. Test through the bend weight of the WL
+   recovery and pieces, not the layer-assignment DP.
+4. **Idea 3, newblue1:** virtual capacity and nested long-net budgets,
+   after the WL floor result (floors may change newblue1's hotspot).
+5. **Idea 1:** a newblue3-only runtime gain; build when convenient.
+

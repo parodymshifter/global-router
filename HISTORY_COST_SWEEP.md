@@ -7194,3 +7194,54 @@ Every printed digit agrees in both. The first L-router run left 7575 nets
 open in both scorers (the official one exits on the first): nets whose
 pins share one access point, for which it wrote nothing -- the evaluator
 only reaches access points a net covers.
+
+## Part 78 -- IDEAS_TEST_PLAN phase 0 and phase 1
+
+**Phase 0, noise floor** (batch `part78.jobs`, queued): newblue1 and
+newblue4 on Part 76's configuration (pd13route, caps 200) with the pattern
+stage's color cell 7 and 9 instead of 8. With Part 76's c200 runs these
+give a three-point spread per benchmark for judging quality ideas.
+
+**Phase 1, diagnostics** -- `gr/grdiag.cpp` (analysis tool, self-tested;
+its overflow, wire and via totals match `gr_verify` exactly on every file
+below):
+
+| route | real overflow | LA share | hotspots | nets: one box / per-hotspot sum | wire over pin MST | vias | vias per corner |
+|---|---|---|---|---|---|---|---|
+| NTHU-Route 2.0 adaptec1 | 0 | -- | -- | -- | +2.17% | 1774596 (33.1%) | 1.73 |
+| ours adaptec1 (p11) | 0 | -- | -- | -- | +1.94% | 1836126 (33.9%) | 1.69 |
+| newblue1 (p9s) | 54 | 0 | 5 (40 in one 17x18) | 8555 / 13191 | **+12.37%** | 2327759 (46.4%) | 1.73 |
+| newblue4 (s) | 148 | 0 | 1 (19x15) | 7986 / 7986 | +1.54% | 4771537 (36.5%) | 1.65 |
+| bigblue4 (l) | 378 | 0 | 1 (9x16) | 9146 / 9146 | **+13.38%** | 11443228 (46.0%) | 2.03 |
+| newblue7 (l) | 106 | 0 | 7 (70 in one 9x7) | **246366 / 42867** | +5.91% | 16921917 (46.8%) | 1.98 |
+| bigblue2 (s) | 0 | -- | -- | -- | +6.67% | 4374465 (46.3%) | 1.83 |
+| newblue6 (l) | 0 | -- | -- | -- | +5.92% | 7756495 (42.3%) | 1.85 |
+
+Findings:
+1. **Every residue is the 2D stage's** -- layer assignment adds nothing on
+   any benchmark. Via work (idea 5) cannot reduce overflow here.
+2. **Hotspots**: one on newblue4 and bigblue4; newblue1's five sit inside
+   one 38 x 30 area (per-hotspot boxes touch *more* nets, overlapping).
+   Only newblue7's are scattered -- seven boxes would touch 5.7x fewer
+   nets than one. Idea 2 is a newblue7 idea.
+3. **The wirelength gap tracks detour, not via share.** Wire over the
+   pins' rectilinear MST (NTHU on adaptec1: +2.2%) ranks the benchmarks
+   the way their gap to NTHU does: bigblue4 +13.4% / gap +9.0%, newblue1
+   +12.4% / +9.2%, bigblue2 +6.7% / +4.9%, newblue6 +5.9% / +3.6%,
+   newblue4 +1.5% / +1.4% (newblue7 +5.9% / +1.8% the exception). On
+   adaptec1, against NTHU's own route, our wire is shorter (3577920 vs
+   3585305) and the whole gap is vias (+61530: 10% more 2D corners).
+4. **bigblue4's detour is global, newblue1's is local**: nets touching
+   bigblue4's hotspot carry 88554 of its 1.73M excess; newblue1's hotspot
+   nets carry ~173000 of 343208 (+154% over their MST).
+5. A likely cause of global detour: the present-demand WL term decays to
+   ~1e-7 by slow round 150 (traces: `wl 6.2e-08`), so with margins up to
+   200 the slow tier chooses shapes on congestion alone, and WL recovery
+   can shorten only through edges with room. `PD1ROUTE_WL_FLOOR` holds the
+   term up; it was screened only at floor 1 under the revert rule (Part
+   58, S3: +59.6% overflow), never at small floors under keep.
+
+**D3, slow-tier plateau replay** (floor 1000, window 25, gain 1%): fires
+only on newblue3 -- round 96 of 150, best 41744 handed to the region
+stage instead of 41000 (~2.5 of its 8.3 hours). Every other slow tier
+reaches its 300 stop or is still gaining > 1% per 25 rounds.

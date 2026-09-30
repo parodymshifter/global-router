@@ -1,6 +1,7 @@
 gr_verify
 g24_verify
 g24_lroute
+grdiag
 broute
 lroute
 proute
