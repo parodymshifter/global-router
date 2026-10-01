@@ -7458,3 +7458,39 @@ the sum of their pin-tile MSTs, and the excess carried by nets over 1.5x
 their MST. Trace only (routes = pd14route's). 531 checks. Queued
 (`part82.jobs`, standard configuration): bigblue2 (must reproduce c200's 0
 / 9508527), newblue6, newblue1, bigblue4.
+
+**Part 81 results** (standard configuration; all `status=OK`, `gr_verify`
+= `eval2008.pl`):
+
+| benchmark | overflow | scored WL | runtime | previous (pd9route) |
+|---|---|---|---|---|
+| newblue2 | **0** | 7635770 | 174s | 0 / 7614709 / 141s |
+| adaptec2 | **0** | 5261814 | 1251s | 0 / 5267444 / 1933s |
+| bigblue1 | **0** | 5754158 | 2778s | 0 / 5701936 / 3835s |
+| adaptec3 | **0** | 13253518 | 2062s | 0 / 13235180 / 5899s |
+| adaptec4 (equivalence check) | **0** | **12234727** | 558s | 0 / 12234727 / 545s (pd11route) |
+
+All four zeros kept; WL -0.11% to +0.92% (inside the 1.6-3.6% noise);
+runtime -28% to -65% except newblue2 (2-3 min either way). adaptec4
+reproduces its pd11route result exactly, as the equivalence argument
+predicts. The ISPD 2008 suite on the standard configuration: 11 of 16 at
+zero (newblue1 48, newblue4 144, newblue7 108, bigblue4 370, newblue3
+38704).
+
+**Part 82, bigblue2 detour trace** (`status=OK`; route file
+**byte-identical** to c200_bigblue2's, 0 / 9508527):
+
+| after | 2D wire | over pin MST | nets > 1.5x MST (excess they carry) |
+|---|---|---|---|
+| pattern stage | 4645070 | -0.28% | 0 |
+| **slow tier** | 6161985 | **+32.28%** | 20175 (1176533) |
+| region stage | 5802831 | +24.57% | 15845 (828741) |
+| refinement | 5802854 | +24.57% | 15846 (828766) |
+| tree rebuild | 5244954 | +12.59% | 6817 (326913) |
+| WL recovery | 5078309 | +9.02% | 5247 (234050) |
+
+The detour enters in the slow tier: the pattern stage's routes sit at the
+pins' MST (its Z/L shapes over MST pieces), the slow tier adds 1.5M tile
+edges (+32%), and the stages after it recover 72% of that. What is left
+(+9.0% here; +7.6% by grdiag over the 3D route, which counts segments, not
+charge records) is the gap.
