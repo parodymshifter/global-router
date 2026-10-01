@@ -7509,3 +7509,29 @@ Same shape on every benchmark: the pattern stage ends at the pins' MST,
 the slow tier adds +24-34%, and the stages after it recover 70-80%. The
 slow tier's excess is concentrated -- 1.6-3.4% of the nets carry 78-90% of
 it -- so a fix aimed at those nets touches very little of the design.
+
+## Part 83 -- detour reclaim (pd16route)
+
+`gr/pd16route.cpp` (forked from pd15route): `PD16ROUTE_RECLAIM=1` adds a
+pass between the slow tier and the region stage. Every non-giant net with
+2D wire > 1.5x its pin-tile MST (and at least 4 tiles over) is rerouted
+whole by MSMV (margin 16) under fresh present-demand prices, whose WL
+weight is back near 1, most excess first. A reroute is kept only if the
+wire it saves exceeds mu (8) times the local overflow it adds; overflow it
+adds is left to the region and refinement stages. Off = pd15route. 538
+checks (a 9-tile detour of a 7-tile MST rerouted straight when the row is
+free; left alone when the straight row is full; a net under the ratio is
+not a candidate).
+
+Test design (the user's: the fastest benchmark plus one or two problem
+ones under ~2 h, statistics first, then the rest). newblue2 is the guard
+(3 min; no detour: its wire is 1.6% *under* the pins' MST, as is
+adaptec4's at -1.4%). bigblue2 (46 min, +7.6% detour, fragile zero) and
+newblue1 (93 min, 48 overflow) are the targets. Significance: three runs
+of the candidate (pattern cells 7 / 8 / 9) against the three baseline runs
+of Part 78; all three below all three is an exact one-sided permutation
+test at p = 0.05 per benchmark (1 in 20 orderings). Screen first
+(`part83a.jobs`): newblue2 parity (pd16route off vs the standard run),
+newblue2 on, bigblue2 at mu 8 and mu 2.
+
+Scope of idea 2 (one hotspot box per cluster): `IDEAS_TEST_PLAN.md`.

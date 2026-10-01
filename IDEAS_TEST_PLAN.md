@@ -205,3 +205,54 @@ Revised Phase 2 order:
    after the WL floor result (floors may change newblue1's hotspot).
 5. **Idea 1:** a newblue3-only runtime gain; build when convenient.
 
+
+## Scope: one hotspot box per cluster (idea 2), 2026-10-01
+
+**What changes.** The region stage today takes one box: the bounding box
+of every overflowed edge, grown by 5 tiles. Its members are every net with
+wire in that box. Round 0 reroutes every member piece inside the box; later
+rounds reroute only members still overflowed. Every improving round copies
+all members' charges and segments as the new best state. The proposal:
+cluster the overflowed tiles (the `grdiag` rule: tiles within r tiles in x
+and y join, r = 3), give each cluster its own box grown by 5, and make a
+net a member if it has wire in any box. Round 0 reroutes only pieces
+inside some box. Later rounds and the best-state rule are unchanged.
+
+**Where it can matter.** Only where the overflow at the region stage's
+start sits in separated clusters. By the final routes (Part 78), only
+newblue7 qualifies: 7 hotspots, 42867 nets in the per-cluster boxes vs
+246366 in the one box. At the stage's start (634 overflow) the split is
+not yet measured. Two effects follow from fewer members:
+- **Runtime.** Round 0 does less work (683088 piece reroutes on newblue7),
+  and each improving round copies far less state. With 266K members and
+  frequent improvements, that copy is a likely part of newblue7's ~77 s
+  per region round.
+- **Quality, unknown.** Rerouting fewer bystander nets disturbs less, but
+  the bystanders are also where room comes from.
+
+**Parity.** With one cluster, the behavior is identical to today's
+(byte-identical routes). A self-test with two separated overflow runs
+checks that a net between them, touching neither cluster box, is not a
+member.
+
+**First step, cheap.** Log the clusters at the region stage's start
+(count, sizes, members per box vs one box) on every run. Any run of the
+new router tells which benchmarks the idea can touch, before testing it.
+
+**How to test without multi-hour reruns.** newblue7 is the only
+qualifying case, and it takes 19.6 h, with the region stage starting after
+about 9 h of slow tier. So:
+1. Run newblue7 once with a dump of the 2D state at the region stage's
+   start (a new option writing a route file that `readRouteAs2D` reads
+   back, as Part 67 did for newblue1).
+2. Run every region variant from that checkpoint
+   (`PD3ROUTE_LA_FROM`-style start: region, refinement, cleanup, layer
+   assignment only). That is still hours per variant on newblue7, since the
+   one-box baseline's region stage alone is 10.7 h.
+3. Use pattern-cell perturbations for the 3-vs-3 comparison only if the
+   single screen shows a difference larger than the noise.
+
+**Estimated cost.** About 9 h once for the checkpoint, then one baseline
+and one variant from it, each several hours. Because of that, it queues
+after the detour-reclaim test, unless the start-of-stage cluster log shows
+a second, cheaper benchmark with separated clusters.
