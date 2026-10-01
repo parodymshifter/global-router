@@ -1,0 +1,401 @@
+<title>Global Router Recap 2026-10-01</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap · snapshot 1 October 2026</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">Where the router stands on the ISPD 2008 benchmarks under its standard configuration, how that compares with the 2008 contest routers, what was tested since the full suite first ran, and what comes next. Later recaps repeat these sections so they can be compared side by side.</p>
+  <div class="meta">
+    <span><b>Configuration</b> <span class="mono">gr/pd14route</span> + <span class="mono">gr/standard.env</span></span>
+    <span><b>Commit</b> <span class="mono">bc82784</span></span>
+    <span><b>Machine</b> Apple M4 Pro, single thread</span>
+    <span><b>Verification</b> every result: <span class="mono">gr_verify</span> = official <span class="mono">eval2008.pl</span></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#glance">At a glance</a><a href="#results">Results</a><a href="#compare">Against the contest</a><a href="#findings">What the results point to</a><a href="#ledger">Tested since Part 75</a><a href="#backlog">Still to test</a><a href="#parallel">Multithreading</a><a href="#openroad">OpenROAD</a><a href="#next">For the next recap</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">11 of 16</div><div class="lab">benchmarks at zero overflow with one setting. The best of the four published routers in our reference table reaches zero on 12.</div></div>
+    <div class="tile"><div class="fig">+0.4 to +9.0%</div><div class="lab">scored wirelength against NTHU-Route 2.0, the 2008 winner. Run-to-run noise alone is 1.6 to 3.6%.</div></div>
+    <div class="tile"><div class="fig">3 min to 19.6 h</div><div class="lab">runtime per benchmark. NTHU-Route 2.0 took 2 min to 25 h on a slower machine.</div></div>
+    <div class="tile"><div class="fig">−67%</div><div class="lab">runtime on bigblue4 since the full suite first ran (23.3 h to 7.7 h), with 8 less overflow.</div></div>
+  </div>
+</section>
+
+<section id="results">
+  <h2>Results on the standard configuration</h2>
+  <p>Every row is a legal solution, and our verifier agrees with the official contest scorer on every number. Rows not rerun after the standard configuration was fixed come from earlier runs on the same pipeline where none of the newer stops would have fired; the adaptec4 rerun reproduced its earlier result exactly, which confirms that argument.</p>
+  <div class="tablebox">
+  <table>
+    <thead><tr>
+      <th>Benchmark</th><th class="num">Overflow</th><th class="num">Max</th><th class="num">Scored WL</th><th class="num">Runtime</th>
+      <th class="num">NTHU-Route 2.0<br>overflow</th><th class="num">NTHU WL<br>(×10⁵)</th><th class="num">NTHU<br>min</th><th class="num">Best of<br>four</th><th class="num">WL vs<br>NTHU</th><th>Overflow vs NTHU</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>adaptec1</td><td class="num">0</td><td class="num">0</td><td class="num">5,414,046</td><td class="num">34 min</td><td class="num">0</td><td class="num">53.6</td><td class="num">10</td><td class="num">0</td><td class="num">+1.0%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>adaptec2</td><td class="num">0</td><td class="num">0</td><td class="num">5,261,814</td><td class="num">21 min</td><td class="num">0</td><td class="num">52.4</td><td class="num">5</td><td class="num">0</td><td class="num">+0.4%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>adaptec3</td><td class="num">0</td><td class="num">0</td><td class="num">13,253,518</td><td class="num">34 min</td><td class="num">0</td><td class="num">131.5</td><td class="num">10</td><td class="num">0</td><td class="num">+0.8%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>adaptec4</td><td class="num">0</td><td class="num">0</td><td class="num">12,234,727</td><td class="num">9 min</td><td class="num">0</td><td class="num">121.8</td><td class="num">3</td><td class="num">0</td><td class="num">+0.4%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>adaptec5</td><td class="num">0</td><td class="num">0</td><td class="num">15,851,373</td><td class="num">88 min</td><td class="num">0</td><td class="num">155.4</td><td class="num">27</td><td class="num">0</td><td class="num">+2.0%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>bigblue1</td><td class="num">0</td><td class="num">0</td><td class="num">5,754,158</td><td class="num">46 min</td><td class="num">0</td><td class="num">55.7</td><td class="num">20</td><td class="num">0</td><td class="num">+3.3%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>bigblue2</td><td class="num">0</td><td class="num">0</td><td class="num">9,508,527</td><td class="num">46 min</td><td class="num">86</td><td class="num">90.0</td><td class="num">21</td><td class="num">0</td><td class="num">+5.7%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>bigblue3</td><td class="num">0</td><td class="num">0</td><td class="num">13,189,107</td><td class="num">27 min</td><td class="num">32</td><td class="num">130.7</td><td class="num">15</td><td class="num">0</td><td class="num">+0.9%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>bigblue4</td><td class="num">370</td><td class="num">2</td><td class="num">24,861,323</td><td class="num">7.7 h</td><td class="num">256</td><td class="num">228.0</td><td class="num">135</td><td class="num">166</td><td class="num">+9.0%</td><td><span class="pill bad">behind</span></td></tr>
+      <tr><td>newblue1</td><td class="num">48</td><td class="num">2</td><td class="num">4,824,414</td><td class="num">93 min</td><td class="num">164</td><td class="num">46.0</td><td class="num">28</td><td class="num">0</td><td class="num">+4.9%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>newblue2</td><td class="num">0</td><td class="num">0</td><td class="num">7,635,770</td><td class="num">3 min</td><td class="num">0</td><td class="num">75.9</td><td class="num">2</td><td class="num">0</td><td class="num">+0.6%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>newblue3</td><td class="num">38,704</td><td class="num">364</td><td class="num">10,779,692</td><td class="num">8.3 h</td><td class="num">31,810</td><td class="num">106.3</td><td class="num">22</td><td class="num">31,024</td><td class="num">+1.4%</td><td><span class="pill bad">behind</span></td></tr>
+      <tr><td>newblue4</td><td class="num">144</td><td class="num">2</td><td class="num">13,660,587</td><td class="num">2.5 h</td><td class="num">222</td><td class="num">128.9</td><td class="num">56</td><td class="num">144</td><td class="num">+6.0%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>newblue5</td><td class="num">0</td><td class="num">0</td><td class="num">23,383,430</td><td class="num">1.8 h</td><td class="num">18</td><td class="num">231.4</td><td class="num">40</td><td class="num">0</td><td class="num">+1.1%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>newblue6</td><td class="num">0</td><td class="num">0</td><td class="num">18,321,622</td><td class="num">1.8 h</td><td class="num">0</td><td class="num">176.9</td><td class="num">52</td><td class="num">0</td><td class="num">+3.6%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>newblue7</td><td class="num">108</td><td class="num">2</td><td class="num">36,104,404</td><td class="num">19.6 h</td><td class="num">68</td><td class="num">355.2</td><td class="num">1,491</td><td class="num">68</td><td class="num">+1.6%</td><td><span class="pill bad">behind</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">NTHU-Route 2.0 figures are LMgr's re-run (ISQED 2013, Table II) on a 1.6 GHz quad-core, with NTHU's iterations cut on newblue3. "Best of four" is the lowest overflow among NTHU-Route 2.0, NTUgr, FastRoute 3.0 and LMgr in that table; NTUgr's newblue3 figure is from its own paper. The contest-day results are no longer online. newblue4's wirelength ranges from 13.19M to 13.66M across three equivalent runs, so its +6.0% is between +2.3% and +6.0% depending on the run.</p>
+</section>
+
+<section id="compare">
+  <h2>Against the 2008 contest routers</h2>
+  <div class="twocol">
+    <div>
+      <h3>Overflow</h3>
+      <p>On par or better on most benchmarks. We reach zero where NTHU-Route 2.0's re-run did not on bigblue2, bigblue3 and newblue5, and leave smaller residues on newblue1 and newblue4. We are behind on three large benchmarks: bigblue4 (370 vs 256, best 166), newblue7 (108 vs 68) and newblue3 (38,704 vs about 31,000, where no published router gets near zero). The one benchmark another router takes to zero and we do not is newblue1 (LMgr 0, ours 48).</p>
+      <h3>Wirelength</h3>
+      <p>Close, with a gap we can now explain. Several benchmarks are within the run-to-run noise. The larger gaps follow detour, wire beyond the pins' minimum spanning tree, not via count. On adaptec1, against NTHU-Route 2.0's own route file, our wire is shorter (3,577,920 vs 3,585,305 tile edges) and the whole gap is vias, from 10% more bends.</p>
+    </div>
+    <div>
+      <h3>Runtime</h3>
+      <p>Still the biggest difference. We now beat NTHU-Route 2.0's time on newblue7 (19.6 h vs 24.9 h) but are 1.5 to 20 times slower on the others, and more than that once the faster machine is accounted for.</p>
+      <h3>Design</h3>
+      <p>The pipeline converged on NTHU-Route 2.0's: present-demand pricing with every reroute kept, 2-pin-piece rip-up with growing search boxes, a refinement stage, NTHU-style layer assignment. What is ours: the hotspot stage that reroutes every net in the box, the tree rebuild and bend-aware wirelength cleanup, a batched pattern stage with bit-identical CPU and GPU (Metal) backends, deterministic work-gated stops, and verification against the official scorer on every result with a measured noise floor.</p>
+    </div>
+  </div>
+</section>
+
+<section id="findings">
+  <h2>What the results point to</h2>
+  <div class="findings">
+    <div class="finding">
+      <h3>The piece rip-up stage is the lever for both wirelength and runtime</h3>
+      <p>A per-stage trace shows the same shape on every benchmark measured. The pattern stage ends at the pins' minimum spanning tree. The piece rip-up stage then adds 24 to 34% detour, and the stages after it spend their time recovering 70 to 80% of it. What is left is the wirelength gap. The added detour is concentrated: 1.6 to 3.4% of the nets carry 78 to 90% of it. Nets detoured while congestion was everywhere stay detoured after it clears, because only overflowing pieces are ever rerouted. The same stage takes most of the runtime, so a fix there could improve both.</p>
+      <div class="tablebox">
+      <table class="bars">
+        <thead><tr><th>Wire over pin MST, after</th><th>bigblue2</th><th>newblue6</th><th>newblue1</th><th>bigblue4</th></tr></thead>
+        <tbody>
+          <tr><td>pattern stage</td>
+            <td class="barcell"><div class="bar"><span class="neg" style="width:1%"></span></div><span class="barval">−0.3%</span></td>
+            <td class="barcell"><div class="bar"><span class="neg" style="width:1%"></span></div><span class="barval">−0.2%</span></td>
+            <td class="barcell"><div class="bar"><span class="neg" style="width:1%"></span></div><span class="barval">−0.3%</span></td>
+            <td class="barcell"><div class="bar"><span class="neg" style="width:1%"></span></div><span class="barval">−0.2%</span></td></tr>
+          <tr><td>piece rip-up</td>
+            <td class="barcell"><div class="bar"><span style="width:92%"></span></div><span class="barval">+32.3%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:98%"></span></div><span class="barval">+34.4%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:69%"></span></div><span class="barval">+24.2%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:85%"></span></div><span class="barval">+29.8%</span></td></tr>
+          <tr><td>hotspot stage</td>
+            <td class="barcell"><div class="bar"><span style="width:70%"></span></div><span class="barval">+24.6%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:41%"></span></div><span class="barval">+14.3%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:36%"></span></div><span class="barval">+12.6%</span></td>
+            <td><span class="pending">run in progress</span></td></tr>
+          <tr><td>refinement</td>
+            <td class="barcell"><div class="bar"><span style="width:70%"></span></div><span class="barval">+24.6%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:41%"></span></div><span class="barval">+14.3%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:34%"></span></div><span class="barval">+12.0%</span></td>
+            <td><span class="pending">run in progress</span></td></tr>
+          <tr><td>tree rebuild</td>
+            <td class="barcell"><div class="bar"><span style="width:36%"></span></div><span class="barval">+12.6%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:25%"></span></div><span class="barval">+8.7%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:24%"></span></div><span class="barval">+8.4%</span></td>
+            <td><span class="pending">run in progress</span></td></tr>
+          <tr><td>wirelength cleanup (final)</td>
+            <td class="barcell"><div class="bar"><span style="width:26%"></span></div><span class="barval">+9.0%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:20%"></span></div><span class="barval">+7.2%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:20%"></span></div><span class="barval">+7.0%</span></td>
+            <td><span class="pending">run in progress</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="note">Bars on a 0 to 35% scale. NTHU-Route 2.0's own adaptec1 route sits at +2.2% on the same measure.</p>
+    </div>
+    <div class="finding">
+      <h3>Stopping on a plateau works when cost is measured correctly</h3>
+      <p>The work-gated stop ended bigblue4's hotspot stage at round 150 instead of 500, with an identical result, cutting runtime by 62%. Measuring work as search-node expansions instead of wall time keeps runs reproducible. The same method of replaying recorded traces first, then building, is ready for the piece rip-up stage.</p>
+    </div>
+    <div class="finding">
+      <h3>The overflow residues look structural</h3>
+      <p>All remaining overflow comes from 2D routing; layer assignment adds none. Each residue sits in one hotspot, or a tight group, except newblue7's seven scattered ones. Residues move by only about 2 units between equivalent runs, and tuning has not moved them. They likely need a different kind of mechanism, such as virtual capacity or a separate capacity limit for long nets, not another setting.</p>
+    </div>
+    <div class="finding">
+      <h3>Noise sets the rules for judging changes</h3>
+      <p>Three runs that differ only in a harmless setting give overflow within 2 units but wirelength spread 1.6% (newblue1, bigblue2, newblue6) to 3.6% (newblue4). One such run lost bigblue2's zero (it ended at 2). So a single run's wirelength gain below about 2% means nothing, and one lost zero is evidence, not proof.</p>
+      <div class="tablebox">
+      <table>
+        <thead><tr><th>Benchmark</th><th class="num">Overflow, 3 runs</th><th class="num">Wirelength spread</th></tr></thead>
+        <tbody>
+          <tr><td>newblue1</td><td class="num">46–48</td><td class="num">1.6%</td></tr>
+          <tr><td>newblue4</td><td class="num">144–146</td><td class="num">3.6%</td></tr>
+          <tr><td>bigblue2</td><td class="num">0, 0, 2</td><td class="num">1.8%</td></tr>
+          <tr><td>newblue6</td><td class="num">0, 0, 0</td><td class="num">1.6%</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="ledger">
+  <h2>Tested since the full suite first ran</h2>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Experiment</th><th>Part</th><th>Result</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Plateau stop with a floor (hotspot and refinement stages)</td><td class="mono">74</td><td>newblue3 finished in 8.3 h instead of 37 h and counting, same best overflow</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>Margin cap of 200 tiles on the late stages</td><td class="mono">76</td><td>Overflow kept or better on all five benchmarks run; runtime −13% to −58%</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>Work-gated plateau stop</td><td class="mono">80</td><td>bigblue4: identical 370 overflow and wirelength, 20.2 h to 7.7 h</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>Standard configuration on the four benchmarks last run on the older router</td><td class="mono">81</td><td>All zeros kept; wirelength within noise; runtime −28% to −65%</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>Noise floor (harmless perturbations)</td><td class="mono">78</td><td>Overflow ±2; wirelength 1.6–3.6%</td><td><span class="pill good">rule adopted</span></td></tr>
+      <tr><td>Residue and wirelength diagnostics (<span class="mono">grdiag</span>)</td><td class="mono">78</td><td>Residues all 2D; wirelength gap tracks detour, not vias</td><td><span class="pill info">informed the plan</span></td></tr>
+      <tr><td>Per-stage detour trace</td><td class="mono">82</td><td>Piece rip-up adds 24–34% detour; later stages recover 70–80%</td><td><span class="pill info">new top target</span></td></tr>
+      <tr><td>Wirelength weight floors 0.01 and 0.05</td><td class="mono">79</td><td>Inside the noise on newblue1 and newblue6; small gain on bigblue2 only</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Plateau stop for the piece rip-up stage (replay only)</td><td class="mono">78</td><td>Fires only on newblue3, saving about 2.5 h but handing on 1.8% more overflow</td><td><span class="pill warn">low priority</span></td></tr>
+      <tr><td>ISPD 2024 verifier and scorer</td><td class="mono">77</td><td>Matches the official evaluator to every printed digit on a real benchmark</td><td><span class="pill good">done</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="backlog">
+  <h2>Still to test, in recommended order</h2>
+  <p>The order is by bounded upside and cost. Runtime ideas can be predicted from recorded traces; quality ideas can only be bounded, not predicted, so each is judged against the benchmark's own noise.</p>
+  <ol>
+    <li><b>Cut detour in the piece rip-up stage.</b> Two directions: add less detour while congestion is still high, or reroute the 2–3% of heavily detoured nets back toward their tree length as congestion clears. This is the one change that could improve wirelength and runtime together. <span class="pill info">next</span></li>
+    <li><b>One hotspot box per cluster, for newblue7.</b> Its seven scattered hotspots would touch 5.7 times fewer nets with separate boxes. Mainly a runtime idea, possibly a quality one.</li>
+    <li><b>newblue1's last 48: virtual capacity.</b> FastRoute 3.0's mechanism, pricing against a lowered capacity inside the hotspot. The one router-specific idea not yet tried here.</li>
+    <li><b>A separate capacity limit for long nets.</b> A second price that pushes long nets out of a contested edge before local nets feel it. Structural and untried; apparently not in any contest router, which makes it the best candidate for this project's novel contribution.</li>
+    <li><b>Fewer bends.</b> On adaptec1 the whole wirelength gap is vias from 10% more bends than NTHU-Route 2.0.</li>
+    <li><b>Plateau stop for the piece rip-up stage.</b> A newblue3-only runtime gain.</li>
+    <li><b>Starting prices from a congestion estimate.</b> Probably low value, since the pattern stage already prices by congestion.</li>
+  </ol>
+  <p class="note">Deferred until a benchmark can score them: timing-driven priorities and a fairness objective (ISPD 2025 / OpenROAD), giant-net splitting (ISPD 2024 scale), provenance tracking (a debugging tool), and the return-to-placement exit (needs placement).</p>
+  <h3>Roadmap steps</h3>
+  <ul>
+    <li><b>Step 3, ISPD 2024 format:</b> verifier done and cross-checked; next is the router reading the format (pins as sets of access points, uneven edge lengths, fractional capacities, vias that use capacity, a soft exponential overflow cost).</li>
+    <li><b>Step 4, multithreading;</b> <b>step 5, GPU maze search and the CUDA CI job;</b> <b>step 6, OpenROAD.</b> See the next two sections.</li>
+  </ul>
+</section>
+
+<section id="parallel">
+  <h2>Where multithreading fits</h2>
+  <ul>
+    <li><b>Where the time goes.</b> Almost all runtime is maze searches in the piece rip-up, hotspot and refinement stages. The pattern stage is already batched and runs on the GPU, but it is a small share.</li>
+    <li><b>How.</b> Group nets whose bounding boxes do not overlap and route each group on all cores at once against one frozen price snapshot. Results stay reproducible run to run. The design notes expect 30–50% parallel efficiency, roughly 3–5 times faster on this machine's performance cores.</li>
+    <li><b>When.</b> After the piece rip-up detour fix. Both change the same stage, and the project's rule is not to parallelize a part of the router that is still changing. Parallel batching also reorders reroutes, which moves results within the noise, so it needs the noise rules above to judge.</li>
+    <li><b>Natural fits already found.</b> Separate hotspot boxes (backlog item 2) are disjoint by construction, so they can run in parallel with no extra coordination. The ISPD 2024 contest assumed 8 CPU cores plus GPUs, so that is also the scale to tune thread counts at.</li>
+  </ul>
+</section>
+
+<section id="openroad">
+  <h2>Where OpenROAD fits now</h2>
+  <ul>
+    <li><b>It is the evaluator for the next contest format.</b> ISPD 2025 uses the same <span class="mono">.cap</span>/<span class="mono">.net</span> inputs as 2024, but writes routes in layout coordinates and scores timing and power through a forked OpenROAD. So the 2024 reader is the direct prerequisite.</li>
+    <li><b>It tests what the 2008 numbers cannot.</b> Global-routing overflow does not show whether a route can actually be detail-routed cleanly. OpenROAD's detailed router and design-rule checks answer that on real LEF/DEF designs.</li>
+    <li><b>It gives a baseline and timing.</b> Its FastRoute-derived global router is a known-good comparison, and OpenSTA supplies the timing needed for the project's planned net typing (design stage 6).</li>
+    <li><b>First step, when it comes:</b> build the forked OpenROAD and run its evaluation on one ISPD 2025 case with a trivial solution, the same verify-first approach used for 2008 and 2024. Order: after the 2024 router works and after multithreading, as agreed.</li>
+  </ul>
+</section>
+
+<section id="next">
+  <h2>For the next recap</h2>
+  <p>A later recap should repeat the results table, the noise table, the detour trace and the two ledgers, then add a comparison section against this one. The numbers below are embedded in this page as machine-readable data (<span class="mono">#recap-data</span>), and the page source is kept in the repository at <span class="mono">recaps/recap-2026-10-01.html</span>, so the next recap can read them directly instead of retyping them.</p>
+  <p>Fields worth comparing: zeros out of 16; overflow, maximum overflow, scored wirelength and runtime per benchmark; wirelength against NTHU-Route 2.0; the noise spreads; final detour after the cleanup stage; and the status of each backlog item.</p>
+  <details>
+    <summary>Embedded snapshot data</summary>
+    <pre id="recap-data-view"></pre>
+  </details>
+</section>
+</div>
+
+<script type="application/json" id="recap-data">
+{
+  "schema": 1,
+  "recapDate": "2026-10-01",
+  "commit": "bc82784",
+  "configuration": "gr/pd14route + gr/standard.env",
+  "machine": "Apple M4 Pro, single thread",
+  "zeroOverflowCount": 11,
+  "benchmarkCount": 16,
+  "benchmarks": [
+    {"name": "adaptec1", "overflow": 0, "maxOverflow": 0, "scoredWL": 5414046, "runtimeSec": 2065},
+    {"name": "adaptec2", "overflow": 0, "maxOverflow": 0, "scoredWL": 5261814, "runtimeSec": 1251},
+    {"name": "adaptec3", "overflow": 0, "maxOverflow": 0, "scoredWL": 13253518, "runtimeSec": 2062},
+    {"name": "adaptec4", "overflow": 0, "maxOverflow": 0, "scoredWL": 12234727, "runtimeSec": 558},
+    {"name": "adaptec5", "overflow": 0, "maxOverflow": 0, "scoredWL": 15851373, "runtimeSec": 5253},
+    {"name": "bigblue1", "overflow": 0, "maxOverflow": 0, "scoredWL": 5754158, "runtimeSec": 2778},
+    {"name": "bigblue2", "overflow": 0, "maxOverflow": 0, "scoredWL": 9508527, "runtimeSec": 2735},
+    {"name": "bigblue3", "overflow": 0, "maxOverflow": 0, "scoredWL": 13189107, "runtimeSec": 1605},
+    {"name": "bigblue4", "overflow": 370, "maxOverflow": 2, "scoredWL": 24861323, "runtimeSec": 27722},
+    {"name": "newblue1", "overflow": 48, "maxOverflow": 2, "scoredWL": 4824414, "runtimeSec": 5608},
+    {"name": "newblue2", "overflow": 0, "maxOverflow": 0, "scoredWL": 7635770, "runtimeSec": 174},
+    {"name": "newblue3", "overflow": 38704, "maxOverflow": 364, "scoredWL": 10779692, "runtimeSec": 29754},
+    {"name": "newblue4", "overflow": 144, "maxOverflow": 2, "scoredWL": 13660587, "runtimeSec": 8871},
+    {"name": "newblue5", "overflow": 0, "maxOverflow": 0, "scoredWL": 23383430, "runtimeSec": 6572},
+    {"name": "newblue6", "overflow": 0, "maxOverflow": 0, "scoredWL": 18321622, "runtimeSec": 6382},
+    {"name": "newblue7", "overflow": 108, "maxOverflow": 2, "scoredWL": 36104404, "runtimeSec": 70692}
+  ],
+  "reference": {
+    "source": "LMgr, ISQED 2013, Table II (re-run on a 1.6 GHz quad-core)",
+    "nthuRoute2": {
+      "adaptec1": [0, 5360000, 10], "adaptec2": [0, 5240000, 5], "adaptec3": [0, 13150000, 10],
+      "adaptec4": [0, 12180000, 3], "adaptec5": [0, 15540000, 27], "bigblue1": [0, 5570000, 20],
+      "bigblue2": [86, 9000000, 21], "bigblue3": [32, 13070000, 15], "bigblue4": [256, 22800000, 135],
+      "newblue1": [164, 4600000, 28], "newblue2": [0, 7590000, 2], "newblue3": [31810, 10630000, 22],
+      "newblue4": [222, 12890000, 56], "newblue5": [18, 23140000, 40], "newblue6": [0, 17690000, 52],
+      "newblue7": [68, 35520000, 1491]
+    },
+    "nthuFields": ["overflow", "scoredWL", "runtimeMin"],
+    "bestOfFourOverflow": {"bigblue4": 166, "newblue3": 31024, "newblue4": 144, "newblue7": 68, "others": 0}
+  },
+  "noise": {
+    "newblue1": {"overflow": [46, 48], "wlSpreadPct": 1.6},
+    "newblue4": {"overflow": [144, 146], "wlSpreadPct": 3.6},
+    "bigblue2": {"overflow": [0, 2], "wlSpreadPct": 1.8},
+    "newblue6": {"overflow": [0, 0], "wlSpreadPct": 1.6}
+  },
+  "detourOverPinMstPct": {
+    "stages": ["pattern", "pieceRipUp", "hotspot", "refinement", "treeRebuild", "wlCleanup"],
+    "bigblue2": [-0.28, 32.28, 24.57, 24.57, 12.59, 9.02],
+    "newblue6": [-0.20, 34.42, 14.26, 14.26, 8.71, 7.16],
+    "newblue1": [-0.30, 24.15, 12.59, 12.00, 8.43, 7.00],
+    "bigblue4": [-0.17, 29.85, null, null, null, null]
+  },
+  "backlog": [
+    {"id": "detour-fix", "title": "Cut detour in the piece rip-up stage", "status": "next"},
+    {"id": "multi-region", "title": "One hotspot box per cluster (newblue7)", "status": "open"},
+    {"id": "virtual-capacity", "title": "Virtual capacity for newblue1", "status": "open"},
+    {"id": "long-net-budget", "title": "Separate capacity limit for long nets", "status": "open"},
+    {"id": "fewer-bends", "title": "Fewer bends to cut corner vias", "status": "open"},
+    {"id": "slow-plateau", "title": "Plateau stop for the piece rip-up stage", "status": "low priority"},
+    {"id": "seed-prices", "title": "Starting prices from a congestion estimate", "status": "low priority"},
+    {"id": "wl-floor", "title": "Wirelength weight floor", "status": "retired"}
+  ]
+}
+</script>
+<script>
+(function () {
+  var src = document.getElementById("recap-data");
+  var view = document.getElementById("recap-data-view");
+  if (src && view) {
+    try { view.textContent = JSON.stringify(JSON.parse(src.textContent), null, 2); }
+    catch (e) { view.textContent = src.textContent; }
+  }
+})();
+</script>
