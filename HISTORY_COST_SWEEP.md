@@ -7399,3 +7399,11 @@ W150: bigblue4 stops at round 150 with its full-run best (~350 rounds,
 work threshold must sit above their cost (~1740 s and ~1250 s per 150
 rounds) and well below bigblue4's (~16300 s): P = the expansions of about
 5000 s.
+
+**Part 80 parity** (adaptec1, small budget; `status=OK`, `gr_verify` =
+`eval2008.pl`): pd13route, pd14route default, and pd14route with window 2
+and an unreachable threshold -- route files **byte-identical** (310 /
+5470515). Calibration: the region stage expanded 503216413 nodes in 78.7 s
+(**6.4M expansions per second**, 54-66M per round). P = 3.2e10 (~5000 s):
+newblue4 ~1.1e10 per 150 rounds, bigblue4 ~1.0e11 -- about 3x margin each
+side. Queued (`part80b.jobs`): bigblue4, window 150, gain 1%, P 3.2e10.
