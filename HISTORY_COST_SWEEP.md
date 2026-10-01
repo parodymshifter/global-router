@@ -7535,3 +7535,13 @@ test at p = 0.05 per benchmark (1 in 20 orderings). Screen first
 newblue2 on, bigblue2 at mu 8 and mu 2.
 
 Scope of idea 2 (one hotspot box per cluster): `IDEAS_TEST_PLAN.md`.
+
+**Part 83a, first results** (`status=OK`, `gr_verify` = `eval2008.pl`):
+newblue2 with the reclaim pass off reproduces the standard run's route
+file **byte for byte** (0 / 7635770). newblue2 with it on (mu 8): 928 of
+1680 candidates kept, 2D wire 4716440 -> 4681493 (-0.74%) at a cost of
+2D overflow 0 -> 746, which the region and refinement stages took back to
+0; final 0 / **7617454** (-0.24%, inside newblue2's noise until measured),
+180 s. The other jobs (bigblue2 at mu 8 and mu 2, and Part 82's bigblue4
+trace at region round 116) were killed at ~15:28 when the desktop app
+hung during an unrelated PDF export; relaunched as `part83a_retry.jobs`.
