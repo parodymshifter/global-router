@@ -7407,3 +7407,16 @@ and an unreachable threshold -- route files **byte-identical** (310 /
 (**6.4M expansions per second**, 54-66M per round). P = 3.2e10 (~5000 s):
 newblue4 ~1.1e10 per 150 rounds, bigblue4 ~1.0e11 -- about 3x margin each
 side. Queued (`part80b.jobs`): bigblue4, window 150, gain 1%, P 3.2e10.
+
+**Part 79b, WL floors on newblue1** (c200 configuration; `status=OK`,
+`gr_verify` = `eval2008.pl`): floor 0.01 -> 48 / 4877199 / 5027s, detour
++7.20%; floor 0.05 -> 46 / 4862174 / 4959s, detour +6.66%. The three
+neutral runs (Part 78): overflow 46-48, WL 4803733-4882558, detour +4.91
+to +7.36% -- **both floors fall inside the noise on every measure.**
+
+**WL floor verdict, all three benchmarks: no effect distinguishable from
+noise** (bigblue2 the only case outside its spread, newblue6 and newblue1
+inside). Idea 4's "decayed WL term" hypothesis is retired. Side finding:
+newblue1's detour is +4.9 to +7.4% on the pd13route pipeline against
++12.4% on the Part 71 pd9route run, and its WL 4.80-4.88M against 5.02M --
+the pattern stage (pd11route) removed about half of newblue1's excess.
