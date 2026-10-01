@@ -7348,3 +7348,28 @@ uncapped). bigblue4 finished at 2D 370 after refinement, 72896s total
 overflow **370** (max 2), scored WL 24861323, 72897s (20.2 h), peak RSS
 3769MB -- vs uncapped 378 / 24851982 / 83888s: overflow -8, WL +0.04%,
 runtime -13%.
+
+## Part 80 -- pd14route: a work-gated plateau stop for the region stage
+
+The floor-gated stop (Part 74) cannot reach bigblue4 (residue ~400 < floor
+1000), and the floor exists only to protect late zeros like bigblue2's --
+which cost bigblue2 almost nothing (500 rounds in 198-361 s) while
+bigblue4's 500 cost 15.1 h. `gr/pd14route.cpp` adds a second rule gated on
+the *work* of the recent rounds instead of the residue's size:
+`PD14ROUTE_REGION_COST_WINDOW=N` / `_COST_POPS=P` stop the region stage
+when its best has not fallen by max(1, gain%) over the last N rounds and
+those N rounds expanded at least P search nodes. Work is counted as
+search-node expansions, not wall time, so stops and routes stay
+deterministic. Off by default; 528 checks (stuck fixture: all 40 rounds
+with no window, exactly 5 with window 5 and the threshold at 5 rounds'
+work, all 40 with the threshold above the total work; the count is
+identical across runs).
+
+Planned setting: window 100 (the Part 74 replay: W100 g1% leaves newblue7
+unstopped -- its region best kept improving to round 375 -- and stops
+bigblue4 at round 204 with its full-run best), P = about an hour's worth
+of expansions per 100 rounds (bigblue4 ~10900 s per 100 rounds; newblue4
+~1160 s, newblue1 ~840 s, bigblue2 ~55 s), calibrated from the parity
+runs' expansions per second. Queued (`part80.jobs`): parity on adaptec1 at
+a small budget -- pd13route, pd14route default, pd14route with a window
+and an unreachable threshold -- route files must be byte-identical.
