@@ -7420,3 +7420,13 @@ inside). Idea 4's "decayed WL term" hypothesis is retired. Side finding:
 newblue1's detour is +4.9 to +7.4% on the pd13route pipeline against
 +12.4% on the Part 71 pd9route run, and its WL 4.80-4.88M against 5.02M --
 the pattern stage (pd11route) removed about half of newblue1's excess.
+
+**Part 80b, bigblue4 with the work-gated stop** (pd14route, window 150,
+gain 1%, P 3.2e10, otherwise c200; `status=OK`, `gr_verify` =
+`eval2008.pl`): **370 (max 2) / 24861323 / 27722 s (7.7 h)**, peak RSS
+4571MB. Region stopped at round 150 by the work-gated rule (408 -> 404,
+9685 s, 7.96e10 expansions -- 8.2M/s here); refinement -> 370. Overflow
+and wirelength are **identical** to the capped run's (370 / 24861323): the
+replay's prediction held exactly -- the 350 rounds removed found nothing.
+Runtime: 72897 s -> 27722 s (-62%); against the original uncapped run
+(378 / 24851982 / 83888 s), -67% at 8 less overflow.
