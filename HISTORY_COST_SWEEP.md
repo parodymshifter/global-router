@@ -7545,3 +7545,23 @@ file **byte for byte** (0 / 7635770). newblue2 with it on (mu 8): 928 of
 180 s. The other jobs (bigblue2 at mu 8 and mu 2, and Part 82's bigblue4
 trace at region round 116) were killed at ~15:28 when the desktop app
 hung during an unrelated PDF export; relaunched as `part83a_retry.jobs`.
+
+**Part 83a, bigblue2 screen** (relaunched; `status=OK`, `gr_verify` =
+`eval2008.pl`):
+
+| run | scored WL | vs c200 baseline | final detour | reclaim kept / candidates | overflow injected | region | runtime |
+|---|---|---|---|---|---|---|---|
+| baseline runs (Part 78b) | 9508527 / 9622819 / 9675318 | -- | +7.6 / +9.4 / +10.2% | -- | -- | -- | ~2700s |
+| reclaim mu 8 | **0 / 9205885** | **-3.18%** | +4.37% | 9046 / 18537 | 298 -> 19974 | -> 0 in 359 rounds, 283 s | 2692s |
+| reclaim mu 2 | **0 / 9196970** | **-3.28%** | +4.23% | 12979 / 18537 | 298 -> 53320 | -> 0 in 393 rounds, 335 s | 2742s |
+
+Both below all three baseline runs by 1.4x+ the 1.8% spread (vs the
+baseline mean -4.1% / -4.2%), zero kept, runtime unchanged. Against
+NTHU-Route 2.0's re-run (9.00M): +5.7% -> +2.3% / +2.2%. The pass took the
+slow tier's +32.3% detour to +15.6% (mu 8) / +10.2% (mu 2); the region
+stage, whose box now spans the whole chip because the injected overflow is
+everywhere, cleared the overflow in ~5 minutes; the stages after it then
+start from much less detour. mu 8 goes to the 3-vs-3 test (less injected
+overflow, safer where a residue remains): `part83b.jobs` -- bigblue2 cells
+7 / 9, newblue1 cells 7 / 8 / 9, newblue2 cells 7 / 9 plus two newblue2
+baseline noise runs.
