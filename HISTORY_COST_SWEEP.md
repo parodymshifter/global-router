@@ -7494,3 +7494,18 @@ pins' MST (its Z/L shapes over MST pieces), the slow tier adds 1.5M tile
 edges (+32%), and the stages after it recover 72% of that. What is left
 (+9.0% here; +7.6% by grdiag over the 3D route, which counts segments, not
 charge records) is the gap.
+
+**Part 82, more traces** (standard configuration; newblue1 and newblue6
+reproduce their earlier results exactly -- 48 / 4824414 and 0 / 18321622):
+
+| benchmark | after pattern | after slow tier (nets > 1.5x MST: count, share of excess) | after region | after refinement | after rebuild | after WL recovery |
+|---|---|---|---|---|---|---|
+| bigblue2 | -0.28% | **+32.28%** (20175, 78%) | +24.57% | +24.57% | +12.59% | +9.02% |
+| newblue6 | -0.20% | **+34.42%** (25493, 85%) | +14.26% | +14.26% | +8.71% | +7.16% |
+| newblue1 | -0.30% | **+24.15%** (4256, 90%) | +12.59% | +12.00% | +8.43% | +7.00% |
+| bigblue4 | -0.17% | **+29.85%** (29993, 89%) | (running) | | | |
+
+Same shape on every benchmark: the pattern stage ends at the pins' MST,
+the slow tier adds +24-34%, and the stages after it recover 70-80%. The
+slow tier's excess is concentrated -- 1.6-3.4% of the nets carry 78-90% of
+it -- so a fix aimed at those nets touches very little of the design.
