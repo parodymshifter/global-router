@@ -80,6 +80,7 @@ jobs:
           - pd11route
           - pd12route
           - pd13route
+          - pd14route
           - g24_verify
           - g24_lroute
           - grdiag
