@@ -7373,3 +7373,29 @@ of expansions per 100 rounds (bigblue4 ~10900 s per 100 rounds; newblue4
 runs' expansions per second. Queued (`part80.jobs`): parity on adaptec1 at
 a small budget -- pd13route, pd14route default, pd14route with a window
 and an unreachable threshold -- route files must be byte-identical.
+
+**newblue7, caps 200, verified** (`status=OK`, `gr_verify` = `eval2008.pl`):
+108 (max 2) / 36104404 / 70692s (19.6 h), peak RSS 5528MB -- vs uncapped
+106 / 36163657 / 97346s: overflow +2 (inside the 2-unit overflow noise
+seen elsewhere), WL -0.16%, **runtime -27%**. Region 634 -> 136 in 500
+rounds, 38528 s (~77 s a round); refinement -> 108. Part 76 summary: caps
+200 kept or improved every overflow (bigblue2 0, newblue1 48 vs 54,
+newblue4 144 vs 148, bigblue4 370 vs 378, newblue7 108 vs 106) at -13% to
+-58% runtime.
+
+**Window choice for pd14route, replayed on the region traces** (gain 1%;
+the work gate decides which benchmarks the rule may touch):
+
+| run | start -> full best (round) | W100 | W150 | W200 |
+|---|---|---|---|---|
+| newblue7 c200 | 634 -> 136 (487) | no stop | no stop | no stop |
+| newblue7 uncapped | 634 -> 138 (493) | no stop | no stop | no stop |
+| bigblue4 c200 | 408 -> 404 (115) | 100 -> 408 | **150 -> 404** | 200 -> 404 |
+| newblue4 c200 | 296 -> 172 (415) | 332 -> 178 | 382 -> 178 | no stop |
+| newblue1 c200 | 298 -> 64 (397) | 497 -> 64 | no stop | no stop |
+
+W150: bigblue4 stops at round 150 with its full-run best (~350 rounds,
+~10 h saved); newblue7 never plateaus; newblue4 and newblue1 would, so the
+work threshold must sit above their cost (~1740 s and ~1250 s per 150
+rounds) and well below bigblue4's (~16300 s): P = the expansions of about
+5000 s.
