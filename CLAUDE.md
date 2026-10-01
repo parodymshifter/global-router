@@ -156,6 +156,18 @@ at equal quality; Metal backend bit-identical to the CPU), then
 `pd12route` (plateau stop for the late stages). Table:
 `HISTORY_COST_SWEEP.md` Part 75.
 
+**2026-10-01: the standard configuration.** `gr/pd14route` with
+`gr/standard.env` (run_batch.sh job lines take `@standard.env`): Part 71's
+pipeline plus three runtime mechanisms that each kept or improved
+overflow -- a floor-gated plateau stop (Part 74), margin caps on the late
+stages (Part 76), and a work-gated plateau stop counted in deterministic
+search expansions (Part 80). The large benchmarks run 13-67% faster than
+in Part 75 (bigblue4 23.3 h -> 7.7 h, newblue7 27.0 h -> 19.6 h). New
+experiments start from this configuration. Run-to-run noise between
+quality-neutral perturbations is ~2 units of overflow on the residues but
+1.6-3.6% of wirelength (Part 78): judge wirelength ideas against each
+benchmark's own spread, never one run.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

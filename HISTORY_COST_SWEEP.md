@@ -7430,3 +7430,31 @@ and wirelength are **identical** to the capped run's (370 / 24861323): the
 replay's prediction held exactly -- the 350 rounds removed found nothing.
 Runtime: 72897 s -> 27722 s (-62%); against the original uncapped run
 (378 / 24851982 / 83888 s), -67% at 8 less overflow.
+
+## Part 81 -- the standard configuration
+
+`gr/standard.env` (with `gr/pd14route`): Part 71's settings, the Part 72
+pattern stage (default on), Part 74's floor-gated plateau (W50 / 1% /
+floor 1000; refinement W10), Part 76's margin caps (200 / 200), Part 80's
+work-gated plateau (W150, 3.2e10 expansions). `run_batch.sh` now expands
+`@file` tokens into the file's VAR=value lines. Benchmarks whose last runs
+were on the same pipeline with none of the new stops firing need no rerun
+(the stops only end loops early; the caps only bind past region round 95
+or refinement iteration 38): adaptec1, adaptec4-5, bigblue3, newblue5-6
+(Part 73b, pd11route: regions finished in <= 43 rounds), bigblue2,
+newblue1, newblue4, newblue7 (Part 76, pd13route caps 200: work gate below
+threshold or never plateaued), bigblue4 (Part 80b), newblue3 (Part 74:
+stopped at round 59 by the floor rule, caps never binding). Queued
+(`part81.jobs`) on the standard configuration: newblue2, adaptec2,
+bigblue1, adaptec3 (last run on pd9route, no pattern stage), and adaptec4
+as an equivalence check (must reproduce 0 / 12234727).
+
+## Part 82 -- where the detour comes from: a per-stage trace
+
+`gr/pd15route.cpp` (forked from pd14route): `PD15ROUTE_DETOUR_TRACE=1`
+prints, after the pattern stage, the slow tier, the region stage,
+refinement, the tree rebuild and WL recovery, the non-giant nets' 2D wire,
+the sum of their pin-tile MSTs, and the excess carried by nets over 1.5x
+their MST. Trace only (routes = pd14route's). 531 checks. Queued
+(`part82.jobs`, standard configuration): bigblue2 (must reproduce c200's 0
+/ 9508527), newblue6, newblue1, bigblue4.
