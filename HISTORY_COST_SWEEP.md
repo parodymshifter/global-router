@@ -7692,3 +7692,20 @@ units higher. The safe form is therefore not a better trigger but a
 comparison: run the reclaim and the stages after it from a saved state and
 keep the result only if it is no worse on overflow (then lower on WL) --
 proposed as the next variant.
+
+## Part 86 -- reclaim with a fallback (pd19route)
+
+`gr/pd19route.cpp`: `PD19ROUTE_RECLAIM_FALLBACK=1` saves the 2D state the
+slow tier hands on and runs two paths from it: A, the region stage and
+refinement as standard; B, the reclaim pass (mu 8) then the region stage
+and refinement. B is kept only if its 2D overflow is lower than A's, or
+equal with less 2D wire. Real overflow equals 2D overflow on every
+benchmark measured (Part 78), so the choice is made on the number that
+is scored. Off = pd18route. 553 checks (the choice rule; on a fixture
+where both detours are reclaimable B wins 0/22 vs 0/26, the kept state
+carries the kept path's numbers, nets stay connected). Cost: one more
+region stage and refinement (minutes on bigblue2, about an hour on
+newblue1). Queued (`part86a.jobs`): newblue2 parity and fallback,
+newblue1 cells 7 / 8 / 9, bigblue2 cell 8. Expected: newblue1 keeps A
+wherever B's overflow is higher -- so its overflow can only match the
+standard run's -- and bigblue2 keeps B (9.21M).
