@@ -80,6 +80,7 @@ pd14route
 pd15route
 pd16route
 pd17route
+pd18route
 pd11route_gpu
 gr/pattern_kernel.metallib
 gr/*.run
