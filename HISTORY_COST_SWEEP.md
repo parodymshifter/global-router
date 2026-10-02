@@ -7591,3 +7591,13 @@ every run (p = 0.05 in the wrong direction)**. Since overflow ranks first,
 mu 8 cannot join the standard configuration as is: on newblue1 the region
 stage absorbs the injected overflow but settles above the old residue.
 Next candidate: keep only reroutes that add no overflow (mu = infinity).
+
+**Part 83c, strict reclaim, queued** (`part83c.jobs`): mu = 1e9, so a
+reroute is kept only if it adds no local overflow at all (the shorter
+route must fit in edges with room). newblue1 at pattern cells 7 / 8 / 9
+(against baseline overflow 46 / 48 / 48 and mu 8's 70 / 54 / 56), and
+bigblue2 cell 8 (against mu 8's 9205885 and the baseline 9508527).
+Caveat: the reroute is still chosen by present-demand cost, so where that
+cost prefers a path through a full edge the reroute is rejected even if
+an overflow-free shorter path exists; this variant measures the safe
+lower bound of the gain, not its maximum.
