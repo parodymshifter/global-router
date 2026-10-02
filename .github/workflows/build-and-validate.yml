@@ -86,6 +86,7 @@ jobs:
           - pd17route
           - pd18route
           - pd19route
+          - pd20route
           - g24_verify
           - g24_lroute
           - grdiag
