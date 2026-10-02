@@ -7664,3 +7664,31 @@ ended at 44 / 52 / 54. Against those six near-neutral runs (44, 46, 48,
 (Mann-Whitney U = 17.5 of 18, one-sided p ~ 0.02): still worse. Keeping
 the reroutes away from the overflow does not keep the residue down; the
 injected overflow elsewhere still draws the region stage away from it.
+
+**Part 85 results, option 2 (reclaim mu 8 at the slow tier's first stop,
+then more slow rounds)** (all `status=OK`, `gr_verify` = `eval2008.pl`):
+newblue2 parity -- everything off reproduces the standard run byte for
+byte. The mechanism works as built: the reclaim fires at slow round 73-79
+(about 2000 of 4060 candidates kept, 2D wire -12%, overflow ~290 ->
+~5750), and 13-26 more slow rounds bring it back under the 300 stop.
+
+| benchmark | baseline | option 1 (Part 84) | option 2 |
+|---|---|---|---|
+| newblue1 overflow (cells 8 / 7 / 9) | 48 / 46 / 48 (strict, near-neutral: 54 / 52 / 44) | 54 / 56 / 60 | 54 / 58 / 50 |
+| newblue1 WL | 4824414 / 4882558 / 4803733 | 4755838 / 4748436 / 4753707 | 4770440 / 4770304 / **4930754** |
+| bigblue2 overflow / WL (cell 8) | 0 / 9508527 | 0 / 9210509 | 0 / 9403565 |
+
+Option 2 is weaker on wirelength (bigblue2 -1.1% vs option 1's -3.1%;
+newblue1's cell-9 run ends above every baseline -- the extra slow rounds,
+WL weight again near zero, rebuilt the detours) and does not protect
+newblue1's overflow either (54 / 58 / 50 against near-neutral 44-54:
+inside to above). Neither option keeps newblue1's residue where it was.
+
+What the five variants together say: on a benchmark that reaches zero,
+the reclaim's injected overflow is cleared and the WL gain is kept
+(bigblue2 3/3 zero, -4.1%; newblue2 3/3 zero, -0.24%); on newblue1, whose
+residue does not clear, any renegotiation the reclaim starts ends a few
+units higher. The safe form is therefore not a better trigger but a
+comparison: run the reclaim and the stages after it from a saved state and
+keep the result only if it is no worse on overflow (then lower on WL) --
+proposed as the next variant.
