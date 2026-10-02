@@ -7732,3 +7732,19 @@ B ends with overflow > 0 -- on benchmarks that reach zero this would cost
 nothing, and it changes the choice only if A and B both reach zero and A
 is shorter, which no run here came near (A was 0.4-16% longer every
 time both were zero).
+
+## Part 87 -- the fallback in the cheaper order, on the zero-overflow benchmarks
+
+`gr/pd20route.cpp`: `PD20ROUTE_FALLBACK_ORDER=bfirst` runs the reclaim
+path first and the standard path only if the reclaim path ends with
+overflow > 0. Default (`both`) = pd19route. 555 checks (on the fixture B
+reaches zero, A is never run, and the kept routes are identical to the
+both-paths order's). Queued (`part87.jobs`, longest first): parity on
+newblue2 and bigblue2 (must reproduce Part 86's fb_newblue2 and
+fbc8_bigblue2 byte for byte), then the nine other zero-overflow
+benchmarks -- adaptec1-5, bigblue1, bigblue3, newblue5, newblue6 --
+against their standard-configuration results (Part 81 / 73b). One run
+each; judged by consistency across the nine (all nine shorter would be a
+sign test at p = 1/512), with each benchmark's own noise where measured
+(newblue6 1.6%). The long residue benchmarks (bigblue4, newblue4,
+newblue7, newblue3) wait on this result.
