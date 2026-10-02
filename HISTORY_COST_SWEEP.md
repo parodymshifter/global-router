@@ -7709,3 +7709,26 @@ newblue1). Queued (`part86a.jobs`): newblue2 parity and fallback,
 newblue1 cells 7 / 8 / 9, bigblue2 cell 8. Expected: newblue1 keeps A
 wherever B's overflow is higher -- so its overflow can only match the
 standard run's -- and bigblue2 keeps B (9.21M).
+
+**Part 86 results** (all `status=OK`, `gr_verify` = `eval2008.pl`):
+
+| run | path A (standard) 2D overflow / wire | path B (reclaim) | kept | final overflow / scored WL | runtime | same as |
+|---|---|---|---|---|---|---|
+| newblue2 parity (off) | -- | -- | -- | 0 / 7635770 | 173s | standard run, byte for byte |
+| newblue2 | 0 / 4734459 | 0 / 4672897 | **B** | 0 / 7617454 | 181s | rc8_newblue2, byte for byte |
+| bigblue2 cell 8 | 0 / 5838363 | 0 / 5054094 | **B** | **0 / 9205885** | 2911s | rc8_bigblue2, byte for byte |
+| newblue1 cell 8 | 48 / ~2.65M | 54 / ~2.52M | A | 48 / 4824414 | 10055s | c200_newblue1, byte for byte |
+| newblue1 cell 7 | 48 / 2885165 | 70 / 2525356 | A | 46 / 4882558 | 9813s | nf7_newblue1 |
+| newblue1 cell 9 | 48 / 2653306 | 56 / 2523945 | A | 48 / 4803733 | 10100s | nf9_newblue1 |
+
+The fallback does what it was built for: where the reclaim path clears
+its overflow it is kept and the WL gain lands (bigblue2 -4.1% vs the
+baseline mean, newblue2 -0.24%); where it does not, the standard result
+is kept unchanged, byte for byte -- overflow can never get worse. The
+cost is the second region stage and refinement: +5% on newblue2, +8% on
+bigblue2, **+85% on newblue1** (~5300 s -> ~10000 s), where it bought
+nothing. A cheaper ordering is possible: run B first and run A only when
+B ends with overflow > 0 -- on benchmarks that reach zero this would cost
+nothing, and it changes the choice only if A and B both reach zero and A
+is shorter, which no run here came near (A was 0.4-16% longer every
+time both were zero).
