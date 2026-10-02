@@ -7565,3 +7565,29 @@ start from much less detour. mu 8 goes to the 3-vs-3 test (less injected
 overflow, safer where a residue remains): `part83b.jobs` -- bigblue2 cells
 7 / 9, newblue1 cells 7 / 8 / 9, newblue2 cells 7 / 9 plus two newblue2
 baseline noise runs.
+
+**Part 82, bigblue4 trace complete** (`status=OK`, 370 / 24861323, route
+file byte-identical to Part 80b's): pattern -0.17%, slow tier **+29.85%**,
+region +29.36%, refinement +29.18%, tree rebuild +16.84%, WL recovery
+**+14.65%** (13844 nets > 1.5x MST carry 1.46M of the 1.71M excess). Its
+region box is tiny (9887 nets), so -- unlike the other three -- the region
+stage removes almost none of the slow tier's detour; the most remaining
+excess of any benchmark.
+
+**Part 83b, the 3-vs-3 test of detour reclaim (mu 8)** (all `status=OK`,
+`gr_verify` = `eval2008.pl`; pattern cells 7 / 8 / 9 both sides):
+
+| benchmark | baseline overflow | reclaim overflow | baseline WL | reclaim WL | WL vs baseline mean | runtime (s), baseline / reclaim |
+|---|---|---|---|---|---|---|
+| newblue2 | 0 / 0 / 0 | 0 / 0 / 0 | 7637309 / 7635770 / 7635916 | 7618285 / 7617454 / 7618092 | **-0.24%** | ~171 / 180-244 |
+| bigblue2 | 2 / 0 / 0 | **0 / 0 / 0** | 9622819 / 9508527 / 9675318 | 9209761 / 9205885 / 9207304 | **-4.11%** | ~2690 / 2692-2887 |
+| newblue1 | 46 / 48 / 48 | **70 / 54 / 56** | 4882558 / 4824414 / 4803733 | 4758156 / 4762042 / 4763382 | **-1.56%** | ~5330 / 5448-5841 |
+
+(Order within each cell: cell 7 / 8 / 9.) Wirelength: every reclaim run
+is below every baseline run on all three benchmarks -- an exact one-sided
+permutation p = 0.05 each, ~1.25e-4 jointly. Overflow: the zeros hold (and
+bigblue2 holds it 3/3 against 2/3), but **newblue1's overflow is worse in
+every run (p = 0.05 in the wrong direction)**. Since overflow ranks first,
+mu 8 cannot join the standard configuration as is: on newblue1 the region
+stage absorbs the injected overflow but settles above the old residue.
+Next candidate: keep only reroutes that add no overflow (mu = infinity).
