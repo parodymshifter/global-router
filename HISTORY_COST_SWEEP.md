@@ -7647,3 +7647,20 @@ stop ends the tier after round 0 without it, one round later with it, nets
 connected). Queued after Part 84 (`part85a.jobs`): newblue2 parity,
 newblue1 cells 7 / 8 / 9 and bigblue2 cell 8, at-stop reclaim alone (no
 pre-region pass, no avoid) so the two options are judged separately.
+
+**Part 84 results, option 1 (reclaim mu 8 skipping nets within 5 tiles of
+overflow)** (all `status=OK`, `gr_verify` = `eval2008.pl`): newblue2
+parity -- avoid off reproduces rc8_newblue2 byte for byte (7617454).
+newblue1 cells 8 / 7 / 9: **54 / 56 / 60** overflow, WL 4755838 / 4748436
+/ 4753707 (-1.7% vs the baseline mean). On cell 8 the pass skipped 1185
+candidates near overflow and kept 1697 of 2869, injecting 298 -> 3618
+(vs mu 8's larger injection) -- yet the residue still ends higher.
+bigblue2 cell 8: **0 / 9210509** -- the full mu 8 gain survives (9205885).
+
+newblue1's overflow noise is wider than the first three baselines showed:
+the strict pass of Part 83c, which left WL inside the baseline range,
+ended at 44 / 52 / 54. Against those six near-neutral runs (44, 46, 48,
+48, 52, 54), option 1's 54 / 56 / 60 is above all but one tie
+(Mann-Whitney U = 17.5 of 18, one-sided p ~ 0.02): still worse. Keeping
+the reroutes away from the overflow does not keep the residue down; the
+injected overflow elsewhere still draws the region stage away from it.
