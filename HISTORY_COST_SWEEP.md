@@ -7621,3 +7621,29 @@ overflow and the renegotiation that clears it**; a reroute restricted to
 edges with room finds little the later WL stages would not find anyway.
 So the open question is how to keep mu 8's renegotiation away from the
 residue that newblue1 cannot absorb.
+
+## Part 84 -- option 1: reclaim that avoids the remaining overflow (pd17route)
+
+`gr/pd17route.cpp`: `PD17ROUTE_RECLAIM_AVOID=D` skips reclaim candidates
+with any wire tile within D tiles (x and y) of an edge overflowed when the
+pass starts -- proximity to each overflowed edge, because the leftover
+overflow is scattered (the region stage's single box at that point: 80 x
+338 tiles on bigblue2, 101 x 217 on newblue1). Off (-1) = pd16route. 543
+checks. Queued (`part84a.jobs`): newblue2 parity (avoid off must reproduce
+rc8_newblue2), newblue1 cells 7 / 8 / 9 and bigblue2 cell 8 at mu 8, D = 5
+(the region stage's own expand).
+
+## Part 85 -- option 2: reclaim inside the slow tier (pd18route)
+
+`gr/pd18route.cpp`: `PD18ROUTE_RECLAIM_AT_STOP=1` runs the reclaim pass
+when the slow tier first reaches PD9ROUTE_STOP_AT, resets the tier's
+best-state tracking (otherwise the pre-reclaim best would be returned and
+the reclaim silently discarded), and keeps running slow rounds until the
+stop holds again; `PD18ROUTE_RECLAIM_EVERY=K` also runs it every K rounds
+for benchmarks that never reach the stop. The injected overflow is then
+renegotiated by slow rounds (growing boxes, history) rather than the
+region stage. Off = pd17route. 547 checks (on a non-convergent fixture the
+stop ends the tier after round 0 without it, one round later with it, nets
+connected). Queued after Part 84 (`part85a.jobs`): newblue2 parity,
+newblue1 cells 7 / 8 / 9 and bigblue2 cell 8, at-stop reclaim alone (no
+pre-region pass, no avoid) so the two options are judged separately.
