@@ -7601,3 +7601,23 @@ Caveat: the reroute is still chosen by present-demand cost, so where that
 cost prefers a path through a full edge the reroute is rejected even if
 an overflow-free shorter path exists; this variant measures the safe
 lower bound of the gain, not its maximum.
+
+**Part 83c results, strict reclaim (mu 1e9)** (all `status=OK`,
+`gr_verify` = `eval2008.pl`):
+
+| benchmark | baseline (3 runs) | mu 8 (3 runs) | strict (runs) |
+|---|---|---|---|
+| newblue1 overflow | 46 / 48 / 48 | 70 / 54 / 56 | 52 / 54 / 44 |
+| newblue1 WL | 4882558 / 4824414 / 4803733 | 4758156 / 4762042 / 4763382 | 4871603 / 4870458 / 4867067 |
+| bigblue2 overflow | 2 / 0 / 0 | 0 / 0 / 0 | 0 (cell 8) |
+| bigblue2 WL | 9622819 / 9508527 / 9675318 | 9209761 / 9205885 / 9207304 | 9487328 (cell 8) |
+
+(Cells 7 / 8 / 9.) The strict pass keeps ~1000 of ~4000 candidates on
+newblue1 (2D wire -2.2%, no overflow added) but the later stages give the
+gain back: newblue1 WL lands inside its baseline range, overflow mixed.
+On bigblue2 it keeps only 9487328 -- just under the best baseline run
+(-0.22%), most of mu 8's -4.1% gone. **The WL gain needs the temporary
+overflow and the renegotiation that clears it**; a reroute restricted to
+edges with room finds little the later WL stages would not find anyway.
+So the open question is how to keep mu 8's renegotiation away from the
+residue that newblue1 cannot absorb.
