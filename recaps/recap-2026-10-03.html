@@ -1,0 +1,508 @@
+<title>Global Router Recap 2026-10-03</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+</style>
+
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap · snapshot 3 October 2026 · compared with 1 October</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">The second recap. It repeats the sections of the <a href="https://claude.ai/artifact/Wb1gWcVVQ85bwqLTsi9T5x" style="color: var(--trace)">1 October recap</a> with current numbers and adds a comparison against it. One change happened in between: a detour reclaim pass with a fallback, now part of the standard configuration.</p>
+  <div class="meta">
+    <span><b>Configuration</b> <span class="mono">gr/pd21route</span> + <span class="mono">gr/standard.env</span></span>
+    <span><b>Commit</b> <span class="mono">ce7a24f</span></span>
+    <span><b>Previous recap</b> <span class="mono">bc82784</span>, <span class="mono">gr/pd14route</span></span>
+    <span><b>Machine</b> Apple M4 Pro, single thread</span>
+    <span><b>Verification</b> every result: <span class="mono">gr_verify</span> = official <span class="mono">eval2008.pl</span></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#glance">At a glance</a><a href="#since">Since 1 October</a><a href="#results">Results</a><a href="#compare">Against the contest</a><a href="#findings">What the results point to</a><a href="#ledger">Tested since 1 October</a><a href="#backlog">Still to test</a><a href="#parallel">Multithreading</a><a href="#openroad">OpenROAD</a><a href="#next">For the next recap</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">11 of 16</div><div class="lab">benchmarks at zero overflow, unchanged. The five residues are byte-identical to 1 October.</div></div>
+    <div class="tile"><div class="fig">+0.84%</div><div class="lab">total wirelength over NTHU-Route 2.0 on the 11 zero-overflow benchmarks, down from +1.79%. adaptec3 is now 0.05% under it.</div></div>
+    <div class="tile"><div class="fig">11 of 11</div><div class="lab">zero-overflow benchmarks got shorter (−0.16% to −3.2%). A sign test on the nine run once gives p ≈ 0.002.</div></div>
+    <div class="tile"><div class="fig">+0%</div><div class="lab">runtime on residue benchmarks, where the new pass never runs. About +5 to 10% where it does.</div></div>
+  </div>
+</section>
+
+<section id="since">
+  <h2>Since 1 October</h2>
+  <p>The 1 October recap named one next step: cut the detour the piece rip-up stage adds. Six variants later, the one that worked is a reclaim pass that reroutes the most-detoured nets under fresh prices, accepting some temporary overflow, then lets the hotspot and refinement stages clear it. It shortened every benchmark that reaches zero, but raised newblue1's residue in every form that let it run there. So it now runs only after the standard path ends at 10 overflow or less, and its result is kept only if it is no worse on overflow.</p>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Measure</th><th class="num">1 October</th><th class="num">3 October</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td>Router</td><td class="num">pd14route</td><td class="num">pd21route</td><td>+ detour reclaim with fallback</td></tr>
+      <tr><td>Benchmarks at zero overflow</td><td class="num">11 of 16</td><td class="num">11 of 16</td><td><span class="delta same">same</span></td></tr>
+      <tr><td>Total overflow, all 16</td><td class="num">39,374</td><td class="num">39,374</td><td><span class="delta same">same, byte-identical residues</span></td></tr>
+      <tr><td>Total scored WL, 11 zero-overflow benchmarks</td><td class="num">129,808,092</td><td class="num">128,600,267</td><td><span class="delta down">−0.93%</span></td></tr>
+      <tr><td>Same total vs NTHU-Route 2.0</td><td class="num">+1.79%</td><td class="num">+0.84%</td><td><span class="delta down">−0.95 points</span></td></tr>
+      <tr><td>WL vs NTHU, range on zero-overflow benchmarks</td><td class="num">+0.4 to +5.7%</td><td class="num">−0.05 to +2.3%</td><td><span class="delta down">narrower</span></td></tr>
+      <tr><td>Zero-overflow benchmarks within 1% of NTHU WL</td><td class="num">5</td><td class="num">8</td><td><span class="delta down">+3</span></td></tr>
+      <tr><td>Benchmarks shorter than NTHU WL</td><td class="num">0</td><td class="num">1 (adaptec3)</td><td><span class="delta down">+1</span></td></tr>
+      <tr><td>Final detour over pin MST, bigblue2</td><td class="num">+9.0%</td><td class="num">+4.4%</td><td><span class="delta down">about half</span></td></tr>
+      <tr><td>Runtime range</td><td class="num">3 min to 19.6 h</td><td class="num">3 min to 19.6 h</td><td><span class="delta same">same; +5–10% on zero-overflow benchmarks</span></td></tr>
+      <tr><td>Router self-checks</td><td class="num">528</td><td class="num">557</td><td><span class="delta same">+29</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <h3>Wirelength against NTHU-Route 2.0, per benchmark</h3>
+  <div class="dumb" role="img" aria-label="Wirelength over NTHU-Route 2.0 for each benchmark, 1 October versus 3 October">
+    <div class="dumb-inner" id="dumbbell"></div>
+  </div>
+  <div class="legend"><span><i class="was"></i>1 October</span><span><i class="now"></i>3 October</span><span>Residue benchmarks (no reclaim) show one dot.</span></div>
+</section>
+
+<section id="results">
+  <h2>Results on the standard configuration</h2>
+  <p>Every row is a legal solution, and our verifier agrees with the official contest scorer on every number. The five residue benchmarks were not rerun: their standard path ends above 10 overflow, so the reclaim never runs and the result is the same route file (checked on newblue1, byte for byte at 5,625 s vs 5,608 s).</p>
+  <div class="tablebox">
+  <table>
+    <thead><tr>
+      <th>Benchmark</th><th class="num">Overflow</th><th class="num">Max</th><th class="num">Scored WL</th><th class="num">Change since<br>1 Oct</th><th class="num">Runtime</th>
+      <th class="num">NTHU-Route 2.0<br>overflow</th><th class="num">NTHU WL<br>(×10⁵)</th><th class="num">Best of<br>four</th><th class="num">WL vs NTHU<br>1 Oct</th><th class="num">WL vs NTHU<br>now</th><th>Overflow vs NTHU</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>adaptec1</td><td class="num">0</td><td class="num">0</td><td class="num">5,405,278</td><td class="num"><span class="delta down">−0.16%</span></td><td class="num">36 min†</td><td class="num">0</td><td class="num">53.6</td><td class="num">0</td><td class="num was">+1.0%</td><td class="num">+0.8%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>adaptec2</td><td class="num">0</td><td class="num">0</td><td class="num">5,243,664</td><td class="num"><span class="delta down">−0.34%</span></td><td class="num">20 min†</td><td class="num">0</td><td class="num">52.4</td><td class="num">0</td><td class="num was">+0.4%</td><td class="num">+0.07%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>adaptec3</td><td class="num">0</td><td class="num">0</td><td class="num">13,142,861</td><td class="num"><span class="delta down">−0.83%</span></td><td class="num">34 min†</td><td class="num">0</td><td class="num">131.5</td><td class="num">0</td><td class="num was">+0.8%</td><td class="num">−0.05%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>adaptec4</td><td class="num">0</td><td class="num">0</td><td class="num">12,205,838</td><td class="num"><span class="delta down">−0.24%</span></td><td class="num">10 min†</td><td class="num">0</td><td class="num">121.8</td><td class="num">0</td><td class="num was">+0.4%</td><td class="num">+0.2%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>adaptec5</td><td class="num">0</td><td class="num">0</td><td class="num">15,651,405</td><td class="num"><span class="delta down">−1.26%</span></td><td class="num">89 min†</td><td class="num">0</td><td class="num">155.4</td><td class="num">0</td><td class="num was">+2.0%</td><td class="num">+0.7%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>bigblue1</td><td class="num">0</td><td class="num">0</td><td class="num">5,700,481</td><td class="num"><span class="delta down">−0.93%</span></td><td class="num">48 min†</td><td class="num">0</td><td class="num">55.7</td><td class="num">0</td><td class="num was">+3.3%</td><td class="num">+2.3%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>bigblue2</td><td class="num">0</td><td class="num">0</td><td class="num">9,205,885</td><td class="num"><span class="delta down">−3.18%</span></td><td class="num">50 min</td><td class="num">86</td><td class="num">90.0</td><td class="num">0</td><td class="num was">+5.7%</td><td class="num">+2.3%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>bigblue3</td><td class="num">0</td><td class="num">0</td><td class="num">13,166,745</td><td class="num"><span class="delta down">−0.17%</span></td><td class="num">27 min†</td><td class="num">32</td><td class="num">130.7</td><td class="num">0</td><td class="num was">+0.9%</td><td class="num">+0.7%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>bigblue4</td><td class="num">370</td><td class="num">2</td><td class="num">24,861,323</td><td class="num"><span class="delta same">same</span></td><td class="num">7.7 h</td><td class="num">256</td><td class="num">228.0</td><td class="num">166</td><td class="num was">+9.0%</td><td class="num">+9.0%</td><td><span class="pill bad">behind</span></td></tr>
+      <tr><td>newblue1</td><td class="num">48</td><td class="num">2</td><td class="num">4,824,414</td><td class="num"><span class="delta same">same</span></td><td class="num">94 min</td><td class="num">164</td><td class="num">46.0</td><td class="num">0</td><td class="num was">+4.9%</td><td class="num">+4.9%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>newblue2</td><td class="num">0</td><td class="num">0</td><td class="num">7,617,454</td><td class="num"><span class="delta down">−0.24%</span></td><td class="num">3 min</td><td class="num">0</td><td class="num">75.9</td><td class="num">0</td><td class="num was">+0.6%</td><td class="num">+0.4%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>newblue3</td><td class="num">38,704</td><td class="num">364</td><td class="num">10,779,692</td><td class="num"><span class="delta same">same</span></td><td class="num">8.3 h</td><td class="num">31,810</td><td class="num">106.3</td><td class="num">31,024</td><td class="num was">+1.4%</td><td class="num">+1.4%</td><td><span class="pill bad">behind</span></td></tr>
+      <tr><td>newblue4</td><td class="num">144</td><td class="num">2</td><td class="num">13,660,587</td><td class="num"><span class="delta same">same</span></td><td class="num">2.5 h</td><td class="num">222</td><td class="num">128.9</td><td class="num">144</td><td class="num was">+6.0%</td><td class="num">+6.0%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>newblue5</td><td class="num">0</td><td class="num">0</td><td class="num">23,324,129</td><td class="num"><span class="delta down">−0.25%</span></td><td class="num">1.8 h†</td><td class="num">18</td><td class="num">231.4</td><td class="num">0</td><td class="num was">+1.1%</td><td class="num">+0.8%</td><td><span class="pill good">better</span></td></tr>
+      <tr><td>newblue6</td><td class="num">0</td><td class="num">0</td><td class="num">17,936,527</td><td class="num"><span class="delta down">−2.10%</span></td><td class="num">1.7 h†</td><td class="num">0</td><td class="num">176.9</td><td class="num">0</td><td class="num was">+3.6%</td><td class="num">+1.4%</td><td><span class="pill info">equal</span></td></tr>
+      <tr><td>newblue7</td><td class="num">108</td><td class="num">2</td><td class="num">36,104,404</td><td class="num"><span class="delta same">same</span></td><td class="num">19.6 h</td><td class="num">68</td><td class="num">355.2</td><td class="num">68</td><td class="num was">+1.6%</td><td class="num">+1.6%</td><td><span class="pill bad">behind</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">† Measured in the B-first order (<span class="mono">pd20route</span>), which runs the reclaim path first and skips the standard path when the reclaim path reaches zero. The reclaim path's result does not depend on that order. The standard configuration runs the standard path first, then the reclaim path's hotspot and refinement stages. That measured +7% over the old runtime on newblue2 and +10% on bigblue2; the nine † benchmarks were not rerun in that order, so expect their runtime to be roughly 5–10% above the 1 October figures, not the figures shown. NTHU-Route 2.0 figures and "best of four" are from LMgr's re-run (ISQED 2013, Table II), as in the first recap. bigblue2's −3.18% is against its 1 October run; against the mean of three equivalent baseline runs it is −4.1%.</p>
+</section>
+
+<section id="compare">
+  <h2>Against the 2008 contest routers</h2>
+  <div class="twocol">
+    <div>
+      <h3>Overflow</h3>
+      <p>Unchanged since 1 October. On par or better on most benchmarks: zero where NTHU-Route 2.0's re-run did not reach it on bigblue2, bigblue3 and newblue5, and smaller residues on newblue1 and newblue4. Behind on bigblue4 (370 vs 256, best 166), newblue7 (108 vs 68) and newblue3 (38,704 vs about 31,000). newblue1 is still the one benchmark another router takes to zero and we do not (LMgr 0, ours 48).</p>
+      <h3>Wirelength</h3>
+      <p>On the benchmarks that reach zero, the gap is nearly closed. Eight of eleven are within 1% of NTHU-Route 2.0, adaptec3 is under it, and the largest gaps (bigblue1 and bigblue2, +2.3%) are about the size of run-to-run noise. The remaining wirelength gap now sits on the residue benchmarks, where the reclaim does not run: bigblue4 +9.0%, newblue4 +6.0%, newblue1 +4.9%.</p>
+    </div>
+    <div>
+      <h3>Runtime</h3>
+      <p>Unchanged in shape. Faster than NTHU-Route 2.0's re-run on newblue7 (19.6 h vs 24.9 h); 1.5 to 20 times slower on the others before accounting for the faster machine. The reclaim adds 5–10% where it runs and nothing where it does not.</p>
+      <h3>Design</h3>
+      <p>The pipeline is still NTHU-Route 2.0's at its core. New since 1 October, and not in any contest router we know of: a detour reclaim that deliberately accepts temporary overflow to shorten the worst-detoured nets, guarded by running both paths from a saved state and keeping the reclaim only when it is no worse on overflow. The guard makes a quality-risky pass safe to leave on everywhere.</p>
+    </div>
+  </div>
+</section>
+
+<section id="findings">
+  <h2>What the results point to</h2>
+  <div class="findings">
+    <div class="finding">
+      <h3>The detour trace is complete, and bigblue4 carries the most</h3>
+      <p>The trace that was still running on 1 October finished. bigblue4 follows the same shape as the others through the piece rip-up stage, but its hotspot box is small (9,887 nets), so that stage removes almost none of the detour. It ends at +14.65% over the pins' minimum spanning tree, the most of any benchmark measured, and is also the largest wirelength gap to NTHU-Route 2.0 (+9.0%).</p>
+      <div class="tablebox">
+      <table class="bars">
+        <thead><tr><th>Wire over pin MST, after</th><th>bigblue2</th><th>newblue6</th><th>newblue1</th><th>bigblue4</th></tr></thead>
+        <tbody>
+          <tr><td>pattern stage</td>
+            <td class="barcell"><div class="bar"><span class="neg" style="width:1%"></span></div><span class="barval">−0.3%</span></td>
+            <td class="barcell"><div class="bar"><span class="neg" style="width:1%"></span></div><span class="barval">−0.2%</span></td>
+            <td class="barcell"><div class="bar"><span class="neg" style="width:1%"></span></div><span class="barval">−0.3%</span></td>
+            <td class="barcell"><div class="bar"><span class="neg" style="width:1%"></span></div><span class="barval">−0.2%</span></td></tr>
+          <tr><td>piece rip-up</td>
+            <td class="barcell"><div class="bar"><span style="width:92%"></span></div><span class="barval">+32.3%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:98%"></span></div><span class="barval">+34.4%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:69%"></span></div><span class="barval">+24.2%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:85%"></span></div><span class="barval">+29.8%</span></td></tr>
+          <tr><td>hotspot stage</td>
+            <td class="barcell"><div class="bar"><span style="width:70%"></span></div><span class="barval">+24.6%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:41%"></span></div><span class="barval">+14.3%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:36%"></span></div><span class="barval">+12.6%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:84%"></span></div><span class="barval">+29.4%</span></td></tr>
+          <tr><td>refinement</td>
+            <td class="barcell"><div class="bar"><span style="width:70%"></span></div><span class="barval">+24.6%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:41%"></span></div><span class="barval">+14.3%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:34%"></span></div><span class="barval">+12.0%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:83%"></span></div><span class="barval">+29.2%</span></td></tr>
+          <tr><td>tree rebuild</td>
+            <td class="barcell"><div class="bar"><span style="width:36%"></span></div><span class="barval">+12.6%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:25%"></span></div><span class="barval">+8.7%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:24%"></span></div><span class="barval">+8.4%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:48%"></span></div><span class="barval">+16.8%</span></td></tr>
+          <tr><td>wirelength cleanup (final)</td>
+            <td class="barcell"><div class="bar"><span style="width:26%"></span></div><span class="barval">+9.0%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:20%"></span></div><span class="barval">+7.2%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:20%"></span></div><span class="barval">+7.0%</span></td>
+            <td class="barcell"><div class="bar"><span style="width:42%"></span></div><span class="barval">+14.7%</span></td></tr>
+          <tr><td><b>with the reclaim, final</b></td>
+            <td class="barcell"><div class="bar"><span style="width:12%"></span></div><span class="barval">+4.4%</span></td>
+            <td><span class="pending">not traced</span></td>
+            <td><span class="pending">reclaim does not run</span></td>
+            <td><span class="pending">reclaim does not run</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="note">Bars on a 0 to 35% scale. The first six rows are the standard path without the reclaim, as in the first recap. On bigblue2 the reclaim pass itself took the piece rip-up stage's +32.3% down to +15.6% before the later stages ran.</p>
+    </div>
+    <div class="finding">
+      <h3>Shorter routes needed a temporary rise in overflow</h3>
+      <p>The version that kept only reroutes adding no overflow lost most of the gain (bigblue2 −1.2% instead of −4.1%, both against the mean of three baseline runs). The shorter routes mostly pass through full edges, and the gain comes from the renegotiation that clears them afterward. That renegotiation succeeds wherever overflow can reach zero and fails on newblue1, which ended higher in most runs, whether the reclaim avoided its hotspot or ran inside the piece rip-up stage. The fix that worked did not change the reclaim at all; it changed when the result is kept.</p>
+      <div class="tablebox">
+      <table>
+        <thead><tr><th>Variant (Part)</th><th class="num">bigblue2 WL vs baseline mean</th><th class="num">newblue1 overflow (3 runs)</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>Baseline, near-neutral runs (78, 83c)</td><td class="num">—</td><td class="num">44–54 (6 runs)</td><td>—</td></tr>
+          <tr><td>Reclaim, mu 8 (83b)</td><td class="num">−4.1%</td><td class="num">70 / 54 / 56</td><td><span class="pill warn">overflow worse</span></td></tr>
+          <tr><td>Strict, no added overflow (83c)</td><td class="num">−1.2%*</td><td class="num">52 / 54 / 44</td><td><span class="pill bad">gain lost</span></td></tr>
+          <tr><td>Skip nets near overflow (84)</td><td class="num">−4.0%*</td><td class="num">54 / 56 / 60</td><td><span class="pill warn">overflow worse</span></td></tr>
+          <tr><td>Reclaim at the piece rip-up stop (85)</td><td class="num">−2.1%*</td><td class="num">54 / 58 / 50</td><td><span class="pill bad">weaker, not safe</span></td></tr>
+          <tr><td>Reclaim with fallback (86–88)</td><td class="num">−4.1%</td><td class="num">46 / 48 / 48, unchanged</td><td><span class="pill good">adopted</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="note">* One run (pattern cell 8), against the baseline mean of 9,602,221.</p>
+    </div>
+    <div class="finding">
+      <h3>The wirelength gap moved to the residue benchmarks</h3>
+      <p>On the 11 zero-overflow benchmarks the total is now 0.84% over NTHU-Route 2.0, inside the run-to-run noise of most of them. The three largest remaining gaps, bigblue4, newblue4 and newblue1, all end with overflow and so never get the reclaim. A reclaim those benchmarks can keep would need either a smaller residue first, or a reclaim that does not disturb an unresolved hotspot, which the avoid-the-hotspot variant showed is harder than keeping its reroutes away from it.</p>
+    </div>
+    <div class="finding">
+      <h3>newblue1's residue is a fragile balance</h3>
+      <p>Every change that started a renegotiation on newblue1 left it higher in most runs (8 of 9 at or above the top of its usual range), and its own noise is wider than the first recap reported: six near-neutral runs range from 44 to 54, not 46 to 48. That makes it a poor benchmark for judging small overflow gains, and suggests its last 48 need a different kind of mechanism, as the first recap guessed.</p>
+      <div class="tablebox">
+      <table>
+        <thead><tr><th>Benchmark</th><th class="num">Overflow, near-neutral runs</th><th class="num">Wirelength spread</th><th>Change since 1 October</th></tr></thead>
+        <tbody>
+          <tr><td>newblue1</td><td class="num">44–54 (6 runs)</td><td class="num">1.6%</td><td>range wider (was 46–48, 3 runs)</td></tr>
+          <tr><td>newblue4</td><td class="num">144–146</td><td class="num">3.6%</td><td>same</td></tr>
+          <tr><td>bigblue2</td><td class="num">0, 0, 2</td><td class="num">1.8%</td><td>same; reclaim runs held zero 3/3</td></tr>
+          <tr><td>newblue6</td><td class="num">0, 0, 0</td><td class="num">1.6%</td><td>same</td></tr>
+          <tr><td>newblue2</td><td class="num">0, 0, 0</td><td class="num">0.02%</td><td>new</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="ledger">
+  <h2>Tested since 1 October</h2>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Experiment</th><th>Part</th><th>Result</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Per-stage detour trace, bigblue4</td><td class="mono">82</td><td>Final detour +14.65%, the most of any benchmark; its small hotspot box removes almost none</td><td><span class="pill info">informed the plan</span></td></tr>
+      <tr><td>Detour reclaim screen, bigblue2 at mu 8 and mu 2</td><td class="mono">83a</td><td>−3.2% / −3.3% WL, zero kept, runtime unchanged</td><td><span class="pill info">went to the 3-vs-3 test</span></td></tr>
+      <tr><td>Detour reclaim, mu 8, three runs against three</td><td class="mono">83b</td><td>WL lower on newblue2, bigblue2, newblue1 (p = 0.05 each); newblue1 overflow worse (54–70)</td><td><span class="pill warn">not safe alone</span></td></tr>
+      <tr><td>Strict reclaim, no added overflow</td><td class="mono">83c</td><td>Overflow safe, but the WL gain mostly lost</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Reclaim skipping nets within 5 tiles of overflow</td><td class="mono">84</td><td>bigblue2 gain kept; newblue1 54 / 56 / 60 (Mann-Whitney p ≈ 0.02, worse)</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Reclaim at the piece rip-up stage's stop</td><td class="mono">85</td><td>Weaker WL gain (bigblue2 −2.1% vs −4.1%); newblue1 not protected</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Reclaim with fallback, both paths</td><td class="mono">86</td><td>Keeps the gain where overflow clears, the standard route byte for byte where not; +85% runtime on newblue1</td><td><span class="pill warn">superseded</span></td></tr>
+      <tr><td>Fallback, reclaim path first, nine zero-overflow benchmarks</td><td class="mono">87</td><td>All nine shorter (−0.16% to −2.10%), zeros kept; sign test p ≈ 0.002</td><td><span class="pill good">confirmed</span></td></tr>
+      <tr><td>Fallback, standard path first, reclaim only at ≤ 10 overflow</td><td class="mono">88</td><td>3 of 3 byte-identical to their targets; newblue1 at standard runtime</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>One hotspot box per cluster, scope</td><td class="mono">—</td><td>Only newblue7 qualifies; testing needs a ~9 h checkpoint run, then hours per variant</td><td><span class="pill info">scoped</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="backlog">
+  <h2>Still to test, in recommended order</h2>
+  <p>Item 1 of the first recap is done in one of its two forms (take detour back afterward). The other form, adding less detour in the first place, is still open and now matters mostly for the residue benchmarks.</p>
+  <ol>
+    <li><b>newblue1's last 48: virtual capacity.</b> FastRoute 3.0's mechanism, pricing against a lowered capacity inside the hotspot. Under 2 h per run, and a smaller residue would also let the reclaim run there. <span class="pill info">suggested next</span></li>
+    <li><b>A separate capacity limit for long nets.</b> A second price that pushes long nets out of a contested edge before local nets feel it. Untried, and apparently not in any contest router; still the best candidate for the project's novel contribution.</li>
+    <li><b>Add less detour in the piece rip-up stage.</b> For the residue benchmarks, which keep their full detour (bigblue4 +14.65%). Moved up from the first recap's item 1.</li>
+    <li><b>One hotspot box per cluster, for newblue7.</b> Scoped; costs a ~9 h checkpoint run before any variant can be tested. <span class="pill info">scoped</span></li>
+    <li><b>Fewer bends.</b> On adaptec1 the gap to NTHU-Route 2.0 was all vias from more bends; now +0.8% overall, so smaller upside than on 1 October.</li>
+    <li><b>Plateau stop for the piece rip-up stage.</b> A newblue3-only runtime gain.</li>
+    <li><b>Starting prices from a congestion estimate.</b> Probably low value.</li>
+  </ol>
+  <h3>Roadmap steps</h3>
+  <ul>
+    <li><b>Step 3, ISPD 2024 format:</b> unchanged. Verifier done and cross-checked; next is the router reading the format.</li>
+    <li><b>Step 4, multithreading;</b> <b>step 5, GPU maze search and the CUDA CI job;</b> <b>step 6, OpenROAD.</b> Unchanged; see below.</li>
+  </ul>
+</section>
+
+<section id="parallel">
+  <h2>Where multithreading fits</h2>
+  <ul>
+    <li><b>Unchanged:</b> almost all runtime is maze searches in the piece rip-up, hotspot and refinement stages; the plan is still to route groups of nets with non-overlapping boxes on all cores against one frozen price snapshot, at an expected 30–50% efficiency.</li>
+    <li><b>New natural fit:</b> the fallback's two paths start from the same saved state and never touch each other, so they can run on two cores at once. That would remove the reclaim's 5–10% runtime cost on zero-overflow benchmarks with no change to any result.</li>
+    <li><b>Timing:</b> the detour work changed a stage after the piece rip-up stage, not the stage itself, so the rule against parallelizing a changing stage still applies only if item 3 above goes ahead.</li>
+  </ul>
+</section>
+
+<section id="openroad">
+  <h2>Where OpenROAD fits now</h2>
+  <p>Unchanged since 1 October. It is the evaluator for the ISPD 2025 format, which shares the 2024 inputs, so the 2024 reader comes first. It answers whether a route can actually be detail-routed cleanly, and supplies a FastRoute-derived baseline and OpenSTA timing. First step, when it comes: build the contest's forked OpenROAD and score a trivial solution on one ISPD 2025 case. Order: after the 2024 router works and after multithreading.</p>
+</section>
+
+<section id="next">
+  <h2>For the next recap</h2>
+  <p>Repeat the results table, the noise table, the detour trace and the ledgers, and compare against this page. Its numbers are embedded as machine-readable data (<span class="mono">#recap-data</span>, same schema as the first recap, plus a <span class="mono">comparedWith</span> block and a per-benchmark <span class="mono">runtimeSource</span>). The page source is in the repository at <span class="mono">recaps/recap-2026-10-03.html</span>, next to the first.</p>
+  <p>Fields to watch next time: whether newblue1's 48 moves (and with it whether the reclaim can run there); final detour on bigblue4; the runtime of the zero-overflow benchmarks measured in the standard order instead of the B-first order.</p>
+  <details>
+    <summary>Embedded snapshot data</summary>
+    <pre id="recap-data-view"></pre>
+  </details>
+</section>
+</div>
+
+<script type="application/json" id="recap-data">
+{
+  "schema": 1,
+  "recapDate": "2026-10-03",
+  "commit": "ce7a24f",
+  "configuration": "gr/pd21route + gr/standard.env",
+  "machine": "Apple M4 Pro, single thread",
+  "zeroOverflowCount": 11,
+  "benchmarkCount": 16,
+  "benchmarks": [
+    {"name": "adaptec1", "overflow": 0, "maxOverflow": 0, "scoredWL": 5405278, "runtimeSec": 2186, "runtimeSource": "B-first (pd20route)"},
+    {"name": "adaptec2", "overflow": 0, "maxOverflow": 0, "scoredWL": 5243664, "runtimeSec": 1225, "runtimeSource": "B-first (pd20route)"},
+    {"name": "adaptec3", "overflow": 0, "maxOverflow": 0, "scoredWL": 13142861, "runtimeSec": 2064, "runtimeSource": "B-first (pd20route)"},
+    {"name": "adaptec4", "overflow": 0, "maxOverflow": 0, "scoredWL": 12205838, "runtimeSec": 577, "runtimeSource": "B-first (pd20route)"},
+    {"name": "adaptec5", "overflow": 0, "maxOverflow": 0, "scoredWL": 15651405, "runtimeSec": 5333, "runtimeSource": "B-first (pd20route)"},
+    {"name": "bigblue1", "overflow": 0, "maxOverflow": 0, "scoredWL": 5700481, "runtimeSec": 2861, "runtimeSource": "B-first (pd20route)"},
+    {"name": "bigblue2", "overflow": 0, "maxOverflow": 0, "scoredWL": 9205885, "runtimeSec": 3011, "runtimeSource": "standard (pd21route)"},
+    {"name": "bigblue3", "overflow": 0, "maxOverflow": 0, "scoredWL": 13166745, "runtimeSec": 1608, "runtimeSource": "B-first (pd20route)"},
+    {"name": "bigblue4", "overflow": 370, "maxOverflow": 2, "scoredWL": 24861323, "runtimeSec": 27722, "runtimeSource": "pd14route; unchanged route on pd21route"},
+    {"name": "newblue1", "overflow": 48, "maxOverflow": 2, "scoredWL": 4824414, "runtimeSec": 5625, "runtimeSource": "standard (pd21route)"},
+    {"name": "newblue2", "overflow": 0, "maxOverflow": 0, "scoredWL": 7617454, "runtimeSec": 183, "runtimeSource": "standard (pd21route)"},
+    {"name": "newblue3", "overflow": 38704, "maxOverflow": 364, "scoredWL": 10779692, "runtimeSec": 29754, "runtimeSource": "pd12route; unchanged route on pd21route"},
+    {"name": "newblue4", "overflow": 144, "maxOverflow": 2, "scoredWL": 13660587, "runtimeSec": 8871, "runtimeSource": "pd13route; unchanged route on pd21route"},
+    {"name": "newblue5", "overflow": 0, "maxOverflow": 0, "scoredWL": 23324129, "runtimeSec": 6510, "runtimeSource": "B-first (pd20route)"},
+    {"name": "newblue6", "overflow": 0, "maxOverflow": 0, "scoredWL": 17936527, "runtimeSec": 6144, "runtimeSource": "B-first (pd20route)"},
+    {"name": "newblue7", "overflow": 108, "maxOverflow": 2, "scoredWL": 36104404, "runtimeSec": 70692, "runtimeSource": "pd13route; unchanged route on pd21route"}
+  ],
+  "reference": {
+    "source": "LMgr, ISQED 2013, Table II (re-run on a 1.6 GHz quad-core)",
+    "nthuRoute2": {
+      "adaptec1": [0, 5360000, 10], "adaptec2": [0, 5240000, 5], "adaptec3": [0, 13150000, 10],
+      "adaptec4": [0, 12180000, 3], "adaptec5": [0, 15540000, 27], "bigblue1": [0, 5570000, 20],
+      "bigblue2": [86, 9000000, 21], "bigblue3": [32, 13070000, 15], "bigblue4": [256, 22800000, 135],
+      "newblue1": [164, 4600000, 28], "newblue2": [0, 7590000, 2], "newblue3": [31810, 10630000, 22],
+      "newblue4": [222, 12890000, 56], "newblue5": [18, 23140000, 40], "newblue6": [0, 17690000, 52],
+      "newblue7": [68, 35520000, 1491]
+    },
+    "nthuFields": ["overflow", "scoredWL", "runtimeMin"],
+    "bestOfFourOverflow": {"bigblue4": 166, "newblue3": 31024, "newblue4": 144, "newblue7": 68, "others": 0}
+  },
+  "noise": {
+    "newblue1": {"overflow": [44, 54], "runs": 6, "wlSpreadPct": 1.6},
+    "newblue4": {"overflow": [144, 146], "wlSpreadPct": 3.6},
+    "bigblue2": {"overflow": [0, 2], "wlSpreadPct": 1.8},
+    "newblue6": {"overflow": [0, 0], "wlSpreadPct": 1.6},
+    "newblue2": {"overflow": [0, 0], "wlSpreadPct": 0.02}
+  },
+  "detourOverPinMstPct": {
+    "stages": ["pattern", "pieceRipUp", "hotspot", "refinement", "treeRebuild", "wlCleanup"],
+    "bigblue2": [-0.28, 32.28, 24.57, 24.57, 12.59, 9.02],
+    "newblue6": [-0.20, 34.42, 14.26, 14.26, 8.71, 7.16],
+    "newblue1": [-0.30, 24.15, 12.59, 12.00, 8.43, 7.00],
+    "bigblue4": [-0.17, 29.85, 29.36, 29.18, 16.84, 14.65],
+    "withReclaimFinal": {"bigblue2": 4.37}
+  },
+  "backlog": [
+    {"id": "detour-fix", "title": "Cut detour in the piece rip-up stage", "status": "done (reclaim with fallback, Parts 83-88)"},
+    {"id": "less-detour", "title": "Add less detour in the piece rip-up stage (residue benchmarks)", "status": "open"},
+    {"id": "multi-region", "title": "One hotspot box per cluster (newblue7)", "status": "scoped"},
+    {"id": "virtual-capacity", "title": "Virtual capacity for newblue1", "status": "suggested next"},
+    {"id": "long-net-budget", "title": "Separate capacity limit for long nets", "status": "open"},
+    {"id": "fewer-bends", "title": "Fewer bends to cut corner vias", "status": "open"},
+    {"id": "slow-plateau", "title": "Plateau stop for the piece rip-up stage", "status": "low priority"},
+    {"id": "seed-prices", "title": "Starting prices from a congestion estimate", "status": "low priority"},
+    {"id": "wl-floor", "title": "Wirelength weight floor", "status": "retired"},
+    {"id": "strict-reclaim", "title": "Reclaim adding no overflow", "status": "retired"},
+    {"id": "reclaim-avoid", "title": "Reclaim skipping nets near overflow", "status": "retired"},
+    {"id": "reclaim-at-stop", "title": "Reclaim inside the piece rip-up stage", "status": "retired"}
+  ],
+  "comparedWith": {
+    "recapDate": "2026-10-01",
+    "file": "recaps/recap-2026-10-01.html",
+    "commit": "bc82784",
+    "scoredWL": {
+      "adaptec1": 5414046, "adaptec2": 5261814, "adaptec3": 13253518, "adaptec4": 12234727,
+      "adaptec5": 15851373, "bigblue1": 5754158, "bigblue2": 9508527, "bigblue3": 13189107,
+      "bigblue4": 24861323, "newblue1": 4824414, "newblue2": 7635770, "newblue3": 10779692,
+      "newblue4": 13660587, "newblue5": 23383430, "newblue6": 18321622, "newblue7": 36104404
+    },
+    "zeroOverflowTotalWL": {"then": 129808092, "now": 128600267, "changePct": -0.93},
+    "zeroOverflowTotalVsNthuPct": {"then": 1.79, "now": 0.84}
+  }
+}
+</script>
+<script>
+(function () {
+  var src = document.getElementById("recap-data");
+  var view = document.getElementById("recap-data-view");
+  var data = null;
+  try { data = JSON.parse(src.textContent); } catch (e) {}
+  if (view) view.textContent = data ? JSON.stringify(data, null, 2) : src.textContent;
+  var host = document.getElementById("dumbbell");
+  if (!data || !host) return;
+  var lo = -1, hi = 10;
+  function pos(v) { return ((v - lo) / (hi - lo) * 100).toFixed(2) + "%"; }
+  function pct(v) { return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%"; }
+  var ref = data.reference.nthuRoute2, prev = data.comparedWith.scoredWL;
+  var rows = data.benchmarks.map(function (b) {
+    var n = ref[b.name][1];
+    return { name: b.name, was: (prev[b.name] / n - 1) * 100, now: (b.scoredWL / n - 1) * 100 };
+  }).sort(function (a, b) { return b.now - a.now; });
+  var ticks = [0, 2, 4, 6, 8, 10];
+  var html = "";
+  rows.forEach(function (r) {
+    var same = Math.abs(r.was - r.now) < 0.005;
+    var grid = ticks.map(function (t) { return '<span class="' + (t === 0 ? "zero" : "grid") + '" style="left:' + pos(t) + '"></span>'; }).join("");
+    var a = Math.min(r.was, r.now), z = Math.max(r.was, r.now);
+    html += '<div class="drow"><span class="nm">' + r.name + '</span><div class="track">' + grid +
+      (same ? "" : '<span class="link" style="left:' + pos(a) + ';width:calc(' + pos(z) + ' - ' + pos(a) + ')"></span><span class="dot was" style="left:' + pos(r.was) + '"></span>') +
+      '<span class="dot now" style="left:' + pos(r.now) + '"></span></div><span class="vals">' +
+      (same ? pct(r.now) : pct(r.was) + " → " + pct(r.now)) + '</span></div>';
+  });
+  html += '<div class="axis"><span></span><div class="ticks">' + ticks.map(function (t) { return '<span style="left:' + pos(t) + '">' + (t > 0 ? "+" : "") + t + "%</span>"; }).join("") + '</div><span></span></div>';
+  host.innerHTML = html;
+})();
+</script>
