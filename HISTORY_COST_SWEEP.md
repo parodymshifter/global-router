@@ -7748,3 +7748,27 @@ each; judged by consistency across the nine (all nine shorter would be a
 sign test at p = 1/512), with each benchmark's own noise where measured
 (newblue6 1.6%). The long residue benchmarks (bigblue4, newblue4,
 newblue7, newblue3) wait on this result.
+
+**Part 87 results** (all `status=OK`, `gr_verify` = `eval2008.pl`; every
+run's reclaim path reached zero, so the standard path was never run):
+parity -- newblue2 and bigblue2 reproduce Part 86's both-paths routes byte
+for byte (7617454; 9205885 in 2824 s vs 2911 s).
+
+| benchmark | standard (Part 81 / 73b) | fallback, B-first | change | vs NTHU-Route 2.0 before -> after | runtime (s) standard / fallback |
+|---|---|---|---|---|---|
+| adaptec1 | 5414046 | **5405278** | -0.16% | +1.0% -> +0.8% | 2065 / 2186 |
+| adaptec2 | 5261814 | **5243664** | -0.34% | +0.4% -> +0.07% | 1251 / 1225 |
+| adaptec3 | 13253518 | **13142861** | -0.83% | +0.8% -> **-0.05%** | 2062 / 2064 |
+| adaptec4 | 12234727 | **12205838** | -0.24% | +0.4% -> +0.2% | 558 / 577 |
+| adaptec5 | 15851373 | **15651405** | -1.26% | +2.0% -> +0.7% | 5253 / 5333 |
+| bigblue1 | 5754158 | **5700481** | -0.93% | +3.3% -> +2.3% | 2778 / 2861 |
+| bigblue3 | 13189107 | **13166745** | -0.17% | +0.9% -> +0.7% | 1605 / 1608 |
+| newblue5 | 23383430 | **23324129** | -0.25% | +1.1% -> +0.8% | 6572 / 6510 |
+| newblue6 | 18321622 | **17936527** | -2.10% | +3.6% -> +1.4% | 6382 / 6144 |
+
+All nine zeros kept and all nine shorter: a sign test at p = 1/512 (~0.002)
+on its own, before counting bigblue2 (-4.1%, 3/3) and newblue2 (-0.24%,
+3/3). newblue6 is also outside its own measured noise (below all three
+baseline runs, 18321622-18615319). Runtime is unchanged within a few
+percent: the B-first order skips the standard path on every benchmark
+that reaches zero.
