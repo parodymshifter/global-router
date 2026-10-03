@@ -168,6 +168,17 @@ quality-neutral perturbations is ~2 units of overflow on the residues but
 1.6-3.6% of wirelength (Part 78): judge wirelength ideas against each
 benchmark's own spread, never one run.
 
+**2026-10-03: the standard configuration moves to `gr/pd21route`** (same
+`gr/standard.env`, plus the detour reclaim with a fallback, Parts 82-88).
+A per-stage trace found the slow tier adds +24-34% detour that later
+stages only partly recover; a reclaim pass reroutes the most-detoured nets
+under fresh prices. It cut wirelength on every benchmark that reaches
+zero (all 11: -0.16% to -4.1%; adaptec3 now 0.05% under NTHU-Route 2.0,
+bigblue2 +5.7% -> +2.3%) but raised newblue1's residue in every variant
+that let it run there, so it runs only when the standard path ends with
+overflow <= 10 and is kept only if no worse on overflow: residues are
+byte-identical to before and pay no runtime.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

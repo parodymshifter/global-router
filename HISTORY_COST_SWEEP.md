@@ -7788,3 +7788,26 @@ B). Validation queued (`part88.jobs`): newblue1 must reproduce
 c200_newblue1 byte for byte at standard runtime; bigblue2 and newblue2
 must reproduce the reclaim results (fbc8_bigblue2, fb_newblue2). If they
 do, the standard configuration moves to pd21route with the fallback on.
+
+**Part 88 results** (all `status=OK`, `gr_verify` = `eval2008.pl`; each
+route byte-identical to the one it had to reproduce):
+
+| benchmark | standard path A | reclaim path B | kept | final | runtime | identical to |
+|---|---|---|---|---|---|---|
+| newblue2 | 0 / 4734459 | 0 / 4672897 | B | 0 / 7617454 | 183 s (standard 171) | fb_newblue2 |
+| bigblue2 | 0 / 5838363 | 0 / 5054094 | B | 0 / 9205885 | 3011 s (standard ~2730) | fbc8_bigblue2 |
+| newblue1 | 48 / 2649703 | not run (48 > 10) | A | 48 / 4824414 | 5625 s (standard 5608) | c200_newblue1 |
+
+**Adopted** as the standard configuration (2026-10-03): `gr/pd21route`
+with `gr/standard.env`, which now adds `PD19ROUTE_RECLAIM_FALLBACK=1
+PD21ROUTE_FALLBACK_A_MAX=10`. The ISPD 2008 suite on it: the 11
+zero-overflow benchmarks at their fallback results (adaptec1 5405278,
+adaptec2 5243664, adaptec3 13142861, adaptec4 12205838, adaptec5 15651405,
+bigblue1 5700481, bigblue2 9205885, bigblue3 13166745, newblue2 7617454,
+newblue5 23324129, newblue6 17936527 -- the reclaim path's result does not
+depend on the order the paths run in, so Part 87's B-first runs stand for
+pd21route); the five residues unchanged (newblue1 48, newblue4 144,
+newblue7 108, bigblue4 370, newblue3 38704: standard path above 10, so
+nothing else runs). The long residue benchmarks were not rerun: on them
+the fallback cannot change the result, and newblue1 showed it costs no
+runtime there.
