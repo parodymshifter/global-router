@@ -7772,3 +7772,19 @@ on its own, before counting bigblue2 (-4.1%, 3/3) and newblue2 (-0.24%,
 baseline runs, 18321622-18615319). Runtime is unchanged within a few
 percent: the B-first order skips the standard path on every benchmark
 that reaches zero.
+
+## Part 88 -- the fallback ordered for residue benchmarks (pd21route)
+
+`gr/pd21route.cpp`: `PD21ROUTE_FALLBACK_A_MAX=T` runs the standard path
+first and the reclaim path only if the standard path ends with 2D
+overflow <= T; above T the standard result is kept and the reclaim never
+runs. Zero-overflow benchmarks then pay one extra region stage and
+refinement on the reclaim path (minutes; it starts from the injected
+overflow, ~5 min on bigblue2), and residue benchmarks pay nothing. With
+T = 10, bigblue2's fragile zero is still covered (its standard path has
+ended at 2). 557 checks (threshold 0 on the fixture reproduces the
+both-paths result; a non-clearing residue above the threshold never runs
+B). Validation queued (`part88.jobs`): newblue1 must reproduce
+c200_newblue1 byte for byte at standard runtime; bigblue2 and newblue2
+must reproduce the reclaim results (fbc8_bigblue2, fb_newblue2). If they
+do, the standard configuration moves to pd21route with the fallback on.
