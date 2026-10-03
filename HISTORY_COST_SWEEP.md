@@ -7811,3 +7811,45 @@ newblue7 108, bigblue4 370, newblue3 38704: standard path above 10, so
 nothing else runs). The long residue benchmarks were not rerun: on them
 the fallback cannot change the result, and newblue1 showed it costs no
 runtime there.
+
+## Part 89 -- virtual capacity in the region stage, and the fallback on two threads (pd22route)
+
+Where newblue1's residue forms (standard run, Part 88's af_newblue1): the
+slow tier stops at 298 after 74 rounds; the region stage's round 0
+reroutes every piece in its box under fresh prices (WL weight ~1) and
+overflow jumps to 22766, then falls to ~300 by round 50 and oscillates
+between ~76 and ~124 for the remaining 450 rounds, around a best of 64
+(4192 s, 75% of the run); refinement takes 64 to 48 in 3 iterations and
+then never moves. NTHU's history term only raises the cost of edges that
+are overflowed; an edge exactly at capacity costs at most wl + hist, so
+inside the hotspot every full-but-legal edge still attracts nets and an
+overflowed net has nowhere free to go.
+
+`gr/pd22route.cpp` (forked from pd21route), two independent mechanisms,
+both off by default (pd21route byte for byte):
+- `PD22ROUTE_VCAP=k`, `PD22ROUTE_VCAP_RADIUS=R` (default 5): at the
+  region stage's start, every 2D edge with an end tile within R tiles of
+  an overflowed edge is priced against capacity max(cap - k(1 +
+  spacing), ceil(cap/2)). Only the present-demand cost reads it; overflow,
+  the best-state rule, the stops, refinement and the fallback choice use
+  the real capacity. FastRoute 3.0's virtual capacity in its simplest
+  (static) form.
+- `PD22ROUTE_FALLBACK_PARALLEL=1`: the fallback's reclaim path runs on a
+  second thread from the start, cancelled if the standard path ends above
+  `PD21ROUTE_FALLBACK_A_MAX`. The search-pop counter is now thread_local,
+  so each path's work-gated stop sees only its own work and the kept
+  routes equal the sequential order's.
+
+579 checks (the arithmetic; the cost seam, exact when off; the zone by
+hand count, 71 edges; on the real search a straight route through a row
+at 60% leaves it once the row is priced 2 tracks lower; the region stage
+reports its zone; the parallel fallback keeps routes identical to the
+sequential order's both when B wins and when B is cancelled).
+
+Queued (`part89.jobs`): newblue2 parity, everything off and parallel on
+(both must reproduce af_newblue2, 0 / 7617454); newblue1 cell 8 at k = 1,
+2, 4 tracks, R = 5 (against 48; near-neutral range 44-54); parallel-on
+timing on newblue1 (must be 48 / 4824414 at ~5625 s) and bigblue2 (must be
+9205885; sequential 3011 s). A virtual-capacity setting that screens below
+44 goes to cells 7 and 9: three runs all below the six near-neutral runs
+is a one-sided Mann-Whitney p = 1/84 (~0.012).
