@@ -7853,3 +7853,54 @@ timing on newblue1 (must be 48 / 4824414 at ~5625 s) and bigblue2 (must be
 9205885; sequential 3011 s). A virtual-capacity setting that screens below
 44 goes to cells 7 and 9: three runs all below the six near-neutral runs
 is a one-sided Mann-Whitney p = 1/84 (~0.012).
+
+**Part 89, parity** (`status=OK`, `gr_verify` = `eval2008.pl`): newblue2
+with everything off and with the parallel fallback both reproduce
+af_newblue2's route file **byte for byte** (0 / 7617454), 185 s / 183 s.
+No time saved here, as expected: newblue2's standard path has nothing for
+its region stage to do (0 overflow, 0 rounds), so B's extra work (the
+reclaim and an 8 s region stage) already overlapped nothing. bigblue2 is
+the timing case.
+
+**Part 89, virtual capacity screen, newblue1 cell 8** (all `status=OK`,
+`gr_verify` = `eval2008.pl`; zone 3086 edges within 5 tiles of the 298
+overflow the region stage starts from):
+
+| tracks (units) | region best | region rounds 400-499: mean (range) | refinement -> | final overflow / scored WL | runtime |
+|---|---|---|---|---|---|
+| 0 (af_newblue1) | 64 | 89 (64-116) | 48 | 48 / 4824414 | 5625 s |
+| 1 (2) | 62 | 85 (62-126) | 48 | 48 / 4829245 | 5487 s |
+| 2 (4) | 58 | 75 (58-90) | 56 | 56 / 4832346 | 5444 s |
+| 4 (8) | **50** | 75 (50-108) | **44** | **44** / 4843729 | 5323 s |
+
+The region stage responds to the dose: its best falls 64 -> 62 -> 58 ->
+50 and its late oscillation drops (mean 89 -> 75). The final overflow
+follows only loosely, because refinement's share varies widely (-16, -14,
+-2, -6): 4 tracks ends at 44, tying the lowest near-neutral run (44-54) --
+not yet a significant gain. WL within noise (+0.4%). 8 and 16 tracks
+queued behind the parallel-fallback timing runs.
+
+**Part 89, parallel fallback on bigblue2** (`status=OK`, `gr_verify` =
+`eval2008.pl`): route file **byte-identical** to af_bigblue2's (0 /
+9205885), both paths' stage reports equal to the sequential run's (A
+region 298 -> 2 in 500 rounds, B 19974 -> 0 in 359), in **2711 s vs 3011
+s** (-10%) -- back to the pre-reclaim standard runtime (~2730 s): the
+reclaim's cost on zero-overflow benchmarks disappears into the second
+thread. Peak RSS 2622 MB vs 2434 MB (+8%, both paths' state live at once).
+
+**Part 89, 8 tracks (16 units)** (`status=OK`, `gr_verify` =
+`eval2008.pl`): region best **46** (rounds 400-499 mean 63, range 46-80),
+refinement -> 38; final **38 / 4854999** (WL +0.6%), 5186 s. The first
+newblue1 result below all six near-neutral runs (44-54) and the lowest
+overflow this project has reached on it (Part 68's 66, Part 75's 54, the
+standard's 48). The dose response continues (region best 64 / 62 / 58 /
+50 / 46 at 0 / 1 / 2 / 4 / 8 tracks). Queued: cells 7 and 9 at 8 tracks
+for the 3-vs-6 test; 16 tracks running.
+
+**Part 89, parallel fallback on newblue1** (`status=OK`, `gr_verify` =
+`eval2008.pl`): route file **byte-identical** to af_newblue1's (48 /
+4824414), 5645 s vs 5625 s. B ran on the second thread and was cancelled
+when A ended at 48 (> 10): no wall-time cost on a residue benchmark, one
+otherwise idle core used. With bigblue2 (-10%) and newblue2 (identical,
+nothing to overlap), the parallel fallback is ready for the standard
+configuration.
