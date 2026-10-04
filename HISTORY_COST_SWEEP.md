@@ -7904,3 +7904,30 @@ when A ended at 48 (> 10): no wall-time cost on a residue benchmark, one
 otherwise idle core used. With bigblue2 (-10%) and newblue2 (identical,
 nothing to overlap), the parallel fallback is ready for the standard
 configuration.
+
+**Part 89, 16 tracks (32 units)** (`status=OK`, `gr_verify` =
+`eval2008.pl`): region best 48 (rounds 400-499 mean 70, range 48-96),
+refinement -> 32; final **32 / 4900178** (WL +1.6%), 6030 s (+7%). The
+region stage did not improve on 8 tracks (46); refinement took 16 more
+off. Full screen, final overflow by tracks 0 / 1 / 2 / 4 / 8 / 16: 48 /
+48 / 56 / 44 / 38 / 32; region best 64 / 62 / 58 / 50 / 46 / 48. Cells 7
+and 9 at 16 tracks queued too (`part89c.jobs`), so both doses get the
+3-vs-6 test (two tests: Bonferroni-adjusted p = 2/84 ~ 0.024 each).
+
+**Part 89b, the 3-vs-6 test at 8 tracks** (all `status=OK`, `gr_verify` =
+`eval2008.pl`):
+
+| cell | baseline (standard) | near-neutral strict runs (Part 83c) | 8 tracks: region best -> refinement = final | scored WL | runtime |
+|---|---|---|---|---|---|
+| 7 | 46 / 4882558 | 52 | 32 -> **24** | 4904825 | 4787 s |
+| 8 | 48 / 4824414 | 54 | 46 -> **38** | 4854999 | 5186 s |
+| 9 | 48 / 4803733 | 44 | 44 -> **36** | 4856062 | 5145 s |
+
+**All three 8-track runs (24, 36, 38) are below all six near-neutral
+runs (44-54)**: one-sided Mann-Whitney U = 0, p = 1/84 ~ 0.012; with both
+doses tested (Bonferroni x2) p ~ 0.024. Mean overflow 32.7 vs 48.7 for the
+six (-33%); best newblue1 result to date 24 (LMgr 0, NTHU-Route 2.0's
+re-run 164). Wirelength +0.7% vs the three standard runs' mean (inside
+newblue1's 1.6% spread); runtime 4787-5186 s vs 5300-5625 s (shorter
+region stages, 3287-3781 s vs ~4200 s). Virtual capacity is the first
+mechanism to move newblue1's residue significantly since Part 68.
