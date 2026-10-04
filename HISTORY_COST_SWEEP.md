@@ -7948,3 +7948,13 @@ also below all six near-neutral runs (p ~ 0.012, ~0.024 Bonferroni). 8 vs
 U = 2.5 of 9, one-sided p ~ 0.2); 16 costs +1.0% more WL and +11% more
 runtime. **8 tracks is the setting carried forward**: the overflow gain is
 the same within what three runs can show, at lower WL and runtime cost.
+
+## Part 90 -- the candidate standard: virtual capacity 8 tracks + parallel fallback
+
+`part90.jobs`: pd22route with `@standard.env PD22ROUTE_VCAP=8
+PD22ROUTE_FALLBACK_PARALLEL=1` on newblue4 (residue 144, ~2.5 h) and the
+11 zero-overflow benchmarks (longest first). Virtual capacity changes the
+region stage wherever it runs, which includes most zero-overflow
+benchmarks (their slow tier stops near 300): the zeros must hold, and WL
+is judged against Parts 87/88. bigblue4 and newblue7 follow only if
+newblue4 improves.
