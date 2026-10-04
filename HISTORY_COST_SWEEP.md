@@ -7964,6 +7964,8 @@ newblue4 improves.
 | benchmark | standard (Part 87/88) | candidate | WL change | runtime (s), standard / candidate | path kept; region rounds A / B; zone edges A / B |
 |---|---|---|---|---|---|
 | newblue6 | 0 / 17936527 | **0** / 18001765 | +0.36% (spread 1.6%) | 6144 (B-first) / 6122 | B; 28 / 20; 12886 / 111745 |
+| newblue5 | 0 / 23324129 | **0** / 23408252 | +0.36% | 6510 (B-first) / 6521 | B; 26 / 36; 9870 / 124476 (checks rerun on the saved route) |
+| bigblue1 | 0 / 5700481 | **0** / 5796812 | **+1.69%** | 2861 (B-first) / 2864 | **A**; 49 / 61; 13249 / 46061 |
 
 Part 90 was launched under a background-command wrapper with a 2-hour
 limit, which killed the batch and its routers at 2 h: newblue4 (~2 h into
@@ -7971,3 +7973,21 @@ the region stage), adaptec5 and bigblue1 were lost; newblue5's router had
 finished (6520 s) and only its checks were cut off -- rechecked on the
 saved route file. The remaining ten jobs were relaunched detached as
 `part90b.jobs`.
+
+All zeros held, but virtual capacity also ran in the reclaim path B's
+region stage, where its zone is built from the overflow the reclaim
+injects on purpose (spread over the chip: 46061-124476 zone edges vs
+9870-13249 on A). On bigblue1 that doubled B's region rounds (61 vs 31
+without it) and left B with 4.2% more 2D wire (3992403 vs 3830113), so the
+fallback kept A and the final WL rose 1.7%; on newblue5 and newblue6 B
+still won but ~0.4% longer. The queued jobs not yet started were dropped
+(newblue4, adaptec5 and bigblue2, already running, were left to finish).
+
+`gr/pd23route.cpp` (forked from pd22route): `PD23ROUTE_VCAP_B=0` runs the
+reclaim path's region stage without virtual capacity (path A keeps it);
+default 1 = pd22route. B is then exactly pd21route's B. 582 checks (on the
+fallback fixture with it off for B, A gets an 18-edge zone, B none, and
+B's wire equals the no-virtual-capacity run's). Queued (`part90c.jobs`):
+the 11 zero-overflow benchmarks with virtual capacity 8 on A only plus the
+parallel fallback; prediction: byte-identical to the standard's routes
+wherever B wins.

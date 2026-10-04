@@ -85,6 +85,7 @@ pd19route
 pd20route
 pd21route
 pd22route
+pd23route
 pd11route_gpu
 gr/pattern_kernel.metallib
 gr/*.run
