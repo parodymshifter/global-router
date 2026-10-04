@@ -8025,3 +8025,12 @@ fallback: zero-overflow benchmarks unchanged byte for byte (11/11), several
 faster where B and A overlap (bigblue2 -9%); newblue1 significantly lower
 (24 / 36 / 38 vs 44-54, Part 89b); newblue4 unchanged (144, +0.37% WL,
 +8% runtime). Not measured: bigblue4, newblue7, newblue3.
+
+**Adopted** as the standard configuration (2026-10-04): `gr/pd23route`
+with `gr/standard.env`, which now adds `PD22ROUTE_VCAP=8
+PD23ROUTE_VCAP_B=0 PD22ROUTE_FALLBACK_PARALLEL=1`. The ISPD 2008 suite on
+it: the 11 zero-overflow benchmarks byte-identical to Part 88's; newblue1
+**38 / 4854999** (cell 8; B never runs above 10, so pd22route's vc8 run is
+pd23route's); newblue4 144 / 13711471 (likewise); bigblue4 370, newblue7
+108, newblue3 38704 not yet rerun (recorded under pd13/pd14route). Total
+overflow 39374 -> 39364.

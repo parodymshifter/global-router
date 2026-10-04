@@ -179,6 +179,20 @@ that let it run there, so it runs only when the standard path ends with
 overflow <= 10 and is kept only if no worse on overflow: residues are
 byte-identical to before and pay no runtime.
 
+**2026-10-04: the standard configuration moves to `gr/pd23route`** (same
+`gr/standard.env`, plus virtual capacity and the parallel fallback, Parts
+89-90). Virtual capacity (FastRoute 3.0's idea, static form): the
+standard path's region stage prices edges near its starting overflow 8
+tracks lower, so full-but-legal hotspot edges stop attracting nets. It
+moved newblue1's residue for the first time since Part 68 (48 -> 24 / 36 /
+38, all three below six near-neutral runs at 44-54, p ~ 0.012) but left
+newblue4's at 144. It runs on the standard path only -- on the reclaim
+path its zone covers the deliberately injected overflow and made routes
+0.4-1.7% longer -- so all 11 zero-overflow benchmarks are byte-identical
+to before. The reclaim path now runs on a second thread (same routes,
+bigblue2 -9% wall time). Not yet rerun on it: bigblue4, newblue7,
+newblue3 (their recorded results are pd14-era).
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned
