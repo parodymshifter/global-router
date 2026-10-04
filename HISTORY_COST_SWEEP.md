@@ -7931,3 +7931,20 @@ re-run 164). Wirelength +0.7% vs the three standard runs' mean (inside
 newblue1's 1.6% spread); runtime 4787-5186 s vs 5300-5625 s (shorter
 region stages, 3287-3781 s vs ~4200 s). Virtual capacity is the first
 mechanism to move newblue1's residue significantly since Part 68.
+
+**Part 89c, the 3-vs-6 test at 16 tracks** (all `status=OK`, `gr_verify`
+= `eval2008.pl`):
+
+| cell | 8 tracks: overflow / WL / runtime | 16 tracks: overflow / WL / runtime |
+|---|---|---|
+| 7 | 24 / 4904825 / 4787 s | 28 / 4948600 / 5305 s |
+| 8 | 38 / 4854999 / 5186 s | 32 / 4900178 / 6030 s |
+| 9 | 36 / 4856062 / 5145 s | 24 / 4912915 / 5391 s |
+| mean | 32.7 / +0.7% / 5039 s | 28.0 / +1.7% / 5575 s |
+
+(WL against the mean of the three standard runs, 4836902.) 16 tracks is
+also below all six near-neutral runs (p ~ 0.012, ~0.024 Bonferroni). 8 vs
+16 on overflow is not distinguishable (24/36/38 vs 24/28/32: Mann-Whitney
+U = 2.5 of 9, one-sided p ~ 0.2); 16 costs +1.0% more WL and +11% more
+runtime. **8 tracks is the setting carried forward**: the overflow gain is
+the same within what three runs can show, at lower WL and runtime cost.
