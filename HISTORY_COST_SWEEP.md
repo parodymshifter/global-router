@@ -8034,3 +8034,70 @@ it: the 11 zero-overflow benchmarks byte-identical to Part 88's; newblue1
 pd23route's); newblue4 144 / 13711471 (likewise); bigblue4 370, newblue7
 108, newblue3 38704 not yet rerun (recorded under pd13/pd14route). Total
 overflow 39374 -> 39364.
+
+## Part 91 -- why virtual capacity moved newblue1 but not newblue4, and which residues are forced
+
+Item 1 of the 2026-10-04 plan runs in the background (`part91.jobs`:
+bigblue4 and newblue3 on the new standard, pd23route). Item 2, the
+diagnosis, used two analysis tools (not routers):
+
+- `gr/grdiag.cpp` gains **D3, hotspot neighborhoods**: for the largest
+  hotspots, the 2D capacity of their overflowed edges, and in rings of
+  tiles at distance 0 / 1-2 / 3-5 / 6-10 / 11-20 per direction: usage over
+  capacity, free units and edges with room for one more net. Self-test
+  extended (ring 0 of the fixture by hand: 4 H edges, cap 8, use 12, free 2,
+  room 1; 4 V edges free 8; overflowed-edge capacity 2).
+- New `gr/cutbound.cpp`: a certified lower bound from the **cut condition**.
+  For a rectangle S, every net with a pin tile inside and one outside
+  crosses S's boundary at least once, so the boundary's 2D overflow is >=
+  D(S) - C(S) (demand of those nets at minWidth + smallest spacing, minus
+  the boundary's 2D capacity); real overflow >= 2D overflow; rectangles
+  with disjoint boundaries add. Enumerates every rectangle up to a side
+  limit in a region and packs a disjoint set greedily; also reports the
+  tightest cuts (D/C). Self-test: 5 nets out of a centre tile with 8 units
+  of boundary capacity -> forced >= 2; an inside-only net excluded; an
+  uncongested case 0. Runs in seconds (minutes for 40-tile sides).
+
+**D3** (standard-configuration routes):
+
+| hotspot | overflowed-edge 2D cap | ring 1-2 use | ring 3-5 use | ring 6-10 use |
+|---|---|---|---|---|
+| newblue1 main (30) | 62 | 98.7 / 98.4% | 97.0 / 96.7% | 96.2 / 95.2% |
+| newblue4 main (142) | 84 | 90.8 / 87.7% | 79.5 / 79.5% | 61.3 / 78.6% |
+| bigblue4 (370, one hotspot) | 192-204 | 92.3 / 92.7% | 74.6 / 76.6% | 64.6 / 57.2% |
+| newblue7 main (72) | 198-212 | 93.0 / 84.4% | 85.4 / 65.9% | 71.2 / 54.5% |
+| newblue7 x 161 (6; 12 small ones total 36) | 198-212 | 97.4 / 97.4% | 95.8 / 97.1% | 91.4 / 96.3% |
+
+(H / V.) newblue1's neighborhood is saturated for 10 tiles; newblue4's
+has 5000-21000 free units 3-10 tiles out.
+
+**cutbound** (tightest cut = the rectangle whose must-cross demand is the
+largest share of its boundary capacity):
+
+| benchmark | ours (standard) | best published | tightest cut | certified lower bound |
+|---|---|---|---|---|
+| newblue1 | 38 | 0 (LMgr) | 92.6% | 0 |
+| newblue4 | 144 | 144 | **98.4%** (x 59-73 y 70-81: 2232 nets, 4464 of 4536) | 0 |
+| bigblue4 | 370 | 166 | 89.3% | 0 |
+| newblue7 | 108 | 68 | **101.1%** (x 222-228 y 246-250: 2522 nets, 5044 > 4990) | **54** |
+| newblue3 | 38704 | ~31024 | single tile (487,668): 2299 nets, 4598 vs 248 | **>= 26264** |
+
+newblue3: 13 concentric squares around tile (487,668) (sides 1-25, borders
+disjoint) certify 25336, plus isolated tiles (447,458) 380, (504,461) 292,
+(522,579) 256 -- **at least 26264 of newblue3's overflow is unavoidable
+for any router**, 85% of the best published result. newblue7: at least 54
+is forced in its main hotspot (ours 72 there, 108 total; best published 68).
+
+**Reading.** Two kinds of residue:
+- *Through-traffic* (newblue1, newblue7's small hotspots): must-cross
+  demand well under the boundary (newblue1 92.6%) but the neighborhood
+  saturated by nets passing through. Pushing traffic out is what helps --
+  virtual capacity did (newblue1 48 -> 24-38).
+- *Pin-bound* (newblue4, newblue7's main hotspot, newblue3): nets with pins
+  inside need nearly all (newblue4 98.4%) or more than all (newblue7,
+  newblue3) of the boundary just to get out once each; there is little or
+  no through-traffic to push. Virtual capacity cannot help, which is what
+  newblue4 showed; newblue4's 144 equals the best published result and is
+  likely at or near its floor.
+bigblue4 is between (89.3% tightest cut, free room 3+ tiles out): the
+overnight run will show whether virtual capacity reaches it.

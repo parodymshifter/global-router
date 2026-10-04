@@ -22,6 +22,16 @@
 // per net, 2D wire against the rectilinear MST of its distinct pin tiles --
 // the excess over the MST is detour (plus Steiner savings, which make it
 // negative), reported separately for nets touching a hotspot box.
+//
+// D3, hotspot neighborhoods (HISTORY_COST_SWEEP.md Part 91: why virtual
+// capacity moved newblue1's residue but not newblue4's): for the largest
+// hotspots, the 2D capacity of their overflowed edges (against which a
+// virtual-capacity reduction of k units is a share), and, in rings of tiles
+// at Chebyshev distance 0, 1-2, 3-5, 6-10 and 11-20 from the hotspot's tile
+// box, per direction: edges, 2D capacity and usage summed, free units
+// (sum of max(0, cap - use)), and edges with room for one more default net
+// (cap - use >= 1 + layer-1 spacing). An edge's distance is its nearer
+// tile's.
 
 #include <algorithm>
 #include <climits>
@@ -95,9 +105,19 @@ struct Box {
   bool has(int x, int y) const { return x >= x0 && x <= x1 && y >= y0 && y <= y1; }
 };
 
+struct Ring {
+  long long edges = 0, cap = 0, use = 0, freeUnits = 0, roomy = 0;
+};
+constexpr int kRings = 5;
+constexpr int kRingLo[kRings] = {0, 1, 3, 6, 11}, kRingHi[kRings] = {0, 2, 5, 10, 20};
+
 struct Cluster {
   long long overflow = 0, edges = 0, nets = 0;
   Box box{INT_MAX, INT_MAX, INT_MIN, INT_MIN};
+  // D3 (filled for the largest hotspots only).
+  bool hood = false;
+  std::vector<long long> ovCaps; // 2D capacity of each overflowed 2D edge with a tile in the box
+  Ring h[kRings], v[kRings];
 };
 
 struct NetWl {
@@ -355,6 +375,68 @@ Result analyze(const Design &d, const std::vector<RouteNet> &sol, int radius) {
   }
   std::sort(r.clusters.begin(), r.clusters.end(),
             [](const Cluster &a, const Cluster &b) { return a.overflow > b.overflow; });
+  // D3: neighborhoods of the largest hotspots, on 2D-collapsed usage.
+  const int amount = 1 + g.minSpacing[0];
+  auto sumH = [&](int x, int y, long long &u2, long long &c2) {
+    u2 = c2 = 0;
+    for (int l = 0; l < g.nLayers; ++l) {
+      size_t i = g.hIndex(x, y, l);
+      u2 += hu[i];
+      c2 += g.hcap[i];
+    }
+  };
+  auto sumV = [&](int x, int y, long long &u2, long long &c2) {
+    u2 = c2 = 0;
+    for (int l = 0; l < g.nLayers; ++l) {
+      size_t i = g.vIndex(x, y, l);
+      u2 += vu[i];
+      c2 += g.vcap[i];
+    }
+  };
+  for (size_t k = 0; k < r.clusters.size() && k < 4; ++k) {
+    Cluster &c = r.clusters[k];
+    c.hood = true;
+    auto dist = [&](int x, int y) {
+      int dx = std::max({0, c.box.x0 - x, x - c.box.x1}), dy = std::max({0, c.box.y0 - y, y - c.box.y1});
+      return std::max(dx, dy);
+    };
+    auto ringOf = [&](int dd) {
+      for (int q = 0; q < kRings; ++q)
+        if (dd >= kRingLo[q] && dd <= kRingHi[q])
+          return q;
+      return -1;
+    };
+    auto add = [&](Ring &rg, long long u2, long long c2) {
+      ++rg.edges;
+      rg.cap += c2;
+      rg.use += u2;
+      rg.freeUnits += std::max(0LL, c2 - u2);
+      rg.roomy += (c2 - u2 >= amount);
+    };
+    for (int y = 0; y < g.ny; ++y)
+      for (int x = 0; x + 1 < g.nx; ++x) {
+        int dd = std::min(dist(x, y), dist(x + 1, y)), q = ringOf(dd);
+        if (q < 0)
+          continue;
+        long long u2, c2;
+        sumH(x, y, u2, c2);
+        add(c.h[q], u2, c2);
+        if (dd == 0 && u2 > c2)
+          c.ovCaps.push_back(c2);
+      }
+    for (int y = 0; y + 1 < g.ny; ++y)
+      for (int x = 0; x < g.nx; ++x) {
+        int dd = std::min(dist(x, y), dist(x, y + 1)), q = ringOf(dd);
+        if (q < 0)
+          continue;
+        long long u2, c2;
+        sumV(x, y, u2, c2);
+        add(c.v[q], u2, c2);
+        if (dd == 0 && u2 > c2)
+          c.ovCaps.push_back(c2);
+      }
+    std::sort(c.ovCaps.begin(), c.ovCaps.end());
+  }
   return r;
 }
 
@@ -375,6 +457,23 @@ void print(const Result &r) {
       break;
     std::printf("    overflow %6lld  box x %d-%d y %d-%d (%d x %d)  nets %lld\n", c.overflow, c.box.x0, c.box.x1,
                 c.box.y0, c.box.y1, c.box.x1 - c.box.x0 + 1, c.box.y1 - c.box.y0 + 1, c.nets);
+  }
+  std::printf("D3 hotspot neighborhoods (2D; free = sum max(0, cap - use); room = edges with space for one more net)\n");
+  for (const Cluster &c : r.clusters) {
+    if (!c.hood)
+      continue;
+    std::printf("  hotspot overflow %lld, box x %d-%d y %d-%d: %zu overflowed edges, 2D capacity min %lld median "
+                "%lld max %lld\n",
+                c.overflow, c.box.x0, c.box.x1, c.box.y0, c.box.y1, c.ovCaps.size(),
+                c.ovCaps.empty() ? 0 : c.ovCaps.front(), c.ovCaps.empty() ? 0 : c.ovCaps[c.ovCaps.size() / 2],
+                c.ovCaps.empty() ? 0 : c.ovCaps.back());
+    for (int q = 0; q < kRings; ++q) {
+      const Ring &h = c.h[q], &v = c.v[q];
+      std::printf("    ring %2d-%-2d  H: %5lld edges, use/cap %5.1f%%, free %6lld, room %5lld   V: %5lld edges, use/cap "
+                  "%5.1f%%, free %6lld, room %5lld\n",
+                  kRingLo[q], kRingHi[q], h.edges, 100.0 * h.use / std::max(1LL, h.cap), h.freeUnits, h.roomy,
+                  v.edges, 100.0 * v.use / std::max(1LL, v.cap), v.freeUnits, v.roomy);
+    }
   }
   std::printf("D2 wirelength anatomy (%lld routed nets)\n", r.netsScored);
   std::printf("  scored %lld = wire %lld + vias %lld (vias %.1f%%)\n", r.wire + r.vias, r.wire, r.vias,
@@ -436,6 +535,19 @@ int run() {
   check(r.wire == 9 && r.vias == 1 && r.viaCorner == 1 && r.corners == 1, "wire 3+3+3, one via at c's corner");
   check(r.mst == 3 + 3 + 3 && r.detourPos == 0 && r.detourNeg == 0, "each net's wire equals its pin-tile MST");
   check(diag::rmst({{0, 0}, {4, 0}, {4, 3}, {0, 3}}) == 10, "RMST of a 4 x 3 rectangle's corners is 10");
+  // D3, ring 0 (tiles x 0-3 of row 0): horizontal edges x 0, 1, 2 (usage
+  // 4, cap 2 each) and x 3 (unused, cap 2): 4 edges, cap 8, use 12, free 2,
+  // one with room for a net (amount 2); the 3 overflowed edges have 2D
+  // capacity 2. Vertical edges touching the box: (x 0-3, y 0-1), unused,
+  // vertical capacity 2 each: 4 edges, cap 8, free 8, all roomy.
+  const diag::Cluster &h0 = r.clusters[0];
+  check(h0.hood && h0.h[0].edges == 4 && h0.h[0].cap == 8 && h0.h[0].use == 12 && h0.h[0].freeUnits == 2 &&
+            h0.h[0].roomy == 1,
+        "D3 ring 0, horizontal: 4 edges, cap 8, use 12, free 2, room 1");
+  check(h0.v[0].edges == 4 && h0.v[0].cap == 8 && h0.v[0].freeUnits == 8 && h0.v[0].roomy == 4,
+        "D3 ring 0, vertical: 4 edges, cap 8, free 8, room 4");
+  check(h0.ovCaps.size() == 3 && h0.ovCaps.front() == 2 && h0.ovCaps.back() == 2,
+        "D3: the 3 overflowed edges have 2D capacity 2");
   // Overflowed runs on tiles x 0-2 and x 6-8 (4 tiles apart): radius 3
   // keeps them apart, radius 4 joins them.
   std::istringstream sol2("a 0\n(5,5,1)-(25,5,1)\n(65,5,1)-(85,5,1)\n!\nb 1\n(5,5,1)-(25,5,1)\n(65,5,1)-"
