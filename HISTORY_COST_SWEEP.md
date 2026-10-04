@@ -7991,3 +7991,37 @@ B's wire equals the no-virtual-capacity run's). Queued (`part90c.jobs`):
 the 11 zero-overflow benchmarks with virtual capacity 8 on A only plus the
 parallel fallback; prediction: byte-identical to the standard's routes
 wherever B wins.
+
+**Part 90, more** (`status=OK`, `gr_verify` = `eval2008.pl`):
+- bigblue2 on pd22route (virtual capacity on both paths): 0 / 9325503
+  (+1.30% vs 9205885), 2628 s. B's region stage with the 167959-edge zone
+  took 115 rounds (vs 359 without -- it converged faster) but left B with
+  5312099 2D wire vs 5054094 (+5.1%) -- the same harm as bigblue1. Path A
+  with virtual capacity reached 0 in the region stage itself (standard A:
+  2, then refinement 0).
+- **newblue2 on pd23route** (virtual capacity on A only): 0 / 7617454, route
+  file **byte-identical** to af_newblue2's, 193 s -- as predicted.
+- adaptec5 on pd22route (both paths): 0 / 15738120 (+0.55% vs 15651405), 5399 s.
+- **newblue4 on pd22route, virtual capacity 8 tracks** (B never runs:
+  identical to pd23route here): **144** / 13711471 (+0.37% WL), 9583 s
+  (+8% vs 8871). Region best 170 by round 447 vs the three standard runs'
+  170 / 172 / 178, refinement -> 144 as all three did (144 / 144 / 146).
+  **No effect on newblue4's residue** (zone 2803 edges). By the plan,
+  bigblue4 and newblue7 are not run on this result.
+- pd23route, byte-identical to the standard's route files (fb_*): adaptec4
+  (12205838, 676 s), adaptec2 (5243664, 1382 s), bigblue3 (13166745, 1730
+  s), adaptec3 (13142861, 2195 s).
+- pd23route, the rest of the zero-overflow suite, all byte-identical to the
+  standard's route files: adaptec1 (5405278, 2181 s), bigblue1 (5700481,
+  2804 s), bigblue2 (9205885, 2729 s vs 3011 sequential), adaptec5
+  (15651405, 5353 s), newblue6 (17936527, 6096 s), newblue5 (23324129,
+  6465 s), with newblue2, adaptec4, adaptec2, bigblue3, adaptec3 above:
+  **11 of 11 identical** (`part90c.jobs`, 0 not OK). With virtual capacity
+  on path A only, path B is pd21route's B, and B won on every benchmark.
+
+**Part 90 summary.** Virtual capacity 8 tracks on the standard path only
+(pd23route, `PD22ROUTE_VCAP=8 PD23ROUTE_VCAP_B=0`) plus the parallel
+fallback: zero-overflow benchmarks unchanged byte for byte (11/11), several
+faster where B and A overlap (bigblue2 -9%); newblue1 significantly lower
+(24 / 36 / 38 vs 44-54, Part 89b); newblue4 unchanged (144, +0.37% WL,
++8% runtime). Not measured: bigblue4, newblue7, newblue3.
