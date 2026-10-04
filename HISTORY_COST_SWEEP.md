@@ -7958,3 +7958,16 @@ region stage wherever it runs, which includes most zero-overflow
 benchmarks (their slow tier stops near 300): the zeros must hold, and WL
 is judged against Parts 87/88. bigblue4 and newblue7 follow only if
 newblue4 improves.
+
+**Part 90 results** (all `status=OK`, `gr_verify` = `eval2008.pl`):
+
+| benchmark | standard (Part 87/88) | candidate | WL change | runtime (s), standard / candidate | path kept; region rounds A / B; zone edges A / B |
+|---|---|---|---|---|---|
+| newblue6 | 0 / 17936527 | **0** / 18001765 | +0.36% (spread 1.6%) | 6144 (B-first) / 6122 | B; 28 / 20; 12886 / 111745 |
+
+Part 90 was launched under a background-command wrapper with a 2-hour
+limit, which killed the batch and its routers at 2 h: newblue4 (~2 h into
+the region stage), adaptec5 and bigblue1 were lost; newblue5's router had
+finished (6520 s) and only its checks were cut off -- rechecked on the
+saved route file. The remaining ten jobs were relaunched detached as
+`part90b.jobs`.
