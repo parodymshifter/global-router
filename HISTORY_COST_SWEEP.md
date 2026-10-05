@@ -8101,3 +8101,12 @@ is forced in its main hotspot (ours 72 there, 108 total; best published 68).
   likely at or near its floor.
 bigblue4 is between (89.3% tightest cut, free room 3+ tiles out): the
 overnight run will show whether virtual capacity reaches it.
+
+**Part 91, item 1 interrupted for an OS update** (2026-10-04, ~7.6 h in):
+bigblue4 on pd23route had reached region round 155, best 400 (the
+standard run's best by the same round 404, its whole-stage best 404 ->
+refinement 370; virtual-capacity zone 1045 edges); newblue3 was at region
+round 6 (slow tier ended at 41000 after 150 rounds). Neither finished; both
+are relaunched after the update. Run outputs from Parts 72-91 were copied
+from the session scratchpad (cleared on reboot) to
+`~/Code/GlobalRouterRuns/` (4.4 GB).
