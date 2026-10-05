@@ -190,8 +190,12 @@ newblue4's at 144. It runs on the standard path only -- on the reclaim
 path its zone covers the deliberately injected overflow and made routes
 0.4-1.7% longer -- so all 11 zero-overflow benchmarks are byte-identical
 to before. The reclaim path now runs on a second thread (same routes,
-bigblue2 -9% wall time). Not yet rerun on it: bigblue4, newblue7,
-newblue3 (their recorded results are pd14-era).
+bigblue2 -9% wall time). Reruns on it (Part 91): bigblue4 370 -> 356
+(+39% runtime), newblue3 38916 (vs pd12route's 38704 -- not like for
+like); newblue7 not yet rerun. Part 91 also certifies, by a cut bound
+(`gr/cutbound.cpp`), that >= 26264 of newblue3's overflow and >= 54 of
+newblue7's are forced for any router; newblue4's residue is pin-bound
+(98.4% of its tightest cut).
 
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check

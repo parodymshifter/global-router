@@ -8110,3 +8110,30 @@ round 6 (slow tier ended at 41000 after 150 rounds). Neither finished; both
 are relaunched after the update. Run outputs from Parts 72-91 were copied
 from the session scratchpad (cleared on reboot) to
 `~/Code/GlobalRouterRuns/` (4.4 GB).
+
+**Part 91, item 1 results** (relaunched after the OS update; outputs in
+`~/Code/GlobalRouterRuns/runs`; both `status=OK`, `gr_verify` =
+`eval2008.pl`):
+
+| benchmark | previous standard | pd23route (virtual capacity 8) | region stage | refinement | runtime |
+|---|---|---|---|---|---|
+| bigblue4 | 370 / 24861323 (pd14route, wg_bigblue4) | **356** / 24863041 (WL +0.01%) | 408 -> 400, 232 rounds, 20465 s (was 408 -> 404, 150 rounds, 9685 s) | 400 -> 356 (was 404 -> 370) | **38634 s (10.7 h, +39%)** |
+| newblue3 | 38704 / 10779692 (pd12route) | 38916 / 10796239 (+0.55% overflow, +0.15% WL) | 41000 -> 39010, 59 rounds (plateau stop), 2135 s | 39010 -> 38916 (plateau stop) | 29612 s (8.2 h, -0.5%) |
+
+bigblue4: -14 overflow (-3.8%), its first improvement since the margin
+caps; the zone (1045 edges) cost 88 s per region round vs 65 s, and the
+work-gated stop came later (232 rounds) because the best kept inching
+down, so the run took 39% longer. Single run; bigblue4's run-to-run
+spread under pattern-cell perturbation is unmeasured (its three earlier
+runs share one cell and are identical).
+
+newblue3: +212 overflow, but **not a like-for-like comparison**: 38704
+is pd12route's (no margin caps, no work-gated stop), and newblue3 was
+never rerun on pd14route; a pd23route run with `PD22ROUTE_VCAP=0` would
+isolate virtual capacity's share. newblue3 is pin-bound (cutbound: >=
+26264 forced) and its zone covered 4993 edges around 41000 overflow, so
+no gain was expected.
+
+Suite on the standard configuration (pd23route): 11 zero-overflow
+benchmarks unchanged; newblue1 38, newblue4 144, bigblue4 **356**, newblue7
+108 (pd14-era, not rerun), newblue3 38916. Total 39562.
