@@ -8185,3 +8185,17 @@ parallel passes against the updated state until none are left (the first
 net of a pass always commits). Self-test: the stampede spreads to 0 in 2
 extra passes, 1 vs 3 and 1 vs 4 workers identical. Queued
 (`part92b.jobs`): newblue1 and bigblue2 at 8 threads.
+
+**Part 92 results, continued** (8 threads, one job at a time; all
+`status=OK`, `gr_verify` = `eval2008.pl`):
+
+| run | overflow / scored WL | runtime (1 thread: newblue1 5625 s, bigblue2 2729 s) | region stage | conflicts |
+|---|---|---|---|---|
+| bigblue2, pd24route (serial redo) | 0 / 9214150 (+0.09%) | 1971 s (1.38x) | -- | slow tier 491340 redone vs 397100 committed |
+| newblue1, pd25route (parallel passes) | 44 / 4888708 (+0.7%) | **2303 s (2.44x)**; pd24route 2783 s | 1334 s (3.1x vs 4192 s) | region 277394 re-searched in 41885 extra passes |
+
+Overflow 44 is a single run; newblue1's range is 24-38 with virtual
+capacity on one thread (cells 7/8/9), 40 for pd24route -- small either way.
+The remaining serial time is now the stages outside the two batched loops
+(pattern stage, tree rebuild, WL recovery, layer assignment): newblue1's
+1-thread non-region time 1376 s fell only to ~910 s.
