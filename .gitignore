@@ -86,6 +86,7 @@ pd20route
 pd21route
 pd22route
 pd23route
+pd24route
 cutbound
 pd11route_gpu
 gr/pattern_kernel.metallib

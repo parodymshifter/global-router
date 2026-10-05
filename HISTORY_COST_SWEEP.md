@@ -8137,3 +8137,28 @@ no gain was expected.
 Suite on the standard configuration (pd23route): 11 zero-overflow
 benchmarks unchanged; newblue1 38, newblue4 144, bigblue4 **356**, newblue7
 108 (pd14-era, not rerun), newblue3 38916. Total 39562.
+
+## Part 92 -- multithreading: batched parallel rerouting (pd24route)
+
+Plan: `MULTITHREADING_PLAN.md` (with adaptive virtual capacity and the
+long-net capacity limit scoped to build on it). Time on one thread is
+85-95% the slow tier and the region stage on every long benchmark (region:
+bigblue4 53%, newblue7 54%, newblue4 67%, newblue1 75%; newblue3 mostly
+the slow tier).
+
+`gr/pd24route.cpp` (forked from pd23route): `PD24ROUTE_THREADS=T` runs
+both stages in batches of `PD24ROUTE_BATCH` (64) nets: searched in parallel
+against the batch-start state on per-worker usage replicas (the per-net
+code unchanged), committed in net order, a net whose new route crosses an
+edge changed by an earlier commit in the batch and now overflowing is
+rerouted live (`PD24ROUTE_REDO=1`). Routes depend on the batch size and
+the rule, not on T. Threads 0 = pd23route. 600 checks, among them: three
+nets stampeding onto one free row in a batch are spread to 0 overflow by
+the redo rule (2 redone) and pile up (overflow 36) without it; on a
+congested 220-net synthetic design, 1 and 4 workers give identical routes
+through the slow tier (329 batches) and the region stage (163), with every
+replica checked against the live state after every batch.
+
+Queued (`part92a.jobs`, one at a time for clean timing): newblue2 at
+threads 0 (must equal af_newblue2), 1 and 8 (must equal each other);
+newblue1 and bigblue2 at 8 threads.
