@@ -8152,7 +8152,7 @@ against the batch-start state on per-worker usage replicas (the per-net
 code unchanged), committed in net order, a net whose new route crosses an
 edge changed by an earlier commit in the batch and now overflowing is
 rerouted live (`PD24ROUTE_REDO=1`). Routes depend on the batch size and
-the rule, not on T. Threads 0 = pd23route. 600 checks, among them: three
+the rule, not on T. Threads 0 = pd23route. 598 checks, among them: three
 nets stampeding onto one free row in a batch are spread to 0 overflow by
 the redo rule (2 redone) and pile up (overflow 36) without it; on a
 congested 220-net synthetic design, 1 and 4 workers give identical routes
@@ -8162,3 +8162,26 @@ replica checked against the live state after every batch.
 Queued (`part92a.jobs`, one at a time for clean timing): newblue2 at
 threads 0 (must equal af_newblue2), 1 and 8 (must equal each other);
 newblue1 and bigblue2 at 8 threads.
+
+**Part 92a results** (pd24route; one job at a time; all `status=OK`,
+`gr_verify` = `eval2008.pl`):
+
+| run | overflow / scored WL | runtime | notes |
+|---|---|---|---|
+| newblue2, threads 0 | 0 / 7617454 | 179 s | **byte-identical** to af_newblue2 (pd23route) |
+| newblue2, threads 1 (batch 64) | 0 / 7618400 | 183 s | batched order: slow tier ends at 42 (sequential: 0); +0.01% WL |
+| newblue2, threads 8 | 0 / 7618400 | 171 s | **byte-identical to threads 1** -- routes independent of the thread count at full scale |
+| newblue1, threads 8 | 40 / 4895006 (WL +0.8%) | **2783 s vs 5625 s (2.0x)** | region 1540 s vs 4192 s (2.7x); slow tier 90 rounds (74 sequential); overflow inside the 24-38 / 44-54 ranges |
+
+newblue2 gains little (its slow tier is 2 rounds; most of its 3 minutes
+is unthreaded stages). On newblue1 the conflict rule fired on more changed
+routes than it passed (slow tier 165417 redone vs 103230 committed; region
+150511 vs 115638), and pd24route redoes those one at a time on the main
+thread -- the cap on the speedup.
+
+`gr/pd25route.cpp` (forked from pd24route): `PD25ROUTE_REDO_PASSES=1`
+(default; 0 = pd24route) re-searches a batch's conflicting nets in further
+parallel passes against the updated state until none are left (the first
+net of a pass always commits). Self-test: the stampede spreads to 0 in 2
+extra passes, 1 vs 3 and 1 vs 4 workers identical. Queued
+(`part92b.jobs`): newblue1 and bigblue2 at 8 threads.

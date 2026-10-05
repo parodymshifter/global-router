@@ -91,6 +91,7 @@ jobs:
           - pd22route
           - pd23route
           - pd24route
+          - pd25route
           - g24_verify
           - g24_lroute
           - grdiag
