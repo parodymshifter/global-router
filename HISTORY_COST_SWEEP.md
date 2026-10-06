@@ -8226,3 +8226,26 @@ conflicting nets to the front of the next batch instead of a small pass of
 their own. route() now reports its pattern+fast vs slow split. 614 checks
 (the stampede still spreads to 0 with carry + fresh, 3 carried; 1 vs 3 and
 1 vs 4 workers identical). Queued (`part92d.jobs`): newblue1, 10 threads.
+
+## Part 93 -- congestion maps: grmap (2D) and grview (3D, Metal)
+
+The congestion visualizer from CLAUDE.md's build stage 1, which was never
+built. `gr/grmap.cpp` (std-only, in CI): charges a route file as gr_verify
+does, collapses to 2D per tile edge, classes each edge by use/capacity
+(<= 50% violet, 50-75% blue, 75-90% green, 90-99% yellow, exactly 100%
+orange, over red; no capacity: blocked grey, or red if used), draws each
+tile in the worst class of its edges (PPM), prints counts per class and
+the 2D overflow (a cross-check: newblue1 38, newblue4 144, bigblue4 356,
+newblue7 108, newblue3 38916, adaptec1 0, bigblue2 0 -- all equal to the
+scored results), and with a `.grid` output writes per-tile ratios and
+classes for the 3D viewer. Self-test: every class boundary exactly, a
+4 x 2 fixture's tiles and counts, bar heights 1.5 / 1.0 / 0.
+`gr/gpu/grview.mm` (macOS only: Cocoa, Metal, MetalKit, ImageIO; shaders
+compiled at run time; not in the routers or CI): every tile a bar of
+height use/capacity, instanced in one draw; drag rotates, scroll zooms,
+Shift-drag pans, +/- bar height, H hides violet and blue, B toggles a
+lift on red bars (overflow is 1-2 units on 60-200, so true red bars barely
+clear the orange), R resets; `--snapshot` renders offscreen to PNG.
+Self-test: the grid reader (good, truncated, wrong magic), instance
+colors, the orbit camera's projection. Maps and snapshots of seven
+benchmarks: `~/Code/GlobalRouterRuns/maps/` (page under `maps/page/`).

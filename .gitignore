@@ -91,6 +91,8 @@ pd25route
 pd26route
 pd27route
 cutbound
+grview
+grmap
 pd11route_gpu
 gr/pattern_kernel.metallib
 gr/*.run

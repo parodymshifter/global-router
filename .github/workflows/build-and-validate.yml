@@ -98,6 +98,7 @@ jobs:
           - g24_lroute
           - grdiag
           - cutbound
+          - grmap
           - lpbound
     steps:
       - uses: actions/checkout@v4
