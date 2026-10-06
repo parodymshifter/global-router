@@ -8456,3 +8456,13 @@ measurable overflow effect, wirelength within its 1.6% spread. Small.
   Same overflow as the ring pulls' 36, inside the 24-38 range: no measurable effect.
 - flat penalty 100 (op100_newblue1): **136** / 4884366 (+0.6% WL), 10481 s wall (incl. the 21.5-min sleep).
   3.6x the standard's overflow: the bigger the uniform penalty, the worse the churn. The flat form is retired.
+- window penalty a = 2 (wp2_newblue1): region best 74, final **66** / 4826906 (-0.6% WL), 6002 s.
+
+**Parts 97-98, verdict.** Every penalty on full edges made newblue1 worse
+or left it in its noise: flat 20 -> 76, flat 100 -> 136, window a = 1 -> 36,
+window a = 2 -> 66 (standard 38; range 24-38). The stronger the push off full
+edges, the worse the result: moved nets land on neighbouring edges that then
+fill, and the stage churns. Room along the line exists (Part 97), but pricing
+alone does not get the nets there without displacing others. The only variant
+that moved the region stage itself is the 15-track ring pull (region best 32
+vs 46, final 30) -- a one-time, overflow-safe pre-pass, not a standing price.
