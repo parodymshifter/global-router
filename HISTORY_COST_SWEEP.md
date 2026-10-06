@@ -8454,3 +8454,5 @@ measurable overflow effect, wirelength within its 1.6% spread. Small.
 - window penalty a = 1 (wp1_newblue1): **36** / 4855408 (WL +0.0%), 7303 s wall (the run spanned the 21.5-minute
   sleep only partly; slower than the standard's 5186 s by ~30% -- the penalty adds detours to the searches).
   Same overflow as the ring pulls' 36, inside the 24-38 range: no measurable effect.
+- flat penalty 100 (op100_newblue1): **136** / 4884366 (+0.6% WL), 10481 s wall (incl. the 21.5-min sleep).
+  3.6x the standard's overflow: the bigger the uniform penalty, the worse the churn. The flat form is retired.
