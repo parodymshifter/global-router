@@ -8345,3 +8345,34 @@ pieces search only 16 tiles beyond their span while the band is 50-190
 tiles thick, and 4 tracks is a quarter of what virtual capacity allows
 (its floor is half the capacity, ~15 tracks here). Queued
 (`part95b.jobs`): pull 15 tracks alone; pull 15 + margin 64 + 3 passes.
+
+## Part 96 -- the band profile: how warm the ring really is, and how far room is
+
+`gr/hotring.cpp --profile` (self-tested: distance to cool on the Part 94
+fixture -- core 4, band 2, cool 0; shell means 0.85 / 0.85 / 0.3; natural
+bands recover three planted groups exactly): per side, the mean ratio of
+the one-tile shells at distance d from the center's box and the first d at
+which it falls to 100 / 85 / 70 / 55 / 40%; the distance from every tile
+to the nearest tile <= 75% (Chebyshev, multi-source); and 1D k-means
+"natural bands" (6 groups) of the tile ratios inside the 90% ring
+rectangle. Overflowed centers (outputs `maps/profile_*.txt`):
+
+| benchmark | shell mean at d = 1 (L / R / B / T) | first d at <= 55% (L / R / B / T) | distance to cool: center median / 90th / max | band median / 90th / max | natural band boundaries |
+|---|---|---|---|---|---|
+| newblue1 | 0.77 / 0.57 / 0.45 / 0.75 | 26 / 2 / 1 / 131 | 3 / 14 / 24 | 0 / 3 / 16 | 0.24 0.47 0.68 0.84 0.95 |
+| newblue4 | 0.69 / 0.69 / 0.51 / 0.74 | 30 / 5 / 1 / >256 | 3 / 7 / 11 | 1 / 8 / 25 | 0.36 0.55 0.70 0.83 0.94 |
+| bigblue4 | 0.70 / 0.82 / 0.72 / 0.80 | 13 / 116 / 7 / 38 | 1 / 7 / 18 | 1 / 9 / 28 | 0.35 0.52 0.68 0.81 0.93 |
+| newblue7 | 0.69 / 0.42 / 0.65 / 0.68 | 29 / 1 / 5 / 14 | 1 / 12 / 39 | 0 / 3 / 11 | 0.26 0.45 0.63 0.78 0.92 |
+| newblue3 | 0.85 / 0.81 / 0.82 / 0.80 | 12 / 10 / 89 / 75 | 3 / 15 / 28 | 0 / 2 / 13 | 0.36 0.55 0.70 0.83 0.94 |
+
+Readings, which revise Part 94's: (1) the ring is mottled, not a solid
+warm wall -- even the first shell outside a center averages 42-85%, and
+the 90% ring rectangle is wide because a long side line rarely gets to
+90% cool tiles, not because the band is uniformly warm; (2) room is close:
+a tile at <= 75% is a median 1-3 tiles from a center's tiles and 0-1 from
+the band's (90th percentile 7-15 and 2-9; max 11-39) -- well inside the
+16-tile margin the pull already searches, so reach is not what limits
+the pull (and a per-piece reach from this map would mostly shrink it);
+(3) the natural bands are nearly the same on every layout -- boundaries
+about 0.24-0.36 / 0.45-0.55 / 0.63-0.70 / 0.78-0.84 / 0.92-0.95 -- close to
+the user's proposed 40 / 55 / 70 / 85 / 100.

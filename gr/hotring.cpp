@@ -4,6 +4,7 @@
 // capacity and its class).
 //
 //   hotring <file.grid> [hot=0.95] [cool=0.75] [merge=2] [minTiles=20] [top=3] [window=7]
+//   hotring <file.grid> ... --profile    also the band profile (below)
 //   hotring --selftest
 //
 // Hot centers: a tile is in a center if the mean worst-edge ratio over the
@@ -24,8 +25,26 @@
 // Reported per rectangle: width x height in tiles, as a share of the die's
 // width and height, and the band thickness on each side (rectangle minus
 // the hot cluster's own box).
+//
+// --profile (Part 96): for each center, (1) the temperature profile per
+// side -- the mean ratio (capped at 1.5) of the one-tile shells at
+// Chebyshev distance d from the center's box, split into the four sides
+// (a corner tile goes to the side it is further beyond; ties to left /
+// right), sampled at d = 1, 2, 4, ..., 128; (2) per side, the first
+// distance at which the shell mean falls to each level 1.00, 0.85, 0.70,
+// 0.55, 0.40; (3) the distance to cool -- for every tile, the Chebyshev
+// distance to the nearest tile <= cool (a multi-source search from all
+// cool tiles) -- summarized (median, 90th percentile, max) over the
+// center's tiles and over its band (the 90% ring rectangle minus the
+// center's box): the reach a piece starting there needs to find room; (4)
+// natural bands: the tiles' ratios inside the ring rectangle clustered into
+// 6 groups by 1D k-means (centroids started at the 1/12, 3/12, ... quantiles,
+// iterated to a fixed point), reported as centroids and the boundaries
+// between them -- the layout's own band levels.
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <climits>
 #include <cstdint>
 #include <cstdio>
@@ -189,6 +208,89 @@ Ring grow(const Grid &g, const Box &core, float cool, double share) {
   return rg;
 }
 
+// Chebyshev distance from every tile to the nearest tile with ratio <=
+// cool (INT_MAX if there is none).
+std::vector<int> distToCool(const Grid &g, float cool) {
+  std::vector<int> d(g.ratio.size(), INT_MAX);
+  std::vector<size_t> q;
+  for (size_t i = 0; i < g.ratio.size(); ++i)
+    if (g.ratio[i] <= cool) {
+      d[i] = 0;
+      q.push_back(i);
+    }
+  for (size_t h = 0; h < q.size(); ++h) {
+    size_t t = q[h];
+    int x = static_cast<int>(t % g.nx), y = static_cast<int>(t / g.nx);
+    for (int dy = -1; dy <= 1; ++dy)
+      for (int dx = -1; dx <= 1; ++dx) {
+        int u = x + dx, v = y + dy;
+        if (u < 0 || v < 0 || u >= g.nx || v >= g.ny)
+          continue;
+        size_t n = static_cast<size_t>(v) * g.nx + u;
+        if (d[n] == INT_MAX) {
+          d[n] = d[t] + 1;
+          q.push_back(n);
+        }
+      }
+  }
+  return d;
+}
+
+// Mean shell ratio per side (0 left, 1 right, 2 bottom, 3 top) at each
+// distance 1..maxD from `core`; -1 where a side has no tiles at that d.
+std::vector<std::array<double, 4>> shellProfile(const Grid &g, const Box &core, int maxD) {
+  std::vector<std::array<double, 4>> sum(maxD + 1, {0, 0, 0, 0}), cnt(maxD + 1, {0, 0, 0, 0});
+  for (int y = std::max(0, core.y0 - maxD); y <= std::min(g.ny - 1, core.y1 + maxD); ++y)
+    for (int x = std::max(0, core.x0 - maxD); x <= std::min(g.nx - 1, core.x1 + maxD); ++x) {
+      int dx = std::max({0, core.x0 - x, x - core.x1}), dy = std::max({0, core.y0 - y, y - core.y1});
+      int d = std::max(dx, dy);
+      if (d < 1 || d > maxD)
+        continue;
+      int side = dx >= dy ? (x < core.x0 ? 0 : 1) : (y < core.y0 ? 2 : 3);
+      sum[d][side] += std::min(1.5, static_cast<double>(g.at(x, y)));
+      cnt[d][side] += 1;
+    }
+  std::vector<std::array<double, 4>> out(maxD + 1, {-1, -1, -1, -1});
+  for (int d = 1; d <= maxD; ++d)
+    for (int s = 0; s < 4; ++s)
+      if (cnt[d][s] > 0)
+        out[d][s] = sum[d][s] / cnt[d][s];
+  return out;
+}
+
+// 1D k-means on `v` (k groups), centroids started at the (2i+1)/2k
+// quantiles; returns the sorted centroids.
+std::vector<double> naturalBands(std::vector<double> v, int k) {
+  std::vector<double> c;
+  if (v.empty())
+    return c;
+  std::sort(v.begin(), v.end());
+  for (int i = 0; i < k; ++i)
+    c.push_back(v[std::min(v.size() - 1, static_cast<size_t>((2.0 * i + 1) / (2.0 * k) * v.size()))]);
+  for (int it = 0; it < 200; ++it) {
+    std::vector<double> sum(k, 0);
+    std::vector<long long> n(k, 0);
+    size_t j = 0;
+    for (double x : v) {
+      while (j + 1 < c.size() && std::fabs(x - c[j + 1]) < std::fabs(x - c[j]))
+        ++j; // v and c are sorted, so the nearest centroid only moves up
+      sum[j] += x;
+      ++n[j];
+    }
+    bool changed = false;
+    for (int i = 0; i < k; ++i) {
+      double nc = n[i] ? sum[i] / n[i] : c[i];
+      if (std::fabs(nc - c[i]) > 1e-9)
+        changed = true;
+      c[i] = nc;
+    }
+    std::sort(c.begin(), c.end());
+    if (!changed)
+      break;
+  }
+  return c;
+}
+
 } // namespace hr
 
 namespace selftest {
@@ -271,6 +373,32 @@ int run() {
       scattered += mask[static_cast<size_t>(y) * 40 + x];
   check(scattered == 0 && mask[static_cast<size_t>(29) * 40 + 29] && mask[static_cast<size_t>(35) * 40 + 5],
         "window 7: scattered full tiles are not a center; the solid block's middle and the overflowed tile are");
+  // Part 96: distance to cool on the first fixture: the core's middle tile
+  // (19,14) is 4 from the nearest cool tile (x 15 or y 10 lines are cool;
+  // x 16-23 and y 11-18 are warm or hot), a band tile (17,14) is 2.
+  std::vector<int> dc = distToCool(g, 0.75f);
+  check(dc[static_cast<size_t>(14) * 40 + 19] == 4 && dc[static_cast<size_t>(14) * 40 + 17] == 2 &&
+            dc[static_cast<size_t>(5) * 40 + 5] == 0,
+        "distance to cool: core (19,14) 4, band (17,14) 2, a cool tile 0 (got " +
+            std::to_string(dc[static_cast<size_t>(14) * 40 + 19]) + ", " +
+            std::to_string(dc[static_cast<size_t>(14) * 40 + 17]) + ")");
+  // Shell profile: shells 1 and 2 around the core are the warm band (0.85),
+  // shell 3 is cool (0.3) except the one 0.8 tile on the right.
+  std::vector<std::array<double, 4>> pr = shellProfile(g, cl[0].box, 4);
+  check(std::fabs(pr[1][0] - 0.85) < 1e-6 && std::fabs(pr[2][3] - 0.85) < 1e-6 && std::fabs(pr[3][0] - 0.3) < 1e-6 &&
+            pr[3][1] > 0.3,
+        "shell profile: d 1-2 at 0.85 on every side, d 3 cool on the left, slightly warmer on the right");
+  // Natural bands recover three well-separated groups.
+  std::vector<double> vals;
+  for (int i = 0; i < 100; ++i) {
+    vals.push_back(0.2 + 0.001 * i);
+    vals.push_back(0.6 + 0.001 * i);
+    vals.push_back(1.0 + 0.001 * i);
+  }
+  std::vector<double> nb = naturalBands(vals, 3);
+  check(nb.size() == 3 && std::fabs(nb[0] - 0.2495) < 1e-6 && std::fabs(nb[1] - 0.6495) < 1e-6 &&
+            std::fabs(nb[2] - 1.0495) < 1e-6,
+        "natural bands: three groups at 0.25 / 0.65 / 1.05 found exactly");
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -279,8 +407,13 @@ int run() {
 int main(int argc, char **argv) {
   if (argc == 2 && std::string(argv[1]) == "--selftest")
     return selftest::run();
+  bool profile = false;
+  if (argc > 2 && std::string(argv[argc - 1]) == "--profile") {
+    profile = true;
+    --argc;
+  }
   if (argc < 2) {
-    std::cerr << "usage: " << argv[0] << " <file.grid> [hot] [cool] [merge] [minTiles] [top]\n";
+    std::cerr << "usage: " << argv[0] << " <file.grid> [hot] [cool] [merge] [minTiles] [top] [window] [--profile]\n";
     return 2;
   }
   float hot = argc > 2 ? std::atof(argv[2]) : 0.95f, cool = argc > 3 ? std::atof(argv[3]) : 0.75f;
@@ -331,6 +464,59 @@ int main(int argc, char **argv) {
                   c.box.x0 - r.rect.x0, r.rect.x1 - c.box.x1, c.box.y0 - r.rect.y0, r.rect.y1 - c.box.y1,
                   hits.empty() ? "" : "; reached the die edge without cooling: ", hits.c_str());
     }
+    if (!profile)
+      continue;
+    // Part 96: the band profile.
+    static std::vector<int> dcool;
+    if (dcool.empty())
+      dcool = hr::distToCool(g, cool);
+    const int maxD = 256;
+    std::vector<std::array<double, 4>> pr = hr::shellProfile(g, c.box, maxD);
+    const char *sn[4] = {"left", "right", "bottom", "top"};
+    for (int sd = 0; sd < 4; ++sd) {
+      std::printf("  %-6s shells:", sn[sd]);
+      for (int d = 1; d <= 128; d *= 2)
+        if (pr[d][sd] >= 0)
+          std::printf(" d%d %.2f", d, pr[d][sd]);
+      std::printf("  | first d at or below");
+      for (double lv : {1.00, 0.85, 0.70, 0.55, 0.40}) {
+        int at = -1;
+        for (int d = 1; d <= maxD && at < 0; ++d)
+          if (pr[d][sd] >= 0 && pr[d][sd] <= lv)
+            at = d;
+        if (at < 0)
+          std::printf(" %.0f%%: >%d", lv * 100, maxD);
+        else
+          std::printf(" %.0f%%: %d", lv * 100, at);
+      }
+      std::printf("\n");
+    }
+    hr::Ring r90 = hr::grow(g, c.box, cool, 0.9);
+    std::vector<int> dc, db;
+    std::vector<double> inRing;
+    for (int y = r90.rect.y0; y <= r90.rect.y1; ++y)
+      for (int x = r90.rect.x0; x <= r90.rect.x1; ++x) {
+        size_t i = static_cast<size_t>(y) * g.nx + x;
+        bool inCore = x >= c.box.x0 && x <= c.box.x1 && y >= c.box.y0 && y <= c.box.y1;
+        (inCore ? dc : db).push_back(dcool[i] == INT_MAX ? 99999 : dcool[i]);
+        inRing.push_back(std::min(1.5, static_cast<double>(g.ratio[i])));
+      }
+    auto pct = [](std::vector<int> v, double q) {
+      if (v.empty())
+        return -1;
+      std::sort(v.begin(), v.end());
+      return v[std::min(v.size() - 1, static_cast<size_t>(q * v.size()))];
+    };
+    std::printf("  distance to cool (tiles): center median %d, 90th %d, max %d; band median %d, 90th %d, max %d\n",
+                pct(dc, 0.5), pct(dc, 0.9), pct(dc, 1.0), pct(db, 0.5), pct(db, 0.9), pct(db, 1.0));
+    std::vector<double> nb = hr::naturalBands(inRing, 6);
+    std::printf("  natural bands in the ring (6 groups): centroids");
+    for (double x : nb)
+      std::printf(" %.2f", x);
+    std::printf("; boundaries");
+    for (size_t i = 0; i + 1 < nb.size(); ++i)
+      std::printf(" %.2f", (nb[i] + nb[i + 1]) / 2);
+    std::printf("\n");
   }
   return 0;
 }
