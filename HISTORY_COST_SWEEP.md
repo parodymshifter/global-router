@@ -8560,3 +8560,19 @@ keeps the budget out of the slow tier (default both = pd31route). Self-test:
 region-only leaves the slow tier's routes equal to the budget-off run's
 and marks long nets only in the region stage. Queued (`part100c.jobs`):
 alpha 0.8, weight 0.25, region only, newblue1 cells 7 / 8 / 9, one thread.
+
+**Part 100c results** (pd32route, long budget alpha 0.8 / weight 0.25,
+region stage only; one thread; all `status=OK`, `gr_verify` =
+`eval2008.pl`): newblue1 cells 7 / 8 / 9 -> **42 / 34 / 34** (mean 36.7)
+/ WL 4951823 / 4943459 / 4938353 (+1.4% to +2.0%), ~6200 s each with three
+sharing the machine. Standard: 24 / 38 / 36 (32.7). No gain; slightly worse
+overflow and longer wire. **The long-net budget is retired in both forms
+tried** (0.6 / 1 in both stages stalls the slow tier, Part 100b; 0.8 / 0.25
+in the region stage only is neutral-to-worse).
+
+**Where the newblue1 residue work stands (Parts 89-100).** Of everything
+tried to move it -- virtual capacity, the ring pull, flat and window-scaled
+over-capacity penalties, and the long-net budget -- only virtual capacity
+(Part 89) moved it. Threading (Parts 92-100) is 2.3-2.6x faster at a
+not-significant +20-28% on newblue1's overflow; the one-thread standard
+stays.
