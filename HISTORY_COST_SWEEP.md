@@ -8429,3 +8429,14 @@ it started (user's decision): Part 96's distance-to-room (median 1-3 tiles,
 90th percentile 7-15) and the 4 -> 15 track result (warm edges 0.832 ->
 0.816) say the pull is not reach-limited; the slot goes to the penalty
 runs (Parts 97-98).
+
+**Part 95a results** (newblue1 cell 8, one thread; `status=OK`, `gr_verify`
+= `eval2008.pl`; standard: 38 / 4854999, region best 46, 5186 s):
+
+| run | region best | final overflow / scored WL | runtime |
+|---|---|---|---|
+| pull 4 tracks | 48 | 36 / 4842258 (-0.3%) | 5129 s |
+| pull 4 tracks + ring box | 46 | 36 / 4788240 (-1.4%) | 5123 s |
+
+Both inside newblue1's virtual-capacity range (24 / 36 / 38): no
+measurable overflow effect, wirelength within its 1.6% spread. Small.
