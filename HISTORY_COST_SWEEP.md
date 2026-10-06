@@ -8440,3 +8440,6 @@ runs (Parts 97-98).
 
 Both inside newblue1's virtual-capacity range (24 / 36 / 38): no
 measurable overflow effect, wirelength within its 1.6% spread. Small.
+- pull 15 tracks (ring15_newblue1): region best **32** (standard 46), refinement -> 32; final **30** / 4849835
+  (-0.1% WL), 4991 s. The region stage itself ended 30% lower than the standard's; the final 30 is 21% below
+  the standard's 38 at this cell but inside the 24-38 range across cells. One run.
