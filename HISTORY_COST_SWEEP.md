@@ -8408,3 +8408,18 @@ capacity, in the region stage (path A only, like virtual capacity). Off =
 pd28route. 626 checks (cost seam exact; on a 5 x 3 grid the search crosses
 a full edge at P = 0 -- 5.14 vs a 6.93 detour -- and detours at P = 5).
 Queued (`part97a.jobs`): newblue1 cell 8 at P = 20 and P = 100.
+
+## Part 98 -- the penalty scaled by the distance to room (pd30route)
+
+The user's refinement of Part 97: price each hot edge by how far its nets
+must go to find room. `gr/pd30route.cpp` (forked from pd29route):
+`PD30ROUTE_WINDOW_PENALTY=a` gives every 2D edge with less spare than one
+net the penalty a x 2 x w, w its absorbing window along its own line
+(the smallest half-width whose edges together hold one net's spare; cap
+200), added when one more net would overflow it; windows recomputed from
+the live usage every `PD30ROUTE_WINDOW_EVERY` (10) rounds; region stage,
+path A only. Off = pd29route. 631 checks (windows on hand-made lines:
+1 / 1 / 0, the cap for a line without spare, 4 for a full stretch; on a
+grid the full edge's window 1 gives penalty 3 at a = 1.5; the cost seam
+adds exactly the edge's own penalty). Queued (`part98a.jobs`): newblue1
+cell 8 at a = 1 and a = 2.
