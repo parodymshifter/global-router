@@ -8423,3 +8423,9 @@ path A only. Off = pd29route. 631 checks (windows on hand-made lines:
 grid the full edge's window 1 gives penalty 3 at a = 1.5; the cost seam
 adds exactly the edge's own penalty). Queued (`part98a.jobs`): newblue1
 cell 8 at a = 1 and a = 2.
+
+Part 95b's second job (pull 15 + margin 64 + 3 passes) was cancelled before
+it started (user's decision): Part 96's distance-to-room (median 1-3 tiles,
+90th percentile 7-15) and the 4 -> 15 track result (warm edges 0.832 ->
+0.816) say the pull is not reach-limited; the slot goes to the penalty
+runs (Parts 97-98).
