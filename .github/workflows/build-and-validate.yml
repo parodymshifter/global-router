@@ -98,6 +98,7 @@ jobs:
           - pd29route
           - pd30route
           - pd31route
+          - pd32route
           - g24_verify
           - g24_lroute
           - grdiag

@@ -8547,3 +8547,16 @@ thread: 24 / 38 / 36 (32.7). Smaller batches are slightly faster and no
 better on overflow. The threaded configurations sit 20-28% above the
 one-thread mean on newblue1 -- not significant at three runs each, but
 consistently on the wrong side; the one-thread standard stays.
+
+**Part 100b, stopped** (user's decision): pd31route alpha 0.6 / weight 1
+in both stages kept newblue1's slow tier from converging -- overflow 5094 /
+9378 / 4326 at round ~65 and 7258 / 7968 / 8010 at round ~130 (cells 7 / 8
+/ 9), against the standard's 298 by round 74. Long nets (28430, the top
+10%) carry most of the congested middle's traffic; capping them at 60% of
+every edge fought the ordinary price instead of relieving it.
+
+`gr/pd32route.cpp` (forked from pd31route): `PD32ROUTE_LONG_STAGES=region`
+keeps the budget out of the slow tier (default both = pd31route). Self-test:
+region-only leaves the slow tier's routes equal to the budget-off run's
+and marks long nets only in the region stage. Queued (`part100c.jobs`):
+alpha 0.8, weight 0.25, region only, newblue1 cells 7 / 8 / 9, one thread.
