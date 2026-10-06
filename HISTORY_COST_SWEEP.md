@@ -8266,3 +8266,52 @@ virtual-capacity runs (24 / 36 / 38) and at the top of the old no-VC range
 full) costs newblue1 a large share of its virtual-capacity gain. Queued
 (`part92e.jobs`): pd27route cells 7 and 9, and cell 8 with carry but the
 old conflict rule (`PD27ROUTE_CONFLICT=any`).
+
+## Part 94 -- how far out from each hot center the chip has room again (hotring)
+
+The congestion maps (Part 93) show dense hot centers with rings cooling
+outward. `gr/hotring.cpp` (an analysis tool on grmap's .grid files):
+a tile is in a hot center if the mean worst-edge ratio of the 7 x 7 block
+around it is >= 95% (scattered full tiles -- 10-25% of tiles even at zero
+overflow -- are not), or if it is overflowed; center tiles within 2 tiles
+join. From each center's bounding box, every side moves outward until the
+tiles along it are cool (<= 75%, violet or blue) for >= 90% of them ("most
+of the way around") or all of them; a side at the die edge stops there.
+Self-test: a 4 x 4 core with a 2-tile warm band gives 10 x 10 at 90% and
+moves one tile further past a single warm tile at 100%; a die-edge
+hotspot is flagged; scattered full tiles are not a center, a solid block
+and a lone overflowed tile are. (A first version clustered raw >= 95%
+tiles within 5 of each other; that chained scattered full tiles into
+die-sized "centers" and was replaced.)
+
+Overflowed centers (standard routes; % of the die width x height):
+
+| benchmark | die | hot center | cool on 90% of each side | cool all the way around | band thickness L / R / B / T (90%) |
+|---|---|---|---|---|---|
+| newblue1 | 399 x 399 | 87 x 87 (22% x 22%), 37 overflowed tiles | 245 x 279 (61% x 70%) | 318 x 290 (80% x 73%) | 56 / 102 / 4 / 188 |
+| newblue4 | 455 x 458 | 43 x 39 (9% x 9%), 119 | 93 x 383 (20% x 84%) | 447 x 398 (98% x 87%) | 45 / 5 / 4 / 340 |
+| bigblue4 | 403 x 405 | 95 x 100 (24% x 25%), 127 | 234 x 272 (58% x 67%) | 371 x 318 (92% x 79%) | 13 / 126 / 7 / 165 |
+| newblue7 | 488 x 490 | 244 x 280 (50% x 57%), 81 | 293 x 472 (60% x 96%) | 395 x 483 (81% x 99%) | 33 / 16 / 170 / 22 |
+| newblue3 | 973 x 1256 | 135 x 88 (14% x 7%), 747 | 157 x 995 (16% x 79%) | 215 x 1213 (22% x 97%) | 12 / 10 / 474 / 433 |
+
+Largest hot center of each zero-overflow benchmark, cool on 90% of each
+side: adaptec1 70x66% -> 90x88%; adaptec2 18x23% -> 24x27%; adaptec3
+23x31% -> 28x73%; adaptec4 13x11% -> 51x54%; adaptec5 46x46% -> 75x47%;
+bigblue1 98x81% -> 100x90% (right edge); bigblue2 27x56% -> 80x92%;
+bigblue3 22x13% -> 33x31%; newblue2 5x27% -> 38x69%; newblue5 41x54% ->
+88x79%; newblue6 64x67% -> 69x75%. (Full output:
+`~/Code/GlobalRouterRuns/maps/hotring_*.txt`.)
+
+Readings: (1) the warm band around an overflowed center is wide -- the
+90%-cool rectangle spans 58-70% of the die on newblue1 and bigblue4, the
+band 50-190 tiles thick on its far sides -- while the region stage's box is
+the overflow's bounding box plus 5 tiles; (2) it is lopsided: cool comes
+within a few tiles on one or two sides (often a die edge) and only hundreds
+of tiles away on the others (newblue1 bottom 4 / top 188; newblue4 right 5
+/ top 340) -- the hot centers sit at the edge of larger warm regions, not
+as islands; (3) "all the way around" reaches 73-99% of the die almost
+everywhere (a single warm tile on a long line blocks it), so the 90% figure
+is the useful one; (4) zero-overflow benchmarks show equally large warm
+regions (adaptec1, bigblue1, bigblue2, newblue5: 80-100% of the die) and
+still reach zero, so a wide warm band alone does not make overflow -- the
+center's own demand does (Part 91's cut ratios).

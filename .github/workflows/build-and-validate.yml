@@ -99,6 +99,7 @@ jobs:
           - grdiag
           - cutbound
           - grmap
+          - hotring
           - lpbound
     steps:
       - uses: actions/checkout@v4
