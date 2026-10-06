@@ -8315,3 +8315,24 @@ is the useful one; (4) zero-overflow benchmarks show equally large warm
 regions (adaptec1, bigblue1, bigblue2, newblue5: 80-100% of the die) and
 still reach zero, so a wide warm band alone does not make overflow -- the
 center's own demand does (Part 91's cut ratios).
+
+## Part 95 -- the ring pull (pd28route)
+
+The user's proposal after Part 94: move load from the warm band around a
+hotspot out to the cool tiles beyond it, then move the hotspot's load
+into the band that freed. `gr/pd28route.cpp` (forked from pd27route):
+`PD28ROUTE_RING=s` computes, at the region stage's start, the ring
+rectangle (Part 94's rule: each side out from the overflow's box until
+>= s of its tiles are <= `PD28ROUTE_RING_COOL` 0.75); then
+`PD28ROUTE_RING_PASSES` (1) passes reroute every net's pieces with wire in
+it under present-demand prices with the band's warm edges priced
+`PD28ROUTE_RING_PULL` (4) tracks lower and the core (overflow box +
+expand) 8 tracks lower, each piece kept only if it adds no local overflow;
+then the region stage runs as before (virtual capacity on the core).
+`PD28ROUTE_RING_BOX=1` also makes the ring rectangle the region stage's
+box. Off = pd27route. 623 checks (the ring rectangle on hotring's fixture;
+on a 16 x 9 design with an overflowed row between two 80% rows the pull
+takes the band's warm edges from 0.80 to 0.20 mean use/capacity, overflow
+10 -> 0, nets connected; off: no ring). Queued (`part95a.jobs`, one
+thread): newblue1 cell 8 with the pull, and with the pull + ring box.
+(q10_bigblue2's timing in part92c overlaps these runs.)
