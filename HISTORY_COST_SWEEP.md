@@ -8474,3 +8474,7 @@ the one-thread standard's 24 / 38 / 36 (mean 32.7) -- **+53% overflow** at
 ~3.9x speed. pd27route's defaults give back virtual capacity's newblue1
 gain (back in the old 44-54 range) and cannot become the standard as they
 are. Pending: cell 8 with carry but the old conflict rule (r10any).
+- cell 8, carry + the old conflict rule (`PD27ROUTE_CONFLICT=any`, r10any_newblue1): **34** / 4885350 (+0.6% WL)
+  in **2083 s** (2.5x the one-thread 5186 s), against 54 with carry + fresh. **The "fresh" rule is what costs
+  newblue1 its overflow**; carrying conflicts into the next batch does not. Carry + any is the threading
+  candidate; cells 7 and 9 would confirm it.
