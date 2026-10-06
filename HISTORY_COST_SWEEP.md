@@ -8199,3 +8199,30 @@ capacity on one thread (cells 7/8/9), 40 for pd24route -- small either way.
 The remaining serial time is now the stages outside the two batched loops
 (pattern stage, tree rebuild, WL recovery, layer assignment): newblue1's
 1-thread non-region time 1376 s fell only to ~910 s.
+- bigblue2, pd25route, 8 threads: **0** / 9212202 (+0.07%), **1739 s (1.57x**; pd24route 1971 s). bigblue2's run is
+  short on maze work after the slow tier (A's region stage reaches 0 in minutes), so its serial share is large.
+
+**Part 92c, newblue1, pd26route, 10 threads** (`status=OK`, `gr_verify` =
+`eval2008.pl`): 44 / 4883229, 2820 s wall -- **including a 288 s system
+sleep** (low battery, 19:31:35-19:36:23, during route()), so ~2532 s of
+running. Stage timers: route() (pattern stage, fast and slow tiers) 1447 s
+(~1159 s awake), region + refinement 1347 s (region 1285 s vs 1334 s at 8
+threads), tree rebuild 2.7 s, WL recovery 15.9 s, layer assignment 5.0 s.
+
+So the serial remainder is not the cleanup stages (24 s together) but
+route(): ~1300 s on one thread -> ~900-1160 s batched, only ~1.2-1.45x. And
+the region stage barely gains from 8 to 10 threads. CPU time says why:
+~202 CPU-minutes by 39 minutes of wall time (~5.9 cores busy while awake)
+against ~94 CPU-minutes for the whole one-thread run -- the conflict rule's
+re-searches (region 277394, slow tier 343359) inflate the work ~2x, and
+small conflict passes leave most workers idle at each pass barrier.
+
+`gr/pd27route.cpp` (forked from pd26route): `PD27ROUTE_CONFLICT=fresh`
+(default; `any` = pd26route) re-searches a net only if its new route
+crosses an edge that had room when it was searched and that an earlier
+commit in the pass filled -- a net that knowingly took an already-full
+edge is committed as searched; `PD27ROUTE_CARRY=1` (default) moves
+conflicting nets to the front of the next batch instead of a small pass of
+their own. route() now reports its pattern+fast vs slow split. 614 checks
+(the stampede still spreads to 0 with carry + fresh, 3 carried; 1 vs 3 and
+1 vs 4 workers identical). Queued (`part92d.jobs`): newblue1, 10 threads.
