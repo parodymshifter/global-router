@@ -8498,3 +8498,22 @@ newblue1's 1.6% spread). Next (user's order): the 15-track ring pull,
 threaded the same way, on cells 7 / 8 / 9 against these three runs (routes
 do not depend on the thread count, so three jobs at 4 threads each give the
 same results as one at a time at 10).
+
+**Part 99b results** -- the 15-track ring pull, threaded like the candidate
+(carry + any; 3 jobs x 4 threads at once), newblue1 (all `status=OK`,
+`gr_verify` = `eval2008.pl`):
+
+| cell | threaded candidate (no pull) | threaded + 15-track pull |
+|---|---|---|
+| 7 | 38 | 38 / 4901328 |
+| 8 | 34 | 44 / 4886846 |
+| 9 | 46 | 36 / 4900319 |
+| mean | 39.3 | **39.3** |
+
+Identical means: the pull has no effect, and the one-thread run's 30 (Part
+95a) was noise. **Verdict on Parts 95-98:** neither the ring pull (4 or 15
+tracks, with or without the ring box) nor any over-capacity penalty (flat
+20 / 100, window-scaled a = 1 / 2) improves newblue1; the flat and a = 2
+penalties make it clearly worse. Retired. Virtual capacity (Part 89)
+remains the only mechanism of this family that moved newblue1's residue.
+(Runtimes here, ~5570 s, reflect three 4-thread jobs sharing the machine.)
