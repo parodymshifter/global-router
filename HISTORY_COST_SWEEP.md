@@ -8478,3 +8478,23 @@ are. Pending: cell 8 with carry but the old conflict rule (r10any).
   in **2083 s** (2.5x the one-thread 5186 s), against 54 with carry + fresh. **The "fresh" rule is what costs
   newblue1 its overflow**; carrying conflicts into the next batch does not. Carry + any is the threading
   candidate; cells 7 and 9 would confirm it.
+
+## Part 99 -- the threading candidate, three cells
+
+pd27route, 10 threads, carry + the old conflict rule (`PD27ROUTE_CONFLICT=any`),
+newblue1 (all `status=OK`, `gr_verify` = `eval2008.pl`):
+
+| cell | one thread (pd23route standard) | threaded candidate | runtime |
+|---|---|---|---|
+| 7 | 24 | 38 / 4899002 | 2266 s |
+| 8 | 38 | 34 / 4885350 | 2083 s |
+| 9 | 36 | 46 / 4890884 | 2339 s |
+| mean | 32.7 | **39.3** (+20%) | ~2230 s (**2.3-2.5x**) |
+
+Not distinguishable from the one-thread runs at three runs each
+(Mann-Whitney U = 6.5 of 9, p ~ 0.3), but the mean is 20% higher -- by the
+project's bar, a borderline result, not a clean pass. WL +0.8% (inside
+newblue1's 1.6% spread). Next (user's order): the 15-track ring pull,
+threaded the same way, on cells 7 / 8 / 9 against these three runs (routes
+do not depend on the thread count, so three jobs at 4 threads each give the
+same results as one at a time at 10).
