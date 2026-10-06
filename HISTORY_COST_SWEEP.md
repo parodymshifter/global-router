@@ -8576,3 +8576,33 @@ over-capacity penalties, and the long-net budget -- only virtual capacity
 (Part 89) moved it. Threading (Parts 92-100) is 2.3-2.6x faster at a
 not-significant +20-28% on newblue1's overflow; the one-thread standard
 stays.
+
+## Part 101 -- what makes a layout hard, measured before routing (routability)
+
+`gr/routability.cpp` (analysis; self-test: util 16/68, RUDY 0.667, pin
+escape 0.5 on a 4 x 3 fixture): from the .gr file alone, total demand /
+capacity (util), a RUDY estimate per 2D edge (p99, p99.9, share over 1,
+excess), the pin-escape ratio of every tile and every 3 x 3 block (demand
+of nets with pins inside and outside, over the block's border capacity).
+Plus `cutbound` over the whole chip with rectangles up to 8 x 8
+(`maps/routability.txt`, `maps/cut8/`). Against the standard's outcome (5
+benchmarks with overflow, 11 at zero):
+
+| measure | AUC (hard vs easy) | Spearman with overflow |
+|---|---|---|
+| tightest 3 x 3 escape (cut3_max) | **0.95** | **0.75** |
+| tightest cut up to 8 x 8 | 0.91 | 0.68 |
+| RUDY share of edges over capacity | 0.40 | -0.17 |
+| util (demand / capacity) | 0.44 | -0.13 |
+
+"cut3_max > 0.67" flags all five hard benchmarks and two easy ones
+(bigblue2 0.80 -- its zero has been fragile -- and newblue5 0.73): 14 of 16.
+Global congestion estimates carry no signal here; local escape does. Small
+sample (16); the ISPD 2024 benchmarks would be an independent test.
+
+Recap 3: `recaps/recap-2026-10-06.html` (artifact
+https://claude.ai/artifact/F6agfYT9sezQtViczBQqKy) -- results, the three
+residue types, the predictor, why the retired ideas backfired and their
+untried fixes (coordinated per-line reassignment, per-tile long-net
+budgets, adaptive virtual capacity, batch coloring, exact search on the
+last overflowed edges).

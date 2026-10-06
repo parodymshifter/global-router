@@ -1,0 +1,384 @@
+<title>Global Router Recap 2026-10-06</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+figure.shot { margin: 10px 0 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+figure.shot figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 5px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.shots > * { min-width: 0; }
+img.px { image-rendering: pixelated; }
+</style>
+
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap · snapshot 6 October 2026 · compared with 3 October</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">The third recap. Since 3 October: virtual capacity joined the standard and moved newblue1, multithreading was built and measured, eight new analysis tools mapped why the remaining overflow resists, and six further ideas were tested and closed. It ends the ISPD 2008 phase; the next step is the ISPD 2024 format.</p>
+  <div class="meta">
+    <span><b>Configuration</b> <span class="mono">gr/pd23route</span> + <span class="mono">gr/standard.env</span>, one thread</span>
+    <span><b>Commit</b> <span class="mono">71dd060</span></span>
+    <span><b>Previous recap</b> <span class="mono">ce7a24f</span>, <span class="mono">gr/pd21route</span></span>
+    <span><b>Machine</b> Apple M4 Pro</span>
+    <span><b>Verification</b> every result: <span class="mono">gr_verify</span> = official <span class="mono">eval2008.pl</span></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#glance">At a glance</a><a href="#since">Since 3 October</a><a href="#results">Results</a><a href="#hard">What makes a layout hard</a><a href="#predict">Predicting it before routing</a><a href="#ledger">Tested since 3 October</a><a href="#why">Why some ideas backfired</a><a href="#untried">Not yet tried</a><a href="#threads">Multithreading</a><a href="#tools">New tools</a><a href="#next">Next</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">48 → 38</div><div class="lab">newblue1 overflow at the standard setting (−21%; 24–38 across three settings), from virtual capacity, the one idea of this round that moved a residue.</div></div>
+    <div class="tile"><div class="fig">0.95</div><div class="lab">how well a pre-route cut measure separates the 5 hard benchmarks from the 11 easy ones (AUC; 0.5 is a coin flip). Global congestion estimates score 0.40–0.44.</div></div>
+    <div class="tile"><div class="fig">≥ 26,264</div><div class="lab">of newblue3's 38,916 overflow is provably forced for any router; ≥ 54 of newblue7's 108.</div></div>
+    <div class="tile"><div class="fig">2.5×</div><div class="lab">speed from 10 threads, at a not-significant +20% overflow on newblue1; not adopted yet.</div></div>
+  </div>
+</section>
+
+<section id="since">
+  <h2>Since 3 October</h2>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Measure</th><th class="num">3 October</th><th class="num">6 October</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td>Router</td><td class="num">pd21route</td><td class="num">pd23route</td><td>+ virtual capacity (standard path), reclaim path on a second thread</td></tr>
+      <tr><td>Benchmarks at zero overflow</td><td class="num">11 of 16</td><td class="num">11 of 16</td><td><span class="delta same">same, routes byte-identical</span></td></tr>
+      <tr><td>newblue1</td><td class="num">48</td><td class="num">38</td><td><span class="delta down">−21%</span></td></tr>
+      <tr><td>bigblue4</td><td class="num">370</td><td class="num">356</td><td><span class="delta down">−4%</span> (runtime +39%)</td></tr>
+      <tr><td>newblue3</td><td class="num">38,704</td><td class="num">38,916</td><td><span class="delta same">+0.5%, older baseline, not like for like</span></td></tr>
+      <tr><td>newblue4 / newblue7</td><td class="num">144 / 108</td><td class="num">144 / 108</td><td><span class="delta same">same (newblue7 not rerun)</span></td></tr>
+      <tr><td>Total overflow</td><td class="num">39,374</td><td class="num">39,562</td><td><span class="delta same">+0.5%, all from newblue3's baseline change</span></td></tr>
+      <tr><td>Proven-forced overflow (cut bound)</td><td class="num">not known</td><td class="num">≥ 26,318</td><td>newblue3 ≥ 26,264, newblue7 ≥ 54</td></tr>
+      <tr><td>Mechanisms tested</td><td class="num"></td><td class="num">9</td><td>3 adopted, 1 parked (threading), 5 retired</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="results">
+  <h2>Results on the standard configuration</h2>
+  <p>Every row is a legal solution, and our verifier agrees with the official contest scorer on every number. The 11 zero-overflow benchmarks are byte-identical to 3 October's (virtual capacity runs only on the standard path, which they no longer keep).</p>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Benchmark</th><th class="num">Overflow</th><th class="num">Scored WL</th><th class="num">Runtime</th><th class="num">NTHU-Route 2.0<br>overflow</th><th class="num">Best of<br>four</th><th class="num">Proven<br>floor</th><th class="num">WL vs<br>NTHU</th></tr></thead>
+    <tbody>
+      <tr><td>adaptec1</td><td class="num">0</td><td class="num">5,405,278</td><td class="num">36 min</td><td class="num">0</td><td class="num">0</td><td class="num">—</td><td class="num">+0.8%</td></tr>
+      <tr><td>adaptec2</td><td class="num">0</td><td class="num">5,243,664</td><td class="num">23 min</td><td class="num">0</td><td class="num">0</td><td class="num">—</td><td class="num">+0.07%</td></tr>
+      <tr><td>adaptec3</td><td class="num">0</td><td class="num">13,142,861</td><td class="num">37 min</td><td class="num">0</td><td class="num">0</td><td class="num">—</td><td class="num">−0.05%</td></tr>
+      <tr><td>adaptec4</td><td class="num">0</td><td class="num">12,205,838</td><td class="num">11 min</td><td class="num">0</td><td class="num">0</td><td class="num">—</td><td class="num">+0.2%</td></tr>
+      <tr><td>adaptec5</td><td class="num">0</td><td class="num">15,651,405</td><td class="num">89 min</td><td class="num">0</td><td class="num">0</td><td class="num">—</td><td class="num">+0.7%</td></tr>
+      <tr><td>bigblue1</td><td class="num">0</td><td class="num">5,700,481</td><td class="num">47 min</td><td class="num">0</td><td class="num">0</td><td class="num">—</td><td class="num">+2.3%</td></tr>
+      <tr><td>bigblue2</td><td class="num">0</td><td class="num">9,205,885</td><td class="num">45 min</td><td class="num">86</td><td class="num">0</td><td class="num">—</td><td class="num">+2.3%</td></tr>
+      <tr><td>bigblue3</td><td class="num">0</td><td class="num">13,166,745</td><td class="num">29 min</td><td class="num">32</td><td class="num">0</td><td class="num">—</td><td class="num">+0.7%</td></tr>
+      <tr><td>bigblue4</td><td class="num">356</td><td class="num">24,863,041</td><td class="num">10.7 h</td><td class="num">256</td><td class="num">166</td><td class="num">0</td><td class="num">+9.0%</td></tr>
+      <tr><td>newblue1</td><td class="num">38</td><td class="num">4,854,999</td><td class="num">86 min</td><td class="num">164</td><td class="num">0</td><td class="num">0</td><td class="num">+5.5%</td></tr>
+      <tr><td>newblue2</td><td class="num">0</td><td class="num">7,617,454</td><td class="num">3 min</td><td class="num">0</td><td class="num">0</td><td class="num">—</td><td class="num">+0.4%</td></tr>
+      <tr><td>newblue3</td><td class="num">38,916</td><td class="num">10,796,239</td><td class="num">8.2 h</td><td class="num">31,810</td><td class="num">31,024</td><td class="num">26,264</td><td class="num">+1.6%</td></tr>
+      <tr><td>newblue4</td><td class="num">144</td><td class="num">13,711,471</td><td class="num">2.7 h</td><td class="num">222</td><td class="num">144</td><td class="num">0</td><td class="num">+6.4%</td></tr>
+      <tr><td>newblue5</td><td class="num">0</td><td class="num">23,324,129</td><td class="num">1.8 h</td><td class="num">18</td><td class="num">0</td><td class="num">—</td><td class="num">+0.8%</td></tr>
+      <tr><td>newblue6</td><td class="num">0</td><td class="num">17,936,527</td><td class="num">1.7 h</td><td class="num">0</td><td class="num">0</td><td class="num">—</td><td class="num">+1.4%</td></tr>
+      <tr><td>newblue7</td><td class="num">108</td><td class="num">36,104,404</td><td class="num">19.6 h</td><td class="num">68</td><td class="num">68</td><td class="num">54</td><td class="num">+1.6%</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">NTHU-Route 2.0 and "best of four" from LMgr's re-run (ISQED 2013, Table II), as in the earlier recaps. "Proven floor" is the cut bound from <span class="mono">cutbound</span>: overflow no router can avoid; 0 means no cut forces any, not that zero is reachable. newblue7's row is from the 1 October configuration (not rerun). Zero-overflow runtimes are pd23route's with the reclaim path on a second thread.</p>
+</section>
+
+<section id="hard">
+  <h2>What makes a layout hard</h2>
+  <p>Three kinds of measurement this round (the congestion maps, the ring and band analyses, and the cut tools) point the same way: the leftover overflow is a local problem around specific crowded spots, not a global shortage of wiring room.</p>
+  <div class="findings">
+    <div class="finding">
+      <h3>Global crowding does not predict it; local escape does</h3>
+      <p>Measured from the input file alone, before routing: the total wire demand against total capacity, and the standard congestion estimate (each net's wire spread over its bounding box), do not separate the 5 benchmarks with overflow from the 11 without. bigblue1 has the highest estimated congestion of all sixteen and routes to zero. What separates them is the tightest local cut: how much wiring must leave a small block of tiles (because nets have pins inside and outside it) against what the block's edges can carry.</p>
+    </div>
+    <div class="finding">
+      <h3>Three kinds of residue</h3>
+      <ul>
+        <li><b>Through-traffic</b> (newblue1, newblue7's small hotspots): the nets that must leave the hotspot need only about 93% of its border, but nets merely passing through fill the rest. Pushing the passers-by out is what works, and virtual capacity did that.</li>
+        <li><b>Pin-bound</b> (newblue4, bigblue4 in part): the nets with pins inside need 89–98% of the border just to get out once each. There is little through-traffic to push. newblue4's 144 already equals the best published result.</li>
+        <li><b>Forced</b> (newblue3, newblue7's main hotspot): the border is smaller than the demand that must cross it. One tile of newblue3 has 2,299 nets that must leave it through edges with room for only 124. No router can fix that part.</li>
+      </ul>
+    </div>
+    <div class="finding">
+      <h3>Room is near, but on the wrong lines</h3>
+      <p>Free capacity is a median 1–3 tiles from the hot tiles, and along each overflowed edge's own crossing line the spare to absorb its overflow sits within 11–43 tiles (except newblue3). The difficulty is not finding room but moving nets into it without pushing others out of it: every price push tried displaced neighbours faster than it relieved the hotspot.</p>
+    </div>
+  </div>
+  <div class="shots">
+    <figure class="shot"><img src="img/2026-10-06-newblue1-3d.png" alt="3D congestion view of newblue1's hotspot" loading="lazy"><figcaption>newblue1: a full (orange) plateau with the overflowed tiles (red, lifted) at its core. Through-traffic type.</figcaption></figure>
+    <figure class="shot"><img src="img/2026-10-06-newblue3-3d.png" alt="3D congestion view of newblue3's hub tile" loading="lazy"><figcaption>newblue3: the tower at tile (487, 668), where 2,299 nets must leave one tile. Forced type.</figcaption></figure>
+  </div>
+</section>
+
+<section id="predict">
+  <h2>Predicting it before routing</h2>
+  <p>Can a number computed from the layout alone, before any routing, say whether the router will reach zero? A first answer, from the sixteen benchmarks (<span class="mono">gr/routability</span> and <span class="mono">gr/cutbound</span>, seconds per benchmark):</p>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Pre-route measure</th><th class="num">Separates hard from easy<br>(AUC, 0.5 = chance)</th><th class="num">Rank correlation<br>with overflow</th><th>Reading</th></tr></thead>
+    <tbody>
+      <tr><td>Tightest 3 × 3 escape cut</td><td class="num"><b>0.95</b></td><td class="num"><b>0.75</b></td><td>best single predictor</td></tr>
+      <tr><td>Tightest cut, rectangles up to 8 × 8</td><td class="num">0.91</td><td class="num">0.68</td><td>close second</td></tr>
+      <tr><td>Share of edges over capacity in the congestion estimate</td><td class="num">0.40</td><td class="num">−0.17</td><td>no signal</td></tr>
+      <tr><td>Total demand ÷ total capacity</td><td class="num">0.44</td><td class="num">−0.13</td><td>no signal</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>A simple rule, "the tightest 3 × 3 escape cut is above 0.67", flags all five hard benchmarks and two of the eleven easy ones: 14 of 16 right, no hard case missed. The two false alarms are telling. bigblue2 (0.80) is the benchmark whose zero has been fragile (one run ended at 2), and newblue5 (0.73) needed the slow tier's full effort. A cut above 1.0 proves overflow outright (newblue3, newblue7).</p>
+  <p class="note">Sixteen benchmarks is a small sample, so read this as strong evidence for which kind of measure to use, not as a calibrated probability. The ISPD 2024 benchmarks would give a second, independent set to test it on. A full predictor would also need the through-traffic share, which needs a cheap routing estimate first.</p>
+</section>
+
+<section id="ledger">
+  <h2>Tested since 3 October</h2>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Experiment</th><th>Part</th><th>Result</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Virtual capacity (core edges priced 8 tracks lower)</td><td class="mono">89</td><td>newblue1 48 → 24 / 36 / 38 (p ≈ 0.012); newblue4 unchanged</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>…on the standard path only</td><td class="mono">90</td><td>11 zero-overflow benchmarks byte-identical; reclaim path no longer harmed</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>Reclaim path on a second thread</td><td class="mono">89</td><td>Same routes; bigblue2 −9% time</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>Multithreading (batches, conflict re-search)</td><td class="mono">92, 99, 100</td><td>2.3–3.9× faster; newblue1 overflow +20% (best variant, not significant)</td><td><span class="pill warn">parked</span></td></tr>
+      <tr><td>Ring pull (move warm-band load outward first)</td><td class="mono">95, 99</td><td>4 / 15 tracks, with or without the ring box: same as without (39.3 vs 39.3)</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Flat penalty on full edges</td><td class="mono">97</td><td>newblue1 76 at 20, 136 at 100 (standard 38)</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Penalty scaled by distance to room</td><td class="mono">98</td><td>36 at α = 1 (noise), 66 at α = 2</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Long-net capacity budget, strong (60%, both stages)</td><td class="mono">100</td><td>First maze stage stalled near 8,000 overflow</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Long-net budget, gentle (80%, hotspot stage)</td><td class="mono">100</td><td>42 / 34 / 34 vs 24 / 38 / 36</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Analyses: maps, rings, bands, cuts, detours, predictor</td><td class="mono">91–101</td><td>See the sections above</td><td><span class="pill info">tools kept</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="why">
+  <h2>Why some ideas backfired, and what could fix them</h2>
+  <div class="findings">
+    <div class="finding">
+      <h3>Penalties on full edges: everyone moves at once</h3>
+      <p>A price on full edges applies to every net that crosses them, so many nets leave in the same round, land on the neighbouring edges and fill those. The stronger the penalty, the worse the result (38 → 76 → 136). <b>Untried fix:</b> decide the moves jointly instead of letting each net react to a price. For each overflowed crossing line, choose which nets cross where by a small exact assignment (a min-cost flow over the line's crossing slots) and reroute only those nets. The room exists (Part 97); a coordinated move would take it without the stampede.</p>
+    </div>
+    <div class="finding">
+      <h3>Long-net budget: one share for the whole chip</h3>
+      <p>Capping long nets at the same share of every edge fought ordinary congestion in the middle of the chip, where long nets carry most of the traffic. The design note in CLAUDE.md already says the share should be set <i>per tile</i> from a pre-routing demand estimate. That was not tried. <b>Untried fix:</b> a per-tile share, applied only where the escape-cut measure says through-traffic is the problem.</p>
+    </div>
+    <div class="finding">
+      <h3>Multithreading: stale information inside a batch</h3>
+      <p>Nets in the same batch route against the batch's starting state. In a hotspot they all see the same few free tracks and collide; the rule that skipped re-searching some of them cost newblue1 50% more overflow. <b>Untried fix:</b> the coloring the design notes call for. Put nets whose search boxes overlap in different batches, so nets routed together cannot compete for the same edges. That keeps the speed outside hotspots and the one-thread quality inside them.</p>
+    </div>
+    <div class="finding">
+      <h3>Ring pull: solving a problem that was not there</h3>
+      <p>The pull moved load from the warm band to cool tiles, but room was never far away (1–3 tiles). It answered "where is room" when the real question is "who moves into it". No fix needed; the analysis that explained it is the useful outcome.</p>
+    </div>
+  </div>
+</section>
+
+<section id="untried">
+  <h2>Not yet tried, most promising first</h2>
+  <ol>
+    <li><b>Coordinated reassignment on the overflowed crossing lines.</b> A small exact solve per line (or per hotspot) deciding which nets cross where, then rerouting just those nets. It attacks the through-traffic residues directly, and nothing like it is in the 2008 contest routers. Could move newblue1 and newblue7's small hotspots.</li>
+    <li><b>Per-tile long-net budgets</b>, set from the escape-cut and through-traffic measurements: the nested constraint as CLAUDE.md describes it, which the uniform version did not test.</li>
+    <li><b>Adaptive virtual capacity</b>: the one mechanism that worked, made to follow the overflow round by round (as FastRoute 3.0 does) instead of a fixed zone.</li>
+    <li><b>Batch coloring for multithreading</b>, so the 2.5× speed comes without the quality cost.</li>
+    <li><b>Exact search on the last few overflowed edges.</b> The project's earlier branch-and-bound routers (broute through qroute) solved joint assignments exactly on small sets; newblue1's 19 overflowed edges are small enough for that as a final polish.</li>
+  </ol>
+  <p class="note">Ideas scoped earlier and still open: one hotspot box per cluster (newblue7), fewer bends, timing-driven priorities and a fair-share objective (both need the ISPD 2025 / OpenROAD setting).</p>
+</section>
+
+<section id="threads">
+  <h2>Multithreading</h2>
+  <p>Built and working: nets are routed in batches across threads and committed in a fixed order, so routes are identical at any thread count (checked at 1, 4 and 8 threads). On newblue1: 2.3–2.6× faster with the safe conflict rule, 3.9× with a looser one. The safe rule's overflow (38 / 34 / 46) averages 20% above one thread's (24 / 38 / 36), not significant with three runs but consistently on the wrong side, so the standard stays one-threaded. Batch coloring (above) is the likely fix.</p>
+</section>
+
+<section id="tools">
+  <h2>New tools</h2>
+  <ul>
+    <li><span class="mono">grmap</span> and <span class="mono">grview</span>: 2D congestion maps and a Metal 3D bar view you can rotate (<a href="https://claude.ai/artifact/XdtYm1g4tXxNacPoCNfxwH" style="color: var(--trace)">congestion maps page</a>).</li>
+    <li><span class="mono">cutbound</span>: a certified lower bound on overflow from cuts; <span class="mono">routability</span>: the pre-route measurements above.</li>
+    <li><span class="mono">hotring</span>, <span class="mono">cutdetour</span>, and <span class="mono">grdiag</span>'s neighborhood report: how far room is, around hotspots and along crossing lines.</li>
+  </ul>
+  <p class="note">All self-tested; all except grview (Mac only) build and test in CI.</p>
+</section>
+
+<section id="next">
+  <h2>Next</h2>
+  <p>The ISPD 2008 results have stopped responding to new pricing and pre-move ideas, and the analyses show why: what remains is either forced, at the best published level, or needs a coordinated move rather than a price. The next step is roadmap step 3, the ISPD 2024 format: a router that reads its <span class="mono">.cap</span> / <span class="mono">.net</span> files (the scorer already matches the official one). Its benchmarks also give the pre-route predictor an independent test. The coordinated reassignment idea stays first in line for a return to the 2008 residues.</p>
+  <details>
+    <summary>Embedded snapshot data</summary>
+    <pre id="recap-data-view"></pre>
+  </details>
+</section>
+</div>
+
+<script type="application/json" id="recap-data">
+{
+  "schema": 1,
+  "recapDate": "2026-10-06",
+  "commit": "71dd060",
+  "configuration": "gr/pd23route + gr/standard.env (one thread)",
+  "machine": "Apple M4 Pro",
+  "zeroOverflowCount": 11,
+  "benchmarkCount": 16,
+  "benchmarks": [
+    {"name": "adaptec1", "overflow": 0, "scoredWL": 5405278, "runtimeSec": 2181},
+    {"name": "adaptec2", "overflow": 0, "scoredWL": 5243664, "runtimeSec": 1382},
+    {"name": "adaptec3", "overflow": 0, "scoredWL": 13142861, "runtimeSec": 2195},
+    {"name": "adaptec4", "overflow": 0, "scoredWL": 12205838, "runtimeSec": 676},
+    {"name": "adaptec5", "overflow": 0, "scoredWL": 15651405, "runtimeSec": 5353},
+    {"name": "bigblue1", "overflow": 0, "scoredWL": 5700481, "runtimeSec": 2804},
+    {"name": "bigblue2", "overflow": 0, "scoredWL": 9205885, "runtimeSec": 2729},
+    {"name": "bigblue3", "overflow": 0, "scoredWL": 13166745, "runtimeSec": 1730},
+    {"name": "bigblue4", "overflow": 356, "scoredWL": 24863041, "runtimeSec": 38634},
+    {"name": "newblue1", "overflow": 38, "scoredWL": 4854999, "runtimeSec": 5186},
+    {"name": "newblue2", "overflow": 0, "scoredWL": 7617454, "runtimeSec": 193},
+    {"name": "newblue3", "overflow": 38916, "scoredWL": 10796239, "runtimeSec": 29612},
+    {"name": "newblue4", "overflow": 144, "scoredWL": 13711471, "runtimeSec": 9583},
+    {"name": "newblue5", "overflow": 0, "scoredWL": 23324129, "runtimeSec": 6465},
+    {"name": "newblue6", "overflow": 0, "scoredWL": 17936527, "runtimeSec": 6096},
+    {"name": "newblue7", "overflow": 108, "scoredWL": 36104404, "runtimeSec": 70692, "note": "1 October configuration, not rerun"}
+  ],
+  "provenFloor": {"newblue3": 26264, "newblue7": 54},
+  "preRoute": {
+    "cut3Max": {"adaptec1": 0.474, "adaptec2": 0.642, "adaptec3": 0.505, "adaptec4": 0.478, "adaptec5": 0.559, "bigblue1": 0.386, "bigblue2": 0.796, "bigblue3": 0.602, "bigblue4": 0.817, "newblue1": 0.680, "newblue2": 0.409, "newblue3": 5.657, "newblue4": 0.806, "newblue5": 0.725, "newblue6": 0.663, "newblue7": 0.780},
+    "tightestCut8Pct": {"adaptec1": 65.1, "adaptec2": 77.8, "adaptec3": 64.3, "adaptec4": 64.1, "adaptec5": 72.8, "bigblue1": 51.4, "bigblue2": 98.4, "bigblue3": 81.4, "bigblue4": 89.3, "newblue1": 81.1, "newblue2": 52.3, "newblue3": 1854.0, "newblue4": 95.5, "newblue5": 88.8, "newblue6": 77.7, "newblue7": 101.1},
+    "auc": {"cut3Max": 0.95, "tightestCut8": 0.91, "rudyOver": 0.40, "util": 0.44}
+  },
+  "threading": {"newblue1Cells789": {"oneThread": [24, 38, 36], "batch64Any": [38, 34, 46], "batch32Any": [38, 44, 44]}, "speedup": "2.3-2.6x"},
+  "comparedWith": {"recapDate": "2026-10-03", "file": "recaps/recap-2026-10-03.html", "commit": "ce7a24f",
+    "overflow": {"bigblue4": 370, "newblue1": 48, "newblue3": 38704, "newblue4": 144, "newblue7": 108}}
+}
+</script>
+<script>
+(function () {
+  var src = document.getElementById("recap-data"), view = document.getElementById("recap-data-view");
+  if (src && view) {
+    try { view.textContent = JSON.stringify(JSON.parse(src.textContent), null, 2); } catch (e) { view.textContent = src.textContent; }
+  }
+})();
+</script>
