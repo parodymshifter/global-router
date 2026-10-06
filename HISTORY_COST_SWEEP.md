@@ -8517,3 +8517,24 @@ tracks, with or without the ring box) nor any over-capacity penalty (flat
 penalties make it clearly worse. Retired. Virtual capacity (Part 89)
 remains the only mechanism of this family that moved newblue1's residue.
 (Runtimes here, ~5570 s, reflect three 4-thread jobs sharing the machine.)
+
+## Part 100 -- batch 32, and the long-net capacity budget (pd31route)
+
+Queued (user's order): (a) the threading candidate with batch 32
+(`part100a.jobs`: pd27route, 10 threads, carry + any, newblue1 cells 7 / 8
+/ 9, one at a time); then (b) the long-net budget.
+
+`gr/pd31route.cpp` (forked from pd30route): CLAUDE.md's nested capacity
+constraint. Long nets (pin bbox half-perimeter at or above the (100 -
+`PD31ROUTE_LONG_PCT`)th percentile, default 10) pay a second
+present-demand term on every edge, `PD31ROUTE_LONG_WEIGHT` (1) x histL x
+((longDemand + amount) / (`PD31ROUTE_LONG_ALPHA` x cap))^5, its history
+raised at every round boundary where long demand exceeds alpha x cap;
+short nets' cost is unchanged. Slow tier and region stage (path A). The
+long demand is a round-boundary snapshot (thread-count independence kept).
+Off = pd30route. 639 checks (top 30% of spans 1..10 -> 8 / 9 / 10; long
+demand counts only long nets; a long net pays exactly ((2 + 2) / 6)^5 more,
+a short one nothing; on an 8 x 3 grid a short net goes straight and a long
+net with its row budget full detours; 1 vs 4 workers identical with the
+budget on). Queued (`part100b.jobs`, after part100a): newblue1 cells 7 / 8 /
+9, one thread, alpha 0.6.
