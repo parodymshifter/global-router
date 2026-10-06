@@ -8466,3 +8466,11 @@ fill, and the stage churns. Room along the line exists (Part 97), but pricing
 alone does not get the nets there without displacing others. The only variant
 that moved the region stage itself is the 15-track ring pull (region best 32
 vs 46, final 30) -- a one-time, overflow-safe pre-pass, not a standing price.
+
+**Part 92e results** (pd27route, 10 threads, carry + fresh; `status=OK`,
+`gr_verify` = `eval2008.pl`): newblue1 cell 7 **48** / 4918113 in 1421 s;
+cell 9 **48** / 4912774 in 1376 s; with cell 8's 54: mean **50.0** against
+the one-thread standard's 24 / 38 / 36 (mean 32.7) -- **+53% overflow** at
+~3.9x speed. pd27route's defaults give back virtual capacity's newblue1
+gain (back in the old 44-54 range) and cannot become the standard as they
+are. Pending: cell 8 with carry but the old conflict rule (r10any).
