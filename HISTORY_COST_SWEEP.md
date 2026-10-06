@@ -8249,3 +8249,20 @@ clear the orange), R resets; `--snapshot` renders offscreen to PNG.
 Self-test: the grid reader (good, truncated, wrong magic), instance
 colors, the orbit camera's projection. Maps and snapshots of seven
 benchmarks: `~/Code/GlobalRouterRuns/maps/` (page under `maps/page/`).
+
+**Part 92c/d results** (newblue1, 10 threads, one job at a time; all
+`status=OK`, `gr_verify` = `eval2008.pl`):
+
+| run | overflow / scored WL | runtime | stages (s) | conflicts |
+|---|---|---|---|---|
+| pd26route, batch 32 | 42 / 4892941 | 2249 s (2.50x) | -- | -- |
+| **pd27route** (carry + fresh), batch 64 | **54** / 4904625 | **1474 s (3.82x)** | pattern+fast 75, slow tier 434, region 875 (4.8x vs 4192), refinement ~66, rebuild 2, WL 15, LA 5 | slow tier 137586 redone vs 308309 committed (was 343359 vs 249010); region 82608 vs 320364 (was 277394 vs 252432); 0 extra passes |
+
+pd27route: the redo work fell by 60-70% and no pass waits on a handful of
+nets any more -- 3.8x end to end. But 54 is above all three one-thread
+virtual-capacity runs (24 / 36 / 38) and at the top of the old no-VC range
+(44-54); region stage best 68 (pd25route 58). If real, the "fresh" rule
+(committing routes chosen against stale state when the edge was already
+full) costs newblue1 a large share of its virtual-capacity gain. Queued
+(`part92e.jobs`): pd27route cells 7 and 9, and cell 8 with carry but the
+old conflict rule (`PD27ROUTE_CONFLICT=any`).
