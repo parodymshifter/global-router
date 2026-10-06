@@ -87,7 +87,17 @@ instead.
    charged to wire capacity (layer assignment's objective gains a via
    term), and the soft exponential objective.
 3. **Writer** for the GCell-coordinate solution, then end-to-end runs
-   scored by both `g24_verify` and the official evaluator.
+   scored by both `g24_verify` and the official evaluator. **First
+   end-to-end result (HISTORY_COST_SWEEP.md Part 102)**, ahead of step 2,
+   through a format bridge (`gr/g24_bridge.cpp`: .cap/.net -> .gr ->
+   unchanged pd23route -> GCell solution; `gr/g24_score.sh` scores it and
+   cross-checks against the official evaluator). On mempool_tile_rank: legal,
+   total 14272259 (WL 7700947, vias 3414924, overflow 3156388 of which
+   2538618 is the idle-GCell floor), 44 s. The bridge cannot carry via
+   demand on wire capacity, access-point choice, non-uniform pitches, or
+   per-layer overflow weights. Reserving M2 capacity for pin via stacks
+   made it 17-86% worse, so the via term must enter layer assignment
+   (step 2).
 4. Benchmarks: the contest's set (Nangate45; ariane133, bsg_chip,
    mempool_tile, nvdla, mempool_group, mempool_cluster, mempool_cluster_large
    and variants, up to tens of millions of GCells) is on Google Drive;

@@ -101,6 +101,7 @@ jobs:
           - pd32route
           - g24_verify
           - g24_lroute
+          - g24_bridge
           - grdiag
           - cutbound
           - grmap

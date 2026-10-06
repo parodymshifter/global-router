@@ -8606,3 +8606,58 @@ residue types, the predictor, why the retired ideas backfired and their
 untried fixes (coordinated per-line reassignment, per-tile long-net
 budgets, adaptive virtual capacity, batch coloring, exact search on the
 last overflowed edges).
+
+## Part 102 -- the first ISPD 2024 design, routed through a format bridge
+
+Roadmap step 3, first end-to-end result. `gr/g24_bridge.cpp` (self-tested)
+converts the 2024 `.cap`/`.net` into an equivalent 2008 `.gr`:
+- one tile per GCell;
+- capacity in half tracks, so a net uses one track, the evaluator's demand
+  unit, along each layer's direction (layer 0 gets 0);
+- per-GCell differences as adjustments (1.15M lines);
+- each pin at its first access point.
+
+After routing it converts the solution back to GCell segments. A pin left
+uncovered gets a via; the 7575 nets whose pins share one GCell get a via
+stack. `gr/g24_score.sh` converts, scores with `g24_verify`, and
+cross-checks against the contest evaluator (`bench/ispd24/official/
+evaluator`), comparing totals. The router is the unchanged standard
+(`pd23route @standard.env`).
+
+`mempool_tile_rank` (429 x 581 x 10, 135666 nets), legal, `gr_verify` =
+`eval2008.pl` on the bridged file and `g24_verify` = official evaluator
+on the 2024 file, every digit:
+
+| run | .gr overflow | vias | WL cost | via cost | overflow cost | **total** | time |
+|---|---|---|---|---|---|---|---|
+| g24_lroute (spread), Part-step-1 baseline | -- | -- | 7828347 | 14457436 | 214189306 | 236475088 | -- |
+| **pd23route via bridge** | 0 | 853731 | 7700947 | 3414924 | 3156388 | **14272259** | 44 s |
+| + M2 reserve 1/pin | 10976 | 1390831 | 7700661 | 5563324 | 3499256 | 16763240 | 69 s |
+| + M2 reserve 2/pin | 4282 | 1380163 | 7702059 | 5520652 | 3457384 | 16680094 | 61 s |
+| + M2, M3 reserve 1/pin | 156144 | 1966086 | 7702147 | 7864344 | 11034798 | 26601290 | 112 s |
+
+Where the 14.27M goes (`g24_verify` now prints a per-layer breakdown):
+- **2.54M of the overflow cost is a floor**: every GCell pays
+  exp(-capacity/2) even when empty, which is the empty solution's cost.
+  Only 0.62M of overflow cost is avoidable.
+- Of that 0.62M, most is on M2 (layer 1): 257K, against 114K from wire
+  demand alone. The rest is **via demand**, which the bridge cannot show
+  the router. A via through layer z at a GCell charges half a track to the
+  two layer-z GCells beside it, unless the net has a layer-z wire there.
+  479935 of 482811 pins sit on M1, so every stack that climbs past M2
+  charges M2.
+- Of the 11.73M that can be controlled: wirelength 66%, vias 29%,
+  overflow 5%.
+
+**The reservation (G24_BRIDGE_RESERVE, off by default) is retired.** Its
+idea: lower M2 capacity by one half track per pin, the worst-case via
+charge. Every variant was worse: +17% (1/pin), +17% (2/pin), +86% (M2 and
+M3). Emptying M2 sends its wires up a layer: +530K vias (+2.1M via cost).
+It also creates the very charge it reserved for, because a stack through
+an M2 GCell with no M2 wire is what pays. The via term belongs in layer
+assignment's own objective, per net and per GCell. That needs the native
+reader (`ISPD24_FORMAT.md` step 2), not a capacity edit.
+
+Predictor check (Part 101): `routability` on the bridged file gives
+cut3_max 0.199 (threshold 0.67), so "easy", and the router reached zero
+in the bridge model. One easy design; consistent, not yet a test.

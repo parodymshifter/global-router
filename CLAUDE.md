@@ -197,6 +197,14 @@ like); newblue7 not yet rerun. Part 91 also certifies, by a cut bound
 newblue7's are forced for any router; newblue4's residue is pin-bound
 (98.4% of its tightest cut).
 
+**2026-10-06: first ISPD 2024 design routed** (Part 102). A format bridge
+(`gr/g24_bridge.cpp`, `gr/g24_score.sh`) runs the unchanged standard
+router on `mempool_tile_rank`: legal, 14.27M total cost (official
+evaluator agrees exactly), 44 s; 2.54M of it is the idle-GCell floor. Via
+demand on wire capacity cannot cross the bridge, and reserving capacity
+for it made results worse, so the native reader (`ISPD24_FORMAT.md` step
+2) with a via term in layer assignment comes next.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

@@ -169,6 +169,14 @@ struct Report {
   long long opens = 0, missing = 0, structural = 0;
   double maxOverflowTracks = 0;  // max over GCells of demand - capacity (tracks)
   long long overflowedGcells = 0; // GCells with demand > capacity
+  // Per layer (diagnostic, not part of the score): the weighted overflow
+  // cost, the part of it on GCells over capacity, the part a zero-via-demand
+  // solution would pay (wire demand only), and the floor (no demand at all).
+  struct LayerDetail {
+    double loss = 0, lossOver = 0, lossWireOnly = 0, floor = 0;
+    long long over = 0;
+  };
+  std::vector<LayerDetail> layers;
   std::vector<std::string> problems; // first few structural messages
   bool legal() const { return opens == 0 && missing == 0 && structural == 0; }
 };
@@ -314,18 +322,28 @@ public:
       }
       unsigned long long wl = 0;
       double layerLoss = 0;
+      Report::LayerDetail det;
+      auto loss = [](double demand, double c) {
+        if (c > 0.001)
+          return std::exp(0.5 * ((demand - 2.0 * c) / 2.0));
+        if (c >= 0 && demand > 0)
+          return std::exp(0.5 * (1.5 * demand));
+        return 0.0;
+      };
       for (int x = 0; x < r_.xSize; ++x)
         for (int y = 0; y < r_.ySize; ++y) {
           size_t i = idx(z, x, y);
           double demand = 2.0 * wire_[i] + viaDemand_[i]; // half tracks
           double c = r_.capacity(z, x, y);
-          if (c > 0.001)
-            layerLoss += std::exp(0.5 * ((demand - 2.0 * c) / 2.0));
-          else if (c >= 0 && demand > 0)
-            layerLoss += std::exp(0.5 * (1.5 * demand));
+          double l = loss(demand, c);
+          layerLoss += l;
+          det.lossWireOnly += loss(2.0 * wire_[i], c);
+          det.floor += loss(0, c);
           double over = demand / 2.0 - c;
           if (over > 1e-9) {
             ++rep.overflowedGcells;
+            ++det.over;
+            det.lossOver += l;
             rep.maxOverflowTracks = std::max(rep.maxOverflowTracks, over);
           }
           if (r_.layers[z].dir == 0 && x + 1 < r_.xSize)
@@ -335,6 +353,12 @@ public:
         }
       rep.wireLength += static_cast<long long>(wl);
       rep.overflowCost += layerLoss * r_.overflowCost[z];
+      det.loss = layerLoss * r_.overflowCost[z];
+      det.lossOver *= r_.overflowCost[z];
+      det.lossWireOnly *= r_.overflowCost[z];
+      det.floor *= r_.overflowCost[z];
+      rep.layers.resize(z + 1);
+      rep.layers[z] = det;
       rep.viaCost += static_cast<double>(viasPerLayer[z]) * r_.unitVia;
       rep.wlCost += static_cast<double>(wl) * r_.unitLength;
     }
@@ -444,6 +468,11 @@ void print(const Report &rep) {
   std::printf("vias %lld (cost %.4f)\n", rep.vias, rep.viaCost);
   std::printf("overflow cost %.4f (%lld GCells over capacity, max %.2f tracks)\n", rep.overflowCost,
               rep.overflowedGcells, rep.maxOverflowTracks);
+  for (size_t z = 1; z < rep.layers.size(); ++z) {
+    const Report::LayerDetail &d = rep.layers[z];
+    std::printf("  layer %zu overflow cost %.1f: %lld GCells over (%.1f of it), wire demand alone %.1f, floor %.1f\n",
+                z, d.loss, d.over, d.lossOver, d.lossWireOnly, d.floor);
+  }
   std::printf("total cost %.4f\n", rep.total);
   std::printf("open nets %lld, missing nets %lld, structural problems %lld\n", rep.opens, rep.missing,
               rep.structural);
