@@ -8336,3 +8336,12 @@ takes the band's warm edges from 0.80 to 0.20 mean use/capacity, overflow
 10 -> 0, nets connected; off: no ring). Queued (`part95a.jobs`, one
 thread): newblue1 cell 8 with the pull, and with the pull + ring box.
 (q10_bigblue2's timing in part92c overlaps these runs.)
+
+**Part 95a, the pull on newblue1** (from the trace): ring x 63-308 y 0-288
+(246 x 289 of 399 x 399), 231469 nets, 621202 pieces rerouted (4501
+reverted) in 11 s; the band's 18342 warm edges 0.870 -> 0.832 mean
+use/capacity, core 0.801 -> 0.762, 2D overflow 298 -> 262. Modest: the
+pieces search only 16 tiles beyond their span while the band is 50-190
+tiles thick, and 4 tracks is a quarter of what virtual capacity allows
+(its floor is half the capacity, ~15 tracks here). Queued
+(`part95b.jobs`): pull 15 tracks alone; pull 15 + margin 64 + 3 passes.
