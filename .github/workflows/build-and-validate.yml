@@ -95,12 +95,14 @@ jobs:
           - pd26route
           - pd27route
           - pd28route
+          - pd29route
           - g24_verify
           - g24_lroute
           - grdiag
           - cutbound
           - grmap
           - hotring
+          - cutdetour
           - lpbound
     steps:
       - uses: actions/checkout@v4

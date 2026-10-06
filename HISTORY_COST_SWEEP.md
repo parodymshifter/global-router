@@ -8376,3 +8376,35 @@ the pull (and a per-piece reach from this map would mostly shrink it);
 (3) the natural bands are nearly the same on every layout -- boundaries
 about 0.24-0.36 / 0.45-0.55 / 0.63-0.70 / 0.78-0.84 / 0.92-0.95 -- close to
 the user's proposed 40 / 55 / 70 / 85 / 100.
+
+## Part 97 -- where the room is along the crossing line, and a price for using a full edge
+
+`gr/cutdetour.cpp` (analysis; self-test: two overflowed edges in a roomy
+line -> nearest 1, window 1; a full stretch -> 4 and 4; a line over
+capacity in aggregate -> none): a net leaving an overflowed edge must
+cross the same line elsewhere, so for every overflowed 2D edge it measures,
+along that line, the distance to the nearest edge with room for one net,
+and the half-width of the window whose total spare covers all the
+overflow in it (`maps/cutdetour.txt`):
+
+| benchmark | overflowed edges | nearest room: median / 90th / max | absorbing window: median / 90th / max | windows over 25 / 50 |
+|---|---|---|---|---|
+| newblue1 | 19 | 7 / 10 / 11 | 9 / 11 / 11 | 0 / 0 |
+| newblue4 | 71 | 7 / 12 / 14 | 9 / 17 / 19 | 0 / 0 |
+| bigblue4 | 144 | 7 / 12 / 17 | 11 / 19 / 26 | 2 / 0 |
+| newblue7 | 43 | 5 / 16 / 23 | 6 / 29 / 43 | 6 / 0 |
+| newblue3 | 1042 | 7 / 12 / 21 | 35 / 69 / 83 | 756 / 259 |
+
+Every overflowed edge outside newblue3 has the spare to absorb its
+overflow within 11-43 tiles along its own line, a detour of ~20-80 tiles.
+The region stage's margins reach that within its first rounds (10 + 2 per
+round, cap 200). What stops it is the price: by mid-stage the WL weight
+has decayed, so each detour tile through nearly full edges costs ~1, while
+an edge 1-2 units over a 60-200 capacity costs ~1.2 x its history.
+
+`gr/pd29route.cpp` (forked from pd28route): `PD29ROUTE_OVER_PENALTY=P`
+adds P to the cost of any edge one more net would push over its real
+capacity, in the region stage (path A only, like virtual capacity). Off =
+pd28route. 626 checks (cost seam exact; on a 5 x 3 grid the search crosses
+a full edge at P = 0 -- 5.14 vs a 6.93 detour -- and detours at P = 5).
+Queued (`part97a.jobs`): newblue1 cell 8 at P = 20 and P = 100.
