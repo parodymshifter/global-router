@@ -8538,3 +8538,12 @@ a short one nothing; on an 8 x 3 grid a short net goes straight and a long
 net with its row budget full detours; 1 vs 4 workers identical with the
 budget on). Queued (`part100b.jobs`, after part100a): newblue1 cells 7 / 8 /
 9, one thread, alpha 0.6.
+
+**Part 100a results** (batch 32; pd27route, 10 threads, carry + any; all
+`status=OK`, `gr_verify` = `eval2008.pl`): newblue1 cells 7 / 8 / 9 ->
+**38 / 44 / 44** (mean 42.0; WL 4809480 / 4893904 / 4894162) in 2053 /
+1973 / 1948 s (~2.6x). Batch 64: 38 / 34 / 46 (39.3) in ~2230 s; one
+thread: 24 / 38 / 36 (32.7). Smaller batches are slightly faster and no
+better on overflow. The threaded configurations sit 20-28% above the
+one-thread mean on newblue1 -- not significant at three runs each, but
+consistently on the wrong side; the one-thread standard stays.
