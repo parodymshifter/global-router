@@ -8449,3 +8449,8 @@ measurable overflow effect, wirelength within its 1.6% spread. Small.
 - flat penalty 20 (op20_newblue1): **76** / 4883507 (+0.6% WL), 8192 s wall including a 21.5-minute system
   sleep (~6900 s awake, +33%). **Overflow doubled**: penalizing every full edge equally makes nets leave full
   edges into neighbours that then fill, and the stage churns instead of settling.
+
+**Part 98a result** (newblue1 cell 8, one thread; `status=OK`, `gr_verify` = `eval2008.pl`):
+- window penalty a = 1 (wp1_newblue1): **36** / 4855408 (WL +0.0%), 7303 s wall (the run spanned the 21.5-minute
+  sleep only partly; slower than the standard's 5186 s by ~30% -- the penalty adds detours to the searches).
+  Same overflow as the ring pulls' 36, inside the 24-38 range: no measurable effect.
