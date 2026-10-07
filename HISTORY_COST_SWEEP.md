@@ -9173,3 +9173,33 @@ at the 5/5/5 budget byte-identical to pd23route. Peak footprint:
 |---|---|---|
 | mempool_tile_rank | 0.75 GB | **0.38 GB** |
 | ariane_68_rank | 0.86 GB | **0.63 GB** (input + Design: 144 MB) |
+
+## Part 112 -- the pattern stage's final wiring step (memory)
+
+mempool_cluster_ranking on the streaming build:
+- input + Design 6.6 GB (was 11.0);
+- 13.3 GB through all 30 pattern rounds (was ~24 GB);
+- then, within 30 s of the last round, 22.5 -> 33.8 GB, and the watchdog
+  stopped it.
+
+The cause: patternStage2D's last step built a `std::set<int>` of tile
+edges per net (a tree node per edge, ~9 GB on ~190M edges) while the
+pieces' edge lists, the best round's lists and the pattern cost grid were
+all still held, and then grew each net's segments and charges by
+push_back.
+
+Now, behaviour-identical:
+- each net's edges are gathered net by net (pieces are created in net
+  order) into a vector that is sorted and de-duplicated, the same
+  ascending order the set gave;
+- the pieces, the cost grid and each consumed best-round list are freed
+  first;
+- the wiring is reserved at its exact size.
+
+Also: layer assignment's kept 2D routes are packed into 10-byte segments
+(int16 coordinates, int8 layers; full Segs on grids too large for that),
+unpacked identically when a tree is rebuilt (~4.6 GB -> ~1.9 GB on
+mempool_cluster).
+
+Byte-identical: mempool_tile_rank, ariane_68_rank, adaptec1 at the 5/5/5
+budget vs pd23route.

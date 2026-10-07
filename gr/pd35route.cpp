@@ -4710,18 +4710,37 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
   }
   // The best round's pieces become each net's wiring: the union of its
   // pieces' tile edges, charged once per net.
-  std::vector<std::set<int>> netEdges(nets.size());
+  // pd35route (memory, Part 112): built net by net -- pieces are created in
+  // net order -- as a sorted, de-duplicated vector (the ascending order the
+  // std::set per net gave, at 4 bytes per edge instead of a tree node:
+  // ~9 GB on mempool_cluster), with the pieces' own edge lists and the
+  // pattern cost grid freed first and each net's wiring reserved exactly.
+  std::vector<int> pieceNet(pieces.size());
   for (size_t k = 0; k < pieces.size(); ++k)
-    for (int code : bestEdges[k])
-      netEdges[pieces[k].net].insert(code);
+    pieceNet[k] = pieces[k].net;
+  std::vector<Piece>().swap(pieces);
+  std::vector<int64_t>().swap(pg.h);
+  std::vector<int64_t>().swap(pg.v);
+  std::vector<int> netCodes;
+  size_t nextPiece = 0;
   for (size_t i = 0; i < nets.size(); ++i) {
+    netCodes.clear();
+    while (nextPiece < pieceNet.size() && pieceNet[nextPiece] == static_cast<int>(i)) {
+      netCodes.insert(netCodes.end(), bestEdges[nextPiece].begin(), bestEdges[nextPiece].end());
+      std::vector<int>().swap(bestEdges[nextPiece]);
+      ++nextPiece;
+    }
+    std::sort(netCodes.begin(), netCodes.end());
+    netCodes.erase(std::unique(netCodes.begin(), netCodes.end()), netCodes.end());
     RoutedNet &rn = nets[i];
     if (rn.giant)
       continue;
     rn.segs.clear();
     rn.charges.clear();
+    rn.segs.reserve(netCodes.size());
+    rn.charges.reserve(netCodes.size());
     int netAmount = rn.net->minWidth + g.minSpacing[0];
-    for (int code : netEdges[i]) {
+    for (int code : netCodes) {
       size_t idx = static_cast<size_t>(code >> 1);
       if (code & 1) {
         int x = static_cast<int>(idx % g.nx), y = static_cast<int>(idx / g.nx);
@@ -7930,7 +7949,36 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   // held every net at once pushed the footprint to 26 GB (Part 107).
   // kInherited keeps its lazily built per-net trees, as before.
   std::vector<NetTree> trees(nthu ? 0 : nets.size());
-  std::vector<std::vector<Seg>> segs2D(nthu ? nets.size() : 0);
+  // pd35route (memory, Part 112): each 2D route packed into 10-byte
+  // segments (int16 coordinates, int8 layers) when the grid allows -- the
+  // same segments, in the same order, when unpacked; full Segs otherwise.
+  struct Seg16 {
+    int16_t x1, y1, x2, y2;
+    int8_t l1, l2;
+  };
+  const bool pack16 = g.nx <= 32767 && g.ny <= 32767 && g.nLayers <= 127;
+  std::vector<std::vector<Seg16>> segs2D16(nthu && pack16 ? nets.size() : 0);
+  std::vector<std::vector<Seg>> segs2D(nthu && !pack16 ? nets.size() : 0);
+  auto keepSegs2D = [&](size_t i) {
+    if (!pack16) {
+      segs2D[i] = nets[i].segs;
+      return;
+    }
+    std::vector<Seg16> &v = segs2D16[i];
+    v.reserve(nets[i].segs.size());
+    for (const Seg &sg : nets[i].segs)
+      v.push_back({static_cast<int16_t>(sg.x1), static_cast<int16_t>(sg.y1), static_cast<int16_t>(sg.x2),
+                   static_cast<int16_t>(sg.y2), static_cast<int8_t>(sg.l1), static_cast<int8_t>(sg.l2)});
+  };
+  std::vector<Seg> unpacked;
+  auto segs2DOf = [&](size_t i) -> const std::vector<Seg> & {
+    if (!pack16)
+      return segs2D[i];
+    unpacked.clear();
+    for (const Seg16 &q : segs2D16[i])
+      unpacked.push_back({q.x1, q.y1, q.l1, q.x2, q.y2, q.l2});
+    return unpacked;
+  };
   std::vector<char> usesTreeDP(nets.size(), 0);
   auto buildLaTree = [&](size_t i, NetTree &t, std::vector<std::pair<int, int>> &pr) -> bool {
     t = NetTree();
@@ -7939,7 +7987,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     std::vector<Point> pinTiles;
     for (const Pin &pn : nets[i].net->pins)
       pinTiles.push_back({pn.x, pn.y});
-    if (!buildNetTree(segs2D[i], legs, /*dropCycles=*/true, &pinTiles))
+    if (!buildNetTree(segs2DOf(i), legs, /*dropCycles=*/true, &pinTiles))
       return false;
     splitToUnitEdges(legs, t);
     if (laPins) {
@@ -7981,7 +8029,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     std::vector<long long> tileEdges(nets.size(), 0);
     for (size_t i = 0; i < nets.size(); ++i) {
       dropDegenerateSegs(nets[i]);
-      segs2D[i] = nets[i].segs;
+      keepSegs2D(i);
       pins[i] = nets[i].net->pins.size();
       for (const Seg &sg : nets[i].segs)
         if (sg.l1 == sg.l2)
