@@ -1202,6 +1202,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <queue>
 #include <random>
 #include <set>
@@ -8259,22 +8260,47 @@ void writeSolution(const std::string &path, const RoutingGrid &g,
 // that need what the Design cannot hold. Null on the 2008 path.
 struct G24Input {
   g24::Resources res;
+  // In memory (self tests), or -- pd35route, Part 111 -- empty, with the
+  // netlist streamed from netPath: once into the Design, once more when the
+  // solution is written. `align` re-applies the access-point choice then.
   std::vector<g24::Net> nets;
+  std::string netPath;
+  bool align = false;
+  size_t nNets = 0;
 };
 const G24Input *g24Input = nullptr;
 
-G24Input readG24(const std::string &capPath, const std::string &netPath) {
-  G24Input in;
+// pd35route (memory, Part 111): reads the resources, then streams the
+// netlist into `d` (its grid already built) one net at a time -- no names
+// and no spare access points are kept; each net's chosen access points
+// (the first, or InstantGR's rule when `align`) become its Design pins.
+void readG24Streaming(const std::string &capPath, const std::string &netPath, bool align, G24Input &in,
+                      Design &d) {
   std::ifstream cf(capPath), nf(netPath);
   if (!cf)
     fail("cannot open " + capPath);
   if (!nf)
     fail("cannot open " + netPath);
   std::string err;
-  if (!g24::readResources(cf, in.res, err) || !g24::readNets(nf, in.nets, err) ||
-      !g24::checkAccessPoints(in.res, in.nets, err))
+  if (!g24::readResources(cf, in.res, err))
     fail("ISPD 2024 input: " + err);
-  return in;
+  in.netPath = netPath;
+  in.align = align;
+  d = g24::designGrid(in.res);
+  g24::NetStream ns(nf);
+  g24::Net n;
+  size_t i = 0;
+  while (ns.next(n, err)) {
+    if (!g24::checkAccessPointsNet(in.res, n, err))
+      fail("ISPD 2024 input: " + err);
+    if (align)
+      g24::chooseAccessPointsNet(n);
+    g24::appendDesignNet(d, n, i++, /*keepName=*/false);
+  }
+  if (!err.empty())
+    fail("ISPD 2024 input: " + err);
+  d.nets.shrink_to_fit();
+  in.nNets = i;
 }
 
 // pd34route: the score-aware 2D cost's per-edge data from the 2024 input.
@@ -8321,14 +8347,58 @@ void buildScore2D(const g24::Resources &res, const RoutingGrid &g) {
 }
 
 // The routed nets as an ISPD 2024 solution file.
+// pd35route (Part 111): written directly, net by net, from each routed
+// net's segments (tile coordinates) -- no text round trip -- with the
+// netlist streamed again from in.netPath when it is not in memory. The same
+// segments, in the same order, as the old text path (g24::convertSolution).
 g24::SolutionReport writeG24Solution(const std::string &path, const G24Input &in, const RoutingGrid &g,
                                      const std::vector<RoutedNet> &nets) {
-  std::stringstream text;
-  writeSolutionTo(text, g, nets);
+  (void)g;
+  const size_t n = in.nets.empty() ? in.nNets : in.nets.size();
+  std::vector<int> routedOf(n, -1);
+  for (size_t k = 0; k < nets.size(); ++k) {
+    long long id = nets[k].net->id;
+    if (id < 0 || static_cast<size_t>(id) >= n || routedOf[static_cast<size_t>(id)] >= 0)
+      fail("solution writer: a routed net's id is out of range or repeated");
+    routedOf[static_cast<size_t>(id)] = static_cast<int>(k);
+  }
   std::ofstream out(path);
   if (!out)
     fail("cannot write " + path);
-  return g24::convertSolution(in.res, in.nets, text, out);
+  g24::SolutionReport rep;
+  std::ifstream nf;
+  std::unique_ptr<g24::NetStream> ns;
+  if (in.nets.empty()) {
+    nf.open(in.netPath);
+    if (!nf)
+      fail("cannot open " + in.netPath);
+    ns = std::make_unique<g24::NetStream>(nf);
+  }
+  g24::Net streamed;
+  std::string err;
+  std::vector<g24::Seg> segs;
+  for (size_t i = 0; i < n; ++i) {
+    const g24::Net *net;
+    if (ns) {
+      if (!ns->next(streamed, err))
+        fail("solution writer: the netlist ended early" + (err.empty() ? std::string() : ": " + err));
+      if (in.align)
+        g24::chooseAccessPointsNet(streamed);
+      net = &streamed;
+    } else {
+      net = &in.nets[i];
+    }
+    segs.clear();
+    if (routedOf[i] >= 0)
+      for (const Seg &s : nets[static_cast<size_t>(routedOf[i])].segs)
+        segs.push_back({std::min(s.x1, s.x2), std::min(s.y1, s.y2), std::min(s.l1, s.l2), std::max(s.x1, s.x2),
+                        std::max(s.y1, s.y2), std::max(s.l1, s.l2)});
+    g24::emitNetSolution(in.res, *net, segs, out, rep);
+  }
+  out.flush();
+  if (!out)
+    fail("solution writer: write failed (disk full?)");
+  return rep;
 }
 
 // pd3route: PD3ROUTE_LA_FROM=<route file> reruns layer assignment alone on
@@ -13960,6 +14030,62 @@ void testScoreCapTableIsExact() {
   gScore = saved;
 }
 
+// pd35route (Part 111): the streamed 2024 path equals the in-memory one --
+// the same Design pins (with access-point choice on) and the same solution
+// text, with the netlist read back from its file while writing.
+void testG24StreamingMatchesInMemory() {
+  const char *cap = "3 4 3\n0.5 2 1 1 1\n100 100 100\n100 100\n"
+                    "M1 0 0\n9 9 9 9\n9 9 9 9\n9 9 9 9\n"
+                    "M2 0 0\n2 2 2 2\n2 1.5 2 2\n2 2 2 2\n"
+                    "M3 1 0\n3 3 0 3\n3 3 3 3\n3 3 3 3\n";
+  const char *net = "netA\n(\n[(0, 0, 0), (0, 2, 1)]\n[(0, 3, 2)]\n)\nnetB\n(\n[(0, 2, 2)]\n[(1, 2, 2)]\n)\n"
+                    "netC\n(\n[(0, 1, 0)]\n[(0, 1, 2), (0, 3, 0)]\n)\n";
+  std::string capPath = "pd35route_selftest_stream.cap", netPath = "pd35route_selftest_stream.net";
+  {
+    std::ofstream(capPath) << cap;
+    std::ofstream(netPath) << net;
+  }
+  // in memory
+  G24Input mem;
+  std::string err;
+  std::istringstream ci(cap), ni(net);
+  g24::readResources(ci, mem.res, err);
+  g24::readNets(ni, mem.nets, err);
+  mem.nets = g24::chooseAccessPoints(mem.nets);
+  Design dm = g24::toDesign(mem.res, mem.nets);
+  // streamed
+  G24Input st;
+  Design ds;
+  readG24Streaming(capPath, netPath, /*align=*/true, st, ds);
+  bool same = ds.nets.size() == dm.nets.size() && st.nNets == 3 && ds.grid.hcap == dm.grid.hcap &&
+              ds.grid.vcap == dm.grid.vcap;
+  for (size_t i = 0; same && i < ds.nets.size(); ++i) {
+    same = ds.nets[i].id == dm.nets[i].id && ds.nets[i].pins.size() == dm.nets[i].pins.size() &&
+           ds.nets[i].name.empty();
+    for (size_t k = 0; same && k < ds.nets[i].pins.size(); ++k)
+      same = ds.nets[i].pins[k].x == dm.nets[i].pins[k].x && ds.nets[i].pins[k].y == dm.nets[i].pins[k].y &&
+             ds.nets[i].pins[k].layer == dm.nets[i].pins[k].layer;
+  }
+  check(same, "g24 streaming: the same Design (access points chosen, no names kept)");
+  // the same routes written both ways
+  std::vector<RoutedNet> rm(2), rs(2);
+  rm[0].net = &dm.nets[0];
+  rs[0].net = &ds.nets[0];
+  rm[0].segs = rs[0].segs = {{2, 1, 0, 2, 1, 1}, {2, 1, 1, 3, 1, 1}, {3, 1, 1, 3, 1, 2}, {3, 1, 2, 3, 2, 2}};
+  rm[1].net = &dm.nets[2];
+  rs[1].net = &ds.nets[2];
+  rm[1].segs = rs[1].segs = {{0, 1, 0, 0, 1, 2}, {0, 1, 2, 0, 3, 2}};
+  std::string a = "pd35route_selftest_stream_a.sol", b = "pd35route_selftest_stream_b.sol";
+  g24::SolutionReport ra = writeG24Solution(a, mem, dm.grid, rm), rb = writeG24Solution(b, st, ds.grid, rs);
+  std::stringstream ta, tb;
+  ta << std::ifstream(a).rdbuf();
+  tb << std::ifstream(b).rdbuf();
+  check(ta.str() == tb.str() && !ta.str().empty() && ra.nets == 3 && rb.nets == 3 && ra.pinFixes == rb.pinFixes,
+        "g24 streaming: the same solution text, the netlist re-read while writing");
+  for (const std::string &f : {capPath, netPath, a, b})
+    std::remove(f.c_str());
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -14105,6 +14231,7 @@ int run() {
   testNetSpillRoundTrip();
   testLowMemFallbackMatches();
   testScoreCapTableIsExact();
+  testG24StreamingMatchesInMemory();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -14317,20 +14444,19 @@ int main(int argc, char **argv) {
   G24Input g24In;
   Design d;
   if (g24Mode) {
-    g24In = readG24(argv[1], argv[2]);
     // Part 105: PD33ROUTE_AP=align routes each pin to the access point
     // InstantGR's rule picks (g24::chooseAccessPoints); first (default) is
     // the file's first access point, as before.
+    bool align = false;
     if (const char *v = std::getenv("PD33ROUTE_AP"); v) {
       std::string sv(v);
       if (sv != "first" && sv != "align")
         fail("PD33ROUTE_AP must be first or align (got '" + sv + "')");
-      if (sv == "align")
-        g24In.nets = g24::chooseAccessPoints(g24In.nets);
+      align = sv == "align";
       std::cerr << "ISPD 2024 access points: " << sv << "\n";
     }
+    readG24Streaming(argv[1], argv[2], align, g24In, d);
     g24Input = &g24In;
-    d = g24::toDesign(g24In.res, g24In.nets);
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {
       std::string sv(v);
       if (sv != "0" && sv != "1")
@@ -14423,7 +14549,7 @@ int main(int argc, char **argv) {
     // reads it after setup (the solution writer needs only the layer count).
     std::vector<double>().swap(g24In.res.cap);
     std::cerr << "ISPD 2024 input: " << g24In.res.xSize << " x " << g24In.res.ySize << " x " << g24In.res.nLayers
-              << ", " << g24In.nets.size() << " nets\n";
+              << ", " << g24In.nNets << " nets\n";
     memTrace("input and Design");
   } else {
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v && std::string(v) != "0")

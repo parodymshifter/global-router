@@ -9135,3 +9135,41 @@ Peak footprint:
 mempool_cluster_ranking (final build): 11.0 GB after reading the input,
 18.4 GB in the pattern stage (was ~24 GB). Input data (each pin's access
 points in its own vector, names stored twice) is now the largest block.
+
+## Part 111 -- streaming the ISPD 2024 netlist (memory)
+
+mempool_cluster_ranking's netlist: 10.6M nets, 38.0M pins, 43.6M access
+points, names averaging 120 characters. After Part 110 the input and
+Design alone took 11.0 GB:
+- names held twice (the 2024 nets and the Design);
+- a heap vector per pin's access points;
+- the solution writer still rendering every route to an in-memory .gr
+  text and parsing it back.
+
+`g24_io.h`:
+- `NetStream`, a one-net-at-a-time reader (`readNets` is now a loop over
+  it);
+- per-net `checkAccessPointsNet`, `chooseAccessPointsNet`,
+  `appendDesignNet` and `emitNetSolution`;
+- `designGrid`.
+
+The whole-design functions are loops over these: g24_verify, g24_bridge
+and g24_gap outputs are unchanged (bridged .gr and converted solution
+byte-identical; scores identical).
+
+pd35route's 2024 path:
+- **Reading:** `readG24Streaming` streams the netlist into the Design,
+  keeping only each pin's chosen access point (no names, no spare access
+  points).
+- **Writing:** `writeG24Solution` writes each net's segments straight from
+  its route, re-reading the netlist and re-applying the (deterministic)
+  access-point choice, with no text round trip. Self test
+  `testG24StreamingMatchesInMemory`.
+
+Byte-identical solutions on mempool_tile_rank and ariane_68_rank; adaptec1
+at the 5/5/5 budget byte-identical to pd23route. Peak footprint:
+
+| design | Part 110 | streaming |
+|---|---|---|
+| mempool_tile_rank | 0.75 GB | **0.38 GB** |
+| ariane_68_rank | 0.86 GB | **0.63 GB** (input + Design: 144 MB) |

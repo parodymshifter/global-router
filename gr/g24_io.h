@@ -135,45 +135,83 @@ inline bool readResources(std::istream &in, Resources &r, std::string &err) {
 
 // The evaluator's rule: a line with neither '(' nor ')' and more than one
 // character starts a net; a line with '[' is one pin, "(z, x, y)" access
-// tuples.
-inline bool readNets(std::istream &in, std::vector<Net> &nets, std::string &err) {
-  std::string line;
-  while (std::getline(in, line)) {
-    line = trimEnd(line);
-    if (line.find('(') == std::string::npos && line.find(')') == std::string::npos && line.length() > 1) {
-      nets.push_back(Net{line, {}});
-    } else if (line.find('[') != std::string::npos) {
-      if (nets.empty()) {
-        err = "pin line before any net name";
-        return false;
-      }
-      for (char &c : line)
-        if (c == '(' || c == ')' || c == ',' || c == '[' || c == ']')
-          c = ' ';
-      std::istringstream ss(line);
-      std::vector<Access> pin;
-      int x, y, z;
-      while (ss >> z >> x >> y)
-        pin.push_back({x, y, z});
-      if (pin.empty()) {
-        err = "net " + nets.back().name + ": pin with no access points";
-        return false;
-      }
-      nets.back().pins.push_back(pin);
+// tuples. NetStream reads one net at a time (Part 111: the cluster designs'
+// netlists are 2 GB, with 120-character names); readNets is a loop over it.
+class NetStream {
+public:
+  explicit NetStream(std::istream &in) : in_(in) {}
+  // The next net into `out`; false at the end (err set on a format error).
+  bool next(Net &out, std::string &err) {
+    out.name.clear();
+    out.pins.clear();
+    std::string line;
+    bool have = false;
+    if (pendingName_) {
+      out.name = std::move(pending_);
+      pendingName_ = false;
+      have = true;
     }
+    while (std::getline(in_, line)) {
+      line = trimEnd(line);
+      if (line.find('(') == std::string::npos && line.find(')') == std::string::npos && line.length() > 1) {
+        if (have) {
+          pending_ = line;
+          pendingName_ = true;
+          return true;
+        }
+        out.name = line;
+        have = true;
+      } else if (line.find('[') != std::string::npos) {
+        if (!have) {
+          err = "pin line before any net name";
+          return false;
+        }
+        for (char &c : line)
+          if (c == '(' || c == ')' || c == ',' || c == '[' || c == ']')
+            c = ' ';
+        std::istringstream ss(line);
+        std::vector<Access> pin;
+        int x, y, z;
+        while (ss >> z >> x >> y)
+          pin.push_back({x, y, z});
+        if (pin.empty()) {
+          err = "net " + out.name + ": pin with no access points";
+          return false;
+        }
+        out.pins.push_back(pin);
+      }
+    }
+    return have;
   }
-  return true;
+
+private:
+  std::istream &in_;
+  std::string pending_;
+  bool pendingName_ = false;
+};
+
+inline bool readNets(std::istream &in, std::vector<Net> &nets, std::string &err) {
+  NetStream ns(in);
+  Net n;
+  while (ns.next(n, err))
+    nets.push_back(std::move(n));
+  return err.empty();
 }
 
 // Every access point inside the grid (the evaluator indexes without checks).
+inline bool checkAccessPointsNet(const Resources &r, const Net &n, std::string &err) {
+  for (const std::vector<Access> &p : n.pins)
+    for (const Access &a : p)
+      if (a.x < 0 || a.x >= r.xSize || a.y < 0 || a.y >= r.ySize || a.z < 0 || a.z >= r.nLayers) {
+        err = "net " + n.name + ": access point outside the grid";
+        return false;
+      }
+  return true;
+}
 inline bool checkAccessPoints(const Resources &r, const std::vector<Net> &nets, std::string &err) {
   for (const Net &n : nets)
-    for (const std::vector<Access> &p : n.pins)
-      for (const Access &a : p)
-        if (a.x < 0 || a.x >= r.xSize || a.y < 0 || a.y >= r.ySize || a.z < 0 || a.z >= r.nLayers) {
-          err = "net " + n.name + ": access point outside the grid";
-          return false;
-        }
+    if (!checkAccessPointsNet(r, n, err))
+      return false;
   return true;
 }
 
@@ -187,12 +225,11 @@ inline bool checkAccessPoints(const Resources &r, const std::vector<Net> &nets, 
 //     pairs that differ in y (aligned pins -> straight wires, fewer bends),
 //     then the smallest summed distance to the center; first found wins ties;
 //   more pins: each pin's access point nearest the center (first wins ties).
-inline std::vector<Net> chooseAccessPoints(const std::vector<Net> &nets) {
-  std::vector<Net> out = nets;
-  for (Net &n : out) {
+inline void chooseAccessPointsNet(Net &n) {
+  {
     const size_t k = n.pins.size();
     if (k == 0)
-      continue;
+      return;
     int x0 = n.pins[0][0].x, x1 = x0, y0 = n.pins[0][0].y, y1 = y0;
     for (const auto &p : n.pins)
       for (const Access &a : p) {
@@ -246,10 +283,30 @@ inline std::vector<Net> chooseAccessPoints(const std::vector<Net> &nets) {
     for (size_t i = 0; i < k; ++i)
       std::swap(n.pins[i][0], n.pins[i][pick[i]]);
   }
+}
+inline std::vector<Net> chooseAccessPoints(const std::vector<Net> &nets) {
+  std::vector<Net> out = nets;
+  for (Net &n : out)
+    chooseAccessPointsNet(n);
   return out;
 }
 
 inline int halfTracks(double tracks) { return tracks <= 0 ? 0 : static_cast<int>(2.0 * tracks + 1e-9); }
+
+// One net into a Design, as net `id`, routed to each pin's first access
+// point. keepName false leaves the name empty (the streaming path, which
+// writes the solution from the netlist itself, never needs it).
+inline void appendDesignNet(gr_io::Design &d, const Net &net, size_t id, bool keepName = true) {
+  gr_io::Net n;
+  if (keepName)
+    n.name = net.name;
+  n.id = static_cast<long long>(id);
+  n.minWidth = 1;
+  n.pins.reserve(net.pins.size());
+  for (const std::vector<Access> &p : net.pins)
+    n.pins.push_back(gr_io::Pin{p[0].x, p[0].y, p[0].z});
+  d.nets.push_back(std::move(n));
+}
 
 // The router's Design for a 2024 design (see the header for the mapping).
 inline gr_io::Design toDesign(const Resources &r, const std::vector<Net> &nets, int reserve = 0,
@@ -307,17 +364,15 @@ inline gr_io::Design toDesign(const Resources &r, const std::vector<Net> &nets, 
         (h ? g.hcap[g.hIndex(x, y, z)] : g.vcap[g.vIndex(x, y, z)]) = edgeCap(z, x, y);
   }
   d.nets.reserve(nets.size());
-  for (size_t i = 0; i < nets.size(); ++i) {
-    gr_io::Net n;
-    n.name = nets[i].name;
-    n.id = static_cast<long long>(i);
-    n.minWidth = 1;
-    for (const std::vector<Access> &p : nets[i].pins)
-      n.pins.push_back(gr_io::Pin{p[0].x, p[0].y, p[0].z});
-    d.nets.push_back(std::move(n));
-  }
+  for (size_t i = 0; i < nets.size(); ++i)
+    appendDesignNet(d, nets[i], i);
   return d;
 }
+
+// The Design's grid alone (no nets), for a caller that streams the nets in
+// with appendDesignNet (Part 111). The same as toDesign's grid with no
+// reservation.
+inline gr_io::Design designGrid(const Resources &r) { return toDesign(r, {}); }
 
 // A Design as .gr text: nominal capacities from hCapLayer / vCapLayer, an
 // adjustment for every edge that differs (layer by layer, horizontal edges
@@ -381,6 +436,82 @@ struct SolutionReport {
 // between its layer and the nearest layer the net covers at that GCell; a
 // net with no segments (all pins in one GCell) gets a via stack over its
 // pins' layers there, at least one layer pair.
+// One net's ISPD 2024 segments from its route's pieces (tile coordinates,
+// low to high), with the pin-coverage fixes -- see convertSolution.
+inline void emitNetSolution(const Resources &r, const Net &n, const std::vector<Seg> &netSegs, std::ostream &o,
+                            SolutionReport &rep) {
+  ++rep.nets;
+  std::vector<Seg> out;
+  std::set<std::tuple<int, int, int>> covered; // (x, y, z)
+  auto cover = [&](const Seg &g) {
+    if (g.zl == g.zh) {
+      for (int x = g.xl; x <= g.xh; ++x)
+        for (int y = g.yl; y <= g.yh; ++y)
+          covered.insert({x, y, g.zl});
+    } else {
+      for (int z = g.zl; z <= g.zh; ++z)
+        covered.insert({g.xl, g.yl, z});
+    }
+  };
+  for (const Seg &g : netSegs) {
+    bool via = g.xl == g.xh && g.yl == g.yh;
+    if ((via && g.zl == g.zh) || (!via && g.zl != g.zh)) {
+      ++rep.droppedZero; // zero-length, or not a straight piece
+      continue;
+    }
+    out.push_back(g);
+    cover(g);
+  }
+  if (out.empty()) {
+    ++rep.unroutedNets;
+    if (!n.pins.empty()) {
+      const Access &a0 = n.pins[0][0];
+      int zl = a0.z, zh = a0.z;
+      for (const std::vector<Access> &p : n.pins)
+        if (p[0].x == a0.x && p[0].y == a0.y) {
+          zl = std::min(zl, p[0].z);
+          zh = std::max(zh, p[0].z);
+        }
+      if (zh == zl) {
+        if (zh + 1 < r.nLayers)
+          ++zh;
+        else
+          --zl;
+      }
+      Seg v{a0.x, a0.y, zl, a0.x, a0.y, zh};
+      out.push_back(v);
+      cover(v);
+    }
+  }
+  for (const std::vector<Access> &p : n.pins) {
+    bool ok = false;
+    for (const Access &a : p)
+      ok = ok || covered.count({a.x, a.y, a.z});
+    if (ok)
+      continue;
+    const Access &a = p[0];
+    int best = -1;
+    for (int z = 0; z < r.nLayers; ++z)
+      if (covered.count({a.x, a.y, z}) && (best < 0 || std::abs(z - a.z) < std::abs(best - a.z)))
+        best = z;
+    if (best < 0)
+      best = a.z + 1 < r.nLayers ? a.z + 1 : a.z - 1; // nothing here at all: a lone via (still open)
+    Seg v{a.x, a.y, std::min(a.z, best), a.x, a.y, std::max(a.z, best)};
+    out.push_back(v);
+    cover(v);
+    ++rep.pinFixes;
+  }
+  o << n.name << "\n(\n";
+  for (const Seg &g : out) {
+    o << g.xl << " " << g.yl << " " << g.zl << " " << g.xh << " " << g.yh << " " << g.zh << "\n";
+    if (g.zl == g.zh)
+      ++rep.wires;
+    else
+      ++rep.vias;
+  }
+  o << ")\n";
+}
+
 inline SolutionReport convertSolution(const Resources &r, const std::vector<Net> &nets, std::istream &sol,
                                       std::ostream &o) {
   SolutionReport rep;
@@ -416,79 +547,8 @@ inline SolutionReport convertSolution(const Resources &r, const std::vector<Net>
       gr_io::fail("solution net header '" + s + "' does not match the netlist");
     cur = id;
   }
-  for (size_t ni = 0; ni < nets.size(); ++ni) {
-    const Net &n = nets[ni];
-    ++rep.nets;
-    std::vector<Seg> out;
-    std::set<std::tuple<int, int, int>> covered; // (x, y, z)
-    auto cover = [&](const Seg &g) {
-      if (g.zl == g.zh) {
-        for (int x = g.xl; x <= g.xh; ++x)
-          for (int y = g.yl; y <= g.yh; ++y)
-            covered.insert({x, y, g.zl});
-      } else {
-        for (int z = g.zl; z <= g.zh; ++z)
-          covered.insert({g.xl, g.yl, z});
-      }
-    };
-    for (const Seg &g : segs[ni]) {
-      bool via = g.xl == g.xh && g.yl == g.yh;
-      if ((via && g.zl == g.zh) || (!via && g.zl != g.zh)) {
-        ++rep.droppedZero; // zero-length, or not a straight piece
-        continue;
-      }
-      out.push_back(g);
-      cover(g);
-    }
-    if (out.empty()) {
-      ++rep.unroutedNets;
-      if (!n.pins.empty()) {
-        const Access &a0 = n.pins[0][0];
-        int zl = a0.z, zh = a0.z;
-        for (const std::vector<Access> &p : n.pins)
-          if (p[0].x == a0.x && p[0].y == a0.y) {
-            zl = std::min(zl, p[0].z);
-            zh = std::max(zh, p[0].z);
-          }
-        if (zh == zl) {
-          if (zh + 1 < r.nLayers)
-            ++zh;
-          else
-            --zl;
-        }
-        Seg v{a0.x, a0.y, zl, a0.x, a0.y, zh};
-        out.push_back(v);
-        cover(v);
-      }
-    }
-    for (const std::vector<Access> &p : n.pins) {
-      bool ok = false;
-      for (const Access &a : p)
-        ok = ok || covered.count({a.x, a.y, a.z});
-      if (ok)
-        continue;
-      const Access &a = p[0];
-      int best = -1;
-      for (int z = 0; z < r.nLayers; ++z)
-        if (covered.count({a.x, a.y, z}) && (best < 0 || std::abs(z - a.z) < std::abs(best - a.z)))
-          best = z;
-      if (best < 0)
-        best = a.z + 1 < r.nLayers ? a.z + 1 : a.z - 1; // nothing here at all: a lone via (still open)
-      Seg v{a.x, a.y, std::min(a.z, best), a.x, a.y, std::max(a.z, best)};
-      out.push_back(v);
-      cover(v);
-      ++rep.pinFixes;
-    }
-    o << n.name << "\n(\n";
-    for (const Seg &g : out) {
-      o << g.xl << " " << g.yl << " " << g.zl << " " << g.xh << " " << g.yh << " " << g.zh << "\n";
-      if (g.zl == g.zh)
-        ++rep.wires;
-      else
-        ++rep.vias;
-    }
-    o << ")\n";
-  }
+  for (size_t ni = 0; ni < nets.size(); ++ni)
+    emitNetSolution(r, nets[ni], segs[ni], o, rep);
   return rep;
 }
 
