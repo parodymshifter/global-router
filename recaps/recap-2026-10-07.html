@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Router Recap 2026-10-07</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+figure.shot { margin: 10px 0 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+figure.shot figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 5px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.shots > * { min-width: 0; }
+img.px { image-rendering: pixelated; }
+/* Recap 4 additions: a diverging bar for "ours vs the contest". */
+.div { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 10px; margin: 8px 0 10px; overflow-x: auto; }
+.div-inner { min-width: 560px; }
+.dvrow { display: grid; grid-template-columns: 170px 1fr 92px; align-items: center; gap: 10px; height: 26px; font-size: 13px; }
+.dvrow .nm { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+.dvrow .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.dvrow .v.good { color: var(--good); }
+.dvrow .v.bad { color: var(--bad); }
+.dvtrack { position: relative; height: 16px; }
+.dvtrack .zero { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--ink-soft); }
+.dvtrack .gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.dvtrack b { position: absolute; top: 2px; height: 12px; }
+.dvtrack b.good { background: var(--good); }
+.dvtrack b.bad { background: var(--bad); }
+.dvaxis { display: grid; grid-template-columns: 170px 1fr 92px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.dvaxis .t { position: relative; height: 16px; }
+.dvaxis .t span { position: absolute; transform: translateX(-50%); }
+.dvgroup { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); margin: 10px 0 4px; }
+.dvgroup:first-child { margin-top: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap 4 · 7 October 2026 · Parts 102–108</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">Since recap 3 the router learned the ISPD 2024 contest format and was measured against the contest's
+  published results. On raw score it now matches or beats the contest's best team on most of the hidden benchmarks it can
+  fit in memory. Two new mechanisms did most of that: choosing each pin's access point, and a joint 3D pattern reroute
+  after layer assignment. The same reroute shortens wire on every ISPD 2008 benchmark too.</p>
+  <div class="meta"><span><b>Standard (2024):</b> <span class="mono">pd35route @standard.env @standard24.env</span></span>
+  <span><b>Standard (2008):</b> <span class="mono">pd23route @standard.env</span> (unchanged)</span>
+  <span><b>Checks:</b> every 2024 result legal and equal to the official evaluator; every 2008 result equal to eval2008.pl</span></div>
+</header>
+<nav class="toc">
+  <a href="#glance">At a glance</a><a href="#since">Since 6 October</a><a href="#ispd24">ISPD 2024 vs the contest</a>
+  <a href="#steps">What moved the score</a><a href="#gap">Where the gap was</a><a href="#ispd08">Back on ISPD 2008</a>
+  <a href="#memory">Memory</a><a href="#caveats">Caveats</a><a href="#next">Next</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">4 of 5</div><div class="lab">hidden ("rank") benchmarks, of those that fit in memory, where our raw score is at or below the best of the contest's top three teams</div></div>
+    <div class="tile"><div class="fig">6 of 6</div><div class="lab">public benchmarks, of those that fit in memory, below the best beta-round submission</div></div>
+    <div class="tile"><div class="fig">16 of 16</div><div class="lab">ISPD 2008 benchmarks with shorter wire after the 3D pattern pass (−0.13% to −0.45%), overflow never worse</div></div>
+    <div class="tile"><div class="fig">−26%</div><div class="lab">peak memory on bsg_chip_rank after the layer-assignment fixes (9.2 → 6.8 GB), routes unchanged</div></div>
+  </div>
+</section>
+
+<section id="since">
+  <h2>Since 6 October</h2>
+  <ol>
+    <li><b>Part 102, a format bridge.</b> The 2024 <span class="mono">.cap/.net</span> files converted to a 2008
+    <span class="mono">.gr</span>, routed by the unchanged standard, converted back. First legal 2024 result:
+    mempool_tile_rank 14.27M, with the official evaluator agreeing to every digit. Reserving M2 capacity for pin vias made
+    it 17–86% worse and was retired.</li>
+    <li><b>Part 103, the native reader.</b> <span class="mono">g24_io.h</span> and <span class="mono">pd33route</span>
+    read the 2024 files directly, reproducing the bridge exactly. Two additions: via demand charged in layer assignment, and
+    layer assignment priced by the 2024 score itself (−1.0%).</li>
+    <li><b>Part 104, the contest designs.</b> All but tera_cluster downloaded. The first design with macros exposed a bug:
+    layers blocked in most GCells were never offered to layer assignment. Fixed; ariane_68_rank 31.9M → 23.6M.</li>
+    <li><b>Part 105, the gap analysis.</b> A new tool showed no detours and near-optimal trees. The wirelength gap was
+    access-point choice, and the rest was overflow cost. The winner's access-point rule, adopted: −0.9% to −3.6%.</li>
+    <li><b>Part 106, score-priced 2D routing.</b> No effect (±0.02%), because wire length decides almost every pattern
+    choice. Retired.</li>
+    <li><b>Part 107, the joint 3D pattern reroute.</b> After layer assignment, each net's pieces may flip their L shape or
+    straighten, with shape and layers chosen together at the exact score. −0.6% to −0.9%. Plus the memory fixes.</li>
+    <li><b>Part 108, the same pass on ISPD 2008</b>, under the 2008 cost: shorter wire on all 16 benchmarks.</li>
+  </ol>
+</section>
+
+<section id="ispd24">
+  <h2>ISPD 2024: ours against the contest</h2>
+  <p>Raw score = wirelength cost + via cost + overflow cost, as the official evaluator computes it. The contest ranked a
+  runtime-scaled score; we compare raw quality only. Negative is better than the reference.</p>
+  <div class="div"><div class="div-inner">
+    <div class="dvgroup">Hidden benchmarks, against the best of the contest's top three</div>
+    <div class="dvrow"><span class="nm">ariane_68_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="bad" style="left:50.00%;width:3.67%"></b></div><span class="v bad">+0.29%</span></div><div class="dvrow"><span class="nm">bsg_chip_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:35.59%;width:14.41%"></b></div><span class="v good">-1.15%</span></div><div class="dvrow"><span class="nm">nvdla_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:49.91%;width:0.09%"></b></div><span class="v good">-0.01%</span></div><div class="dvrow"><span class="nm">mempool_tile_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:41.29%;width:8.71%"></b></div><span class="v good">-0.70%</span></div><div class="dvrow"><span class="nm">mempool_group_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:49.61%;width:0.39%"></b></div><span class="v good">-0.03%</span></div><div class="dvrow"><span class="nm">mempool_cluster_ranking</span><div class="dvtrack"><i class="zero"></i></div><span class="v pending">no fit</span></div>
+    <div class="dvgroup">Public benchmarks, against the best beta-round submission</div>
+    <div class="dvrow"><span class="nm">ariane133_51</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:30.99%;width:19.01%"></b></div><span class="v good">-1.52%</span></div><div class="dvrow"><span class="nm">ariane133_68</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:19.49%;width:30.51%"></b></div><span class="v good">-2.44%</span></div><div class="dvrow"><span class="nm">bsg_chip</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:34.32%;width:15.68%"></b></div><span class="v good">-1.25%</span></div><div class="dvrow"><span class="nm">nvdla</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:7.56%;width:42.44%"></b></div><span class="v good">-3.40%</span></div><div class="dvrow"><span class="nm">mempool_tile</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:27.96%;width:22.04%"></b></div><span class="v good">-1.76%</span></div><div class="dvrow"><span class="nm">mempool_group</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:16.51%;width:33.49%"></b></div><span class="v good">-2.68%</span></div><div class="dvrow"><span class="nm">mempool_cluster</span><div class="dvtrack"><i class="zero"></i></div><span class="v pending">no fit</span></div>
+    <div class="dvaxis"><span></span><div class="t"><span style="left:0.0%">-4%</span><span style="left:25.0%">-2%</span><span style="left:50%">0</span><span style="left:75.0%">+2%</span><span style="left:100.0%">+4%</span></div><span></span></div>
+  </div></div>
+  <h3>Hidden benchmarks</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>file</th><th>contest name</th><th class="num">ours</th><th class="num">contest #1</th><th class="num">best of top 3</th><th class="num">vs best</th><th class="num">our time · peak memory</th><th></th></tr></thead>
+    <tbody><tr><td class="mono">ariane_68_rank</td><td>Ariane_rank</td><td class="num"><b>22,669,151</b></td><td class="num">22,602,876</td><td class="num">22,602,876 (#1)</td><td class="num">+0.29%</td><td class="num">231 s · 1.8 GB</td><td><span class="pill warn">place 2 of 4</span></td></tr><tr><td class="mono">bsg_chip_rank</td><td>BlackParrot_rank</td><td class="num"><b>109,707,507</b></td><td class="num">113,109,620</td><td class="num">110,986,781 (#2)</td><td class="num">-1.15%</td><td class="num">1,247 s · 6.8 GB</td><td><span class="pill good">best raw score</span></td></tr><tr><td class="mono">nvdla_rank</td><td>Nvdla_rank</td><td class="num"><b>43,192,839</b></td><td class="num">43,195,979</td><td class="num">43,195,979 (#1)</td><td class="num">-0.01%</td><td class="num">393 s · 3.7 GB</td><td><span class="pill good">best raw score</span></td></tr><tr><td class="mono">mempool_tile_rank</td><td>MemPool-Tile_rank</td><td class="num"><b>13,730,842</b></td><td class="num">13,827,142</td><td class="num">13,827,142 (#1)</td><td class="num">-0.70%</td><td class="num">115 s · 0.9 GB</td><td><span class="pill good">best raw score</span></td></tr><tr><td class="mono">mempool_group_rank</td><td>MemPool-Group_rank</td><td class="num"><b>383,517,195</b></td><td class="num">383,637,652</td><td class="num">383,637,652 (#1)</td><td class="num">-0.03%</td><td class="num">9,836 s · 22.9 GB</td><td><span class="pill good">best raw score</span></td></tr><tr><td class="mono">mempool_cluster_ranking</td><td>MemPool-Cluster_rank</td><td class="num pending">did not fit</td><td class="num">1,782,191,834</td><td class="num">1,782,191,834 (#1)</td><td class="num">–</td><td class="num">stopped at 28.7 GB</td><td><span class="pill bad">memory</span></td></tr></tbody>
+  </table></div>
+  <p class="note">bsg_chip_rank: the contest's #2 team had the best raw score there, which is why "best of top 3" is the
+  reference. tera_cluster_rank was not downloaded (two 10.7 GB net files, ~50M cells).</p>
+  <h3>Public benchmarks</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>file</th><th class="num">ours</th><th class="num">best beta submission</th><th class="num">vs beta</th><th class="num">our time</th></tr></thead>
+    <tbody><tr><td class="mono">ariane133_51</td><td class="num"><b>22,419,201</b></td><td class="num">22,765,372</td><td class="num">-1.52%</td><td class="num">144 s</td></tr><tr><td class="mono">ariane133_68</td><td class="num"><b>19,756,985</b></td><td class="num">20,251,238</td><td class="num">-2.44%</td><td class="num">153 s</td></tr><tr><td class="mono">bsg_chip</td><td class="num"><b>112,113,224</b></td><td class="num">113,537,664</td><td class="num">-1.25%</td><td class="num">1,557 s</td></tr><tr><td class="mono">nvdla</td><td class="num"><b>48,215,464</b></td><td class="num">49,909,986</td><td class="num">-3.40%</td><td class="num">357 s</td></tr><tr><td class="mono">mempool_tile</td><td class="num"><b>15,131,232</b></td><td class="num">15,402,753</td><td class="num">-1.76%</td><td class="num">131 s</td></tr><tr><td class="mono">mempool_group</td><td class="num"><b>398,343,847</b></td><td class="num">409,309,772</td><td class="num">-2.68%</td><td class="num">10,132 s</td></tr><tr><td class="mono">mempool_cluster</td><td class="num pending">did not fit</td><td class="num">1,663,344,708</td><td class="num">–</td><td class="num">stopped at 30.7 GB</td></tr></tbody>
+  </table></div>
+</section>
+
+<section id="steps">
+  <h2>What moved the score</h2>
+  <p>Two designs followed through every change, raw score.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>change</th><th>Part</th><th class="num">mempool_tile_rank</th><th class="num">ariane_68_rank</th></tr></thead>
+    <tbody><tr><td>Format bridge, standard router unchanged</td><td class="mono">102</td><td class="num">14,272,259</td><td class="num">–</td></tr><tr><td>Native reader (identical by construction)</td><td class="mono">103</td><td class="num">14,272,259</td><td class="num">–</td></tr><tr><td>+ via demand in layer assignment</td><td class="mono">103</td><td class="num">14,239,931</td><td class="num">–</td></tr><tr><td>+ layer assignment priced by the score</td><td class="mono">103</td><td class="num">14,126,516</td><td class="num">23,557,286</td></tr><tr><td>+ access-point choice (InstantGR's rule)</td><td class="mono">105</td><td class="num">13,852,844</td><td class="num">22,811,265</td></tr><tr><td>+ score-priced 2D routing</td><td class="mono">106</td><td class="num">13,855,061</td><td class="num">22,808,802</td></tr><tr><td>+ joint 3D pattern reroute</td><td class="mono">107</td><td class="num">13,730,842</td><td class="num">22,669,151</td></tr></tbody>
+  </table></div>
+  <div class="tablebox"><table>
+    <thead><tr><th>also tried</th><th>Part</th><th>result</th><th></th></tr></thead>
+    <tbody>
+      <tr><td>Reserve M2 capacity for pin via stacks (bridge)</td><td class="mono">102</td><td>+17% to +86%: emptied M2, added 530K vias</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Re-price every net in every layer-assignment round</td><td class="mono">103, 105</td><td>−0.01% to −0.02% for +50% runtime</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Score-priced 2D routing (with and without history)</td><td class="mono">106</td><td>±0.02%: the 2D routes barely change</td><td><span class="pill bad">retired</span></td></tr>
+      <tr><td>Access-point choice (contest winner's rule)</td><td class="mono">105</td><td>−0.9% to −3.6% on every design</td><td><span class="pill good">adopted</span></td></tr>
+      <tr><td>Joint 3D pattern reroute, 3 passes</td><td class="mono">107</td><td>−0.6% to −0.9%; total never rises</td><td><span class="pill good">adopted</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="gap">
+  <h2>Where the gap was</h2>
+  <div class="findings">
+    <div class="finding"><h3>Not detours, not topology</h3><p>2- and 3-pin nets were routed at exactly their bounding
+    box (ratio 1.000), and multi-pin trees came within 0.2–0.8% of an iterated 1-Steiner reference. The tree-building side
+    was already near its limit.</p></div>
+    <div class="finding"><h3>Access points were the wirelength gap</h3><p>The contest winner's ariane wirelength was
+    <i>below</i> our near-optimal tree over the first access points. Only choosing different access points explains that.
+    The winner's rule (InstantGR, read from its public source) closed it: wirelength now within 0.3–0.5% of #1, and vias
+    below #1 on every design.</p></div>
+    <div class="finding"><h3>Overflow cost is mostly utilisation</h3><p>The 2024 score charges every busy GCell, not only
+    overflowed ones. On ariane only ~0.12M of 0.96M avoidable overflow cost sat on GCells over capacity. What paid it down
+    was choosing each piece's L orientation together with its layers. Pricing the 2D stage differently and re-pricing
+    layers on fixed routes did not.</p></div>
+  </div>
+</section>
+
+<section id="ispd08">
+  <h2>Back on ISPD 2008</h2>
+  <p>The 3D pattern pass with the 2008 cost: overflow first (each unit over capacity heavily penalised), then wire tiles
+  plus vias. The screen reruns layer assignment from each benchmark's archived standard route as the control, and adds three
+  passes as the test. All 32 runs are legal, and gr_verify equals eval2008.pl on every one.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>benchmark</th><th class="num">control overflow</th><th class="num">control WL</th><th class="num">+ pass overflow</th><th class="num">+ pass WL</th><th class="num">ΔWL</th><th class="num">Δ overflow</th></tr></thead>
+    <tbody><tr><td class="mono">adaptec1</td><td class="num">0</td><td class="num">5,405,293</td><td class="num">0</td><td class="num">5,395,548</td><td class="num"><span class="delta down">-0.18%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">adaptec2</td><td class="num">0</td><td class="num">5,243,679</td><td class="num">0</td><td class="num">5,228,314</td><td class="num"><span class="delta down">-0.29%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">adaptec3</td><td class="num">0</td><td class="num">13,142,859</td><td class="num">0</td><td class="num">13,124,466</td><td class="num"><span class="delta down">-0.14%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">adaptec4</td><td class="num">0</td><td class="num">12,205,847</td><td class="num">0</td><td class="num">12,160,639</td><td class="num"><span class="delta down">-0.37%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">adaptec5</td><td class="num">0</td><td class="num">15,651,432</td><td class="num">0</td><td class="num">15,624,462</td><td class="num"><span class="delta down">-0.17%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">bigblue1</td><td class="num">0</td><td class="num">5,700,492</td><td class="num">0</td><td class="num">5,692,892</td><td class="num"><span class="delta down">-0.13%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">bigblue2</td><td class="num">0</td><td class="num">9,205,857</td><td class="num">0</td><td class="num">9,189,826</td><td class="num"><span class="delta down">-0.17%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">bigblue3</td><td class="num">0</td><td class="num">13,166,790</td><td class="num">0</td><td class="num">13,110,103</td><td class="num"><span class="delta down">-0.43%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">bigblue4</td><td class="num">356</td><td class="num">24,863,059</td><td class="num">356</td><td class="num">24,791,967</td><td class="num"><span class="delta down">-0.29%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">newblue1</td><td class="num">38</td><td class="num">4,854,996</td><td class="num">38</td><td class="num">4,838,866</td><td class="num"><span class="delta down">-0.33%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">newblue2</td><td class="num">0</td><td class="num">7,617,455</td><td class="num">0</td><td class="num">7,582,931</td><td class="num"><span class="delta down">-0.45%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">newblue3</td><td class="num">38,916</td><td class="num">10,796,253</td><td class="num">38,384</td><td class="num">10,748,710</td><td class="num"><span class="delta down">-0.44%</span></td><td class="num"><span class="delta down">-532</span></td></tr><tr><td class="mono">newblue4</td><td class="num">144</td><td class="num">13,711,450</td><td class="num">144</td><td class="num">13,667,251</td><td class="num"><span class="delta down">-0.32%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">newblue5</td><td class="num">0</td><td class="num">23,324,125</td><td class="num">0</td><td class="num">23,256,814</td><td class="num"><span class="delta down">-0.29%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">newblue6</td><td class="num">0</td><td class="num">17,936,550</td><td class="num">0</td><td class="num">17,909,806</td><td class="num"><span class="delta down">-0.15%</span></td><td class="num"><span class="delta same">0</span></td></tr><tr><td class="mono">newblue7</td><td class="num">108</td><td class="num">36,104,384</td><td class="num">108</td><td class="num">35,969,243</td><td class="num"><span class="delta down">-0.37%</span></td><td class="num"><span class="delta same">0</span></td></tr></tbody>
+  </table></div>
+  <p class="note">A small, universal gain, not a big swing, for 12 seconds to 3 minutes on runs of 1–20 hours. Adopting it
+  for 2008 means moving the 2008 standard to pd35route; one full-pipeline run should confirm the gain first.</p>
+</section>
+
+<section id="memory">
+  <h2>Memory</h2>
+  <p>mempool_group_rank first ran out of memory: a 26 GB footprint on this 24 GB machine. A 5-second profile of
+  bsg_chip_rank showed the real cause, which wasn't the first guess. Layer assignment's per-edge state across 10 layers
+  roughly tripled the footprint the moment it started:</p>
+  <ul>
+    <li>an empty history undo log per wire edge, 24 bytes each on tens of millions of edges, only a few of them ever used:
+    now stored only where it exists;</li>
+    <li>via-site prices that NTHU-mode layer assignment never reads: no longer allocated;</li>
+    <li>a tree per net held for every net at once: now rebuilt per net from its 2D route.</li>
+  </ul>
+  <p>Routes are byte-identical, and the peak on bsg_chip_rank fell 26%. mempool_group_rank then finished at a 22.9 GB peak,
+  inside the machine. The mempool_cluster designs (10.6M nets) do not fit yet. Their pattern stage completes at about 20–24 GB, but entering the first maze stage pushes the footprint past 28 GB, where a watchdog stops the run rather than let it thrash (stopped at 30.7 GB and 28.7 GB). Both were heavily congested at that point: 2D overflow 765K and 524K after the pattern stage.</p>
+</section>
+
+<section id="caveats">
+  <h2>Caveats</h2>
+  <ul>
+    <li><b>Runtime.</b> The contest ranked a runtime-scaled score on 8 cores plus 4 A100 GPUs, where the winners took
+    1–50 seconds per design up to mempool_group, 2–5 minutes on mempool_cluster and 23–34 minutes on tera_cluster. Ours runs on one CPU core: 2–26 minutes on the small and medium
+    designs, 2.7 hours on mempool_group_rank. On the contest's own scaled ranking we would place far lower.</li>
+    <li><b>Hidden-benchmark tuning.</b> All settings come from one design (mempool_tile_rank) and the gap analysis. Nothing
+    was tuned per design, and the rank and public versions use identical settings.</li>
+    <li><b>Margins.</b> On nvdla_rank and mempool_group_rank the margins over #1 are 0.007% and 0.03%, effectively ties.</li>
+  </ul>
+</section>
+
+<section id="next">
+  <h2>Next</h2>
+  <ol>
+    <li><b>Runtime</b> is now the largest gap to the 2024 contest: the batched pattern stage on the GPU
+    (<span class="mono">GPU_BACKEND_PLAN.md</span>), and the parked multithreading.</li>
+    <li><b>Memory for the cluster designs</b>: the 2D stage's per-net state and the 3D per-edge arrays are next. Float
+    capacities and streaks, and dropping via usage in NTHU mode, are candidates, along with streaming the netlist.</li>
+    <li><b>ariane_68_rank's last 0.29%</b> is overflow cost. Z shapes and wider detours in the 3D pattern pass are the
+    obvious extension.</li>
+    <li><b>Adopt the 3D pattern pass for ISPD 2008</b> after one full-pipeline confirmation run.</li>
+  </ol>
+</section>
+</div>
+</body>
+</html>

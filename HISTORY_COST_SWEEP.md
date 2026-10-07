@@ -9046,3 +9046,41 @@ sits in the same place (after layer assignment, after WL recovery).
 Adopting it for 2008 means the standard router becomes pd35route with
 `PD35ROUTE_PATTERN3D=3`; one full-pipeline run should confirm the gain
 there first.
+
+## Part 109 -- the remaining ISPD 2024 designs, current standard
+
+pd35route `@standard.env @standard24.env` (`p109.sh`: after the 2008
+screen, rebuilt from the committed source and self-tested; large designs
+one at a time under a footprint watchdog that stops a run above 28 GB).
+All completed runs status OK (legal; g24_verify = official evaluator).
+
+| design | ours | reference | vs ref | time | peak footprint |
+|---|---|---|---|---|---|
+| ariane133_51 | 22419201 | beta 22765372 | -1.52% | 144 s | 1.2 GB |
+| ariane133_68 | 19756985 | beta 20251238 | -2.44% | 153 s | 1.1 GB |
+| mempool_tile | 15131232 | beta 15402753 | -1.76% | 131 s | 0.7 GB |
+| nvdla | 48215464 | beta 49909986 | -3.40% | 357 s | 2.7 GB |
+| bsg_chip | 112113224 | beta 113537664 | -1.25% | 1557 s | 6.3 GB |
+| mempool_group | 398343847 | beta 409309772 | -2.68% | 10132 s | 22.3 GB |
+| **mempool_group_rank** | **383517195** | #1 383637652 | **-0.03%** | 9836 s | 22.9 GB |
+| mempool_cluster | did not fit | beta 1663344708 | -- | stopped 1 h 21 min in | > 30.7 GB |
+| mempool_cluster_ranking | did not fit | #1 1782191834 | -- | stopped 55 min in | > 28.7 GB |
+
+**mempool_group_rank beats contest #1's raw score**, narrowly. Its
+pattern passes removed 2.75M, 0.44M and 0.14M of score.
+
+**The cluster designs (10.6M nets)** finish the pattern stage at 20-24
+GB, then jump past 28 GB on entering the slow tier, where the watchdog
+stopped them. Their 2D overflow after the pattern stage was 765K / 524K.
+
+With the current standard, all hidden designs that fit:
+- ariane_68_rank 22669151 (+0.29% vs #1);
+- bsg_chip_rank 109707507 (-1.15% vs the best of the top three, #2);
+- nvdla_rank 43192839 (-0.007%);
+- mempool_tile_rank 13730842 (-0.70%);
+- mempool_group_rank 383517195 (-0.03%).
+
+That is at or below the best contest raw score on 4 of 5, and all 6
+public designs that fit are below the best beta submission.
+
+Recap 4: `recaps/recap-2026-10-07.html`.
