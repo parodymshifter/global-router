@@ -8661,3 +8661,83 @@ reader (`ISPD24_FORMAT.md` step 2), not a capacity edit.
 Predictor check (Part 101): `routability` on the bridged file gives
 cut3_max 0.199 (threshold 0.67), so "easy", and the router reached zero
 in the bridge model. One easy design; consistent, not yet a test.
+
+## Part 103 -- the native ISPD 2024 front end (pd33route), via demand, and score-priced layer assignment
+
+`gr/g24_io.h` now holds the 2024 format in one place: the readers (moved
+from `g24_verify.cpp`), `toDesign` (the bridge's mapping, built in memory),
+`writeGr`, and `convertSolution`. `g24_verify` and `g24_bridge` include it.
+After the move, every output is byte-identical: the bridged .gr files, the
+converted solution, and the total cost.
+
+`gr/pd33route.cpp` (fork of the standard pd23route, species `pd`,
+generation 33) reads `<design.cap> <design.net> <solution>` directly and
+writes the 2024 solution. Its self test checks that the native Design
+equals the bridge's .gr Design, edge for edge and pin for pin. With two
+arguments it is pd23route.
+
+`run_checked.sh` hands any job whose benchmark ends in `.cap` to
+`run_checked24.sh`, which runs g24_verify and the contest evaluator and
+writes a one-line summary. Status OK requires a legal solution and an
+exactly equal total cost.
+
+Three mechanisms, all off by default (each needs the 2024 path):
+- `PD33ROUTE_VIA_DEMAND=1`: the evaluator's via demand is charged into
+  layer assignment's usage. A via through layer z at a GCell charges half
+  a track on the two layer-z GCells beside it, unless the net has a
+  layer-z wire there. Layer assignment's tree DP prices it per node stack.
+- `PD33ROUTE_LA_COST=score` (needs via demand): layer assignment pays the
+  exact marginal 2024 score of each tile and each via-demand charge,
+  w_z (loss(d + a) - loss(d)), and unitVia per via, instead of NTHU's
+  overflow-first lexicographic cost. A negotiation reroute is kept only if
+  it lowers the score over the edges it touches plus its vias. The score
+  is a sum over GCells, so this is the exact change in the total, and the
+  total never rises. The overflow-based best-round restore is skipped.
+- `PD33ROUTE_SCORE_ALL=1` (needs score): every negotiation round
+  re-prices every net, not only those on overflowed edges.
+
+mempool_tile_rank, standard settings otherwise, every run status OK
+(g24_verify = official evaluator to the printed digit):
+
+| run | total | WL cost | via cost | overflow cost | over GCells | max over | time |
+|---|---|---|---|---|---|---|---|
+| bridge (Part 102) | 14272259 | 7700947 | 3414924 | 3156388 | 14977 | 6.00 | 44 s |
+| native, defaults | 14272259 | 7700947 | 3414924 | 3156388 | 14977 | 6.00 | 49 s |
+| + via demand | 14239931 | 7700947 | 3509696 | 3029288 | 792 | 2.00 | 68 s |
+| + score cost | 14126516 | 7700947 | 3424008 | 3001561 | 6717 | 3.50 | 104 s |
+| + score cost, every net every round | 14123231 | 7700947 | 3421080 | 3001204 | 6971 | 3.50 | 165 s |
+| `@standard.env @standard24.env` (final binary) | 14126516 | 7700947 | 3424008 | 3001561 | 6717 | 3.50 | 104 s |
+
+- **Via demand alone: -0.23%.** It removed most overflowed GCells
+  (14977 -> 792, max 6 -> 2 tracks), but NTHU's cost treats any overflow
+  as forbidden, so it bought +23.7K vias to do it.
+- **Score cost: -1.02% vs the bridge.**
+  - Via cost is back near the baseline.
+  - The avoidable overflow cost (above the 2538618 idle floor) is
+    618K -> 463K (-25%).
+  - The cost knows that one track over a full GCell (5 (e^0.5 - 1) =
+    3.2) is cheaper than a via (4), and accepts some overflow (6717
+    GCells, max 3.5 tracks) where that wins.
+  - Its negotiation stalls after 8 rounds.
+- **Every net every round: -0.02% more, for +60 s.** The removed score
+  converged in 9 rounds (-12.0K, -3.5K, -0.7K, ...), but the score-only
+  run's own rounds had already taken most of it. The knob was removed,
+  not kept: untested code for nothing.
+- **Kept:** `gr/standard24.env` (via demand + score cost), used after
+  `@standard.env`. The final binary reproduces the score-cost row to the
+  digit.
+
+Why the swing is small on this design:
+- It is easy in 2D: 558 units of 2D overflow after the first pattern
+  round, 34 nets on the slow tier. Its wirelength (7.70M, 54%) is
+  therefore close to its Steiner topology, and no negotiation setting
+  moves it.
+- Vias (3.42M) are mostly structural: 479935 of 482811 pins are on M1.
+- The idle-GCell floor (2.54M) is fixed.
+- What is left to win here: access-point choice (73736 pins, 15%, have
+  access points in two GCells, perhaps ~1% of wirelength) and topology
+  quality. The congestion mechanisms need the contest's harder designs
+  to show anything (downloads need the user's approval).
+
+`pd33route` with two arguments is pd23route byte for byte: same route
+file on adaptec1 at a short budget (5/5/5 rounds).

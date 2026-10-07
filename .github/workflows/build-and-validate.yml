@@ -99,6 +99,7 @@ jobs:
           - pd30route
           - pd31route
           - pd32route
+          - pd33route
           - g24_verify
           - g24_lroute
           - g24_bridge

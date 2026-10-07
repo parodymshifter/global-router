@@ -49,119 +49,13 @@
 #include <unordered_map>
 #include <vector>
 
+#include "g24_io.h"
+
 namespace g24 {
 
-struct Layer {
-  std::string name;
-  int dir = 0; // 0 horizontal, 1 vertical
-  double minLength = 0;
-};
-
-struct Resources {
-  int nLayers = 0, xSize = 0, ySize = 0;
-  double unitLength = 0, unitVia = 0;
-  std::vector<double> overflowCost; // per layer
-  std::vector<long long> xPitch, yPitch; // xSize-1, ySize-1
-  std::vector<Layer> layers;
-  std::vector<double> cap; // (z * ySize + y) * xSize + x
-  double capacity(int z, int x, int y) const {
-    return cap[(static_cast<size_t>(z) * ySize + y) * xSize + x];
-  }
-};
-
-struct Access {
-  int x, y, z;
-};
-struct Net {
-  std::string name;
-  std::vector<std::vector<Access>> pins;
-};
-
-static std::string trimEnd(std::string s) {
-  while (!s.empty() && (s.back() == '\r' || s.back() == '\n' || s.back() == ' ' || s.back() == '\t'))
-    s.pop_back();
-  return s;
-}
-
-bool readResources(std::istream &in, Resources &r, std::string &err) {
-  if (!(in >> r.nLayers >> r.xSize >> r.ySize) || r.nLayers < 2 || r.xSize < 1 || r.ySize < 1) {
-    err = "bad .cap header (need nLayers >= 2, xSize >= 1, ySize >= 1)";
-    return false;
-  }
-  if (!(in >> r.unitLength >> r.unitVia)) {
-    err = "bad .cap cost line";
-    return false;
-  }
-  r.overflowCost.resize(r.nLayers);
-  for (double &c : r.overflowCost)
-    if (!(in >> c)) {
-      err = "bad .cap overflow costs";
-      return false;
-    }
-  r.xPitch.resize(r.xSize - 1);
-  r.yPitch.resize(r.ySize - 1);
-  for (long long &p : r.xPitch)
-    if (!(in >> p) || p < 0) {
-      err = "bad .cap horizontal pitch";
-      return false;
-    }
-  for (long long &p : r.yPitch)
-    if (!(in >> p) || p < 0) {
-      err = "bad .cap vertical pitch";
-      return false;
-    }
-  r.layers.resize(r.nLayers);
-  r.cap.assign(static_cast<size_t>(r.nLayers) * r.ySize * r.xSize, 0.0);
-  for (int z = 0; z < r.nLayers; ++z) {
-    Layer &L = r.layers[z];
-    if (!(in >> L.name >> L.dir >> L.minLength) || (z > 0 && L.dir != 0 && L.dir != 1)) {
-      err = "bad .cap layer line for layer " + std::to_string(z);
-      return false;
-    }
-    for (int y = 0; y < r.ySize; ++y)
-      for (int x = 0; x < r.xSize; ++x) {
-        double c;
-        if (!(in >> c)) {
-          err = "short capacity table on layer " + std::to_string(z);
-          return false;
-        }
-        r.cap[(static_cast<size_t>(z) * r.ySize + y) * r.xSize + x] = c;
-      }
-  }
-  return true;
-}
-
-// The evaluator's rule: a line with neither '(' nor ')' and more than one
-// character starts a net; a line with '[' is one pin, "(z, x, y)" access
-// tuples.
-bool readNets(std::istream &in, std::vector<Net> &nets, std::string &err) {
-  std::string line;
-  while (std::getline(in, line)) {
-    line = trimEnd(line);
-    if (line.find('(') == std::string::npos && line.find(')') == std::string::npos && line.length() > 1) {
-      nets.push_back(Net{line, {}});
-    } else if (line.find('[') != std::string::npos) {
-      if (nets.empty()) {
-        err = "pin line before any net name";
-        return false;
-      }
-      for (char &c : line)
-        if (c == '(' || c == ')' || c == ',' || c == '[' || c == ']')
-          c = ' ';
-      std::istringstream ss(line);
-      std::vector<Access> pin;
-      int x, y, z;
-      while (ss >> z >> x >> y)
-        pin.push_back({x, y, z});
-      if (pin.empty()) {
-        err = "net " + nets.back().name + ": pin with no access points";
-        return false;
-      }
-      nets.back().pins.push_back(pin);
-    }
-  }
-  return true;
-}
+// The format types and readers (Layer, Resources, Access, Net,
+// readResources, readNets) live in g24_io.h, shared with the bridge and
+// the native routers.
 
 struct Report {
   double wlCost = 0, viaCost = 0, overflowCost = 0, total = 0;

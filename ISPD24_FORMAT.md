@@ -79,7 +79,14 @@ instead.
    (7575 such nets in this design; with no segment written they are open).
    An empty solution already costs 2538617.8 in overflow (idle GCells).
 2. **Reader into the router's `Design`/`RoutingGrid`** (the porting seam:
-   nothing below the grid learns the format). What the 2008 path lacks:
+   nothing below the grid learns the format). **Started
+   (HISTORY_COST_SWEEP.md Part 103):** `gr/g24_io.h` (readers, `toDesign`,
+   solution writer) and `gr/pd33route.cpp`, which reads .cap/.net
+   directly. The defaults reproduce the bridge exactly. Done so far: via
+   demand charged in layer assignment, and layer assignment priced in the
+   score's own terms (`gr/standard24.env`). Still to do: access-point
+   choice, non-uniform pitches in the wirelength term, and score-aware 2D
+   pricing. What the 2008 path lacks:
    non-uniform pitches (the wirelength term becomes per-edge length),
    fractional per-layer capacities, pins as sets of access points (MSMV's
    multi-sink search already takes sets), access points on the unroutable
@@ -104,3 +111,33 @@ instead.
    `cuhk-eda/InstantGR` carries one small case (`mempool_tile_rank`: .cap
    5.6 MB, .net 20 MB) that is enough for step 1's cross-check.
    Downloads need the user's approval.
+
+## Published reference scores
+
+From the contest page (liangrj2014.github.io/ISPD24_contest, read
+2026-10-06). Raw score = WL cost + via cost + overflow cost. The contest
+ranked a runtime-scaled score; our comparisons use the raw score. The
+contest ran on 8 cores + 4 A100s, with runtime limits of 30 s to 50000 s
+per design.
+
+Hidden ("rank") benchmarks, final submissions, raw score:
+
+| file | contest name | #1 | #2 | #3 |
+|---|---|---|---|---|
+| ariane_68_rank | Ariane_rank | 22602876 | 23093501 | 22821289 |
+| bsg_chip_rank | BlackParrot_rank | 113109620 | 110986781 | 111778586 |
+| nvdla_rank | Nvdla_rank | 43195979 | 44141552 | 43295092 |
+| mempool_tile_rank | MemPool-Tile_rank | 13827142 | 14133269 | 13867124 |
+| mempool_group_rank | MemPool-Group_rank | 383637652 | 395488860 | 388200338 |
+| mempool_cluster_ranking | MemPool-Cluster_rank | 1782191834 | 1824527054 | 1795524941 |
+| tera_cluster_rank | Tera-Cluster_rank | 12521927639 | 12676067016 | 12597498026 |
+
+Public benchmarks, best beta submission (Feb 15, 2024), raw score:
+ariane133_51 22765372, ariane133_68 20251238, bsg_chip 113537664, nvdla
+49909986, mempool_tile 15402753, mempool_group 409309772, mempool_cluster
+1663344708, tera_cluster 20438460750.
+
+Downloaded (2026-10-06, user-approved) to `gr/bench/ispd24/` by
+`download.sh` / `download.list`: every Simple_inputs design except
+tera_cluster (two 10.7 GB .net files, ~50M cells). The InstantGR copy of
+mempool_tile_rank is byte-identical to the contest's.

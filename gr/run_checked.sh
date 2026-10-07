@@ -8,6 +8,9 @@
 # Usage (from gr/, router env vars set by the caller):
 #   ./run_checked.sh <log_prefix> <benchmark.gr> <router_binary>
 #
+# A benchmark ending in .cap is an ISPD 2024 design: handed to
+# run_checked24.sh (same job lines, its own checks and summary).
+#
 # Writes <log_prefix>.{stdout,stderr,time,vsz} (run_tracked.sh), .route,
 # .verify, .eval, and <log_prefix>.summary -- one line:
 #   <name> status=<OK|ILLEGAL|DISAGREE|ROUTER_FAILED> of=<N> max=<N> wl=<N>
@@ -35,6 +38,11 @@ bench="$2"
 router="$3"
 name=$(basename "$prefix")
 here=$(cd "$(dirname "$0")" && pwd)
+
+# An ISPD 2024 design (.cap, its .net beside it): run_checked24.sh.
+case "$bench" in
+  *.cap) exec "$here/run_checked24.sh" "$prefix" "$bench" "$router" ;;
+esac
 
 "$here/run_tracked.sh" "$prefix" "$router" "$bench" "${prefix}.route"
 router_exit=$?
