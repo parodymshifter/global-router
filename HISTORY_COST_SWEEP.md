@@ -8862,3 +8862,53 @@ ariane_68_rank 23557286 -> 23554443 (-0.01%) for +50% runtime. Together
 with mempool_tile_rank's -0.02% (Part 103), this shows layer assignment
 is at its local optimum once the 2D routes are fixed. The remaining
 overflow-cost gap lies in the 2D routes themselves.
+
+AP align on the other designs (`@standard.env @standard24.env`, all
+status OK):
+
+| design | Part 104 | AP align | reference | vs ref |
+|---|---|---|---|---|
+| bsg_chip_rank | 111803195 | **110449209** (-1.2%) | best of top 3: #2 110986781 | **-0.5%** |
+| ariane133_51 | 22806327 | **22547449** (-1.1%) | beta 22765372 | -1.0% |
+| ariane133_68 | 20637969 | **19899930** (-3.6%) | beta 20251238 | -1.7% |
+| mempool_tile | 15504694 | **15248838** (-1.7%) | beta 15402753 | -1.0% |
+| nvdla | 48918896 | **48469489** (-0.9%) | beta 49909986 | -2.9% |
+
+On bsg_chip_rank (BlackParrot_rank) the router now beats all three
+contest teams' raw scores. Runtime: 12.9 min, 5.0 GB.
+
+## Part 106 -- score-aware 2D routing (pd34route): no effect
+
+`gr/pd34route.cpp` (fork of pd33route, species `pd`, gen. 34):
+`PD34ROUTE_2D_COST=score` replaces the present-demand cost wherever the
+2D searches read it (pattern stage, slow tier, region stage). A 2D edge
+costs unitLength x pitch + hist x M(D). M(D) is the score's marginal
+cost for one more net if the edge's 2D demand were spread evenly over
+its routable layers: n w (e^(0.5((D+a)/2 - C)/n) - e^(0.5(D/2 - C)/n)).
+`PD34ROUTE_2D_HIST=0` drops the history factor. Self tests check:
+- the marginal by hand;
+- the decision it changes: one track of overflow (3.24) beats a 2-tile
+  detour (10), where present demand at iteration 40 detours;
+- the cost seam.
+
+| run | ariane_68_rank | mempool_tile_rank |
+|---|---|---|
+| AP align (Part 105) | 22811265 | 13852844 |
+| + score 2D | 22808802 (-0.01%) | 13855061 (+0.02%) |
+| + score 2D, no history | 22807493 (-0.02%) | -- |
+
+Noise. The 2D decisions barely move:
+- 2D overflow after the pattern stage: 19814 vs 19812.
+- Final 2D wire: 2750985 vs 2750974.
+
+Pattern routing picks among the shortest L and Z shapes, so wirelength
+decides almost every choice whichever congestion price sits on top. The
+handful of escalated nets (~500) cannot move the total. Retired; it stays
+in pd34route, off by default.
+
+So neither layer assignment (Part 105) nor 2D pricing explains the
+remaining 0.2-0.9% overflow-cost gap to contest #1. The untested
+structural difference left is that InstantGR picks each 2-pin piece's L
+orientation *jointly* with its layers (3D pattern routing, exact score).
+Ours fixes the orientation in 2D, against summed capacity, before layer
+assignment sees it.
