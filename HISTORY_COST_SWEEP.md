@@ -8791,3 +8791,74 @@ The 2D stage still routes for zero 2D overflow, under a capacity that
 leaves out via demand, and pays detours the soft objective may not want.
 Untried: score-aware 2D pricing, access-point choice, and pitch-aware
 wirelength.
+
+## Part 105 -- where the gap to the contest winners is, and access-point choice
+
+`gr/g24_gap.cpp` (analysis, self-tested) splits a solution's wirelength by
+net class and compares it with three references over the pins' first
+access points:
+- HPWL, a lower bound;
+- HPWL with each pin's access point re-chosen greedily, which shows what
+  access-point choice alone could save;
+- a near-optimal tree: RMST, plus iterated 1-Steiner for nets of up to 60
+  pin GCells (`G24_GAP_STEINER_MAX`).
+
+It also counts vias against a floor (one per distinct layer-0 pin
+GCell).
+
+Findings on the Part 104 solutions (ariane_68_rank / nvdla_rank /
+mempool_tile_rank):
+- **No detours on 2- and 3-pin nets**: ours / HPWL = 1.000-1.001.
+- **Tree topology is near-optimal**: ours / 1-Steiner = 1.002 / 1.008 /
+  1.005 overall, and within 0.6-1.5% on 4+ pin nets.
+- **Access-point choice was the wirelength gap**: re-choosing access
+  points shrinks HPWL 3.4% / 1.1% / 1.7% (ariane 2-pin nets: 8.9%).
+  Contest #1's ariane wirelength (11.93M) is below our near-optimal tree
+  over the first access points (12.38M), which only different access
+  points can explain.
+- **Vias are within 2-7% of #1's.**
+- **Overflow cost is mostly utilisation, not overflow.** ariane's
+  avoidable overflow cost (above the 7.06M idle floor) is 0.96M, and only
+  ~0.12M of it is on GCells over capacity. The exponential charges every
+  busy GCell.
+
+InstantGR (cuhk-eda/InstantGR, BSD-3, read online), which we believe is
+the winner (ICCAD 2024 paper):
+- Flow: FLUTE trees -> GPU 3D L-shape pattern routing of every net ->
+  rip up nets on overflowed edges -> L-shape-with-detour reroute. No maze
+  routing.
+- Every stage prices with the score itself: unitLength x pitch plus the
+  exact marginal exponential overflow cost per GCell, and unitVia plus
+  via-demand marginals.
+- Access points (net::init): nets of up to 4 pins enumerate combinations
+  and keep the fewest unaligned pin pairs (pairs differing in x plus
+  pairs differing in y), ties by distance to the box centre; larger nets
+  take each pin's access point nearest the centre.
+
+**`PD33ROUTE_AP=align`** (pd33route; `g24::chooseAccessPoints` in
+`g24_io.h`, InstantGR's rule) moves each pin's chosen access point first.
+Self test `testG24AccessPointChoice`. Now in `standard24.env`.
+
+| design | before (Part 104) | AP align | contest #1 | vs #1 |
+|---|---|---|---|---|
+| ariane_68_rank | 23557286 | **22811265** (-3.2%) | 22602876 | +0.9% |
+| nvdla_rank | 43848400 | **43453388** (-0.9%) | 43195979 | +0.6% |
+| mempool_tile_rank | 14126516 | **13852844** (-1.9%) | 13827142 | +0.2% |
+
+Components with AP align vs #1:
+
+| design | WL ours / #1 | via ours / #1 | overflow ours / #1 |
+|---|---|---|---|
+| ariane_68_rank | 11.968M / 11.932M | 2.901M / 2.907M | 7.942M / 7.764M |
+| nvdla_rank | 21.585M / 21.472M | 4.578M / 4.661M | 17.290M / 17.062M |
+| mempool_tile_rank | 7.579M / 7.541M | 3.288M / 3.347M | 2.986M / 2.939M |
+
+Vias are now at or below #1's on all three. Wirelength is within
+0.3-0.5%. The rest of the gap is overflow cost, 0.05-0.23M per design.
+
+Re-pricing every net in every layer-assignment round
+(`PD33ROUTE_SCORE_ALL`, restored for one measurement and removed again):
+ariane_68_rank 23557286 -> 23554443 (-0.01%) for +50% runtime. Together
+with mempool_tile_rank's -0.02% (Part 103), this shows layer assignment
+is at its local optimum once the 2D routes are fixed. The remaining
+overflow-cost gap lies in the 2D routes themselves.

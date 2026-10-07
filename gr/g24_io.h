@@ -177,6 +177,78 @@ inline bool checkAccessPoints(const Resources &r, const std::vector<Net> &nets, 
   return true;
 }
 
+// Access-point choice (Part 105): returns the nets with each pin's chosen
+// access point moved to the front (toDesign and convertSolution route to
+// and fix at the first one; any access point still counts as covered).
+// The rule is InstantGR's (ISPD 2024 contest winner; cuhk-eda/InstantGR,
+// database.hpp net::init), with its box and center over every access point
+// of the net:
+//   up to 4 pins: every combination; fewest pin pairs that differ in x plus
+//     pairs that differ in y (aligned pins -> straight wires, fewer bends),
+//     then the smallest summed distance to the center; first found wins ties;
+//   more pins: each pin's access point nearest the center (first wins ties).
+inline std::vector<Net> chooseAccessPoints(const std::vector<Net> &nets) {
+  std::vector<Net> out = nets;
+  for (Net &n : out) {
+    const size_t k = n.pins.size();
+    if (k == 0)
+      continue;
+    int x0 = n.pins[0][0].x, x1 = x0, y0 = n.pins[0][0].y, y1 = y0;
+    for (const auto &p : n.pins)
+      for (const Access &a : p) {
+        x0 = std::min(x0, a.x);
+        x1 = std::max(x1, a.x);
+        y0 = std::min(y0, a.y);
+        y1 = std::max(y1, a.y);
+      }
+    const int cx2 = x0 + x1, cy2 = y0 + y1;
+    auto dist = [&](const Access &a) { return std::abs(2 * a.x - cx2) + std::abs(2 * a.y - cy2); };
+    std::vector<size_t> pick(k, 0);
+    if (k <= 4) {
+      std::vector<size_t> idx(k, 0);
+      long long bestDiff = -1, bestMetric = 0;
+      for (;;) {
+        long long diff = 0, metric = 0;
+        for (size_t i = 0; i < k; ++i) {
+          const Access &ai = n.pins[i][idx[i]];
+          metric += dist(ai);
+          for (size_t j = 0; j < i; ++j) {
+            const Access &aj = n.pins[j][idx[j]];
+            diff += (ai.x != aj.x) + (ai.y != aj.y);
+          }
+        }
+        if (bestDiff < 0 || diff < bestDiff || (diff == bestDiff && metric < bestMetric)) {
+          bestDiff = diff;
+          bestMetric = metric;
+          pick = idx;
+        }
+        // next combination (last pin varies fastest, as a nested loop would)
+        size_t i = k;
+        while (i > 0) {
+          --i;
+          if (++idx[i] < n.pins[i].size())
+            break;
+          idx[i] = 0;
+          if (i == 0) {
+            i = k + 1; // done
+            break;
+          }
+        }
+        if (i == k + 1)
+          break;
+      }
+    } else {
+      for (size_t i = 0; i < k; ++i)
+        for (size_t j = 1; j < n.pins[i].size(); ++j)
+          if (dist(n.pins[i][j]) < dist(n.pins[i][pick[i]]))
+            pick[i] = j;
+    }
+    for (size_t i = 0; i < k; ++i)
+      std::swap(n.pins[i][0], n.pins[i][pick[i]]);
+  }
+  return out;
+}
+
 inline int halfTracks(double tracks) { return tracks <= 0 ? 0 : static_cast<int>(2.0 * tracks + 1e-9); }
 
 // The router's Design for a 2024 design (see the header for the mapping).

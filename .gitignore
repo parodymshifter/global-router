@@ -2,6 +2,7 @@ gr_verify
 g24_verify
 g24_lroute
 g24_bridge
+g24_gap
 grdiag
 broute
 lroute

@@ -12480,6 +12480,27 @@ void testG24MostlyBlockedLayerStaysRoutable() {
         "blocked layer: nominal = the open value, M2 is a horizontal layer, blocked edges stay 0");
 }
 
+// pd33route (Part 105): InstantGR's access-point rule. netA: pin 0 has
+// access points (0,0) and (2,1), pin 1 one at (2,2): (2,1) shares x with
+// (2,2) -- one differing coordinate instead of two -- so it is chosen and
+// moved first. netB (5 pins, > 4): each pin nearest the centre of the box
+// over all access points; pin 0's (0,0) / (3,3) / (2,2) with box (0..4,
+// 0..4), centre (2,2): (2,2). netC: ties keep the first combination.
+void testG24AccessPointChoice() {
+  std::vector<g24::Net> nets(3);
+  nets[0].name = "netA";
+  nets[0].pins = {{{0, 0, 0}, {2, 1, 0}}, {{2, 2, 0}}};
+  nets[1].name = "netB";
+  nets[1].pins = {{{0, 0, 0}, {3, 3, 0}, {2, 2, 0}}, {{0, 4, 0}}, {{4, 0, 0}}, {{4, 4, 0}}, {{0, 0, 0}}};
+  nets[2].name = "netC";
+  nets[2].pins = {{{1, 1, 0}, {1, 1, 1}}, {{3, 3, 0}}};
+  std::vector<g24::Net> c = g24::chooseAccessPoints(nets);
+  check(c[0].pins[0][0].x == 2 && c[0].pins[0][0].y == 1 && c[0].pins[0].size() == 2,
+        "access points: an aligned access point is chosen and moved first");
+  check(c[1].pins[0][0].x == 2 && c[1].pins[0][0].y == 2, "access points: > 4 pins, the one nearest the centre");
+  check(c[2].pins[0][0].z == 0, "access points: a tie keeps the first");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -12611,6 +12632,7 @@ int run() {
   testG24LossMatchesTheEvaluator();
   testScoreCostAcceptsCheapOverflow();
   testG24MostlyBlockedLayerStaysRoutable();
+  testG24AccessPointChoice();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -12824,6 +12846,17 @@ int main(int argc, char **argv) {
   Design d;
   if (g24Mode) {
     g24In = readG24(argv[1], argv[2]);
+    // Part 105: PD33ROUTE_AP=align routes each pin to the access point
+    // InstantGR's rule picks (g24::chooseAccessPoints); first (default) is
+    // the file's first access point, as before.
+    if (const char *v = std::getenv("PD33ROUTE_AP"); v) {
+      std::string sv(v);
+      if (sv != "first" && sv != "align")
+        fail("PD33ROUTE_AP must be first or align (got '" + sv + "')");
+      if (sv == "align")
+        g24In.nets = g24::chooseAccessPoints(g24In.nets);
+      std::cerr << "ISPD 2024 access points: " << sv << "\n";
+    }
     g24Input = &g24In;
     d = g24::toDesign(g24In.res, g24In.nets);
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {
@@ -12868,6 +12901,8 @@ int main(int argc, char **argv) {
       fail("PD33ROUTE_VIA_DEMAND needs an ISPD 2024 design (.cap .net solution)");
     if (const char *v = std::getenv("PD33ROUTE_LA_COST"); v && std::string(v) != "nthu")
       fail("PD33ROUTE_LA_COST=score needs an ISPD 2024 design (.cap .net solution)");
+    if (const char *v = std::getenv("PD33ROUTE_AP"); v && std::string(v) != "first")
+      fail("PD33ROUTE_AP=align needs an ISPD 2024 design (.cap .net solution)");
     d = readGr(argv[1]);
   }
   // pd11route's own mechanism: the batched pattern stage.
