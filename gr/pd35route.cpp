@@ -5165,12 +5165,44 @@ void applyCharge(RealUsage &ru, RealViaUsage &rvu, const NetCharge &c) {
 // direction-split pair. Reuses HistOp and kHistoryCap, already defined
 // above for the 2D stage's own Prices/updateHistory, unchanged.
 // ---------------------------------------------------------------------------
+// pd35route (memory): the LIFO history stacks, kept only for the edges or
+// via sites that have one -- a std::vector per element cost 24 bytes on
+// every one of tens of millions, used by the few that ever overflow
+// (bsg_chip_rank: 2.2 GB of empty vectors; Part 107). Same pushes, pops and
+// sizes, so the same history arithmetic.
+struct OpStacks {
+  std::unordered_map<size_t, std::vector<HistOp>> m;
+  void push(size_t i, HistOp op) { m[i].push_back(op); }
+  bool empty(size_t i) const {
+    if (m.empty())
+      return true;
+    auto it = m.find(i);
+    return it == m.end() || it->second.empty();
+  }
+  size_t size(size_t i) const {
+    if (m.empty())
+      return 0;
+    auto it = m.find(i);
+    return it == m.end() ? 0 : it->second.size();
+  }
+  HistOp pop(size_t i) {
+    auto it = m.find(i);
+    HistOp op = it->second.back();
+    it->second.pop_back();
+    if (it->second.empty())
+      m.erase(it);
+    return op;
+  }
+};
+
 struct ViaPrices {
   std::vector<double> hist;
   std::vector<int> streak;
-  std::vector<std::vector<HistOp>> histOps;
-  explicit ViaPrices(const RoutingGrid &g)
-      : hist(viaCount(g), 1.0), streak(viaCount(g), 0), histOps(viaCount(g)) {}
+  OpStacks histOps;
+  // pd35route: `alloc` false (layer assignment's NTHU mode, whose cost never
+  // reads via-site history) keeps it empty.
+  explicit ViaPrices(const RoutingGrid &g, bool alloc = true)
+      : hist(alloc ? viaCount(g) : 0, 1.0), streak(alloc ? viaCount(g) : 0, 0) {}
 };
 
 // Called once per round boundary (never mid-round, never per-net -- same
@@ -5200,24 +5232,23 @@ void updateViaHistory(const RoutingGrid &g, ViaPrices &vp, const RealViaUsage &r
       if (mode == HistMode::kAdditive) {
         vp.hist[idx] = std::min(kHistoryCap, vp.hist[idx] + histStep * ratio);
         if (relaxEnabled)
-          vp.histOps[idx].push_back({vp.hist[idx] - before, false});
+          vp.histOps.push(idx, {vp.hist[idx] - before, false});
       } else if (mode == HistMode::kMultiplicative) {
         vp.hist[idx] = std::min(kHistoryCap, vp.hist[idx] * (1.0 + (histFactor - 1.0) * ratio));
         if (relaxEnabled)
-          vp.histOps[idx].push_back({vp.hist[idx] / before, true});
+          vp.histOps.push(idx, {vp.hist[idx] / before, true});
       } else {
         double effExponent =
-            ratioExponent + exponentEscalation * static_cast<double>(vp.histOps[idx].size());
+            ratioExponent + exponentEscalation * static_cast<double>(vp.histOps.size(idx));
         vp.hist[idx] =
             std::min(kHistoryCap, vp.hist[idx] * std::pow(static_cast<double>(usage) / cap, effExponent));
         if (relaxEnabled)
-          vp.histOps[idx].push_back({vp.hist[idx] / before, true});
+          vp.histOps.push(idx, {vp.hist[idx] / before, true});
       }
     } else {
       vp.streak[idx] = 0;
-      if (relaxEnabled && !vp.histOps[idx].empty()) {
-        HistOp op = vp.histOps[idx].back();
-        vp.histOps[idx].pop_back();
+      if (relaxEnabled && !vp.histOps.empty(idx)) {
+        HistOp op = vp.histOps.pop(idx);
         vp.hist[idx] = op.multiplicative ? std::max(1.0, vp.hist[idx] / op.amountOrFactor)
                                           : std::max(1.0, vp.hist[idx] - op.amountOrFactor);
       }
@@ -5236,10 +5267,10 @@ void updateViaHistory(const RoutingGrid &g, ViaPrices &vp, const RealViaUsage &r
 struct WirePrices {
   std::vector<double> histH, histV;
   std::vector<int> streakH, streakV;
-  std::vector<std::vector<HistOp>> histOpsH, histOpsV;
+  OpStacks histOpsH, histOpsV; // pd35route: sparse (see OpStacks)
   explicit WirePrices(const RoutingGrid &g)
       : histH(g.hCount(), 1.0), histV(g.vCount(), 1.0), streakH(g.hCount(), 0),
-        streakV(g.vCount(), 0), histOpsH(g.hCount()), histOpsV(g.vCount()) {}
+        streakV(g.vCount(), 0) {}
 };
 
 // Called once per round boundary, same discipline as updateViaHistory.
@@ -5257,7 +5288,7 @@ void updateWireHistory(const RoutingGrid &g, WirePrices &wp, const RealUsage &ru
                         bool scaleByOverflow = false, bool relaxEnabled = true,
                         double ratioExponent = 1.0, double exponentEscalation = 0.0) {
   auto update = [&](std::vector<double> &hist, std::vector<int> &streak,
-                     std::vector<std::vector<HistOp>> &histOps, const std::vector<long long> &usage,
+                     OpStacks &histOps, const std::vector<long long> &usage,
                      const std::vector<int> &cap) {
     for (size_t idx = 0; idx < usage.size(); ++idx) {
       long long u = usage[idx];
@@ -5271,25 +5302,24 @@ void updateWireHistory(const RoutingGrid &g, WirePrices &wp, const RealUsage &ru
         if (mode == HistMode::kAdditive) {
           hist[idx] = std::min(kHistoryCap, hist[idx] + histStep * ratio);
           if (relaxEnabled)
-            histOps[idx].push_back({hist[idx] - before, false});
+            histOps.push(idx, {hist[idx] - before, false});
         } else if (mode == HistMode::kMultiplicative) {
           hist[idx] = std::min(kHistoryCap, hist[idx] * (1.0 + (histFactor - 1.0) * ratio));
           if (relaxEnabled)
-            histOps[idx].push_back({hist[idx] / before, true});
+            histOps.push(idx, {hist[idx] / before, true});
         } else {
           double effExponent =
-              ratioExponent + exponentEscalation * static_cast<double>(histOps[idx].size());
+              ratioExponent + exponentEscalation * static_cast<double>(histOps.size(idx));
           hist[idx] = std::min(
               kHistoryCap,
               hist[idx] * std::pow(static_cast<double>(u) / std::max(1, c), effExponent));
           if (relaxEnabled)
-            histOps[idx].push_back({hist[idx] / before, true});
+            histOps.push(idx, {hist[idx] / before, true});
         }
       } else {
         streak[idx] = 0;
-        if (relaxEnabled && !histOps[idx].empty()) {
-          HistOp op = histOps[idx].back();
-          histOps[idx].pop_back();
+        if (relaxEnabled && !histOps.empty(idx)) {
+          HistOp op = histOps.pop(idx);
           hist[idx] = op.multiplicative ? std::max(1.0, hist[idx] / op.amountOrFactor)
                                          : std::max(1.0, hist[idx] - op.amountOrFactor);
         }
@@ -7623,7 +7653,9 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   RealUsage ru(g);
   RealViaUsage rvu(g);
   std::vector<int> viaCap = viaCapacityPerLayerPair(g);
-  ViaPrices vp(g);
+  // pd35route (memory): NTHU's cost never reads via-site history (spanCost
+  // counts vias only), so in that mode it is neither allocated nor updated.
+  ViaPrices vp(g, !nthu);
   WirePrices wireHist(g);
   bool trace = std::getenv("NV2ROUTE_TRACE") != nullptr;
 
@@ -7790,9 +7822,10 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     return rep;
   }
 
-  updateViaHistory(g, vp, rvu, viaCap, viaKnobs.step, viaKnobs.mode, viaKnobs.factor,
-                    viaKnobs.streakThreshold, viaKnobs.scaleByOverflow, viaKnobs.relaxEnabled,
-                    viaKnobs.ratioExponent, viaKnobs.exponentEscalation);
+  if (!nthu)
+    updateViaHistory(g, vp, rvu, viaCap, viaKnobs.step, viaKnobs.mode, viaKnobs.factor,
+                     viaKnobs.streakThreshold, viaKnobs.scaleByOverflow, viaKnobs.relaxEnabled,
+                     viaKnobs.ratioExponent, viaKnobs.exponentEscalation);
   if (wireAware)
     updateWireHistory(g, wireHist, ru, wireKnobs.step, wireKnobs.mode, wireKnobs.factor,
                       wireKnobs.streakThreshold, wireKnobs.scaleByOverflow, wireKnobs.relaxEnabled,
@@ -7903,9 +7936,10 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     } else {
       ++sinceImprovement;
     }
-    updateViaHistory(g, vp, rvu, viaCap, viaKnobs.step, viaKnobs.mode, viaKnobs.factor,
-                      viaKnobs.streakThreshold, viaKnobs.scaleByOverflow, viaKnobs.relaxEnabled,
-                      viaKnobs.ratioExponent, viaKnobs.exponentEscalation);
+    if (!nthu)
+      updateViaHistory(g, vp, rvu, viaCap, viaKnobs.step, viaKnobs.mode, viaKnobs.factor,
+                       viaKnobs.streakThreshold, viaKnobs.scaleByOverflow, viaKnobs.relaxEnabled,
+                       viaKnobs.ratioExponent, viaKnobs.exponentEscalation);
     if (wireAware)
       updateWireHistory(g, wireHist, ru, wireKnobs.step, wireKnobs.mode, wireKnobs.factor,
                         wireKnobs.streakThreshold, wireKnobs.scaleByOverflow,
@@ -13493,6 +13527,22 @@ void testPattern3D2008RemovesADetour() {
   gPattern3D = saved;
 }
 
+// pd35route: OpStacks, the sparse LIFO history stacks: pushes and pops per
+// index in last-in first-out order, sizes per index, nothing stored for an
+// index never pushed, and an emptied index forgotten.
+void testOpStacksIsASparseLifo() {
+  OpStacks st;
+  check(st.empty(7) && st.size(7) == 0 && st.m.empty(), "OpStacks: an untouched index is empty, nothing stored");
+  st.push(7, {1.5, false});
+  st.push(7, {2.0, true});
+  st.push(3, {0.25, false});
+  check(st.size(7) == 2 && st.size(3) == 1 && st.m.size() == 2, "OpStacks: sizes per index, two indices stored");
+  HistOp a = st.pop(7), b = st.pop(7);
+  check(a.amountOrFactor == 2.0 && a.multiplicative && b.amountOrFactor == 1.5 && !b.multiplicative &&
+            st.empty(7) && st.m.size() == 1,
+        "OpStacks: LIFO order; an emptied index is erased");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -13633,6 +13683,7 @@ int run() {
   testPattern3DRemovesADetour();
   testPattern3D2008FlipsToRemoveOverflow();
   testPattern3D2008RemovesADetour();
+  testOpStacksIsASparseLifo();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }

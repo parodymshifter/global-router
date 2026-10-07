@@ -8978,3 +8978,30 @@ score path, whose restore is skipped anyway.
 - A screen of all 16 ISPD 2008 benchmarks is queued (p108): layer
   assignment alone from each archived standard route (control) vs the
   same + 3 passes, with refinement, rebuild and WL recovery off.
+
+**Part 107, memory profile and fix.** A 5-second footprint profile of
+bsg_chip_rank (`runs/p107prof/profile.txt`):
+- the 2D stages hold 2.2 -> 2.85 GB;
+- layer assignment's start jumps to 7.3 GB and holds ~7.6 GB;
+- the pattern passes peak at 8.8 GB.
+
+The jump is layer assignment's per-3D-edge state (32M edges per
+direction):
+- an empty `std::vector<HistOp>` per wire edge for the LIFO history
+  undo log (1.5 GB);
+- via-site prices that NTHU mode never reads (1.0 GB);
+- history values and streaks (0.76 GB);
+- usage and capacities (1.25 GB).
+
+Fixes, behaviour-identical:
+- `OpStacks` keeps the undo logs only for edges or via sites that have
+  entries (self test `testOpStacksIsASparseLifo`; the existing exact
+  history tests pass).
+- `ViaPrices` is neither allocated nor updated in NTHU mode.
+
+Results:
+- bsg_chip_rank peak footprint **9.22 GB -> 6.82 GB (-26%)**, solution
+  byte-identical. mempool_tile_rank is byte-identical; adaptec1 at the
+  5/5/5 budget is byte-identical to pd23route.
+- That run's score, **109707507**, includes the pattern pass: **1.2%
+  below the best contest raw score** on BlackParrot_rank (#2, 110986781).
