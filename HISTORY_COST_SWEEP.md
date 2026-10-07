@@ -9203,3 +9203,37 @@ mempool_cluster).
 
 Byte-identical: mempool_tile_rank, ariane_68_rank, adaptec1 at the 5/5/5
 budget vs pd23route.
+
+## Part 113 -- 16-bit route records, and returning freed memory
+
+mempool_cluster_ranking on the Part 112 build:
+- input + Design 6.6 GB;
+- pattern stage end 22.9 GB (no spike), routed nets **15.3 GB** (10.1M
+  nets, ~320M tile edges at 48 bytes per Seg + ChargeRecord pair);
+- the slow tier stopped at 2D overflow 11 (PD9ROUTE_STOP_AT 300);
+- **the region stage reached 2D overflow 0 at round 15**: the design is
+  routable here.
+
+Path A at 0 <= 10 sent the low-memory fallback into B: A's result was
+spilled, freed and the start state read back. The footprint went 23.5 ->
+30.7 GB within 15 s and the watchdog stopped it.
+
+Fixes, behaviour-identical:
+- `Seg` and `ChargeRecord` now have 16-bit fields (were int): 12 bytes
+  each instead of 24. Int constructors keep every brace initialisation;
+  `checkSegRange` refuses a design whose grid, layers or width + spacing
+  would not fit.
+- `releaseFreedMemory()` (macOS `malloc_zone_pressure_relief`) after each
+  large free: the fallback's state swaps, the pattern stage's cleanup,
+  the 2D data before layer assignment. macOS's allocator otherwise keeps
+  freed pages in the footprint.
+
+Byte-identical: mempool_tile_rank (also with `PD35ROUTE_LOWMEM=1`),
+ariane_68_rank, adaptec1 at the 5/5/5 budget vs pd23route.
+
+Peak footprint, all Parts 110-113:
+
+| design | Part 109 | now |
+|---|---|---|
+| mempool_tile_rank | 0.75 GB | **0.28 GB** |
+| ariane_68_rank | 1.77 GB | **0.51 GB** |

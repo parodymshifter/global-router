@@ -1213,6 +1213,7 @@
 #include <thread>
 #ifdef __APPLE__
 #include <mach/mach.h>
+#include <malloc/malloc.h>
 #endif
 #include <string>
 #include <unordered_map>
@@ -2082,13 +2083,41 @@ SteinerResult exactSteinerTree(const std::vector<Point> &pts) {
   return result;
 }
 
+// pd35route (memory, Part 113): 16-bit fields (were int). A route keeps a
+// Seg and a ChargeRecord per tile edge -- ~320M of each on
+// mempool_cluster_ranking, 15.3 GB at 48 bytes a pair -- and every tile
+// coordinate, layer and charge amount here fits 16 bits (checkSegRange
+// refuses a design where one would not). The int constructors keep every
+// existing brace initialisation working; arithmetic promotes to int.
 struct Seg {
-  int x1, y1, l1, x2, y2, l2;
+  int16_t x1, y1, l1, x2, y2, l2;
+  Seg() = default;
+  Seg(int ax1, int ay1, int al1, int ax2, int ay2, int al2)
+      : x1(static_cast<int16_t>(ax1)), y1(static_cast<int16_t>(ay1)), l1(static_cast<int16_t>(al1)),
+        x2(static_cast<int16_t>(ax2)), y2(static_cast<int16_t>(ay2)), l2(static_cast<int16_t>(al2)) {}
 };
 struct ChargeRecord {
   bool horizontal;
-  int cross, a, b, layer, amount;
+  int16_t cross, a, b, layer, amount;
+  ChargeRecord() = default;
+  ChargeRecord(bool h, int c, int aa, int bb, int l, int am)
+      : horizontal(h), cross(static_cast<int16_t>(c)), a(static_cast<int16_t>(aa)), b(static_cast<int16_t>(bb)),
+        layer(static_cast<int16_t>(l)), amount(static_cast<int16_t>(am)) {}
 };
+
+// Fails loudly on a design whose tile coordinates, layers or per-net charge
+// amounts (width + spacing) would not fit Seg's and ChargeRecord's 16 bits.
+void checkSegRange(const Design &d) {
+  const int lim = 32767;
+  bool ok = d.grid.nx <= lim && d.grid.ny <= lim && d.grid.nLayers <= lim;
+  int maxSpacing = 0;
+  for (int sp : d.grid.minSpacing)
+    maxSpacing = std::max(maxSpacing, sp);
+  for (const Net &n : d.nets)
+    ok = ok && static_cast<long long>(n.minWidth) + maxSpacing <= lim;
+  if (!ok)
+    fail("design too large for 16-bit route records (grid, layers or width + spacing above 32767)");
+}
 
 void undoCharge(const RoutingGrid &g, Usage &u, const ChargeRecord &c) {
   if (c.horizontal) {
@@ -4070,6 +4099,17 @@ long long footprintBytes() {
 #endif
   return -1;
 }
+// pd35route (memory, Part 113): hands memory just freed back to the OS.
+// macOS's allocator otherwise keeps freed pages, still counted in the
+// footprint -- after the fallback freed one 15 GB state and read another,
+// mempool_cluster_ranking's footprint went 23.5 -> 30.7 GB. No routing
+// decision depends on it.
+void releaseFreedMemory() {
+#ifdef __APPLE__
+  malloc_zone_pressure_relief(nullptr, 0);
+#endif
+}
+
 long long netsBytes(const std::vector<RoutedNet> &nets) {
   long long b = static_cast<long long>(nets.capacity() * sizeof(RoutedNet));
   for (const RoutedNet &rn : nets)
@@ -4452,6 +4492,7 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
     }
     aFinal.write(nets, base);
     std::vector<RoutedNet>().swap(nets);
+    releaseFreedMemory();
     std::vector<RoutedNet> b;
     start.read(b, base);
     RegionSettings regionB = region;
@@ -4471,6 +4512,7 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
       nets = std::move(b);
     } else {
       std::vector<RoutedNet>().swap(b);
+      releaseFreedMemory();
       aFinal.read(nets, base);
     }
     return fr;
@@ -4721,6 +4763,7 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
   std::vector<Piece>().swap(pieces);
   std::vector<int64_t>().swap(pg.h);
   std::vector<int64_t>().swap(pg.v);
+  releaseFreedMemory();
   std::vector<int> netCodes;
   size_t nextPiece = 0;
   for (size_t i = 0; i < nets.size(); ++i) {
@@ -9774,7 +9817,7 @@ void testCapacityAwareLayerChoiceReactsToRealUsageNotJustPreference() {
   auto wireLayer = [](const RoutedNet &rn) {
     for (const Seg &s : rn.segs)
       if (s.l1 == s.l2 && (s.x1 != s.x2 || s.y1 != s.y2))
-        return s.l1;
+        return static_cast<int>(s.l1);
     return -1;
   };
   check(wireLayer(*netA) == 0,
@@ -14680,6 +14723,7 @@ int main(int argc, char **argv) {
     rs.enabled = true;
     gSlowReclaim.settings = rs;
   }
+  checkSegRange(d); // pd35route: 16-bit route records
   // pd35route (memory): low-memory mode (see gLowMem).
   {
     std::string lm = std::getenv("PD35ROUTE_LOWMEM") ? std::getenv("PD35ROUTE_LOWMEM") : "auto";
@@ -14902,6 +14946,7 @@ int main(int argc, char **argv) {
       std::vector<std::pair<int, int>>().swap(rn.mst);
       std::vector<Point>().swap(rn.pts);
     }
+    releaseFreedMemory();
     memTrace("freeing the 2D-only net data", &rep.nets);
   }
   if (!twoDOnly)
