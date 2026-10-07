@@ -1210,6 +1210,9 @@
 #include <cstdio>
 #include <atomic>
 #include <thread>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -1262,6 +1265,37 @@ struct HistOp {
   double amountOrFactor;
   bool multiplicative;
 };
+
+// pd35route (memory): the LIFO history stacks, kept only for the edges or
+// via sites that have one -- a std::vector per element cost 24 bytes on
+// every one of tens of millions, used by the few that ever overflow
+// (bsg_chip_rank: 2.2 GB of empty vectors; Part 107). Same pushes, pops and
+// sizes, so the same history arithmetic.
+struct OpStacks {
+  std::unordered_map<size_t, std::vector<HistOp>> m;
+  void push(size_t i, HistOp op) { m[i].push_back(op); }
+  bool empty(size_t i) const {
+    if (m.empty())
+      return true;
+    auto it = m.find(i);
+    return it == m.end() || it->second.empty();
+  }
+  size_t size(size_t i) const {
+    if (m.empty())
+      return 0;
+    auto it = m.find(i);
+    return it == m.end() ? 0 : it->second.size();
+  }
+  HistOp pop(size_t i) {
+    auto it = m.find(i);
+    HistOp op = it->second.back();
+    it->second.pop_back();
+    if (it->second.empty())
+      m.erase(it);
+    return op;
+  }
+};
+
 
 // ---------------------------------------------------------------------------
 // This file's own new mechanism: collapse the 3D grid to a single 2D plane
@@ -1343,11 +1377,10 @@ struct Prices {
   // Empty for almost every edge (only edges that have ever gone over
   // capacity accumulate entries), so the memory cost is proportional to
   // actual congestion, not grid size.
-  std::vector<std::vector<HistOp>> histOpsH, histOpsV;
+  OpStacks histOpsH, histOpsV; // pd35route: sparse (see OpStacks)
   explicit Prices(const RoutingGrid &g)
       : h(h2dCount(g), 1.0), v(v2dCount(g), 1.0), histH(h2dCount(g), 1.0), histV(v2dCount(g), 1.0),
-        streakH(h2dCount(g), 0), streakV(v2dCount(g), 0), histOpsH(h2dCount(g)),
-        histOpsV(v2dCount(g)) {}
+        streakH(h2dCount(g), 0), streakV(v2dCount(g), 0) {}
 
   // This file's own mechanism: present-demand pricing state. Unused (and
   // left empty) under kLambda. `live` points at route()'s one Usage object,
@@ -1686,25 +1719,24 @@ void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double hist
       if (mode == HistMode::kAdditive) {
         pr.histH[i] = std::min(kHistoryCap, pr.histH[i] + histStep * ratio);
         if (relaxEnabled)
-          pr.histOpsH[i].push_back({pr.histH[i] - before, false});
+          pr.histOpsH.push(i, {pr.histH[i] - before, false});
       } else if (mode == HistMode::kMultiplicative) {
         pr.histH[i] = std::min(kHistoryCap, pr.histH[i] * (1.0 + (histFactor - 1.0) * ratio));
         if (relaxEnabled)
-          pr.histOpsH[i].push_back({pr.histH[i] / before, true});
+          pr.histOpsH.push(i, {pr.histH[i] / before, true});
       } else {
         double effExponent =
-            ratioExponent + exponentEscalation * static_cast<double>(pr.histOpsH[i].size());
+            ratioExponent + exponentEscalation * static_cast<double>(pr.histOpsH.size(i));
         pr.histH[i] = std::min(
             kHistoryCap,
             pr.histH[i] * std::pow(static_cast<double>(u.h[i]) / u.capH[i], effExponent));
         if (relaxEnabled)
-          pr.histOpsH[i].push_back({pr.histH[i] / before, true});
+          pr.histOpsH.push(i, {pr.histH[i] / before, true});
       }
     } else {
       pr.streakH[i] = 0;
-      if (relaxEnabled && !pr.histOpsH[i].empty()) {
-        HistOp op = pr.histOpsH[i].back();
-        pr.histOpsH[i].pop_back();
+      if (relaxEnabled && !pr.histOpsH.empty(i)) {
+        HistOp op = pr.histOpsH.pop(i);
         pr.histH[i] = op.multiplicative ? std::max(1.0, pr.histH[i] / op.amountOrFactor)
                                          : std::max(1.0, pr.histH[i] - op.amountOrFactor);
       }
@@ -1722,25 +1754,24 @@ void updateHistory(const RoutingGrid &g, Prices &pr, const Usage &u, double hist
       if (mode == HistMode::kAdditive) {
         pr.histV[i] = std::min(kHistoryCap, pr.histV[i] + histStep * ratio);
         if (relaxEnabled)
-          pr.histOpsV[i].push_back({pr.histV[i] - before, false});
+          pr.histOpsV.push(i, {pr.histV[i] - before, false});
       } else if (mode == HistMode::kMultiplicative) {
         pr.histV[i] = std::min(kHistoryCap, pr.histV[i] * (1.0 + (histFactor - 1.0) * ratio));
         if (relaxEnabled)
-          pr.histOpsV[i].push_back({pr.histV[i] / before, true});
+          pr.histOpsV.push(i, {pr.histV[i] / before, true});
       } else {
         double effExponent =
-            ratioExponent + exponentEscalation * static_cast<double>(pr.histOpsV[i].size());
+            ratioExponent + exponentEscalation * static_cast<double>(pr.histOpsV.size(i));
         pr.histV[i] = std::min(
             kHistoryCap,
             pr.histV[i] * std::pow(static_cast<double>(u.v[i]) / u.capV[i], effExponent));
         if (relaxEnabled)
-          pr.histOpsV[i].push_back({pr.histV[i] / before, true});
+          pr.histOpsV.push(i, {pr.histV[i] / before, true});
       }
     } else {
       pr.streakV[i] = 0;
-      if (relaxEnabled && !pr.histOpsV[i].empty()) {
-        HistOp op = pr.histOpsV[i].back();
-        pr.histOpsV[i].pop_back();
+      if (relaxEnabled && !pr.histOpsV.empty(i)) {
+        HistOp op = pr.histOpsV.pop(i);
         pr.histV[i] = op.multiplicative ? std::max(1.0, pr.histV[i] / op.amountOrFactor)
                                          : std::max(1.0, pr.histV[i] - op.amountOrFactor);
       }
@@ -2100,6 +2131,32 @@ struct RoutedNet {
 // round k is init + k*grow. PerNet widens only the nets that stay
 // overflowed: a net starts at init and grows by grow after each round it
 // is still overflowed. Both non-Fixed modes clamp at cap.
+// pd35route (memory): a delta snapshot of a vector of routed nets. Instead
+// of copying every net at a "best state so far" point, it keeps the
+// original of each net only when that net is first modified after the
+// point -- the state at the point is the current nets with those originals
+// put back. Callers must save(i) before *any* change to nets[i] (route,
+// charges, flags, margin). mark() makes the current state the snapshot;
+// restore() returns nets to it exactly. Memory scales with the nets a
+// stage actually changes, not with the design (Part 110).
+struct NetDelta {
+  std::unordered_map<size_t, RoutedNet> orig;
+  void save(const std::vector<RoutedNet> &nets, size_t i) {
+    if (orig.find(i) == orig.end())
+      orig.emplace(i, nets[i]);
+  }
+  void saveAll(const std::vector<RoutedNet> &nets) {
+    for (size_t i = 0; i < nets.size(); ++i)
+      save(nets, i);
+  }
+  void mark() { orig.clear(); }
+  void restore(std::vector<RoutedNet> &nets) {
+    for (auto &kv : orig)
+      nets[kv.first] = std::move(kv.second);
+    orig.clear();
+  }
+};
+
 enum class BoxMode { Fixed, Round, PerNet };
 
 struct BoxGrowth {
@@ -3431,7 +3488,7 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
   long long total = totalOverflow(g, usage);
   rep.before = rep.after = total;
   std::vector<long long> bestAfter{rep.after};
-  std::vector<RoutedNet> best = nets;
+  NetDelta best; // pd35route: the best state as a delta (was a full copy)
   for (int it = 0; it < rs.iters && total > 0; ++it) {
     std::vector<long long> ov(nets.size(), 0);
     std::vector<int> bbox(nets.size(), 0);
@@ -3456,6 +3513,7 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
       RoutedNet &rn = nets[i];
       if (!netOverflowed(g, usage, rn))
         continue; // an earlier reroute this iteration already cleared it
+      best.save(nets, i);
       if (rs.pieces) {
         PieceStats ps = rerouteNetPieces(g, usage, prices, lp, region, rn, margin, rs.accept, nullptr);
         if (ps.ok) {
@@ -3494,7 +3552,7 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
                 << " (rerouted " << rerouted << ", reverted " << reverted << ")\n";
     if (total < rep.after) {
       rep.after = total;
-      best = nets;
+      best.mark();
     }
     bestAfter.push_back(rep.after);
     if (total > 0 && plateauReached(bestAfter, rs.plateau, rs.plateauGain, rs.plateauMin)) {
@@ -3502,7 +3560,7 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
       break;
     }
   }
-  nets = std::move(best);
+  best.restore(nets);
   rep.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - stageStart).count();
   return rep;
 }
@@ -3991,7 +4049,44 @@ bool detourTraceOn() {
   return v && std::string(v) == "1";
 }
 
+// pd35route (memory): PD35ROUTE_MEMTRACE=1 prints the process's memory
+// footprint (the figure /usr/bin/time reports as "peak memory footprint",
+// read live) and the heap bytes held by the routed nets at each stage
+// boundary. Diagnostic only; no routing decision reads it.
+bool memTraceOn() {
+  static const bool on = [] {
+    const char *v = std::getenv("PD35ROUTE_MEMTRACE");
+    return v && std::string(v) == "1";
+  }();
+  return on;
+}
+long long footprintBytes() {
+#ifdef __APPLE__
+  task_vm_info_data_t info;
+  mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count) == KERN_SUCCESS)
+    return static_cast<long long>(info.phys_footprint);
+#endif
+  return -1;
+}
+long long netsBytes(const std::vector<RoutedNet> &nets) {
+  long long b = static_cast<long long>(nets.capacity() * sizeof(RoutedNet));
+  for (const RoutedNet &rn : nets)
+    b += static_cast<long long>(rn.pts.capacity() * sizeof(Point) + rn.mst.capacity() * sizeof(std::pair<int, int>) +
+                                rn.segs.capacity() * sizeof(Seg) + rn.charges.capacity() * sizeof(ChargeRecord));
+  return b;
+}
+void memTrace(const char *stage, const std::vector<RoutedNet> *nets = nullptr) {
+  if (!memTraceOn())
+    return;
+  std::cerr << "mem after " << stage << ": footprint " << footprintBytes() / (1 << 20) << " MB";
+  if (nets)
+    std::cerr << ", routed nets " << netsBytes(*nets) / (1 << 20) << " MB (" << nets->size() << ")";
+  std::cerr << "\n";
+}
+
 void detourTrace(const char *stage, const std::vector<RoutedNet> &nets) {
+  memTrace(stage, &nets);
   if (!detourTraceOn())
     return;
   DetourStats st = detourStats(nets);
@@ -4249,12 +4344,136 @@ struct FallbackReport {
 };
 
 // Runs both paths from the state in `nets` and leaves the kept one there.
+// pd35route (memory): spilling a vector of routed nets to an anonymous
+// temporary file (std::tmpfile: deleted when closed) and reading it back.
+// The net pointer is stored as its index into the Design's nets.
+struct NetSpill {
+  FILE *f = nullptr;
+  NetSpill() = default;
+  NetSpill(const NetSpill &) = delete;
+  NetSpill &operator=(const NetSpill &) = delete;
+  ~NetSpill() {
+    if (f)
+      std::fclose(f);
+  }
+  template <class T> void putVec(const std::vector<T> &v) {
+    uint64_t n = v.size();
+    std::fwrite(&n, sizeof n, 1, f);
+    if (n)
+      std::fwrite(v.data(), sizeof(T), n, f);
+  }
+  template <class T> void getVec(std::vector<T> &v) {
+    uint64_t n = 0;
+    if (std::fread(&n, sizeof n, 1, f) != 1)
+      fail("net spill: short read");
+    v.resize(n);
+    if (n && std::fread(v.data(), sizeof(T), n, f) != n)
+      fail("net spill: short read");
+  }
+  void write(const std::vector<RoutedNet> &nets, const Net *base) {
+    if (f)
+      std::fclose(f);
+    f = std::tmpfile();
+    if (!f)
+      fail("net spill: cannot create a temporary file");
+    uint64_t n = nets.size();
+    std::fwrite(&n, sizeof n, 1, f);
+    for (const RoutedNet &rn : nets) {
+      int64_t idx = rn.net ? static_cast<int64_t>(rn.net - base) : -1;
+      int8_t flags = static_cast<int8_t>((rn.giant ? 1 : 0) | (rn.escalated ? 2 : 0));
+      int32_t margin = rn.boxMargin;
+      std::fwrite(&idx, sizeof idx, 1, f);
+      std::fwrite(&flags, sizeof flags, 1, f);
+      std::fwrite(&margin, sizeof margin, 1, f);
+      putVec(rn.pts);
+      putVec(rn.mst);
+      putVec(rn.segs);
+      putVec(rn.charges);
+    }
+    if (std::fflush(f) != 0 || std::ferror(f))
+      fail("net spill: write failed (disk full?)");
+  }
+  void read(std::vector<RoutedNet> &nets, const Net *base) {
+    std::rewind(f);
+    uint64_t n = 0;
+    if (std::fread(&n, sizeof n, 1, f) != 1)
+      fail("net spill: short read");
+    nets.assign(n, RoutedNet());
+    for (RoutedNet &rn : nets) {
+      int64_t idx = 0;
+      int8_t flags = 0;
+      int32_t margin = 0;
+      if (std::fread(&idx, sizeof idx, 1, f) != 1 || std::fread(&flags, sizeof flags, 1, f) != 1 ||
+          std::fread(&margin, sizeof margin, 1, f) != 1)
+        fail("net spill: short read");
+      rn.net = idx >= 0 ? base + idx : nullptr;
+      rn.giant = flags & 1;
+      rn.escalated = flags & 2;
+      rn.boxMargin = margin;
+      getVec(rn.pts);
+      getVec(rn.mst);
+      getVec(rn.segs);
+      getVec(rn.charges);
+    }
+  }
+};
+
+// pd35route (memory): low-memory mode (PD35ROUTE_LOWMEM = auto (default:
+// on above kLowMemNets nets) | 0 | 1). The reclaim fallback then runs its
+// paths in sequence (A, then B only at or below the threshold -- the same
+// routes as the parallel order, Part 89) and keeps the states it is not
+// working on in a temporary file instead of in memory.
+constexpr size_t kLowMemNets = 2000000;
+bool gLowMem = false;
+
 FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets, const ReclaimSettings &reclaim,
                                    const RegionSettings &region, const RefineSettings &refine, bool trace,
                                    bool bFirst = false, long long aMax = -1, bool parallel = false,
                                    bool vcapB = true) {
   FallbackReport fr;
   const RoutingGrid &g = d.grid;
+  if (gLowMem && aMax >= 0) {
+    // pd35route (memory): A in place; B's start state and, while B runs,
+    // A's result live in temporary files -- one state in memory at a time.
+    const Net *base = d.nets.data();
+    NetSpill start, aFinal;
+    start.write(nets, base);
+    if (region.enabled)
+      fr.regionA = regionNegotiate(d, nets, region, trace);
+    if (refine.enabled)
+      fr.refineA = refine2D(d, nets, refine, trace);
+    fr.overflowA = totalOverflow(g, usageFromCharges(g, nets));
+    fr.wireA = totalWire2D(nets);
+    if (fr.overflowA > aMax) {
+      fr.ranB = false;
+      fr.tookB = false;
+      return fr;
+    }
+    aFinal.write(nets, base);
+    std::vector<RoutedNet>().swap(nets);
+    std::vector<RoutedNet> b;
+    start.read(b, base);
+    RegionSettings regionB = region;
+    if (!vcapB)
+      regionB.vcapTracks = 0;
+    ReclaimSettings rs = reclaim;
+    rs.enabled = true;
+    fr.reclaim = reclaimDetours(d, b, rs);
+    if (region.enabled)
+      fr.regionB = regionNegotiate(d, b, regionB, trace);
+    if (refine.enabled)
+      fr.refineB = refine2D(d, b, refine, trace);
+    fr.overflowB = totalOverflow(g, usageFromCharges(g, b));
+    fr.wireB = totalWire2D(b);
+    fr.tookB = fallbackPrefersB(fr.overflowA, fr.wireA, fr.overflowB, fr.wireB);
+    if (fr.tookB) {
+      nets = std::move(b);
+    } else {
+      std::vector<RoutedNet>().swap(b);
+      aFinal.read(nets, base);
+    }
+    return fr;
+  }
   std::vector<RoutedNet> b = nets;
   // pd23route: the reclaim path's region settings (no virtual capacity
   // unless vcapB).
@@ -4601,11 +4820,18 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   // pd11route: the batched pattern stage replaces phase A and the cleanup
   // pass (maxFastRounds -> 0 skips phase A's loop below).
   const bool patternOn = pattern && pattern->enabled;
+  // pd35route (memory): with the pattern stage on (both standards), the
+  // slow tier's best state is a NetDelta instead of a full copy of every
+  // net in rep.nets; rep.nets is filled once, at the return. The
+  // fast-tier path (pattern off) keeps its copies unchanged.
+  const bool deltaBest = patternOn;
+  NetDelta slowBest;
   if (patternOn) {
     PatternStageReport psr = patternStage2D(g, nets, usage, prices, *pattern, trace);
     std::cerr << "pattern stage (" << psr.backend << "): " << psr.pieces << " pieces, " << psr.rounds
               << " rounds, 2D overflow " << psr.overflow << "\n";
-    rep.nets = nets;
+    // pd35route (memory): the best state is kept as a delta from here on
+    // (deltaBest below), not as a full copy in rep.nets.
     rep.bestOverflow = psr.overflow;
     rep.roundsRun = psr.rounds;
     maxFastRounds = 0;
@@ -4656,13 +4882,14 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       break;
   }
 
-  if (rep.nets.empty())
+  if (!deltaBest && rep.nets.empty())
     rep.nets = nets; // never improved on the initial max; still need output
 
   // Rebuild usage/nets to match the fast tier's best snapshot before the
   // cleanup pass and escalation touch anything -- the loop may have ended
   // on a later, worse round than its best (see mroute.cpp's identical note).
-  nets = rep.nets;
+  if (!deltaBest)
+    nets = rep.nets;
   usage = Usage(g);
   for (const RoutedNet &rn : nets)
     for (const ChargeRecord &c : rn.charges) {
@@ -4676,7 +4903,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
 
   if (!patternOn)
     relaxedCleanup(g, prices, usage, lp, epsilon, rep);
-  nets = rep.nets;
+  if (!deltaBest)
+    nets = rep.nets;
   usage = Usage(g);
   for (const RoutedNet &rn : nets)
     for (const ChargeRecord &c : rn.charges) {
@@ -4698,6 +4926,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
 
   if (rep.bestOverflow == 0) {
     rep.convergedToZero = true;
+    if (deltaBest)
+      rep.nets = std::move(nets);
     return rep;
   }
 
@@ -4718,14 +4948,18 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   // caught the regression and the final output was still correct (227914,
   // matching the fast tier alone), but ~150s were spent finding nothing.
   for (RoutedNet &rn : nets)
-    if (!rn.giant && netOverflowed(g, usage, rn))
+    if (!rn.giant && netOverflowed(g, usage, rn)) {
+      if (deltaBest)
+        slowBest.save(nets, static_cast<size_t>(&rn - nets.data()));
       rn.escalated = true;
+    }
   int initialEscalated = 0;
   for (const RoutedNet &rn : nets)
     if (rn.escalated)
       ++initialEscalated;
   if (trace)
     std::cerr << "escalating " << initialEscalated << " of " << nets.size() << " nets\n";
+  memTrace("escalation (rep.nets is the best snapshot)", &nets);
 
   roundsSinceImprovement = 0;
   bool reclaimedAtStop = false; // pd18route
@@ -4738,12 +4972,17 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     for (RoutedNet &rn : nets) {
       if (rn.giant)
         continue;
-      if (!rn.escalated && netOverflowed(g, usage, rn))
+      if (!rn.escalated && netOverflowed(g, usage, rn)) {
+        if (deltaBest)
+          slowBest.save(nets, static_cast<size_t>(&rn - nets.data()));
         rn.escalated = true;
+      }
       if (!rn.escalated)
         continue; // fast tier already has this net legal; leave it alone
       if (round > 0 && !netOverflowed(g, usage, rn))
         continue; // already resolved by an earlier round's accepted move
+      if (deltaBest) // before the margin, the route, anything
+        slowBest.save(nets, static_cast<size_t>(&rn - nets.data()));
 
       // This file's own mechanism: pick this search's box margin.
       assignBoxMarginForSearch(box, round, rn);
@@ -4830,7 +5069,10 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     }
     if (overflow < rep.bestOverflow) {
       rep.bestOverflow = overflow;
-      rep.nets = nets;
+      if (deltaBest)
+        slowBest.mark();
+      else
+        rep.nets = nets;
       roundsSinceImprovement = 0;
     } else {
       ++roundsSinceImprovement;
@@ -4858,6 +5100,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     if (reclaimNow) {
       if (stopNow)
         reclaimedAtStop = true;
+      if (deltaBest)
+        slowBest.saveAll(nets); // reclaim may change any net
       ReclaimReport rr = reclaimDetours(d, nets, gSlowReclaim.settings);
       usage = usageFromCharges(g, nets);
       rep.bestOverflow = std::numeric_limits<long long>::max(); // post-reclaim states are what counts
@@ -4873,6 +5117,10 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
         std::cerr << "slow tier stopped: 2D overflow " << overflow << " <= PD9ROUTE_STOP_AT " << stopAt << "\n";
       break;
     }
+  }
+  if (deltaBest) { // the best state, from the delta
+    slowBest.restore(nets);
+    rep.nets = std::move(nets);
   }
   rep.slowReclaims = slowReclaims;
   rep.escalatedCount = 0;
@@ -4920,8 +5168,10 @@ struct RealLayerPlan {
 // Fresh, independent per-real-layer usage tracking -- this file's own
 // Usage/Prices are sized only for the synthetic 2D grid (h2dCount/
 // v2dCount) and cannot represent real per-layer state at all.
+// pd35route (memory): 4-byte counters (were 8): a layer edge's usage is a
+// few thousand at most; checkIndexWidth guards the index range.
 struct RealUsage {
-  std::vector<long long> h, v;
+  std::vector<int32_t> h, v;
   explicit RealUsage(const RoutingGrid &g) : h(g.hCount(), 0), v(g.vCount(), 0) {}
 };
 
@@ -4962,7 +5212,7 @@ std::vector<int> viaCapacityPerLayerPair(const RoutingGrid &g) {
 // mroute.cpp's own convention -- via capacity is about physical site
 // count, not net width, unlike wire capacity).
 struct RealViaUsage {
-  std::vector<long long> usage;
+  std::vector<int32_t> usage; // pd35route: 4-byte (was 8)
   explicit RealViaUsage(const RoutingGrid &g) : usage(viaCount(g), 0) {}
 };
 
@@ -4979,14 +5229,25 @@ struct RealViaUsage {
 // exact amount added, since wire charges are width-dependent, not a flat
 // +1; rvu.usage entries are always a flat +1 so a bare index suffices).
 // ---------------------------------------------------------------------------
+// pd35route (memory): 8-byte charge entries (were 16) and 4-byte via
+// indices (were 8); every layer-edge and via-site index fits 32 bits on any
+// grid checkIndexWidth accepts.
 struct ChargeEntry {
-  size_t idx;
-  long long amount;
+  uint32_t idx;
+  int32_t amount;
 };
 struct NetCharge {
   std::vector<ChargeEntry> ruH, ruV;
-  std::vector<size_t> rvuIdx;
+  std::vector<uint32_t> rvuIdx;
 };
+
+// Fails loudly on a grid whose layer-edge or via-site count does not fit
+// the 32-bit indices above.
+void checkIndexWidth(const RoutingGrid &g) {
+  const size_t lim = std::numeric_limits<uint32_t>::max();
+  if (g.hCount() >= lim || g.vCount() >= lim || viaCount(g) >= lim)
+    fail("grid too large for 32-bit layer-edge indices");
+}
 
 void undoCharge(RealUsage &ru, RealViaUsage &rvu, const NetCharge &c) {
   for (const ChargeEntry &e : c.ruH)
@@ -5068,11 +5329,11 @@ void chargeViaDemand(const RoutingGrid &g, RealUsage &ru, const std::vector<Seg>
         if (h) {
           ru.h[idx] += amount;
           if (charge)
-            charge->ruH.push_back({idx, amount});
+            charge->ruH.push_back({static_cast<uint32_t>(idx), static_cast<int32_t>(amount)});
         } else {
           ru.v[idx] += amount;
           if (charge)
-            charge->ruV.push_back({idx, amount});
+            charge->ruV.push_back({static_cast<uint32_t>(idx), static_cast<int32_t>(amount)});
         }
       });
     }
@@ -5099,6 +5360,17 @@ struct ScoreModel {
   std::vector<double> w;          // per layer
   double unitVia = 0;
   std::vector<double> capH, capV; // tracks, per edge index (the GCell's)
+  // pd35route (memory): when a design has at most 256 distinct capacity
+  // values (mempool_cluster: 88), each edge keeps a 1-byte index into
+  // capTable instead of a double -- the same doubles, an eighth of the
+  // memory. capH / capV are then empty (tests fill them directly).
+  std::vector<uint8_t> capIdxH, capIdxV;
+  std::vector<double> capTable;
+  double capOf(bool h, size_t i) const {
+    if (h)
+      return capIdxH.empty() ? capH[i] : capTable[capIdxH[i]];
+    return capIdxV.empty() ? capV[i] : capTable[capIdxV[i]];
+  }
   // pd35route: the pattern reroute's wirelength term.
   double unitLength = 0;
   std::vector<long long> xPitch, yPitch;
@@ -5122,7 +5394,7 @@ inline int edgeLayerOf(const RoutingGrid &g, bool h, size_t idx) {
 
 // The score change of adding `amount` half tracks to an edge now at `cur`.
 inline double scoreMarginal(const RoutingGrid &g, bool h, size_t idx, long long cur, int amount) {
-  double c = h ? gScore.capH[idx] : gScore.capV[idx];
+  double c = gScore.capOf(h, idx);
   return gScore.w[edgeLayerOf(g, h, idx)] * (g24Loss(cur + amount, c) - g24Loss(cur, c));
 }
 
@@ -5137,9 +5409,9 @@ double localScore(const RoutingGrid &g, const RealUsage &ru, const NetCharge &a,
   }
   double total = 0;
   for (size_t idx : hs)
-    total += gScore.w[edgeLayerOf(g, true, idx)] * g24Loss(ru.h[idx], gScore.capH[idx]);
+    total += gScore.w[edgeLayerOf(g, true, idx)] * g24Loss(ru.h[idx], gScore.capOf(true, idx));
   for (size_t idx : vs)
-    total += gScore.w[edgeLayerOf(g, false, idx)] * g24Loss(ru.v[idx], gScore.capV[idx]);
+    total += gScore.w[edgeLayerOf(g, false, idx)] * g24Loss(ru.v[idx], gScore.capOf(false, idx));
   return total;
 }
 
@@ -5165,36 +5437,6 @@ void applyCharge(RealUsage &ru, RealViaUsage &rvu, const NetCharge &c) {
 // direction-split pair. Reuses HistOp and kHistoryCap, already defined
 // above for the 2D stage's own Prices/updateHistory, unchanged.
 // ---------------------------------------------------------------------------
-// pd35route (memory): the LIFO history stacks, kept only for the edges or
-// via sites that have one -- a std::vector per element cost 24 bytes on
-// every one of tens of millions, used by the few that ever overflow
-// (bsg_chip_rank: 2.2 GB of empty vectors; Part 107). Same pushes, pops and
-// sizes, so the same history arithmetic.
-struct OpStacks {
-  std::unordered_map<size_t, std::vector<HistOp>> m;
-  void push(size_t i, HistOp op) { m[i].push_back(op); }
-  bool empty(size_t i) const {
-    if (m.empty())
-      return true;
-    auto it = m.find(i);
-    return it == m.end() || it->second.empty();
-  }
-  size_t size(size_t i) const {
-    if (m.empty())
-      return 0;
-    auto it = m.find(i);
-    return it == m.end() ? 0 : it->second.size();
-  }
-  HistOp pop(size_t i) {
-    auto it = m.find(i);
-    HistOp op = it->second.back();
-    it->second.pop_back();
-    if (it->second.empty())
-      m.erase(it);
-    return op;
-  }
-};
-
 struct ViaPrices {
   std::vector<double> hist;
   std::vector<int> streak;
@@ -5266,7 +5508,9 @@ void updateViaHistory(const RoutingGrid &g, ViaPrices &vp, const RealViaUsage &r
 // ---------------------------------------------------------------------------
 struct WirePrices {
   std::vector<double> histH, histV;
-  std::vector<int> streakH, streakV;
+  // pd35route (memory): 1-byte saturating streaks (were int); identical for
+  // any streak threshold <= 255 (updateWireHistory refuses more).
+  std::vector<uint8_t> streakH, streakV;
   OpStacks histOpsH, histOpsV; // pd35route: sparse (see OpStacks)
   explicit WirePrices(const RoutingGrid &g)
       : histH(g.hCount(), 1.0), histV(g.vCount(), 1.0), streakH(g.hCount(), 0),
@@ -5287,14 +5531,17 @@ void updateWireHistory(const RoutingGrid &g, WirePrices &wp, const RealUsage &ru
                         HistMode mode, double histFactor, int streakThreshold = 1,
                         bool scaleByOverflow = false, bool relaxEnabled = true,
                         double ratioExponent = 1.0, double exponentEscalation = 0.0) {
-  auto update = [&](std::vector<double> &hist, std::vector<int> &streak,
-                     OpStacks &histOps, const std::vector<long long> &usage,
+  if (streakThreshold > 255)
+    fail("wire history streak threshold above 255 (1-byte streaks)");
+  auto update = [&](std::vector<double> &hist, std::vector<uint8_t> &streak,
+                     OpStacks &histOps, const std::vector<int32_t> &usage,
                      const std::vector<int> &cap) {
     for (size_t idx = 0; idx < usage.size(); ++idx) {
       long long u = usage[idx];
       int c = cap[idx];
       if (u > c) {
-        ++streak[idx];
+        if (streak[idx] < 255)
+          ++streak[idx];
         if (streak[idx] < streakThreshold)
           continue;
         double ratio = scaleByOverflow ? static_cast<double>(u) / std::max(1, c) : 1.0;
@@ -5817,11 +6064,11 @@ void commitNetTree(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, int w
       if (e.horizontal) {
         ru.h[idx] += amount;
         if (charge)
-          charge->ruH.push_back({idx, amount});
+          charge->ruH.push_back({static_cast<uint32_t>(idx), static_cast<int32_t>(amount)});
       } else {
         ru.v[idx] += amount;
         if (charge)
-          charge->ruV.push_back({idx, amount});
+          charge->ruV.push_back({static_cast<uint32_t>(idx), static_cast<int32_t>(amount)});
       }
     }
     if (e.horizontal)
@@ -6132,13 +6379,13 @@ long long localOverflow(const RoutingGrid &g, const RealUsage &ru, const RealVia
   // gap between this file's own internal "best round" number and gr_verify's
   // independently-computed real overflow on the same output.
   for (size_t idx : hSeen)
-    total += std::max(0LL, ru.h[idx] - g.hcap[idx]);
+    total += std::max(0LL, static_cast<long long>(ru.h[idx]) - g.hcap[idx]);
   for (size_t idx : vSeen)
-    total += std::max(0LL, ru.v[idx] - g.vcap[idx]);
+    total += std::max(0LL, static_cast<long long>(ru.v[idx]) - g.vcap[idx]);
   for (size_t idx : rvuSeen) {
     int l = static_cast<int>(idx / plane);
     int cap = (l >= 0 && l < static_cast<int>(viaCap.size())) ? viaCap[l] : 1;
-    total += std::max(0LL, rvu.usage[idx] - std::max(1, cap));
+    total += std::max(0LL, static_cast<long long>(rvu.usage[idx]) - std::max(1, cap));
   }
   return total;
 }
@@ -6199,15 +6446,15 @@ long long totalRealOverflow(const RoutingGrid &g, const RealUsage &ru, const Rea
   long long total = 0;
   // No clamp -- see localOverflow's own comment.
   for (size_t i = 0; i < ru.h.size(); ++i)
-    total += std::max(0LL, ru.h[i] - g.hcap[i]);
+    total += std::max(0LL, static_cast<long long>(ru.h[i]) - g.hcap[i]);
   for (size_t i = 0; i < ru.v.size(); ++i)
-    total += std::max(0LL, ru.v[i] - g.vcap[i]);
+    total += std::max(0LL, static_cast<long long>(ru.v[i]) - g.vcap[i]);
   if (includeVia) {
     for (int l = 0; l < static_cast<int>(viaCap.size()); ++l) {
       int cap = std::max(1, viaCap[l]);
       for (int y = 0; y < g.ny; ++y)
         for (int x = 0; x < g.nx; ++x)
-          total += std::max(0LL, rvu.usage[viaIndex(g, x, y, l)] - cap);
+          total += std::max(0LL, static_cast<long long>(rvu.usage[viaIndex(g, x, y, l)]) - cap);
     }
   }
   return total;
@@ -7208,9 +7455,9 @@ double localOverflow2008(const RoutingGrid &g, const RealUsage &ru, const NetCha
   }
   long long over = 0;
   for (size_t idx : hs)
-    over += std::max(0LL, ru.h[idx] - g.hcap[idx]);
+    over += std::max(0LL, static_cast<long long>(ru.h[idx]) - g.hcap[idx]);
   for (size_t idx : vs)
-    over += std::max(0LL, ru.v[idx] - g.vcap[idx]);
+    over += std::max(0LL, static_cast<long long>(ru.v[idx]) - g.vcap[idx]);
   return kLaOverflowPenalty * static_cast<double>(over);
 }
 
@@ -7567,13 +7814,13 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
           for (int x = std::min(s.x1, s.x2); x < std::max(s.x1, s.x2); ++x) {
             size_t idx = g.hIndex(x, s.y1, s.l1);
             ru.h[idx] += am;
-            c.ruH.push_back({idx, am});
+            c.ruH.push_back({static_cast<uint32_t>(idx), static_cast<int32_t>(am)});
           }
         else
           for (int y = std::min(s.y1, s.y2); y < std::max(s.y1, s.y2); ++y) {
             size_t idx = g.vIndex(s.x1, y, s.l1);
             ru.v[idx] += am;
-            c.ruV.push_back({idx, am});
+            c.ruV.push_back({static_cast<uint32_t>(idx), static_cast<int32_t>(am)});
           }
       } else {
         for (int l = std::min(s.l1, s.l2); l < std::max(s.l1, s.l2); ++l) {
@@ -7790,6 +8037,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   rep.roundsRun = 1;
   if (trace)
     std::cerr << "round 0: overflow " << rep.bestOverflow << "\n";
+  memTrace("layer assignment round 0", &nets);
   // The best-round snapshot feeds only the restore at the end, which the
   // score cost skips (pd33route): not kept then (pd35route, memory).
   const bool keepBest = !gScore.on;
@@ -7809,6 +8057,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
       return;
     for (int pass = 0; pass < gPattern3D.passes; ++pass) {
       Pattern3DStats st = pattern3DPass(g, ru, rvu, nets, charges, usesTreeDP, order);
+      memTrace("a pattern 3D pass", &nets);
       std::cerr << "pattern 3D pass " << pass << ": " << st.accepted << " of " << st.nets << " nets rerouted, score -"
                 << st.gain << ", real overflow " << totalRealOverflow(g, ru, rvu, viaCap, false) << "\n";
       if (st.accepted == 0)
@@ -10199,7 +10448,7 @@ void testChargeLogRoundTripIsExact() {
         "fixture is engineered, same as testPinAccessViaIsChargedIntoRealViaUsage, "
         "to need one)");
 
-  std::vector<long long> ruHAfter = ru.h, ruVAfter = ru.v, rvuAfter = rvu.usage;
+  std::vector<int32_t> ruHAfter = ru.h, ruVAfter = ru.v, rvuAfter = rvu.usage;
 
   undoCharge(ru, rvu, chargeA);
   bool allZero = true;
@@ -10446,9 +10695,9 @@ void testSupervisedRevertPrimitivesDetectAndUndoAWorseningMove() {
   rvu.usage[newIdx] = 7; // 4 over capacity 3 (before this net's own +1 below)
 
   NetCharge oldCharge;
-  oldCharge.rvuIdx = {oldIdx}; // this net's own current contribution: 1 of the 5 at oldIdx
+  oldCharge.rvuIdx = {static_cast<uint32_t>(oldIdx)}; // this net's own current contribution: 1 of the 5 at oldIdx
   NetCharge newCharge;
-  newCharge.rvuIdx = {newIdx}; // the candidate: 1 more at newIdx, now 8 total there
+  newCharge.rvuIdx = {static_cast<uint32_t>(newIdx)}; // the candidate: 1 more at newIdx, now 8 total there
 
   long long localBefore = localOverflow(d.grid, ru, rvu, viaCap, oldCharge, oldCharge);
   check(localBefore == 2, "before: only oldIdx is in the union (old,old) -- 5-3=2 over (sanity)");
@@ -13365,12 +13614,12 @@ NetCharge p3dCharge(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, cons
       if (sg.y1 == sg.y2)
         for (int x = std::min(sg.x1, sg.x2); x < std::max(sg.x1, sg.x2); ++x) {
           ru.h[g.hIndex(x, sg.y1, sg.l1)] += 2;
-          c.ruH.push_back({g.hIndex(x, sg.y1, sg.l1), 2});
+          c.ruH.push_back({static_cast<uint32_t>(g.hIndex(x, sg.y1, sg.l1)), 2});
         }
       else
         for (int y = std::min(sg.y1, sg.y2); y < std::max(sg.y1, sg.y2); ++y) {
           ru.v[g.vIndex(sg.x1, y, sg.l1)] += 2;
-          c.ruV.push_back({g.vIndex(sg.x1, y, sg.l1), 2});
+          c.ruV.push_back({static_cast<uint32_t>(g.vIndex(sg.x1, y, sg.l1)), 2});
         }
     } else {
       for (int l = std::min(sg.l1, sg.l2); l < std::max(sg.l1, sg.l2); ++l) {
@@ -13487,12 +13736,12 @@ void testPattern3D2008FlipsToRemoveOverflow() {
   NetCharge c = p3dCharge(g, ru, rvu, rn.segs);
   long long overBefore = 0, overAfter = 0;
   for (size_t i = 0; i < ru.h.size(); ++i)
-    overBefore += std::max(0LL, ru.h[i] - g.hcap[i]);
+    overBefore += std::max(0LL, static_cast<long long>(ru.h[i]) - g.hcap[i]);
   RealLayerPlan lp(g);
   double gain = 0;
   bool ok = pattern3DNet(g, ru, rvu, lp, rn, c, gain);
   for (size_t i = 0; i < ru.h.size(); ++i)
-    overAfter += std::max(0LL, ru.h[i] - g.hcap[i]);
+    overAfter += std::max(0LL, static_cast<long long>(ru.h[i]) - g.hcap[i]);
   check(ok && overBefore == 8 && overAfter == 0, "pattern 3D, 2008 cost: the flip removes the row's overflow (8 -> 0)");
   gPattern3D = saved;
 }
@@ -13541,6 +13790,174 @@ void testOpStacksIsASparseLifo() {
   check(a.amountOrFactor == 2.0 && a.multiplicative && b.amountOrFactor == 1.5 && !b.multiplicative &&
             st.empty(7) && st.m.size() == 1,
         "OpStacks: LIFO order; an emptied index is erased");
+}
+
+// pd35route (memory): NetDelta reproduces a full copy. Nets 0..2; mark;
+// change net 1 twice and net 2 once; restore -> exactly the marked state.
+// mark() after the change makes the changed state the snapshot.
+void testNetDeltaMatchesAFullCopy() {
+  std::vector<RoutedNet> nets(3);
+  for (int i = 0; i < 3; ++i)
+    nets[i].segs = {{i, 0, 0, i + 1, 0, 0}};
+  std::vector<RoutedNet> copy = nets;
+  NetDelta d;
+  d.save(nets, 1);
+  nets[1].segs.push_back({5, 5, 0, 6, 5, 0});
+  d.save(nets, 1); // a second save keeps the first original
+  nets[1].escalated = true;
+  d.save(nets, 2);
+  nets[2].boxMargin = 9;
+  bool sizeOk = d.orig.size() == 2;
+  d.restore(nets);
+  bool same = nets.size() == copy.size();
+  for (size_t i = 0; same && i < nets.size(); ++i)
+    same = nets[i].segs.size() == copy[i].segs.size() && nets[i].escalated == copy[i].escalated &&
+           nets[i].boxMargin == copy[i].boxMargin;
+  check(sizeOk && same && d.orig.empty(), "NetDelta: restore returns exactly the marked state");
+  d.save(nets, 0);
+  nets[0].giant = true;
+  d.mark();
+  d.restore(nets);
+  check(nets[0].giant, "NetDelta: mark() makes the current state the snapshot");
+}
+
+// pd35route (memory): NetSpill round trip -- pointers (as indices), flags,
+// margin and all four vectors.
+void testNetSpillRoundTrip() {
+  const char *gr = "grid 4 3 2\nvertical capacity 0 4\nhorizontal capacity 4 0\nminimum width 1 1\n"
+                   "minimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\nnum net 2\n"
+                   "n0 0 2 1\n5 5 1\n35 5 1\nn1 1 2 1\n5 15 1\n35 25 1\n0\n";
+  Design d = parse("pd35route_selftest_spill.gr", gr);
+  std::vector<RoutedNet> nets(2);
+  for (int i = 0; i < 2; ++i)
+    nets[i].net = &d.nets[i];
+  prepareFor2DRefine(d, nets);
+  nets[0].segs = {{0, 0, 0, 3, 0, 0}};
+  nets[0].charges = {{true, 0, 0, 3, 0, 2}};
+  nets[1].escalated = true;
+  nets[1].boxMargin = 17;
+  nets[1].mst = {{0, 1}};
+  NetSpill sp;
+  sp.write(nets, d.nets.data());
+  std::vector<RoutedNet> back;
+  sp.read(back, d.nets.data());
+  bool same = back.size() == 2;
+  for (size_t i = 0; same && i < 2; ++i)
+    same = back[i].net == nets[i].net && back[i].giant == nets[i].giant && back[i].escalated == nets[i].escalated &&
+           back[i].boxMargin == nets[i].boxMargin && back[i].pts.size() == nets[i].pts.size() &&
+           back[i].mst == nets[i].mst && back[i].segs.size() == nets[i].segs.size() &&
+           back[i].charges.size() == nets[i].charges.size();
+  same = same && back[0].segs[0].x2 == 3 && back[0].charges[0].amount == 2 && back[0].charges[0].horizontal;
+  check(same, "NetSpill: a spilled and re-read state equals the original");
+}
+
+// pd35route (memory): the low-memory fallback keeps exactly the routes the
+// sequential fallback keeps, on testFallbackAFirstThreshold's fixtures:
+// A at 0 <= threshold (B runs and wins) and A above it (B never runs).
+void testLowMemFallbackMatches() {
+  const char *gr = "grid 16 5 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                   "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                   "num net 4\n"
+                   "nA 0 2 1\n5 15 1\n55 15 1\n"
+                   "nD 1 2 1\n105 15 1\n155 15 1\n"
+                   "nB 2 2 1\n105 35 1\n155 35 1\n"
+                   "nC 3 2 1\n105 35 1\n155 35 1\n0\n";
+  RegionSettings region;
+  region.enabled = true;
+  region.rounds = 20;
+  region.expand = 0;
+  RefineSettings refine;
+  refine.iters = 5;
+  ReclaimSettings rs;
+  rs.ratio = 1.2;
+  rs.minExcess = 2;
+  auto run = [&](bool lowMem, long long aMax, FallbackReport &fr, std::vector<std::vector<Seg>> &out) {
+    bool saved = gLowMem;
+    gLowMem = lowMem;
+    Design d = parse("pd35route_selftest_lowmem.gr", gr);
+    std::vector<RoutedNet> nets(4);
+    for (int i = 0; i < 4; ++i)
+      nets[i].net = &d.nets[i];
+    nets[0].segs = {{0, 1, 0, 0, 0, 0}, {0, 0, 0, 5, 0, 0}, {5, 0, 0, 5, 1, 0}};
+    nets[1].segs = {{10, 1, 0, 10, 0, 0}, {10, 0, 0, 15, 0, 0}, {15, 0, 0, 15, 1, 0}};
+    nets[2].segs = {{10, 3, 0, 15, 3, 0}};
+    nets[3].segs = {{10, 3, 0, 15, 3, 0}};
+    prepareFor2DRefine(d, nets);
+    fr = reclaimWithFallback(d, nets, rs, region, refine, false, false, aMax);
+    out.clear();
+    for (const RoutedNet &rn : nets)
+      out.push_back(rn.segs);
+    gLowMem = saved;
+  };
+  auto sameSegs = [](const std::vector<std::vector<Seg>> &a, const std::vector<std::vector<Seg>> &b) {
+    if (a.size() != b.size())
+      return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+      if (a[i].size() != b[i].size())
+        return false;
+      for (size_t k = 0; k < a[i].size(); ++k)
+        if (a[i][k].x1 != b[i][k].x1 || a[i][k].y1 != b[i][k].y1 || a[i][k].x2 != b[i][k].x2 ||
+            a[i][k].y2 != b[i][k].y2 || a[i][k].l1 != b[i][k].l1 || a[i][k].l2 != b[i][k].l2)
+          return false;
+    }
+    return true;
+  };
+  FallbackReport f0, f1;
+  std::vector<std::vector<Seg>> s0, s1;
+  run(false, 0, f0, s0);
+  run(true, 0, f1, s1);
+  check(f1.ranB && f1.tookB == f0.tookB && f1.overflowA == f0.overflowA && f1.wireB == f0.wireB && sameSegs(s0, s1),
+        "low-memory fallback, B runs: same choice and the same kept routes");
+  // A above the threshold: the row fixture (three nets on a one-track row).
+  const char *row = "grid 8 1 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                    "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                    "num net 3\nnA 0 2 1\n5 5 1\n75 5 1\nnB 1 2 1\n5 5 1\n75 5 1\n"
+                    "nC 2 2 1\n5 5 1\n75 5 1\n0\n";
+  auto runRow = [&](bool lowMem, FallbackReport &fr, std::vector<std::vector<Seg>> &out) {
+    bool saved = gLowMem;
+    gLowMem = lowMem;
+    Design d = parse("pd35route_selftest_lowmem_row.gr", row);
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &d.nets[i];
+      nets[i].segs = {{0, 0, 0, 7, 0, 0}};
+    }
+    prepareFor2DRefine(d, nets);
+    fr = reclaimWithFallback(d, nets, rs, region, refine, false, false, 10);
+    out.clear();
+    for (const RoutedNet &rn : nets)
+      out.push_back(rn.segs);
+    gLowMem = saved;
+  };
+  FallbackReport g0, g1;
+  runRow(false, g0, s0);
+  runRow(true, g1, s1);
+  check(!g1.ranB && !g1.tookB && g1.overflowA == g0.overflowA && g1.overflowA > 10 && sameSegs(s0, s1),
+        "low-memory fallback, A above the threshold: B never runs, the same A kept");
+}
+
+// pd35route (memory): the 1-byte capacity table returns exactly the doubles
+// a dense copy holds, edge for edge, horizontal and vertical.
+void testScoreCapTableIsExact() {
+  ScoreModel saved = gScore;
+  std::vector<double> dense = {0.0, 9.78571, 6.15, 10.0, 6.15, 0.0};
+  gScore.capH = dense;
+  gScore.capV = dense;
+  gScore.capIdxH.clear();
+  gScore.capIdxV.clear();
+  std::vector<double> viaDense;
+  for (size_t i = 0; i < dense.size(); ++i)
+    viaDense.push_back(gScore.capOf(true, i));
+  gScore.capH.clear();
+  gScore.capV.clear();
+  gScore.capTable = {0.0, 6.15, 9.78571, 10.0};
+  gScore.capIdxH = {0, 2, 1, 3, 1, 0};
+  gScore.capIdxV = {0, 2, 1, 3, 1, 0};
+  bool same = true;
+  for (size_t i = 0; i < dense.size(); ++i)
+    same = same && gScore.capOf(true, i) == viaDense[i] && gScore.capOf(false, i) == dense[i];
+  check(same, "score capacities: the 1-byte table returns exactly the dense doubles");
+  gScore = saved;
 }
 
 int run() {
@@ -13684,6 +14101,10 @@ int run() {
   testPattern3D2008FlipsToRemoveOverflow();
   testPattern3D2008RemovesADetour();
   testOpStacksIsASparseLifo();
+  testNetDeltaMatchesAFullCopy();
+  testNetSpillRoundTrip();
+  testLowMemFallbackMatches();
+  testScoreCapTableIsExact();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -13936,15 +14357,38 @@ int main(int argc, char **argv) {
       gScore.yPitch = res.yPitch;
       gScore.w = res.overflowCost;
       gScore.unitVia = res.unitVia;
-      gScore.capH.assign(gg.hCount(), 0.0);
-      gScore.capV.assign(gg.vCount(), 0.0);
-      for (int z = 1; z < res.nLayers; ++z) {
-        for (int y = 0; y < gg.ny; ++y)
-          for (int x = 0; x + 1 < gg.nx; ++x)
-            gScore.capH[gg.hIndex(x, y, z)] = res.capacity(z, x, y);
-        for (int y = 0; y + 1 < gg.ny; ++y)
-          for (int x = 0; x < gg.nx; ++x)
-            gScore.capV[gg.vIndex(x, y, z)] = res.capacity(z, x, y);
+      // pd35route (memory): a table of the distinct capacities (0.0 for
+      // layer 0 included) and a 1-byte index per edge when they fit.
+      std::map<double, int> distinct{{0.0, 0}};
+      for (double c : res.cap)
+        distinct.emplace(c, 0);
+      if (distinct.size() <= 256) {
+        gScore.capTable.clear();
+        for (auto &kv : distinct) {
+          kv.second = static_cast<int>(gScore.capTable.size());
+          gScore.capTable.push_back(kv.first);
+        }
+        gScore.capIdxH.assign(gg.hCount(), static_cast<uint8_t>(distinct[0.0]));
+        gScore.capIdxV.assign(gg.vCount(), static_cast<uint8_t>(distinct[0.0]));
+        for (int z = 1; z < res.nLayers; ++z) {
+          for (int y = 0; y < gg.ny; ++y)
+            for (int x = 0; x + 1 < gg.nx; ++x)
+              gScore.capIdxH[gg.hIndex(x, y, z)] = static_cast<uint8_t>(distinct[res.capacity(z, x, y)]);
+          for (int y = 0; y + 1 < gg.ny; ++y)
+            for (int x = 0; x < gg.nx; ++x)
+              gScore.capIdxV[gg.vIndex(x, y, z)] = static_cast<uint8_t>(distinct[res.capacity(z, x, y)]);
+        }
+      } else {
+        gScore.capH.assign(gg.hCount(), 0.0);
+        gScore.capV.assign(gg.vCount(), 0.0);
+        for (int z = 1; z < res.nLayers; ++z) {
+          for (int y = 0; y < gg.ny; ++y)
+            for (int x = 0; x + 1 < gg.nx; ++x)
+              gScore.capH[gg.hIndex(x, y, z)] = res.capacity(z, x, y);
+          for (int y = 0; y + 1 < gg.ny; ++y)
+            for (int x = 0; x < gg.nx; ++x)
+              gScore.capV[gg.vIndex(x, y, z)] = res.capacity(z, x, y);
+        }
       }
     }
     std::cerr << "ISPD 2024 layer assignment cost: " << (gScore.on ? "score" : "nthu") << "\n";
@@ -13974,8 +14418,13 @@ int main(int argc, char **argv) {
     std::cerr << "ISPD 2024 3D pattern reroute passes: " << gPattern3D.passes << "\n";
     std::cerr << "ISPD 2024 2D cost: " << (gScore2D.on ? "score" : "pd")
               << (gScore2D.on && !gScore2D.hist ? " (no history)" : "") << "\n";
+    // pd35route (memory): the per-GCell capacity table has been copied
+    // into the Design, the score model and the 2D score model; nothing
+    // reads it after setup (the solution writer needs only the layer count).
+    std::vector<double>().swap(g24In.res.cap);
     std::cerr << "ISPD 2024 input: " << g24In.res.xSize << " x " << g24In.res.ySize << " x " << g24In.res.nLayers
               << ", " << g24In.nets.size() << " nets\n";
+    memTrace("input and Design");
   } else {
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v && std::string(v) != "0")
       fail("PD33ROUTE_VIA_DEMAND needs an ISPD 2024 design (.cap .net solution)");
@@ -14057,6 +14506,15 @@ int main(int argc, char **argv) {
     rs.enabled = true;
     gSlowReclaim.settings = rs;
   }
+  // pd35route (memory): low-memory mode (see gLowMem).
+  {
+    std::string lm = std::getenv("PD35ROUTE_LOWMEM") ? std::getenv("PD35ROUTE_LOWMEM") : "auto";
+    if (lm != "auto" && lm != "0" && lm != "1")
+      fail("PD35ROUTE_LOWMEM must be auto, 0 or 1 (got '" + lm + "')");
+    gLowMem = lm == "1" || (lm == "auto" && d.nets.size() > kLowMemNets);
+    if (gLowMem)
+      std::cerr << "low-memory mode: on (" << d.nets.size() << " nets)\n";
+  }
   RunReport rep;
   if (laFrom) {
     rep.nets = readRouteAs2D(d, laFrom);
@@ -14066,6 +14524,15 @@ int main(int argc, char **argv) {
                 streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent, exponentEscalation,
                 useMSMV, useSteinerize, useExactSteiner, maxExactPins, box, cost, accept, slowPieces, stopAt,
                 &pattern);
+  }
+  // pd35route (memory): the slow tier's nets carry their vectors' growth
+  // slack (the old full-copy snapshots used to compact them as a side
+  // effect, ~28% of their size); compact them once here.
+  for (RoutedNet &rn : rep.nets) {
+    rn.pts.shrink_to_fit();
+    rn.mst.shrink_to_fit();
+    rn.segs.shrink_to_fit();
+    rn.charges.shrink_to_fit();
   }
   detourTrace("slow tier", rep.nets);
   // pd7route's own mechanism: pin-aware layer assignment (PD7ROUTE_LA_PINS,
@@ -14251,9 +14718,22 @@ int main(int argc, char **argv) {
               << wlRep.piecesImproved << " pieces improved)\n";
   }
   ViaNegotiationReport viaRep;
+  // pd35route (memory): layer assignment and everything after it read only
+  // each net's segments and pins; its 2D charge log, spanning tree and pin
+  // points are freed first.
+  if (!twoDOnly) {
+    checkIndexWidth(d.grid);
+    for (RoutedNet &rn : rep.nets) {
+      std::vector<ChargeRecord>().swap(rn.charges);
+      std::vector<std::pair<int, int>>().swap(rn.mst);
+      std::vector<Point>().swap(rn.pts);
+    }
+    memTrace("freeing the 2D-only net data", &rep.nets);
+  }
   if (!twoDOnly)
     viaRep = negotiateViaAssignment(d.grid, rep.nets, viaRounds, viaPatience, viaWeight, viaKnobs,
                                      wireKnobs, laMode, laPins);
+  memTrace("layer assignment", &rep.nets);
   if (g24Mode) {
     g24::SolutionReport sr = writeG24Solution(argv[3], g24In, d.grid, rep.nets);
     std::cerr << "ISPD 2024 solution: " << sr.nets << " nets, " << sr.wires << " wires, " << sr.vias << " vias, "

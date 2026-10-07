@@ -9084,3 +9084,54 @@ That is at or below the best contest raw score on 4 of 5, and all 6
 public designs that fit are below the best beta submission.
 
 Recap 4: `recaps/recap-2026-10-07.html`.
+
+## Part 110 -- memory for the cluster designs (pd35route, behaviour-identical)
+
+`PD35ROUTE_MEMTRACE=1` prints the process footprint (live
+`phys_footprint`) and the routed nets' heap bytes at every stage
+boundary. On bsg_chip_rank it showed the per-net route state at ~1 KB per
+net, ~10 GB per copy on mempool_cluster (10.6M nets). Copies:
+- the slow tier's best snapshot (rep.nets);
+- refinement's best;
+- the fallback's path-B state.
+
+Changes (every one behaviour-identical):
+- **Delta snapshots** (`NetDelta`): the slow tier's and refinement's best
+  states keep the original of a net only when it is first changed after
+  the snapshot point (save before any change, flags included; mark on
+  improvement; restore at the end).
+- **Fallback to disk** (the user's suggestion): low-memory mode
+  (`PD35ROUTE_LOWMEM`, auto above 2M nets) runs the fallback's paths in
+  sequence. B's start state and, while B runs, A's result live in
+  anonymous temporary files (`NetSpill`): one state in memory at a time.
+- **Compaction**: the nets' vectors are compacted once after the slow
+  tier (the old full copies did this as a side effect, -28%).
+- **Before layer assignment**: each net's 2D charge log, spanning tree
+  and pin points are freed (nothing after reads them).
+- **Narrower layer-assignment state**: 4-byte 3D usage and via usage;
+  8-byte charge entries and 4-byte via indices (`checkIndexWidth` fails
+  loudly beyond 32 bits); 1-byte saturating history streaks (thresholds
+  above 255 refused); sparse 2D history undo logs (`OpStacks`).
+- **Score capacities** as a 1-byte index into a table of the design's
+  distinct values (mempool_cluster: 88), exact.
+- **The input's capacity table** is freed after setup.
+
+Self tests: `NetDelta`, `NetSpill`, the low-memory fallback against the
+sequential one (B runs / B skipped), the capacity table.
+
+Verification, byte-identical solutions or route files:
+- mempool_tile_rank (also with `PD35ROUTE_LOWMEM=1`, where B ran and
+  the spill path was taken);
+- bsg_chip_rank; ariane_68_rank;
+- adaptec1 at the 5/5/5 budget vs pd23route (also low-memory).
+
+Peak footprint:
+
+| design | before | delta snapshots | + layer-assignment cuts | + capacity table |
+|---|---|---|---|---|
+| bsg_chip_rank | 7.39 GB | 6.13 GB | 5.60 GB | **4.98 GB (-33%)** |
+| ariane_68_rank | 1.77 GB | -- | -- | **0.86 GB (-51%)** |
+
+mempool_cluster_ranking (final build): 11.0 GB after reading the input,
+18.4 GB in the pattern stage (was ~24 GB). Input data (each pin's access
+points in its own vector, names stored twice) is now the largest block.
