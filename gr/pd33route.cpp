@@ -12456,6 +12456,30 @@ void testScoreCostAcceptsCheapOverflow() {
   gScore = savedS;
 }
 
+// pd33route (Part 104): a layer blocked in most GCells is still a routing
+// layer. M2 (horizontal) of a 4 x 3 fixture has capacity 0 in 8 of its 9
+// edges' GCells and 2 tracks in one: its nominal capacity must be that open
+// value (4 half tracks), not the most common 0 -- RealLayerPlan reads a
+// layer's direction from it -- and the blocked edges keep 0.
+void testG24MostlyBlockedLayerStaysRoutable() {
+  const char *cap = "3 4 3\n0.5 2 1 1 1\n100 100 100\n100 100\n"
+                    "M1 0 0\n9 9 9 9\n9 9 9 9\n9 9 9 9\n"
+                    "M2 0 0\n0 0 0 0\n0 2 0 0\n0 0 0 0\n"
+                    "M3 1 0\n3 3 3 3\n3 3 3 3\n3 3 3 3\n";
+  const char *net = "netA\n(\n[(0, 0, 0)]\n[(0, 3, 2)]\n)\n";
+  g24::Resources r;
+  std::vector<g24::Net> nets;
+  std::string err;
+  std::istringstream ci(cap), ni(net);
+  check(g24::readResources(ci, r, err) && g24::readNets(ni, nets, err), "blocked layer: fixture reads");
+  Design d = g24::toDesign(r, nets);
+  RealLayerPlan lp(d.grid);
+  bool m2 = std::find(lp.hLayers.begin(), lp.hLayers.end(), 1) != lp.hLayers.end();
+  check(d.grid.hCapLayer[1] == 4 && m2 && d.grid.hcap[d.grid.hIndex(1, 1, 1)] == 4 &&
+            d.grid.hcap[d.grid.hIndex(0, 0, 1)] == 0,
+        "blocked layer: nominal = the open value, M2 is a horizontal layer, blocked edges stay 0");
+}
+
 int run() {
   std::cout << "self test\n";
   testBasicShapesStayOnFastTier();
@@ -12586,6 +12610,7 @@ int run() {
   testLayerAssignmentPricesViaDemand();
   testG24LossMatchesTheEvaluator();
   testScoreCostAcceptsCheapOverflow();
+  testG24MostlyBlockedLayerStaysRoutable();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }

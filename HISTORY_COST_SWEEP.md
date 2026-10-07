@@ -8741,3 +8741,53 @@ Why the swing is small on this design:
 
 `pd33route` with two arguments is pd23route byte for byte: same route
 file on adaptec1 at a short budget (5/5/5 rounds).
+
+## Part 104 -- the ISPD 2024 contest designs, and a blocked-layer bug
+
+The contest's Simple_inputs (all but tera_cluster) were downloaded, with
+the user's approval; see `ISPD24_FORMAT.md` "Published reference scores".
+Every design below runs pd33route `@standard.env @standard24.env`, from
+scratch. Every result is status OK: g24_verify finds it legal and agrees
+with the contest evaluator to the printed digit.
+
+**Bug found on the first macro design.** ariane_68_rank first scored
+31947590: via cost 2.8x the contest winner's, and wire demand equal to
+the idle floor on M2-M4, so those layers carried no wire at all. Its
+M2-M4 have capacity 0 in about 55% of GCells (SRAM macros), so the
+most common value, which `toDesign` took as the layer's nominal capacity,
+was 0. `RealLayerPlan` reads a layer's direction from its nominal
+capacity, so M2-M4 were never offered to layer assignment.
+
+Fix (`g24_io.h`): nominal = the most common *nonzero* value. Self test
+`testG24MostlyBlockedLayerStaysRoutable` fails on the old code.
+mempool_tile_rank's mapping is byte-identical, so Part 103 stands.
+ariane_68_rank: 31947590 -> 23557286 (-26%).
+
+Results vs the contest (raw score = WL + via + overflow cost; contest #1
+on the hidden "rank" designs, best beta submission on the public ones):
+
+| design | ours | WL | via | overflow | time | reference | vs ref |
+|---|---|---|---|---|---|---|---|
+| ariane_68_rank | 23557286 | 12408333 | 3126948 | 8022006 | 202 s | #1 22602876 | +4.2% |
+| nvdla_rank | 43848400 | 21814694 | 4737488 | 17296219 | 357 s | #1 43195979 | +1.5% |
+| mempool_tile_rank | 14126516 | 7700947 | 3424008 | 3001561 | 104 s | #1 13827142 | +2.2% |
+| ariane133_51 | 22806327 | 9376315 | 3111596 | 10318415 | 139 s | beta 22765372 | +0.2% |
+| ariane133_68 | 20637969 | 9796131 | 3101556 | 7740282 | 154 s | beta 20251238 | +1.9% |
+| mempool_tile | 15504694 | 8490560 | 3461864 | 3552271 | 112 s | beta 15402753 | +0.7% |
+| nvdla | 48918896 | 21493100 | 4623808 | 22801988 | 300 s | beta 49909986 | **-2.0%** |
+
+On raw score, the router is within 0.2-4.2% of the contest's best on
+every design so far. It beats the best beta submission on nvdla, and
+beats contest #2 on nvdla_rank (44141552) and mempool_tile_rank
+(14133269). The contest's ranking also scaled by runtime: theirs is 1-17
+s on 8 cores + 4 A100 GPUs; ours is 2-6 min on one core.
+
+Where the gap to #1 sits:
+- **Wirelength**: ariane_68_rank 12.41M vs 11.93M (+4.0%), the largest
+  term.
+- **Vias**: 3.13M vs 2.91M.
+- **Overflow**: 8.02M vs 7.76M.
+The 2D stage still routes for zero 2D overflow, under a capacity that
+leaves out via demand, and pays detours the soft objective may not want.
+Untried: score-aware 2D pricing, access-point choice, and pitch-aware
+wirelength.

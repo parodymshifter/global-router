@@ -22,8 +22,11 @@
 //   (x, y)'s capacity on a horizontal layer is edge (x,y)-(x+1,y)'s, on a
 //   vertical layer edge (x,y)-(x,y+1)'s (the evaluator charges a wire's
 //   run [lo, hi) to the GCells it leaves); 0 across the layer's direction
-//   and on layer 0 (not routable); each layer's most common value is its
-//   nominal capacity;
+//   and on layer 0 (not routable); each layer's most common nonzero value
+//   is its nominal capacity (Part 104: the router reads a layer's direction
+//   from its nominal capacity, so a layer blocked in most GCells -- macros
+//   on ariane's M2-M4 -- whose most common value is 0 must still get its
+//   open value, or it is never a routing layer);
 //   each pin at its first access point;
 //   optional reservation (Part 102, retired -- every setting was worse):
 //   lower a layer-z edge by `reserve` half tracks per pin below z in each of
@@ -218,7 +221,7 @@ inline gr_io::Design toDesign(const Resources &r, const std::vector<Net> &nets, 
     long long best = -1;
     int def = 0;
     for (const auto &kv : count)
-      if (kv.second > best) {
+      if (kv.first > 0 && kv.second > best) {
         best = kv.second;
         def = kv.first;
       }
