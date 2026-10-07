@@ -8912,3 +8912,69 @@ structural difference left is that InstantGR picks each 2-pin piece's L
 orientation *jointly* with its layers (3D pattern routing, exact score).
 Ours fixes the orientation in 2D, against summed capacity, before layer
 assignment sees it.
+
+## Part 107 -- joint 3D pattern reroute (pd35route), and lean layer assignment
+
+`gr/pd35route.cpp` (fork of pd34route, species `pd`, gen. 35).
+
+**`PD35ROUTE_PATTERN3D=k`** (passes; needs the score cost on the 2024
+path):
+- **When:** after layer assignment, every tree-DP net in layer-assignment
+  order is ripped up and rebuilt.
+- **Pieces:** its wires' 2D tree (cycle edges dropped, non-pin leaves
+  pruned) is split at pins and branch points. Each piece keeps its shape,
+  takes either L, or takes the straight run if its ends are aligned.
+- **Choice:** one tree DP picks every piece's shape and run layers and
+  every key node's via stack, at the exact marginal score with the net
+  removed: wire GCells, vias, bend stacks and the via demand of uncovered
+  stack layers.
+- **Acceptance:** kept only if score + wirelength + vias over everything
+  either version touches falls. The total never rises; the passes' summed
+  gain on ariane_68_rank (142114) equals the evaluator's total drop
+  exactly.
+- **Tests:** five self tests (an L flips out of a congested row; usage
+  stays exact; pins reached; an equal route is kept; a detour becomes
+  straight).
+
+| design | AP align (Part 105) | + pattern 3D (3 passes) | contest #1 | vs #1 |
+|---|---|---|---|---|
+| ariane_68_rank | 22811265 | **22669151** (-0.62%) | 22602876 | +0.29% |
+| nvdla_rank | 43453388 | **43192839** (-0.60%) | 43195979 | **-0.007%** |
+| mempool_tile_rank | 13852844 | **13730842** (-0.88%) | 13827142 | **-0.70%** |
+
+Components vs #1:
+
+| design | WL | via | overflow |
+|---|---|---|---|
+| ariane_68_rank | 11.968M / 11.932M | 2.842M / 2.907M | 7.859M / 7.764M |
+| nvdla_rank | 21.585M / 21.472M | 4.483M / 4.661M | 17.125M / 17.062M |
+| mempool_tile_rank | 7.579M / 7.541M | 3.223M / 3.347M | 2.929M / 2.939M |
+
+Passes on ariane: -125296, -13251, -3567 (15077, 5013 and 1960 nets
+rerouted), still gaining at the third. It adds ~5-15% runtime. Now in
+`standard24.env`; the 2024 standard router is pd35route.
+
+**Lean layer assignment** (memory): under NTHU's order every net's
+unit-edge tree was built up front and kept. Now each net's 2D route is
+kept and its tree rebuilt from it whenever the net is assigned: the same
+input, so the same tree. The best-round snapshot is no longer kept on the
+score path, whose restore is skipped anyway.
+- **Identical routes:** mempool_tile_rank and bsg_chip_rank solutions are
+  byte-identical; adaptec1 at the 5/5/5 budget is byte-identical to
+  pd23route.
+- **But the peak barely moved:** bsg_chip_rank's peak footprint is
+  9.91 GB -> 9.84 GB. Trees were not the peak there. mempool_group_rank's
+  26 GB was a snapshot in layer assignment, not a measured peak. A
+  per-stage footprint profile of bsg_chip_rank is queued
+  (`runs/p107prof/profile.txt`).
+
+**2008 cost mode** for the pattern pass (`PD35ROUTE_PATTERN3D` on a .gr):
+- Cost: 1 per wire GCell plus kLaOverflowPenalty per unit newly over
+  capacity; 1 per via layer; no via demand.
+- Acceptance: kLaOverflowPenalty x local overflow + tiles + vias must
+  fall.
+- Tests: the flip removes a row's overflow (8 -> 0); a detour: 8 tiles + 6
+  vias -> 4 + 2.
+- A screen of all 16 ISPD 2008 benchmarks is queued (p108): layer
+  assignment alone from each archived standard route (control) vs the
+  same + 3 passes, with refinement, rebuild and WL recovery off.
