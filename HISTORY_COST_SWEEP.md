@@ -9005,3 +9005,44 @@ Results:
   5/5/5 budget is byte-identical to pd23route.
 - That run's score, **109707507**, includes the pattern pass: **1.2%
   below the best contest raw score** on BlackParrot_rank (#2, 110986781).
+
+## Part 108 -- the joint 3D pattern pass on ISPD 2008 (2008 cost mode)
+
+Screen (`p108.jobs`, all 32 status OK, gr_verify = eval2008.pl):
+- each benchmark's archived standard route is the input; layer assignment
+  is rerun alone from it (`PD3ROUTE_LA_FROM`, refinement, rebuild and WL
+  recovery off) as the control;
+- the same + `PD35ROUTE_PATTERN3D=3` (2008 cost) is the test.
+
+The control reproduces the standard within ~15-50 units of WL on every
+benchmark.
+
+| benchmark | control of / WL | + pattern 3D of / WL | dWL | d overflow | time ctl -> p3d |
+|---|---|---|---|---|---|
+| adaptec1 | 0 / 5405293 | 0 / 5395548 | -0.180% | +0 | 7.76s -> 19.41s |
+| adaptec2 | 0 / 5243679 | 0 / 5228314 | -0.293% | +0 | 7.82s -> 19.17s |
+| adaptec3 | 0 / 13142859 | 0 / 13124466 | -0.140% | +0 | 22.23s -> 49.43s |
+| adaptec4 | 0 / 12205847 | 0 / 12160639 | -0.370% | +0 | 21.30s -> 45.50s |
+| adaptec5 | 0 / 15651432 | 0 / 15624462 | -0.172% | +0 | 24.81s -> 71.31s |
+| bigblue1 | 0 / 5700492 | 0 / 5692892 | -0.133% | +0 | 10.08s -> 26.92s |
+| bigblue2 | 0 / 9205857 | 0 / 9189826 | -0.174% | +0 | 20.11s -> 48.47s |
+| bigblue3 | 0 / 13166790 | 0 / 13110103 | -0.431% | +0 | 39.97s -> 92.15s |
+| bigblue4 | 356 / 24863059 | 356 / 24791967 | -0.286% | +0 | 95.29s -> 208.88s |
+| newblue1 | 38 / 4854996 | 38 / 4838866 | -0.332% | +0 | 15.82s -> 32.83s |
+| newblue2 | 0 / 7617455 | 0 / 7582931 | -0.453% | +0 | 20.41s -> 50.67s |
+| newblue3 | 38916 / 10796253 | 38384 / 10748710 | -0.440% | -532 | 122.81s -> 158.25s |
+| newblue4 | 144 / 13711450 | 144 / 13667251 | -0.322% | +0 | 42.46s -> 103.04s |
+| newblue5 | 0 / 23324125 | 0 / 23256814 | -0.289% | +0 | 77.07s -> 198.80s |
+| newblue6 | 0 / 17936550 | 0 / 17909806 | -0.149% | +0 | 60.20s -> 147.27s |
+| newblue7 | 108 / 36104384 | 108 / 35969243 | -0.374% | +0 | 221.14s -> 414.22s |
+
+**Result:**
+- Wirelength falls on **all 16**, by 0.13% to 0.45%.
+- Overflow is never worse; newblue3 38916 -> 38384 (-532, -1.4%).
+- The pass costs 12 s to 3 min, on runs of 1-20 h.
+
+A small, universal gain, not a big swing. In the full pipeline the pass
+sits in the same place (after layer assignment, after WL recovery).
+Adopting it for 2008 means the standard router becomes pd35route with
+`PD35ROUTE_PATTERN3D=3`; one full-pipeline run should confirm the gain
+there first.
