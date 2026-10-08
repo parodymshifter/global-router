@@ -103,6 +103,7 @@ jobs:
           - pd34route
           - pd35route
           - pd36route
+          - pd37route
           - g24_verify
           - g24_lroute
           - g24_bridge
