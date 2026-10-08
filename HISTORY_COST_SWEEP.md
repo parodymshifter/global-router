@@ -9279,3 +9279,80 @@ largest stage: round 0 took 41 min, then via negotiation ran 19 rounds
 (best at round 3, "stalled" stop) plus the 3D passes, about 9.5 h
 together. That loop is the runtime target for the cluster designs, and
 round 0's +10.8 GB is the memory target.
+
+## Part 115 -- the lean 2024 pipeline, and pd36route (exact runtime cuts)
+
+**Why.** Contest #1 routed mempool_cluster_ranking in 217 s on 8 cores + 4
+A100s; we took 61017 s. InstantGR's flow (ISPD24_FORMAT.md) is one GPU 3D
+pattern pass, one rip-up of nets crossing > 12 overflowed edges, and one
+detour reroute: no negotiation to zero overflow, no wirelength recovery,
+no layer-assignment rounds. Our stage times on the cluster run: layer
+assignment rounds 1-18 9.0 h, wirelength recovery 4.9 h, everything else
+~3 h. Two questions: what do those stages buy on the 2024 score, and how
+much of the rest is avoidable work.
+
+**Step 1: stage ablations** (pd35route, all `status=OK`, `g24_verify` =
+official evaluator). Variants on `@standard.env @standard24.env`:
+- **L** (`lean24.env`): no slow tier, region, refinement, fallback, tree
+  rebuild, wirelength recovery or layer-assignment rounds;
+- **L2D** (`lean24b.env`): L plus the 2D stages back (slow tier, region,
+  refinement, fallback);
+- **LA**: L plus layer-assignment rounds (200); **LWL**: L plus tree
+  rebuild and wirelength recovery.
+
+| design | standard (Part 109) | L | L2D | LA | LWL |
+|---|---|---|---|---|---|
+| ariane_68_rank | 22669151 (231 s) | 22588177 (53 s) | **22504300** (54 s) | 22586875 (119 s) | 22733301 (137 s) |
+| nvdla_rank | 43192839 (393 s) | 66838152 (118 s) | **42959617** (122 s) | 66254115 (322 s) | 59942210 (229 s) |
+| mempool_tile_rank | 13730842 (115 s) | 13700998 (30 s) | **13700293** (32 s) | 13700439 (74 s) | 13732589 (68 s) |
+
+L on the remaining designs:
+
+| design | standard | L | change | time |
+|---|---|---|---|---|
+| mempool_group_rank | 383517195 | **381543656** | -0.51% | 9836 -> 1055 s |
+| mempool_group | 398343847 | **396463581** | -0.47% | 10132 -> 1158 s |
+| ariane133_51 | 22419201 | 22391676 | -0.12% | 144 -> 43 s |
+| ariane133_68 | 19756985 | 19729542 | -0.14% | 153 -> 42 s |
+| mempool_tile | 15131232 | 15113343 | -0.12% | 131 -> 35 s |
+| bsg_chip_rank | 109707507 | 110427411 | +0.66% | 1247 -> 279 s |
+| nvdla | 48215464 | 66724182 | +38% | 357 -> 131 s |
+| bsg_chip | 112113224 | 140328266 | +25% | 1557 -> 294 s |
+
+Findings:
+- **The 2D stages are needed where the pattern stage leaves heavy 2D
+  overflow** (nvdla_rank: 474894 after the pattern stage; the slow tier
+  clears it in one round, 4049 nets). They cost little elsewhere.
+- **Wirelength recovery makes the 2024 score worse** (ariane_68_rank
+  +0.64% vs L; it shortens 2D wire into busier GCells).
+- **Layer-assignment rounds buy nothing** (-0.006% / -0.01%) for 2-3x the
+  time.
+- L2D beats contest #1 on ariane_68_rank (-0.44%; standard was +0.29%) and
+  nvdla_rank (-0.55%).
+
+**Step 2: `gr/pd36route.cpp`** (fork of pd35route; species `pd`, gen. 36),
+exact speedups, no knobs:
+- the batched pattern stage refreshed every 2D edge's cost before every
+  batch (46M edges x thousands of batches on mempool_cluster); now once per
+  round, then only edges whose usage changed;
+- a loss table per (capacity value, demand) for exp(0.5 (d - c)), filled
+  by g24Loss itself (scoreMarginal, localScore);
+- layer assignment's DP: one flat table, one scratch choice per node;
+- the 3D pattern reroute computes each point's via-demand costs once per
+  layer instead of in its innermost loops.
+
+Self-tests (632 checks): the incremental refresh gives the same routes as
+a full refresh on a congested 300-net fixture (and a stale refresh does
+not, so the fixture depends on it); scoreMarginal and edgeLoss through
+the table equal the direct exp bit for bit, in and past the table.
+Byte-identical outputs vs pd35route: mempool_tile_rank and ariane_68_rank
+(standard), mempool_tile_rank, nvdla_rank and bsg_chip_rank (L); adaptec1
+at the 5/5/5 budget under the 2008 standard vs pd23route.
+
+| run | pd35route | pd36route |
+|---|---|---|
+| bsg_chip_rank, L | 279 s | **126 s** |
+| nvdla_rank, L | 118 s | **49 s** |
+| mempool_tile_rank, L | 30 s | **17 s** |
+| ariane_68_rank, standard | 255 s | **149 s** |
+| mempool_tile_rank, standard | 128 s | **73 s** |
