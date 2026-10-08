@@ -9421,6 +9421,14 @@ bsg_chip_rank, `lean24b.env`, stage times (s):
 | 3D pattern passes (3) | -- | 49.3 | 20.7 |
 | total | 280 | 128.7 | **75.9** |
 
+Then layer assignment's DP evaluates each node's candidate via ranges once
+per node instead of once per parent layer (only the parent-dependent
+via-demand terms per parent layer): round 0 33.0 -> 30.9 s, bsg_chip_rank
+73.0 s in all. What remains of round 0 is the DP itself, once per unit
+tree edge (~13M on bsg_chip_rank) -- work for threads (step 3), not more
+single-thread surgery. ariane_68_rank, `lean24b.env`: 54 s (pd35route) ->
+13.9 s.
+
 (standard pipeline, pd35route: 1247 s.) Byte-identical vs pd35route:
 mempool_tile_rank and ariane_68_rank (standard), nvdla_rank (L and L2D),
 ariane133_68 (LS), bsg_chip_rank (L2D); adaptec1 2008 parity holds.

@@ -29,6 +29,10 @@
 //     inner loops; the net is ripped up and usage fixed throughout its DP,
 //     so the same values are added in the same order. The score check
 //     (localScore) reads the loss table too.
+//   - Layer assignment's DP evaluates each node's candidate via ranges
+//     (span cost, children's best layers) once per node, not once per
+//     parent layer; only the parent-dependent via-demand terms are added
+//     per parent layer, in the same order.
 //   - The 3D pattern reroute builds each net's tree and runs its DP in
 //     flat scratch arrays reused across nets (sorted node keys and CSR
 //     adjacency in place of maps and sets), in the same orders.
@@ -6194,24 +6198,28 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
     }
     vdReady[u] = 1;
   };
-  auto resolveNode = [&](int u, int x, int y, int ref, const std::vector<int> &children, double &outTotal,
-                          Range &outRange, std::vector<int> &outChoice) -> bool {
-    if (vdCache && !vdReady[u])
-      vdFill(u, x, y);
-    outTotal = kInf;
-    bool any = false;
-    int loMax = ref, hiMin = ref;
-    if (nodePinRange && (*nodePinRange)[u].first >= 0) {
-      loMax = std::min(loMax, (*nodePinRange)[u].first);
-      hiMin = std::max(hiMin, (*nodePinRange)[u].second);
-    }
-    // pd36route: one scratch choice per call (was one per range); a
-    // better range copies it out, so outChoice ends as before.
-    std::vector<int> choice(children.size(), 0);
-    for (int lo = 0; lo <= loMax; ++lo) {
-      for (int hi = hiMin; hi < L; ++hi) {
+  // pd36route: each node's candidate stack ranges, computed once per node
+  // instead of once per parent layer -- the span cost and the children's
+  // best layers do not depend on the parent layer, so each range's base
+  // total is the same sum, taken in the same order; only the via-demand
+  // terms (which layers the parent covers) are added per parent layer.
+  int rangeNode = -1;
+  size_t rangeKids = 0;
+  std::vector<double> rangeBase;
+  std::vector<char> rangeOk;
+  std::vector<int> rangeChoice;
+  auto fillRanges = [&](int u, int x, int y, const std::vector<int> &children) {
+    rangeNode = u;
+    rangeKids = children.size();
+    rangeBase.assign(static_cast<size_t>(L) * L, 0.0);
+    rangeOk.assign(static_cast<size_t>(L) * L, 0);
+    rangeChoice.assign(static_cast<size_t>(L) * L * rangeKids, 0);
+    for (int lo = 0; lo < L; ++lo)
+      for (int hi = lo; hi < L; ++hi) {
+        size_t rs = static_cast<size_t>(lo) * L + hi;
         double total = spanCost(x, y, lo, hi);
         bool feasible = true;
+        int *choice = rangeKids ? &rangeChoice[rs * rangeKids] : nullptr;
         for (size_t k = 0; k < children.size(); ++k) {
           int ce = children[k];
           double best = kInf;
@@ -6231,8 +6239,30 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
           total += best;
           choice[k] = bestLayer;
         }
-        if (!feasible)
+        rangeBase[rs] = total;
+        rangeOk[rs] = feasible;
+      }
+  };
+  auto resolveNode = [&](int u, int x, int y, int ref, const std::vector<int> &children, double &outTotal,
+                          Range &outRange, std::vector<int> &outChoice) -> bool {
+    if (vdCache && !vdReady[u])
+      vdFill(u, x, y);
+    if (rangeNode != u)
+      fillRanges(u, x, y, children);
+    outTotal = kInf;
+    bool any = false;
+    int loMax = ref, hiMin = ref;
+    if (nodePinRange && (*nodePinRange)[u].first >= 0) {
+      loMax = std::min(loMax, (*nodePinRange)[u].first);
+      hiMin = std::max(hiMin, (*nodePinRange)[u].second);
+    }
+    for (int lo = 0; lo <= loMax; ++lo) {
+      for (int hi = hiMin; hi < L; ++hi) {
+        size_t rs = static_cast<size_t>(lo) * L + hi;
+        if (!rangeOk[rs])
           continue;
+        double total = rangeBase[rs];
+        const int *choice = rangeKids ? &rangeChoice[rs * rangeKids] : nullptr;
         // pd33route: the stack's via demand (PD33ROUTE_VIA_DEMAND), priced
         // like a wire tile (nthuCost): every layer z in [max(lo, 1), hi)
         // that no edge at this node covers -- the parent edge (ref, except
@@ -6258,7 +6288,7 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
         if (total < outTotal) {
           outTotal = total;
           outRange = {lo, hi};
-          outChoice = choice;
+          outChoice.assign(choice, choice + rangeKids);
         }
       }
     }
