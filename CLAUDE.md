@@ -205,6 +205,20 @@ demand on wire capacity cannot cross the bridge, and reserving capacity
 for it made results worse, so the native reader (`ISPD24_FORMAT.md` step
 2) with a via term in layer assignment comes next.
 
+**2026-10-08: the ISPD 2024 standard is `./pd36route @standard.env
+@standard24.env @fast24.env`** (Part 115). The contest winner routed
+mempool_cluster in 217 s against our 16.9 h; most of the gap was work, not
+hardware. Re-ablating the pipeline under the 2024 score dropped wirelength
+recovery (it made the score worse), layer assignment's negotiation rounds
+(+-0.01%), and the region/refinement/fallback stages (no change); pd36route
+then removed whole-grid work per batch in the pattern stage and redundant
+work in layer assignment and the 3D passes, byte-identical to pd35route.
+All six hidden designs now beat the contest's best raw score, 12-38x
+faster (mempool_cluster_ranking 61017 s -> 1599 s, -0.57% vs #1). Every
+run ends with a `stage report:` table (per-stage time, footprint,
+objective and its change, work): read it before tuning anything. The
+2008 standard is unchanged.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

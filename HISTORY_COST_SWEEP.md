@@ -9448,3 +9448,30 @@ slow tier 70, layer assignment round 0 710 (45%), 3D passes 136 / 129 /
 better score. On the public mempool_cluster the slow tier stopped at 155
 units of 2D overflow and the fallback spent 4097 s (49% of the run)
 clearing them; that design is now running with `fast24.env`.
+
+**Step 2 complete: the ISPD 2024 standard is now `./pd36route @standard.env
+@standard24.env @fast24.env`.** Every design, pd36route 5ea1a1a, all
+LEGAL, `g24_verify` = official evaluator (scores equal the LS runs above:
+same configuration, byte-identical router):
+
+| design | Part 109 standard | now | change | time: Part 109 -> now | reference |
+|---|---|---|---|---|---|
+| ariane_68_rank | 22669151 | 22504300 | -0.73% | 231 -> 14 s | -0.44% vs #1 |
+| bsg_chip_rank | 109707507 | 109421476 | -0.26% | 1247 -> 74 s | -1.41% vs best (#2) |
+| nvdla_rank | 43192839 | 42959853 | -0.54% | 393 -> 28 s | -0.55% vs #1 |
+| mempool_tile_rank | 13730842 | 13700293 | -0.22% | 115 -> 10 s | -0.92% vs #1 |
+| mempool_group_rank | 383517195 | 381376443 | -0.56% | 9836 -> 320 s | -0.59% vs #1 |
+| mempool_cluster_ranking | 1777655067 (Part 114) | 1772058531 | -0.31% | 61017 -> 1599 s | -0.57% vs #1 |
+| ariane133_51 | 22419201 | 22389269 | -0.13% | 144 -> 13 s | -1.65% vs beta |
+| ariane133_68 | 19756985 | 19695163 | -0.31% | 153 -> 12 s | -2.75% vs beta |
+| mempool_tile | 15131232 | 15107017 | -0.16% | 131 -> 11 s | -1.92% vs beta |
+| nvdla | 48215464 | 48046228 | -0.35% | 357 -> 27 s | -3.73% vs beta |
+| bsg_chip | 112113224 | 111844160 | -0.24% | 1557 -> 76 s | -1.49% vs beta |
+| mempool_group | 398343847 | 396207313 | -0.54% | 10132 -> 334 s | -3.20% vs beta |
+| mempool_cluster | -- | 1615320900 | -- | 1861 s | -2.89% vs beta |
+
+All six hidden designs now beat the contest's best raw score, and every
+design is faster by 12-38x (single-threaded; contest #1: 5-217 s on 8
+cores + 4 A100s). What is left for step 3 (threads, GPU), from the
+cluster stage reports: layer assignment's first round (35-45%), the
+pattern stage (19-20%), the 3D passes (21-25%) -- all net-parallel.
