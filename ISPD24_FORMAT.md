@@ -135,6 +135,23 @@ Hidden ("rank") benchmarks, final submissions, raw score:
 Ours on mempool_cluster_ranking (HISTORY_COST_SWEEP.md Part 114): 1777655067,
 0.25% below #1, 16.9 h single-threaded, peak footprint 29.4 GB.
 
+Contest runtimes (contest page, read 2026-10-08), main track, hidden designs,
+seconds: #1 ariane 6.2, bsg 16.6, nvdla 7.5, tile 5.1, group 45.5, cluster
+217.1, tera 1940.2. Cluster #2 124.4 s, #3 275.1 s. Limits: cluster 10000 s,
+tera 50000 s; 8 cores, 4 A100s, 200 GB RAM. Cluster #1 components: WL
+1185865082, via 282548572, overflow 313778179.9 (ours: 1187760524 /
+271736568 / 318157975).
+
+InstantGR's flow (src/main.cpp, Lshape_route.hpp, graph.hpp, read online
+2026-10-08): FLUTE trees (OpenMP, 8 threads) -> one GPU pass of 3D L-shape
+tree DP over every net, in batches, one thread per net -> one rip-up that
+selects only nets crossing more than 12 overflowed edges -> one GPU
+detour (DAG) reroute of those nets -> output written by background
+threads during routing. No maze search, no negotiation loop, no
+wirelength recovery. Segment cost is O(1): per batch, a GPU kernel
+evaluates every GCell's marginal cost (__expf) and a per-track prefix sum,
+so a straight run costs presum[end] - presum[start].
+
 Public benchmarks, best beta submission (Feb 15, 2024), raw score:
 ariane133_51 22765372, ariane133_68 20251238, bsg_chip 113537664, nvdla
 49909986, mempool_tile 15402753, mempool_group 409309772, mempool_cluster
