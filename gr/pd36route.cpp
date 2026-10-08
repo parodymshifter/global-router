@@ -29,6 +29,10 @@
 //     inner loops; the net is ripped up and usage fixed throughout its DP,
 //     so the same values are added in the same order. The score check
 //     (localScore) reads the loss table too.
+//   - The stage report: every run ends with a table of each stage's wall
+//     time, footprint, objective (2D overflow; then the router's own 2024
+//     score, or real overflow on 2008 designs) and its change, wire and
+//     via totals, and work counts. Diagnostics only.
 //
 // RESULTS: see HISTORY_COST_SWEEP.md Part 115.
 //
@@ -4162,6 +4166,95 @@ void memTrace(const char *stage, const std::vector<RoutedNet> *nets = nullptr) {
   std::cerr << "\n";
 }
 
+// pd36route: the stage report (HISTORY_COST_SWEEP.md Part 115). Every run
+// records, at each stage boundary, the stage's wall time, the footprint,
+// its objective -- 2D overflow for the 2D stages, the router's own score
+// (ISPD 2024) or real wire overflow (2008) for the 3D ones -- the wire and
+// via totals of the nets' segments, and a line of work counts; main prints
+// the table at the end. Measuring is excluded from the stage times.
+// Diagnostics only: nothing routes differently.
+struct StageRow {
+  std::string name;
+  double secs = 0;
+  long long footprintMB = -1;
+  long long overflow2D = -1;
+  long long wire = -1, vias = -1;
+  double objective = std::numeric_limits<double>::quiet_NaN();
+  std::string work;
+};
+struct StageLog {
+  bool on = false;
+  std::string objectiveName = "score";
+  std::chrono::steady_clock::time_point last;
+  std::vector<StageRow> rows;
+  void begin(const std::string &objName) {
+    on = true;
+    objectiveName = objName;
+    rows.clear();
+    last = std::chrono::steady_clock::now();
+  }
+  void mark(const std::string &name, const std::vector<RoutedNet> *nets, long long overflow2D = -1,
+            double objective = std::numeric_limits<double>::quiet_NaN(), const std::string &work = "") {
+    if (!on)
+      return;
+    auto now = std::chrono::steady_clock::now();
+    StageRow r;
+    r.name = name;
+    r.secs = std::chrono::duration<double>(now - last).count();
+    r.footprintMB = footprintBytes() / (1 << 20);
+    r.overflow2D = overflow2D;
+    r.objective = objective;
+    r.work = work;
+    if (nets) {
+      r.wire = 0;
+      r.vias = 0;
+      for (const RoutedNet &rn : *nets)
+        for (const Seg &sg : rn.segs) {
+          if (sg.l1 != sg.l2)
+            r.vias += std::abs(sg.l2 - sg.l1);
+          else
+            r.wire += std::abs(sg.x2 - sg.x1) + std::abs(sg.y2 - sg.y1);
+        }
+    }
+    rows.push_back(r);
+    last = std::chrono::steady_clock::now();
+  }
+  void print(std::ostream &out) const {
+    if (!on || rows.empty())
+      return;
+    double total = 0;
+    for (const StageRow &r : rows)
+      total += r.secs;
+    out << "stage report: stage | wall s | share | footprint MB | 2D overflow | wire | vias | " << objectiveName
+        << " | change | work\n";
+    double prev = std::numeric_limits<double>::quiet_NaN();
+    char buf[512];
+    for (const StageRow &r : rows) {
+      std::string ov = r.overflow2D >= 0 ? std::to_string(r.overflow2D) : "-";
+      std::string wi = r.wire >= 0 ? std::to_string(r.wire) : "-";
+      std::string vi = r.vias >= 0 ? std::to_string(r.vias) : "-";
+      std::string ob = "-", ch = "-";
+      if (!std::isnan(r.objective)) {
+        std::snprintf(buf, sizeof buf, "%.0f", r.objective);
+        ob = buf;
+        if (!std::isnan(prev)) {
+          std::snprintf(buf, sizeof buf, "%+.0f (%+.3f%%)", r.objective - prev,
+                        prev != 0 ? 100.0 * (r.objective - prev) / prev : 0.0);
+          ch = buf;
+        }
+        prev = r.objective;
+      }
+      std::snprintf(buf, sizeof buf, "stage report: %s | %.1f | %.1f%% | %lld | %s | %s | %s | %s | %s | %s\n",
+                    r.name.c_str(), r.secs, total > 0 ? 100.0 * r.secs / total : 0.0, r.footprintMB, ov.c_str(),
+                    wi.c_str(), vi.c_str(), ob.c_str(), ch.c_str(), r.work.c_str());
+      out << buf;
+    }
+    std::snprintf(buf, sizeof buf, "stage report: total | %.1f s\n", total);
+    out << buf;
+  }
+};
+StageLog gStages;
+
 void detourTrace(const char *stage, const std::vector<RoutedNet> &nets) {
   memTrace(stage, &nets);
   if (!detourTraceOn())
@@ -4965,6 +5058,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     rep.roundsRun = psr.rounds;
     maxFastRounds = 0;
     detourTrace("pattern stage", nets);
+    gStages.mark("pattern stage", &nets, psr.overflow, std::numeric_limits<double>::quiet_NaN(),
+                 std::to_string(psr.pieces) + " pieces, " + std::to_string(psr.rounds) + " rounds");
   }
 
   // Phase A: nproute's algorithm, unmodified in spirit, aside from giant
@@ -8066,6 +8161,39 @@ Pattern3DStats pattern3DPass(const RoutingGrid &g, RealUsage &ru, RealViaUsage &
   return st;
 }
 
+// pd36route: the router's own ISPD 2024 score for the stage report --
+// every edge's w_z loss(usage, capacity) over the live 3D usage (via demand
+// included), plus unitLength x pitch per wire GCell and unitVia per via of
+// the nets' segments. The evaluator also counts the solution writer's pin
+// fixes, so the final row sits slightly below g24_verify's total.
+double routerScore(const RoutingGrid &g, const RealUsage &ru, const std::vector<RoutedNet> &nets) {
+  double total = 0;
+  const size_t planeH = static_cast<size_t>(g.ny) * static_cast<size_t>(g.nx - 1);
+  const size_t planeV = static_cast<size_t>(g.ny - 1) * static_cast<size_t>(g.nx);
+  for (int l = 0; l < g.nLayers; ++l) {
+    double layerSum = 0;
+    for (size_t i = l * planeH; i < (l + 1) * planeH; ++i)
+      layerSum += edgeLoss(true, i, ru.h[i]);
+    for (size_t i = l * planeV; i < (l + 1) * planeV; ++i)
+      layerSum += edgeLoss(false, i, ru.v[i]);
+    total += gScore.w[l] * layerSum;
+  }
+  long long vias = 0;
+  for (const RoutedNet &rn : nets)
+    for (const Seg &sg : rn.segs) {
+      if (sg.l1 != sg.l2) {
+        vias += std::abs(sg.l2 - sg.l1);
+      } else if (sg.y1 == sg.y2) {
+        for (int x = std::min(sg.x1, sg.x2); x < std::max(sg.x1, sg.x2); ++x)
+          total += p3d::wlEdge(true, x, sg.y1);
+      } else {
+        for (int y = std::min(sg.y1, sg.y2); y < std::max(sg.y1, sg.y2); ++y)
+          total += p3d::wlEdge(false, sg.x1, y);
+      }
+    }
+  return total + gScore.unitVia * static_cast<double>(vias);
+}
+
 ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<RoutedNet> &nets,
                                              int maxRounds = 60, int patience = 20,
                                              double viaWeight = 1.0,
@@ -8248,6 +8376,14 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   if (trace)
     std::cerr << "round 0: overflow " << rep.bestOverflow << "\n";
   memTrace("layer assignment round 0", &nets);
+  // pd36route: the stage report's 3D objective.
+  auto stageObjective = [&]() {
+    return gScore.on ? routerScore(g, ru, nets)
+                     : static_cast<double>(totalRealOverflow(g, ru, rvu, viaCap, /*includeVia=*/false));
+  };
+  if (gStages.on)
+    gStages.mark("layer assignment, round 0", &nets, -1, stageObjective(),
+                 std::to_string(nets.size()) + " nets");
   // The best-round snapshot feeds only the restore at the end, which the
   // score cost skips (pd33route): not kept then (pd35route, memory).
   const bool keepBest = !gScore.on;
@@ -8268,6 +8404,9 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     for (int pass = 0; pass < gPattern3D.passes; ++pass) {
       Pattern3DStats st = pattern3DPass(g, ru, rvu, nets, charges, usesTreeDP, order);
       memTrace("a pattern 3D pass", &nets);
+      if (gStages.on)
+        gStages.mark("3D pattern pass " + std::to_string(pass), &nets, -1, stageObjective(),
+                     std::to_string(st.accepted) + " of " + std::to_string(st.nets) + " nets rerouted");
       std::cerr << "pattern 3D pass " << pass << ": " << st.accepted << " of " << st.nets << " nets rerouted, score -"
                 << st.gain << ", real overflow " << totalRealOverflow(g, ru, rvu, viaCap, false) << "\n";
       if (st.accepted == 0)
@@ -8435,6 +8574,9 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     }
   }
 
+  if (gStages.on && rep.roundsRun > 1)
+    gStages.mark("layer assignment, rounds 1-" + std::to_string(rep.roundsRun - 1), &nets, -1, stageObjective(),
+                 rep.stalled ? "stopped: no improvement" : "round cap");
   runPattern3D();
   return rep;
 }
@@ -14273,6 +14415,28 @@ void testPatternIncrementalRefreshIsExact() {
   check(!same(stale, full), "stale costs route differently: the fixture exercises the per-batch refresh");
 }
 
+// pd36route: the stage report counts wire and vias from segments (a 3-unit
+// run, a 2-unit run, a 2-layer via), keeps rows in order, and prints each
+// objective's change from the previous one (100 -> 90: -10, -10%).
+void testStageReport() {
+  StageLog saved = gStages;
+  gStages = StageLog{};
+  gStages.begin("score");
+  std::vector<RoutedNet> nets(1);
+  nets[0].segs = {{0, 0, 1, 3, 0, 1}, {3, 0, 0, 3, 0, 2}, {3, 0, 2, 3, 2, 2}};
+  gStages.mark("a", &nets, 7, 100.0, "w1");
+  gStages.mark("b", nullptr, -1, 90.0);
+  std::ostringstream out;
+  gStages.print(out);
+  const std::string t = out.str();
+  check(gStages.rows.size() == 2 && gStages.rows[0].wire == 5 && gStages.rows[0].vias == 2 &&
+            gStages.rows[0].overflow2D == 7 && gStages.rows[1].wire == -1,
+        "stage report: wire 5 and vias 2 from the segments, rows in order");
+  check(t.find("| 100 | - | w1") != std::string::npos && t.find("| 90 | -10 (-10.000%) |") != std::string::npos,
+        "stage report: the change column is the objective's difference from the previous row");
+  gStages = saved;
+}
+
 // pd36route: the loss table returns bit for bit what g24Loss computes,
 // through scoreMarginal, on every edge of a 7 x 3 x 5 grid with mixed
 // capacity indices, for demands inside the table and past it.
@@ -14539,6 +14703,7 @@ int run() {
   testLowMemFallbackMatches();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
+  testStageReport();
   testPatternIncrementalRefreshIsExact();
   testG24StreamingMatchesInMemory();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
@@ -14555,6 +14720,7 @@ int main(int argc, char **argv) {
 
   // pd33route: three arguments -> ISPD 2024 (.cap, .net, solution).
   const bool g24Mode = argc == 4;
+  gStages.begin(g24Mode ? "score (router's own)" : "real overflow"); // pd36route
   if (argc != 3 && argc != 4) {
     std::cerr << "usage: " << argv[0] << " <benchmark.gr> <solution.route>\n";
     std::cerr << "       " << argv[0] << " <design.cap> <design.net> <solution>   (ISPD 2024)\n";
@@ -14861,6 +15027,8 @@ int main(int argc, char **argv) {
     std::cerr << "ISPD 2024 input: " << g24In.res.xSize << " x " << g24In.res.ySize << " x " << g24In.res.nLayers
               << ", " << g24In.nNets << " nets\n";
     memTrace("input and Design");
+    gStages.mark("read input", nullptr, -1, std::numeric_limits<double>::quiet_NaN(),
+                 std::to_string(d.nets.size()) + " nets");
   } else {
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v && std::string(v) != "0")
       fail("PD33ROUTE_VIA_DEMAND needs an ISPD 2024 design (.cap .net solution)");
@@ -14882,6 +15050,8 @@ int main(int argc, char **argv) {
         std::cerr << "3D pattern reroute passes (ISPD 2008 cost): " << k << "\n";
     }
     d = readGr(argv[1]);
+    gStages.mark("read input", nullptr, -1, std::numeric_limits<double>::quiet_NaN(),
+                 std::to_string(d.nets.size()) + " nets");
   }
   // pd11route's own mechanism: the batched pattern stage.
   PatternStageSettings pattern;
@@ -14972,6 +15142,10 @@ int main(int argc, char **argv) {
     rn.charges.shrink_to_fit();
   }
   detourTrace("slow tier", rep.nets);
+  gStages.mark(laFrom ? "read 2D routes" : "escalation + slow tier", &rep.nets, laFrom ? -1 : rep.bestOverflow,
+               std::numeric_limits<double>::quiet_NaN(),
+               laFrom ? "" : std::to_string(rep.escalatedCount) + " nets escalated, " + std::to_string(rep.roundsRun) +
+                                  " rounds in all");
   // pd7route's own mechanism: pin-aware layer assignment (PD7ROUTE_LA_PINS,
   // default 1; 0 reproduces pd6route's layer assignment).
   bool laPins = true;
@@ -15103,6 +15277,11 @@ int main(int argc, char **argv) {
     regRep = fr.tookB ? fr.regionB : fr.regionA;
     refRep = fr.tookB ? fr.refineB : fr.refineA;
     detourTrace("reclaim fallback (kept path)", rep.nets);
+    gStages.mark("fallback (region + refinement, paths A/B)", &rep.nets, fr.tookB ? fr.overflowB : fr.overflowA,
+                 std::numeric_limits<double>::quiet_NaN(),
+                 std::string("kept ") + (fr.tookB ? "B" : "A") + "; region rounds A " +
+                     std::to_string(fr.regionA.roundsRun) + ", B " + std::to_string(fr.regionB.roundsRun) +
+                     "; expansions " + std::to_string(fr.regionA.pops + fr.regionB.pops));
   }
   // pd16route's own mechanism: the detour reclaim pass, before the region stage.
   if (!reclaimFallback) {
@@ -15121,12 +15300,16 @@ int main(int argc, char **argv) {
                 << rr.wireBefore << " -> " << rr.wireAfter << ", 2D overflow " << rr.overflowBefore << " -> "
                 << rr.overflowAfter << " (" << rr.seconds << "s)\n";
       detourTrace("detour reclaim", rep.nets);
+      gStages.mark("detour reclaim", &rep.nets, rr.overflowAfter, std::numeric_limits<double>::quiet_NaN(),
+                   std::to_string(rr.kept) + " of " + std::to_string(rr.candidates) + " reroutes kept");
     }
   }
   // pd5route: hotspot rip-up first (if on), then refinement polishes.
   if (region.enabled && !reclaimFallback) {
     regRep = regionNegotiate(d, rep.nets, region, std::getenv("VROUTE_TRACE") != nullptr);
     detourTrace("region stage", rep.nets);
+    gStages.mark("region stage", &rep.nets, regRep.after, std::numeric_limits<double>::quiet_NaN(),
+                 std::to_string(regRep.roundsRun) + " rounds, " + std::to_string(regRep.pops) + " expansions");
     std::cerr << "region: box x " << regRep.box.x0 << "-" << regRep.box.x1 << " y " << regRep.box.y0 << "-"
               << regRep.box.y1 << ", " << regRep.regionNets << " nets, 2D overflow " << regRep.before
               << " -> " << regRep.after << " (" << regRep.roundsRun << " rounds"
@@ -15137,12 +15320,17 @@ int main(int argc, char **argv) {
   }
   if (refine.enabled && !reclaimFallback)
     refRep = refine2D(d, rep.nets, refine, std::getenv("VROUTE_TRACE") != nullptr);
-  if (refine.enabled && !reclaimFallback)
+  if (refine.enabled && !reclaimFallback) {
     detourTrace("refinement", rep.nets);
+    gStages.mark("refinement", &rep.nets, refRep.after, std::numeric_limits<double>::quiet_NaN(),
+                 std::to_string(refRep.itersRun) + " iterations");
+  }
   // pd8route: whole-net tree rebuild, before piece recovery polishes.
   if (rebuild.enabled) {
     RebuildReport rb = rebuild2D(d, rep.nets, wl.bend, rebuild, std::getenv("VROUTE_TRACE") != nullptr);
     detourTrace("tree rebuild", rep.nets);
+    gStages.mark("tree rebuild", &rep.nets, -1, std::numeric_limits<double>::quiet_NaN(),
+                 std::to_string(rb.rebuilt) + " nets rebuilt");
     std::cerr << "tree rebuild: 2D wire " << rb.wireBefore << " -> " << rb.wireAfter << " (" << rb.rebuilt
               << " nets rebuilt)\n";
   }
@@ -15151,6 +15339,8 @@ int main(int argc, char **argv) {
   if (wl.enabled) {
     wlRep = wlRecover2D(d, rep.nets, wl, std::getenv("VROUTE_TRACE") != nullptr);
     detourTrace("WL recovery", rep.nets);
+    gStages.mark("wirelength recovery", &rep.nets, -1, std::numeric_limits<double>::quiet_NaN(),
+                 std::to_string(wlRep.piecesImproved) + " pieces improved");
     std::cerr << "wl recovery: 2D wire " << wlRep.wireBefore << " -> " << wlRep.wireAfter << " ("
               << wlRep.piecesImproved << " pieces improved)\n";
   }
@@ -15180,6 +15370,8 @@ int main(int argc, char **argv) {
   } else {
     writeSolution(argv[2], d.grid, rep.nets);
   }
+  gStages.mark("write solution", nullptr);
+  gStages.print(std::cerr);
   auto t1 = std::chrono::steady_clock::now();
 
   std::cerr << "routed " << rep.nets.size() << " nets, " << rep.escalatedCount

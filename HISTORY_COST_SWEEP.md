@@ -9356,3 +9356,31 @@ at the 5/5/5 budget under the 2008 standard vs pd23route.
 | mempool_tile_rank, L | 30 s | **17 s** |
 | ariane_68_rank, standard | 255 s | **149 s** |
 | mempool_tile_rank, standard | 128 s | **73 s** |
+
+**The stage report (pd36route, permanent).** Every run now ends with a
+`stage report:` table on stderr: per stage, wall time and share,
+footprint, the stage's objective -- 2D overflow for the 2D stages; for
+layer assignment and the 3D passes the router's own 2024 score (or real
+wire overflow on 2008 designs) and its change from the previous row --
+wire and via totals of the segments, and work counts. Measuring is kept
+out of the stage times; routes are unchanged (self-test
+`testStageReport`; mempool_tile_rank with `lean24b.env` byte-identical to
+pd35route's). Reason (user, 2026-10-08): stage times had to be
+reconstructed from a memory log, and the two stages that cost the cluster
+run 14 h -- one of them worsening the score -- would have shown up on the
+first 2024 design with a time-and-objective row per stage. First output,
+mempool_tile_rank, `lean24b.env`, 17.2 s:
+
+| stage | s | share | score (router's own) | change |
+|---|---|---|---|---|
+| pattern stage | 2.8 | 16% | (2D overflow 362) | |
+| slow tier + fallback | 0.1 | 1% | (2D overflow 0) | |
+| layer assignment, round 0 | 5.7 | 33% | 16355548 | |
+| 3D pattern pass 0 | 2.5 | 15% | 16224200 | -0.803% |
+| 3D pattern pass 1 | 2.5 | 15% | 16192570 | -0.195% |
+| 3D pattern pass 2 | 2.5 | 14% | 16187632 | -0.030% |
+
+The router's absolute score sits ~18% above the evaluator's (13700293):
+it prices wire demand per grid edge, the evaluator per GCell. The change
+column is what the router optimizes, and what the report is for. Already
+visible: the third 3D pass costs 14% of the run for 0.03%.
