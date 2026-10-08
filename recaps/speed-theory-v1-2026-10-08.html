@@ -1,0 +1,381 @@
+<title>Global Router Speed and Theory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (the project's recap look); stat strip, then the four questions in the order asked, then the suggested order of work. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --hatch: #b07a12;
+  --hatch-bg: #f8edd6;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --hatch: #e2b55a; --hatch-bg: #352a13;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --hatch: #e2b55a; --hatch-bg: #352a13;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 920px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 12px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 6px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; text-wrap: balance; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { font-size: 17.5px; color: var(--ink-soft); }
+.q { font-family: var(--font-mono); font-size: 13px; color: var(--ink-soft); margin-bottom: 14px; }
+section { padding-block: 36px 8px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+.num { font-variant-numeric: tabular-nums; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 22px; }
+.stat { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; }
+.stat b { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 13.5px; color: var(--ink-soft); }
+
+.scroll { overflow-x: auto; margin: 14px 0 16px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--sheet); }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-soft); background: var(--paper); }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+figure { margin: 18px 0 20px; }
+figcaption { font-size: 13.5px; color: var(--ink-soft); max-width: 70ch; margin-top: 8px; }
+.chart { min-width: 560px; width: 100%; height: auto; display: block; }
+.chart text { fill: var(--ink); font-family: var(--font-body); font-size: 12.5px; }
+.chart .soft { fill: var(--ink-soft); font-size: 11.5px; font-family: var(--font-mono); }
+.chart .grid { stroke: var(--rule); stroke-width: 1; }
+.chart .solid { fill: var(--bar); }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13.5px; color: var(--ink-soft); }
+.key { display: inline-block; width: 14px; height: 10px; vertical-align: -1px; margin-right: 6px; border-radius: 2px; }
+.key.solid { background: var(--bar); }
+.key.hatch { background: repeating-linear-gradient(135deg, var(--hatch) 0 2px, var(--hatch-bg) 2px 5px); }
+
+.recs { display: grid; gap: 12px; margin: 14px 0 6px; padding: 0; list-style: none; counter-reset: rec; }
+.recs li { max-width: none; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px 6px 54px; position: relative; counter-increment: rec; margin: 0; }
+.recs li::before { content: counter(rec); position: absolute; left: 16px; top: 13px; width: 26px; height: 26px; border-radius: 50%; background: var(--trace-soft); color: var(--trace); font-family: var(--font-display); font-weight: 700; display: grid; place-items: center; font-size: 14px; }
+.recs h4 { font-family: var(--font-display); font-weight: 600; font-size: 16.5px; margin: 1px 0 6px; }
+.recs p { font-size: 15px; }
+.est { border-left: 3px solid var(--trace); padding: 8px 14px; background: var(--trace-soft); border-radius: 0 6px 6px 0; margin: 14px 0; max-width: 70ch; }
+
+.pill { display: inline-block; font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.pill.ok { background: var(--good-bg); color: var(--good); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.no { background: var(--bad-bg); color: var(--bad); }
+
+.loop { min-width: 520px; width: 100%; height: auto; display: block; }
+.loop rect.box { fill: var(--sheet); stroke: var(--ink-soft); stroke-width: 1.2; }
+.loop rect.hot { fill: var(--trace-soft); stroke: var(--trace); stroke-width: 1.6; }
+.loop text { fill: var(--ink); font-family: var(--font-body); font-size: 13px; }
+.loop text.t { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+.loop text.s { fill: var(--ink-soft); font-size: 12px; }
+.loop path { fill: none; stroke: var(--ink-soft); stroke-width: 1.4; }
+.loop .ah { fill: var(--ink-soft); }
+
+.lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
+.lane { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; min-width: 0; }
+.lane.hot { border-color: var(--trace); }
+.lane h4 { font-family: var(--font-display); font-weight: 600; font-size: 15.5px; margin: 0 0 8px; }
+.lane ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; }
+.lane li { font-size: 13.5px; line-height: 1.45; margin: 0; }
+.lane .fx { display: block; margin-top: 2px; }
+.fx .big { background: var(--good-bg); color: var(--good); }
+.fx .small { background: var(--paper); color: var(--ink-soft); border: 1px solid var(--rule); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 14px 0; }
+.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px 6px; min-width: 0; }
+.card h4 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+.card p { font-size: 14.5px; }
+.card .lbl { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--trace); display: block; margin-bottom: 2px; }
+.formula { font-family: var(--font-mono); font-size: 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; overflow-x: auto; white-space: pre; margin: 12px 0 14px; }
+footer { padding-top: 26px; font-size: 13.5px; color: var(--ink-soft); }
+@media (max-width: 520px) { .recs li { padding-left: 48px; } .recs li::before { left: 12px; } }
+</style>
+
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Global router · ISPD 2024 · 2026-10-08</div>
+  <h1>Global Router Speed and Theory</h1>
+  <p class="lede">A research global router in C++ now routes the largest ISPD 2024 contest design it has tried, <span class="mono">mempool_cluster_ranking</span>: 10.6 million nets on a 4113 × 5580 × 10 GCell grid. Its score beats the contest winner by 0.25%. It took 16.9 hours on one core, though, and peaked at 29.4 GB. This page answers four questions about what comes next.</p>
+  <div class="stats">
+    <div class="stat"><b>1,777,655,067</b><span>score; contest #1 was 1,782,191,834 (lower is better)</span></div>
+    <div class="stat"><b>16.9 h</b><span>runtime on 1 of 14 cores; contest winners took 2–5 minutes on 8 cores + 4 GPUs</span></div>
+    <div class="stat"><b>29.4 GB</b><span>peak memory footprint on a 24 GB machine</span></div>
+    <div class="stat"><b>15 h</b><span>of the runtime spent in two net-by-net loops</span></div>
+  </div>
+</header>
+
+<section id="speed">
+  <h2>Where the time goes, and what to change first</h2>
+  <p class="q">Are there places in the router that could be refactored or reprioritized to speed up the most complex designs?</p>
+  <p>Stage times below come from the run's memory log, which stamps each stage line every 15 seconds. The maze-search stages that dominated the earlier ISPD 2008 work took under half an hour here. The time sits in two loops that run after routing is already legal: wirelength recovery and layer assignment.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="chart" viewBox="0 0 640 312" role="img" aria-label="Wall time per stage, hours. Layer assignment rounds 1 to 18: 9.0 hours, about 7.5 of it after the best overflow round. Wirelength recovery: 4.9 hours, 2.3 of it in passes that gained 0.003 percent. Pattern stage 55 minutes, layer assignment round 0 41 minutes, tree rebuild 34 minutes, fallback 24 minutes, 3D passes 23 minutes, everything else about 6 minutes.">
+      <defs>
+        <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="6" height="6" style="fill: var(--hatch-bg)"/>
+          <rect width="2.2" height="6" style="fill: var(--hatch)"/>
+        </pattern>
+      </defs>
+      <g>
+        <line class="grid" x1="210" y1="10" x2="210" y2="282"/>
+        <line class="grid" x1="288" y1="10" x2="288" y2="282"/>
+        <line class="grid" x1="366" y1="10" x2="366" y2="282"/>
+        <line class="grid" x1="444" y1="10" x2="444" y2="282"/>
+        <line class="grid" x1="522" y1="10" x2="522" y2="282"/>
+        <line class="grid" x1="600" y1="10" x2="600" y2="282"/>
+        <text class="soft" x="210" y="300" text-anchor="middle">0</text>
+        <text class="soft" x="288" y="300" text-anchor="middle">2</text>
+        <text class="soft" x="366" y="300" text-anchor="middle">4</text>
+        <text class="soft" x="444" y="300" text-anchor="middle">6</text>
+        <text class="soft" x="522" y="300" text-anchor="middle">8</text>
+        <text class="soft" x="600" y="300" text-anchor="middle">10 h</text>
+      </g>
+      <text x="202" y="32" text-anchor="end">Layer assignment, rounds 1–18</text>
+      <rect class="solid" x="210" y="18" width="58.5" height="18"/>
+      <rect x="268.5" y="18" width="292.5" height="18" fill="url(#hatch)"/>
+      <text x="567" y="32" class="num">9.0 h</text>
+
+      <text x="202" y="66" text-anchor="end">Wirelength recovery, 4 passes</text>
+      <rect class="solid" x="210" y="52" width="101.4" height="18"/>
+      <rect x="311.4" y="52" width="91.3" height="18" fill="url(#hatch)"/>
+      <text x="409" y="66" class="num">4.9 h</text>
+
+      <text x="202" y="100" text-anchor="end">Pattern stage (initial routes)</text>
+      <rect class="solid" x="210" y="86" width="35.9" height="18"/>
+      <text x="252" y="100" class="num">55 min</text>
+
+      <text x="202" y="134" text-anchor="end">Layer assignment, round 0</text>
+      <rect class="solid" x="210" y="120" width="26.9" height="18"/>
+      <text x="243" y="134" class="num">41 min</text>
+
+      <text x="202" y="168" text-anchor="end">Tree rebuild</text>
+      <rect class="solid" x="210" y="154" width="21.8" height="18"/>
+      <text x="238" y="168" class="num">34 min</text>
+
+      <text x="202" y="202" text-anchor="end">Fallback (two paths, in turn)</text>
+      <rect class="solid" x="210" y="188" width="15.6" height="18"/>
+      <text x="232" y="202" class="num">24 min</text>
+
+      <text x="202" y="236" text-anchor="end">3D pattern passes</text>
+      <rect class="solid" x="210" y="222" width="14.8" height="18"/>
+      <text x="231" y="236" class="num">23 min</text>
+
+      <text x="202" y="270" text-anchor="end">Everything else</text>
+      <rect class="solid" x="210" y="256" width="3.9" height="18"/>
+      <text x="220" y="270" class="num">≈ 6 min</text>
+    </svg>
+    </div>
+    <figcaption>
+      <span class="legend"><span><i class="key solid"></i>working time</span><span><i class="key hatch"></i>time after the loop's own progress measure had flattened</span></span>
+      Wirelength passes 2 and 3 took 2.3 h and shortened total wire by 0.003% together. Layer assignment's best overflow came at round 3, and rounds average about 30 minutes. How much score rounds 4–18 gained was not logged.
+    </figcaption>
+  </figure>
+
+  <ol class="recs">
+    <li>
+      <h4>Give layer assignment a real stop rule</h4>
+      <p>Under the 2024 score, any round that improves the score by more than 10<sup>−6</sup> resets the patience counter, so the loop practically never stops early. First, measure: rerun a mid-size design (bsg_chip_rank or mempool_group_rank) with the per-round trace on and see where the score gain flattens. Then stop on a relative threshold, for example a round that gains less than 0.01% of the score.</p>
+    </li>
+    <li>
+      <h4>Add a gain threshold to wirelength recovery</h4>
+      <p>Each pass takes 70–85 minutes. The four passes improved wire by 0.36%, 0.04%, 0.003% and 0.0002%. Stopping when a pass gains under about 0.01% removes the last two passes at essentially no quality cost.</p>
+    </li>
+    <li>
+      <h4>Run those two loops on many cores</h4>
+      <p>Both work net by net and suit the batched scheme the project already built for the 2008 benchmarks: search in parallel against a snapshot, commit in a fixed order, re-search only the conflicts. One change is needed at this scale. The earlier version gave every worker its own copy of the usage arrays, and a 3D copy here is about 0.9 GB. Workers should instead read one shared snapshot and keep only their own changes.</p>
+    </li>
+  </ol>
+  <p class="est"><b>Estimate, not yet measured:</b> stop rules alone could bring this design to about 6–8 hours; adding about 10 threads on the two loops, to about 2–3 hours. That would still be far from the contest winners' 2–5 minutes, so the score is competitive but the runtime is not. Next in line after that are the pattern stage (55 min) and layer assignment round 0, which also adds 10.8 GB of memory.</p>
+</section>
+
+<section id="parallel">
+  <h2>Parallelism and GPU today</h2>
+  <p class="q">Where do things stand on parallelism and GPU acceleration?</p>
+  <p>Both exist, but neither covers the stages that dominate the largest designs. The machine is an M4 Pro with 14 cores (10 performance, 4 efficiency); the cluster run used one.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Piece</th><th>Status</th><th>What it covers on the cluster run</th></tr></thead>
+    <tbody>
+      <tr><td>Threads for the maze-search stages (2008 line, pd24–pd27)</td><td><span class="pill ok">built</span> 1.6–2.4× faster on 8–10 threads</td><td>Under 30 min of maze work here. Not carried into the 2024 router (pd35route).</td></tr>
+      <tr><td>Fallback's second path on its own thread</td><td><span class="pill ok">in pd35route</span></td><td>24 min. Low-memory mode switches it off on designs above 2M nets.</td></tr>
+      <tr><td>Metal GPU kernel for batched pattern routing</td><td><span class="pill ok">built</span> bit-identical to CPU, 4.4× per batch</td><td>Pattern stage, 55 min (5%). Wired into pd11route; this run used the CPU build.</td></tr>
+      <tr><td>CUDA backend</td><td><span class="pill warn">planned</span></td><td>Same kernel, for NVIDIA GPUs. Not written.</td></tr>
+      <tr><td>Threads for layer assignment and wirelength recovery</td><td><span class="pill no">not built</span></td><td><b>About 15 h, 89% of the run.</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Threads on the two dominant loops are the parallel step that matters now. The GPU becomes useful again once those loops are fast and the pattern stage is a larger share of what is left.</p>
+</section>
+
+<section id="model">
+  <h2>A mathematical model of the routers</h2>
+  <p class="q">How would you model the router and the routers tried so far, what could that show, and could it suggest significant improvements?</p>
+
+  <h3>The problem underneath</h3>
+  <p>Every router in this project is a heuristic for the same optimization: give each net a tree connecting its pins, and charge each GCell for how much demand lands on it.</p>
+  <div class="formula">minimize   Σ<sub>nets i</sub> cost(tree<sub>i</sub>)  +  Σ<sub>GCells g</sub> f<sub>g</sub>(usage<sub>g</sub>)
+where      usage<sub>g</sub> = demand from every tree crossing g, including via demand</div>
+  <p>In the 2024 contest score, <i>f</i> grows exponentially with demand over capacity. That makes it convex, and a convex cost lets the relaxed problem be treated with standard optimization theory: it has duals, lower bounds and convergence measures.</p>
+
+  <h3>Each router as four choices</h3>
+  <p>Seen this way, every router in the project's 114-part history is a combination of four choices in one loop:</p>
+  <figure>
+    <div class="scroll">
+    <svg class="loop" viewBox="0 0 640 250" role="img" aria-label="Loop diagram. Prices feed the oracle, where each net finds its best route. The acceptance rule decides whether to keep or revert the new route. Usage updates, and the price update turns usage into new prices. The schedule, in the middle, decides which nets see which prices.">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z" style="stroke:none"/></marker>
+      </defs>
+      <rect class="box" x="20" y="20" width="230" height="70" rx="6"/>
+      <text class="t" x="36" y="47">Price update</text>
+      <text class="s" x="36" y="70">usage → price per GCell</text>
+      <rect class="hot" x="390" y="20" width="230" height="70" rx="6"/>
+      <text class="t" x="406" y="47">Oracle</text>
+      <text class="s" x="406" y="70">each net's best route at those prices</text>
+      <rect class="box" x="390" y="160" width="230" height="70" rx="6"/>
+      <text class="t" x="406" y="187">Acceptance</text>
+      <text class="s" x="406" y="210">keep the new route, or revert</text>
+      <rect class="box" x="20" y="160" width="230" height="70" rx="6"/>
+      <text class="t" x="36" y="187">Usage</text>
+      <text class="s" x="36" y="210">demand on every GCell</text>
+      <path d="M250 55 L384 55" marker-end="url(#arr)"/>
+      <path d="M505 90 L505 154" marker-end="url(#arr)"/>
+      <path d="M390 195 L256 195" marker-end="url(#arr)"/>
+      <path d="M135 160 L135 96" marker-end="url(#arr)"/>
+      <text class="t" x="320" y="120" text-anchor="middle">Schedule</text>
+      <text class="s" x="320" y="140" text-anchor="middle">order and batching: who sees which prices</text>
+    </svg>
+    </div>
+    <figcaption>Negotiated-congestion routing is best-response dynamics in a congestion game, and close to the Frank-Wolfe method on the convex relaxation: price the current usage, let every net respond, step toward the result.</figcaption>
+  </figure>
+
+  <p>Sorting the project's measured results by which of the four choices they changed shows where the large gains came from:</p>
+  <div class="lanes">
+    <div class="lane">
+      <h4>Price update</h4>
+      <ol>
+        <li>Permanent congestion history <span class="fx"><span class="pill small">−0.5 to −2.7%</span></span></li>
+        <li>History that can relax again <span class="fx"><span class="pill small">another −0.6 to −1.4%</span></span></li>
+        <li>NTHU present-demand price + history, with keep-every-reroute <span class="fx"><span class="pill big">−86.5% overflow</span></span> <span class="fx" style="color:var(--ink-soft)">either half alone made things worse</span></li>
+      </ol>
+    </div>
+    <div class="lane hot">
+      <h4>Oracle</h4>
+      <ol>
+        <li>Maze growth from all built wire, not a fixed tree <span class="fx"><span class="pill big">−21 to −37% overflow</span></span></li>
+        <li>Search box 6 tiles → growing to 200 <span class="fx"><span class="pill big">−60% overflow</span></span></li>
+        <li>Per-tile layer choice, NTHU-style <span class="fx"><span class="pill big">adaptec1 to zero</span></span></li>
+      </ol>
+    </div>
+    <div class="lane">
+      <h4>Acceptance</h4>
+      <ol>
+        <li>Revert if worse: essential under an ever-rising price</li>
+        <li>Keep every reroute: essential under present-demand pricing <span class="fx"><span class="pill big">part of −86.5%</span></span></li>
+      </ol>
+    </div>
+    <div class="lane">
+      <h4>Schedule</h4>
+      <ol>
+        <li>Net-ordering experiments <span class="fx"><span class="pill small">low single digits, one regression</span></span></li>
+        <li>Batched pattern stage <span class="fx"><span class="pill big">−37% runtime</span></span></li>
+        <li>Parallel batches, 8–10 threads <span class="fx"><span class="pill big">1.6–2.4× faster</span></span></li>
+      </ol>
+    </div>
+  </div>
+  <p>The theory explains the pattern. Price-update methods converge only if the per-net search really finds that net's cheapest route at the current prices. A 6-tile search box or a fixed tree is a restricted search, and no price formula makes up for it. That is why the biggest wins came from widening the oracle, and it says where to look next: wherever the search is still restricted.</p>
+  <ul>
+    <li>Layer assignment works on a fixed 2D tree.</li>
+    <li>The 3D passes try only L and Z shapes.</li>
+    <li>The 2D stage never sees layer assignment's prices; the two stages run in sequence with no feedback.</li>
+  </ul>
+
+  <h3>What a model would add</h3>
+  <div class="cards">
+    <div class="card">
+      <span class="lbl">Where headroom is</span>
+      <h4>A certified lower bound on the score</h4>
+      <p>Because the cost is convex, a Lagrangian dual gives a provable floor on the achievable score, per design and per component (wire, vias, overflow). The project already did this for 2008 overflow: a cut bound proved most of newblue3's residue is forced for any router. On designs within 0.25% of the contest winner, a bound says whether a 25%-scale gain exists anywhere.</p>
+    </div>
+    <div class="card">
+      <span class="lbl">When to stop</span>
+      <h4>A duality gap every round</h4>
+      <p>A Frank-Wolfe-style round yields a convergence gap at almost no extra cost. That is the stopping signal layer assignment lacks today, and it also suggests step sizes in place of keeping every reroute.</p>
+    </div>
+    <div class="card">
+      <span class="lbl">What to build</span>
+      <h4>Finding the restricted search</h4>
+      <p>Comparing each stage's routes with what an unrestricted search would pick shows which restriction binds. The project's box-binding test (does a net's search actually hit its box edge?) is a small instance of this idea.</p>
+    </div>
+    <div class="card">
+      <span class="lbl">Before a 21 GB download</span>
+      <h4>Scaling laws</h4>
+      <p>Fitting time and memory per stage across the three MemPool sizes (tile, group, cluster) would predict tera_cluster, the largest contest design, before downloading it. A rough guess is about 5× the cluster design, which would not fit this machine.</p>
+    </div>
+  </div>
+  <p><b>Could it lead to significant improvements?</b> Indirectly, yes. The bound shows whether headroom exists, the gap gives better stop rules, and locating restricted searches points at the next structural change, which is what every big win so far has been. It will not replace experiments: the project's record shows measured results beating reasoned guesses again and again.</p>
+</section>
+
+<section id="cloud">
+  <h2>Running on GitHub's cloud</h2>
+  <p class="q">Is now a good time to try a GitHub cloud run on some of the benchmarks?</p>
+  <p>Not yet for the large designs. GitHub Actions jobs are capped at 6 hours each, and the repository is private, which on the free plan means small runners and 2,000 minutes a month. The project's last CI runs had used up those minutes.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Option</th><th>Fits the cluster design?</th><th>Good for</th></tr></thead>
+    <tbody>
+      <tr><td>GitHub standard runner (2 vCPU, about 7 GB)</td><td><span class="pill no">no</span> memory and time</td><td>A cross-platform reproducibility check: small designs on Linux, diffed byte for byte against macOS. Minutes per run.</td></tr>
+      <tr><td>GitHub larger runner (paid plan, up to 64 cores, 256 GB)</td><td><span class="pill warn">memory yes, time no</span></td><td>Big designs, once the runtime work brings them under 6 hours.</td></tr>
+      <tr><td>GitHub GPU runner</td><td><span class="pill warn">not needed yet</span></td><td>Building and validating the CUDA backend.</td></tr>
+      <tr><td>Rented cloud machine, 64 GB or more</td><td><span class="pill ok">yes</span></td><td>Long runs with no job time limit. Costs money per hour.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="order">
+  <h2>Suggested order of work</h2>
+  <ol>
+    <li>One traced run of a mid-size design to measure per-round score gains in layer assignment.</li>
+    <li>Stop rules for layer assignment and wirelength recovery, checked against the current scores on every 2024 design.</li>
+    <li>Threads for those two loops, with a shared snapshot instead of per-worker copies.</li>
+    <li>In parallel, since it needs no machine time: a lower bound on the 2024 score, starting with one mid-size design.</li>
+    <li>Cloud runs once a cluster design fits in 6 hours, or a rented machine sooner if waiting costs more than renting.</li>
+  </ol>
+  <footer>Run figures are from the mempool_cluster_ranking run of 2026-10-07/08 (HISTORY_COST_SWEEP.md Part 114). The score is checked by the contest's official evaluator and the project's own verifier, which agree to every digit. Runtime projections are labelled as estimates. Results on every benchmark: <a href="https://claude.ai/artifact/BFvFpA5vEgBrNq6gcjvR1F" style="color:var(--trace)">Global Router Recap</a>.</footer>
+</section>
+</div>
