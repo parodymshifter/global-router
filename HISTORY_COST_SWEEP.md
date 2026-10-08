@@ -9237,3 +9237,45 @@ Peak footprint, all Parts 110-113:
 |---|---|---|
 | mempool_tile_rank | 0.75 GB | **0.28 GB** |
 | ariane_68_rank | 1.77 GB | **0.51 GB** |
+
+## Part 114 -- mempool_cluster_ranking routed: 0.25% below contest #1
+
+The Part 113 build (`pd35route`, `@standard.env @standard24.env`, memory
+trace on) finished mempool_cluster_ranking (10.6M nets, 4113 x 5580 x 10)
+end to end. LEGAL, 0 open nets; `g24_verify` and the official evaluator
+agree to every printed digit:
+
+| | ours | contest #1 | #2 | #3 |
+|---|---|---|---|---|
+| total | **1777655066.8** | 1782191834 | 1824527054 | 1795524941 |
+
+**-0.25% vs #1** (WL 1187760524.1, via 271736568, overflow 318157974.7;
+617779 GCells over, max 8). On this design 270M of the overflow cost is
+the idle-GCell floor on metal7-10.
+
+Stage trace (footprint, `PD35ROUTE_MEMTRACE`):
+
+| stage | footprint |
+|---|---|
+| input + Design | 6.6 GB |
+| pattern stage end | 15.5 GB (routed nets 8.9 GB) |
+| slow tier (stopped at 2D overflow 11, 31 rounds) | 15.4 GB |
+| reclaim fallback: A 11 -> 0 (16 region rounds, 147 s); B 27 -> 0 (15 rounds, 1255 s); B kept (wire 281530345 vs 281590289) | 20.1 GB |
+| tree rebuild (281.53M -> 281.28M) | 15.5 GB |
+| WL recovery, 4 passes (-> 280.15M, 2D overflow 0) | 15.3 GB |
+| layer assignment round 0 | 26.2 GB |
+| 3 pattern 3D passes (last: 303374 nets rerouted) | 26.9 GB |
+| end of layer assignment | 20.7 GB |
+
+Kernel-tracked peak footprint **29.4 GB** (max RSS 12.4 GB on a 24 GB
+machine; swap up to ~6 GB, but user time tracked wall time, so not
+thrashing). The 28 GB watchdog sampled in 1 GB steps; it read 27 GB at
+the peak and was raised to 32 GB by hand during layer assignment
+(logged in `p113c.status`). Part 112's attempt died at 30.7 GB in the
+fallback; this one peaked there at 20.1 GB.
+
+Runtime **61017 s (16.9 h)**, single-threaded. Layer assignment is the
+largest stage: round 0 took 41 min, then via negotiation ran 19 rounds
+(best at round 3, "stalled" stop) plus the 3D passes, about 9.5 h
+together. That loop is the runtime target for the cluster designs, and
+round 0's +10.8 GB is the memory target.

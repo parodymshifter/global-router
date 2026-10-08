@@ -132,6 +132,9 @@ Hidden ("rank") benchmarks, final submissions, raw score:
 | mempool_cluster_ranking | MemPool-Cluster_rank | 1782191834 | 1824527054 | 1795524941 |
 | tera_cluster_rank | Tera-Cluster_rank | 12521927639 | 12676067016 | 12597498026 |
 
+Ours on mempool_cluster_ranking (HISTORY_COST_SWEEP.md Part 114): 1777655067,
+0.25% below #1, 16.9 h single-threaded, peak footprint 29.4 GB.
+
 Public benchmarks, best beta submission (Feb 15, 2024), raw score:
 ariane133_51 22765372, ariane133_68 20251238, bsg_chip 113537664, nvdla
 49909986, mempool_tile 15402753, mempool_group 409309772, mempool_cluster
