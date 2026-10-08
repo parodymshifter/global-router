@@ -9432,3 +9432,19 @@ single-thread surgery. ariane_68_rank, `lean24b.env`: 54 s (pd35route) ->
 (standard pipeline, pd35route: 1247 s.) Byte-identical vs pd35route:
 mempool_tile_rank and ariane_68_rank (standard), nvdla_rank (L and L2D),
 ariane133_68 (LS), bsg_chip_rank (L2D); adaptec1 2008 parity holds.
+
+**Cluster designs, pd36route** (LEGAL, `g24_verify` = official evaluator):
+
+| run | score | vs reference | time | peak |
+|---|---|---|---|---|
+| mempool_cluster_ranking, `fast24.env`, pd36route 789df54 | **1772058531** | **-0.57% vs #1** | **1599 s** | 28.0 GB |
+| mempool_cluster_ranking, `lean24b.env`, pd36route 2d2a413 | 1773660600 | -0.48% | 5043 s | 29.4 GB |
+| mempool_cluster_ranking, standard (Part 114) | 1777655067 | -0.25% | 61017 s | 29.4 GB |
+| mempool_cluster (public), `lean24b.env`, 2d2a413 | **1617549889** | **-2.75% vs best beta** | 8414 s | -- |
+
+The fast24 cluster run, stage report (s): input 27, pattern stage 299,
+slow tier 70, layer assignment round 0 710 (45%), 3D passes 136 / 129 /
+130 (-0.66% / -0.18% / -0.03%), write 90. 38x faster than Part 114 at a
+better score. On the public mempool_cluster the slow tier stopped at 155
+units of 2D overflow and the fallback spent 4097 s (49% of the run)
+clearing them; that design is now running with `fast24.env`.
