@@ -29,6 +29,14 @@
 //     inner loops; the net is ripped up and usage fixed throughout its DP,
 //     so the same values are added in the same order. The score check
 //     (localScore) reads the loss table too.
+//   - The 3D pattern reroute builds each net's tree and runs its DP in
+//     flat scratch arrays reused across nets (sorted node keys and CSR
+//     adjacency in place of maps and sets), in the same orders.
+//   - Layer assignment's DP computes each tree node's via-demand terms once
+//     per layer instead of once per parent layer and candidate range.
+//   - The CPU pattern backend sums each piece's own bounding box
+//     (gpu::CpuLocalPatternBackend) instead of building whole-grid prefix
+//     sums per batch; integer costs, so the same choices and costs.
 //   - The stage report: every run ends with a table of each stage's wall
 //     time, footprint, objective (2D overflow; then the router's own 2024
 //     score, or real overflow on 2008 designs) and its change, wire and
@@ -1233,6 +1241,7 @@
 //                                 -- see kroute.cpp's own header for the
 //                                 full derivation of each.
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <climits>
 #include <cmath>
@@ -4754,7 +4763,7 @@ int gPatternRefreshTest = 0;
 PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &nets, Usage &usage,
                                   Prices &prices, const PatternStageSettings &ps, bool trace) {
   PatternStageReport rep;
-  static gpu::CpuPatternBackend cpuBackend;
+  static gpu::CpuLocalPatternBackend cpuBackend; // pd36route: per-piece box sums, same results
   gpu::IPatternBackend *backend = &cpuBackend;
 #ifdef GR_PATTERN_SELECT
   {
@@ -6151,8 +6160,44 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
   // DP pays for pin access itself (NTHU's rec_count: a pin node's interval
   // starts at layer 0) instead of stitchPinAccess bolting a stack on after
   // the DP chose layers blind to it.
+  // pd36route: each node's via-demand terms, per layer z, computed once (the
+  // net's usage is fixed during its DP) instead of once per parent layer
+  // and candidate range. A term is kept as the two factors its statement
+  // multiplied, and added back as `total += a * b`, so the arithmetic --
+  // contraction included -- is the statement it replaces.
+  const bool vdCache = nthuCost && gViaDemand.on;
+  std::vector<std::array<std::pair<double, double>, 2>> vdTerm;
+  std::vector<uint8_t> vdCount;
+  std::vector<char> vdReady;
+  if (vdCache) {
+    vdTerm.resize(static_cast<size_t>(n) * L);
+    vdCount.assign(static_cast<size_t>(n) * L, 0);
+    vdReady.assign(n, 0);
+  }
+  auto vdFill = [&](int u, int x, int y) {
+    for (int z = 1; z < L; ++z) {
+      size_t slot = static_cast<size_t>(u) * L + z;
+      forViaDemandEdges(g, x, y, z, [&](bool h, size_t idx, int amount) {
+        long long uu = (h ? ru.h[idx] : ru.v[idx]) + amount;
+        long long capT = h ? g.hcap[idx] : g.vcap[idx];
+        const std::vector<double> *hw = h ? historyWireH : historyWireV;
+        double hh = hw ? (*hw)[idx] : 1.0;
+        std::pair<double, double> t;
+        if (gScore.on)
+          t = {hh, scoreMarginal(g, h, idx, uu - amount, amount)};
+        else if (uu > capT)
+          t = {kLaOverflowPenalty * hh, static_cast<double>(uu - capT)};
+        else
+          t = {kLaBalance * static_cast<double>(uu) / static_cast<double>(std::max<long long>(1, capT)), 1.0};
+        vdTerm[slot][vdCount[slot]++] = t;
+      });
+    }
+    vdReady[u] = 1;
+  };
   auto resolveNode = [&](int u, int x, int y, int ref, const std::vector<int> &children, double &outTotal,
                           Range &outRange, std::vector<int> &outChoice) -> bool {
+    if (vdCache && !vdReady[u])
+      vdFill(u, x, y);
     outTotal = kInf;
     bool any = false;
     int loMax = ref, hiMin = ref;
@@ -6203,18 +6248,11 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
               cov = choice[k] == z;
             if (cov)
               continue;
-            forViaDemandEdges(g, x, y, z, [&](bool h, size_t idx, int amount) {
-              long long uu = (h ? ru.h[idx] : ru.v[idx]) + amount;
-              long long capT = h ? g.hcap[idx] : g.vcap[idx];
-              const std::vector<double> *hw = h ? historyWireH : historyWireV;
-              double hh = hw ? (*hw)[idx] : 1.0;
-              if (gScore.on)
-                total += hh * scoreMarginal(g, h, idx, uu - amount, amount);
-              else if (uu > capT)
-                total += kLaOverflowPenalty * hh * static_cast<double>(uu - capT);
-              else
-                total += kLaBalance * static_cast<double>(uu) / static_cast<double>(std::max<long long>(1, capT));
-            });
+            {
+              size_t slot = static_cast<size_t>(u) * L + z;
+              for (int k = 0; k < vdCount[slot]; ++k)
+                total += vdTerm[slot][k].first * vdTerm[slot][k].second;
+            }
           }
         any = true;
         if (total < outTotal) {
@@ -7740,210 +7778,282 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
   using namespace p3d;
   const int L = g.nLayers;
   const double kInf = std::numeric_limits<double>::max() / 4;
-  // 1. The 2D tree of the current wires.
-  std::map<long long, std::vector<long long>> adj;
-  auto link = [&](int x0, int y0, int x1, int y1) {
-    long long a = key2(x0, y0), b = key2(x1, y1);
-    adj[a].push_back(b);
-    adj[b].push_back(a);
+  // pd36route: flat scratch, reused across nets (thread_local, for step 3),
+  // in place of the maps, sets and nested vectors pd35route built per net.
+  // Nodes are indices into the sorted unique GCell keys; every order the
+  // old containers gave (unit edges sorted, neighbours in link order, BFS,
+  // children in BFS order, pieces per key in discovery order) is kept, so
+  // the DP sees the same tree and adds the same terms in the same order.
+  struct Scratch {
+    std::vector<std::tuple<int, int, int>> unit;
+    std::vector<long long> nodeKey;
+    std::vector<int> la, lb;                 // links, in link order
+    std::vector<int> adjStart, adjFill, adj; // CSR, neighbours in link order
+    std::vector<int> parent, bfs, kidStart, kidFill, kid, nkids, keyIdx, keyNode, pinLo, pinHi;
+    std::vector<char> dead;
+    std::vector<long long> keys;
+    std::vector<int> pieceBegin, pieceEnd;     // per key: its child pieces
+    std::vector<int> pieceParent, pieceChild;  // per piece: key indices
+    std::vector<int> altBegin;                 // per piece: first alt (size pieces + 1)
+    std::vector<int> cornerBegin;              // per alt: first corner (size alts + 1)
+    std::vector<Point> corners, path, cur;
+    std::vector<int> parentPiece;
+    std::vector<double> G, nodeCost, keyVd, cornerVd, rc, curD, nxtD, altH;
+    std::vector<int> gAlt, gLast, nodeLo, nodeHi, childOff, childLayer, ch, bestCh, from, layOff, altLay;
+    std::vector<char> keyVdReady;
+    std::vector<std::pair<int, int>> todo;
   };
-  std::set<std::tuple<int, int, int>> unit; // (h, x, y) 2D unit edges
+  static thread_local Scratch sc;
+  // 1. The 2D tree of the current wires.
+  sc.unit.clear();
   for (const Seg &s : rn.segs) {
     if (s.l1 != s.l2)
       continue;
     if (s.y1 == s.y2)
       for (int x = std::min(s.x1, s.x2); x < std::max(s.x1, s.x2); ++x)
-        unit.insert({1, x, s.y1});
+        sc.unit.emplace_back(1, x, s.y1);
     else
       for (int y = std::min(s.y1, s.y2); y < std::max(s.y1, s.y2); ++y)
-        unit.insert({0, s.x1, y});
+        sc.unit.emplace_back(0, s.x1, y);
   }
-  if (unit.empty())
+  std::sort(sc.unit.begin(), sc.unit.end());
+  sc.unit.erase(std::unique(sc.unit.begin(), sc.unit.end()), sc.unit.end());
+  if (sc.unit.empty())
     return false;
-  for (const auto &e : unit) {
-    if (std::get<0>(e))
-      link(std::get<1>(e), std::get<2>(e), std::get<1>(e) + 1, std::get<2>(e));
-    else
-      link(std::get<1>(e), std::get<2>(e), std::get<1>(e), std::get<2>(e) + 1);
+  sc.nodeKey.clear();
+  for (const auto &e : sc.unit) {
+    int x = std::get<1>(e), y = std::get<2>(e);
+    sc.nodeKey.push_back(key2(x, y));
+    sc.nodeKey.push_back(std::get<0>(e) ? key2(x + 1, y) : key2(x, y + 1));
   }
-  std::map<long long, std::pair<int, int>> pinRange; // GCell -> (lo, hi) pin layers
+  std::sort(sc.nodeKey.begin(), sc.nodeKey.end());
+  sc.nodeKey.erase(std::unique(sc.nodeKey.begin(), sc.nodeKey.end()), sc.nodeKey.end());
+  const int N = static_cast<int>(sc.nodeKey.size());
+  auto nodeOf = [&](long long k) {
+    auto it = std::lower_bound(sc.nodeKey.begin(), sc.nodeKey.end(), k);
+    return it != sc.nodeKey.end() && *it == k ? static_cast<int>(it - sc.nodeKey.begin()) : -1;
+  };
+  sc.la.clear();
+  sc.lb.clear();
+  for (const auto &e : sc.unit) {
+    int x = std::get<1>(e), y = std::get<2>(e);
+    sc.la.push_back(nodeOf(key2(x, y)));
+    sc.lb.push_back(nodeOf(std::get<0>(e) ? key2(x + 1, y) : key2(x, y + 1)));
+  }
+  sc.adjStart.assign(N + 1, 0);
+  for (size_t i = 0; i < sc.la.size(); ++i) {
+    ++sc.adjStart[sc.la[i] + 1];
+    ++sc.adjStart[sc.lb[i] + 1];
+  }
+  for (int v = 0; v < N; ++v)
+    sc.adjStart[v + 1] += sc.adjStart[v];
+  sc.adjFill.assign(sc.adjStart.begin(), sc.adjStart.end() - 1);
+  sc.adj.resize(sc.adjStart[N]);
+  for (size_t i = 0; i < sc.la.size(); ++i) { // link(a, b): adj[a] gets b, then adj[b] gets a
+    sc.adj[sc.adjFill[sc.la[i]]++] = sc.lb[i];
+    sc.adj[sc.adjFill[sc.lb[i]]++] = sc.la[i];
+  }
+  // pin layer ranges per node; a pin off the wire tree: leave this net alone
+  sc.pinLo.assign(N, -1);
+  sc.pinHi.assign(N, -1);
   for (const Pin &p : rn.net->pins) {
-    long long k = key2(p.x, p.y);
-    auto it = pinRange.find(k);
-    if (it == pinRange.end())
-      pinRange[k] = {p.layer, p.layer};
-    else
-      it->second = {std::min(it->second.first, p.layer), std::max(it->second.second, p.layer)};
+    int v = nodeOf(key2(p.x, p.y));
+    if (v < 0)
+      return false;
+    if (sc.pinLo[v] < 0) {
+      sc.pinLo[v] = p.layer;
+      sc.pinHi[v] = p.layer;
+    } else {
+      sc.pinLo[v] = std::min(sc.pinLo[v], p.layer);
+      sc.pinHi[v] = std::max(sc.pinHi[v], p.layer);
+    }
   }
-  for (const auto &pr : pinRange)
-    if (!adj.count(pr.first))
-      return false; // a pin off the wire tree: leave this net alone
+  auto isPin = [&](int v) { return sc.pinLo[v] >= 0; };
   // BFS spanning tree from the first pin; then prune non-pin leaves.
-  long long root = key2(rn.net->pins[0].x, rn.net->pins[0].y);
-  std::map<long long, long long> parent;
-  std::vector<long long> bfs{root};
-  parent[root] = root;
-  for (size_t i = 0; i < bfs.size(); ++i)
-    for (long long nb : adj[bfs[i]])
-      if (!parent.count(nb)) {
-        parent[nb] = bfs[i];
-        bfs.push_back(nb);
+  const int root = nodeOf(key2(rn.net->pins[0].x, rn.net->pins[0].y));
+  sc.parent.assign(N, -1);
+  sc.bfs.assign(1, root);
+  sc.parent[root] = root;
+  for (size_t i = 0; i < sc.bfs.size(); ++i)
+    for (int a = sc.adjStart[sc.bfs[i]]; a < sc.adjStart[sc.bfs[i] + 1]; ++a) {
+      int nb = sc.adj[a];
+      if (sc.parent[nb] < 0) {
+        sc.parent[nb] = sc.bfs[i];
+        sc.bfs.push_back(nb);
       }
-  for (const auto &pr : pinRange)
-    if (!parent.count(pr.first))
+    }
+  for (int v = 0; v < N; ++v)
+    if (isPin(v) && sc.parent[v] < 0)
       return false; // disconnected: leave it
-  std::map<long long, std::vector<long long>> kids;
-  for (long long v : bfs)
+  sc.kidStart.assign(N + 1, 0);
+  for (int v : sc.bfs)
     if (v != root)
-      kids[parent[v]].push_back(v);
-  // prune: repeatedly drop non-pin leaves
-  std::map<long long, int> nkids;
-  for (long long v : bfs)
-    nkids[v] = static_cast<int>(kids[v].size());
-  std::set<long long> dead;
-  for (auto it = bfs.rbegin(); it != bfs.rend(); ++it) {
-    long long v = *it;
-    if (v != root && nkids[v] == 0 && !pinRange.count(v)) {
-      dead.insert(v);
-      --nkids[parent[v]];
+      ++sc.kidStart[sc.parent[v] + 1];
+  for (int v = 0; v < N; ++v)
+    sc.kidStart[v + 1] += sc.kidStart[v];
+  sc.kidFill.assign(sc.kidStart.begin(), sc.kidStart.end() - 1);
+  sc.kid.resize(sc.kidStart[N]);
+  for (int v : sc.bfs)
+    if (v != root)
+      sc.kid[sc.kidFill[sc.parent[v]]++] = v;
+  sc.nkids.assign(N, 0);
+  for (int v : sc.bfs)
+    sc.nkids[v] = sc.kidStart[v + 1] - sc.kidStart[v];
+  sc.dead.assign(N, 0);
+  for (auto it = sc.bfs.rbegin(); it != sc.bfs.rend(); ++it) {
+    int v = *it;
+    if (v != root && sc.nkids[v] == 0 && !isPin(v)) {
+      sc.dead[v] = 1;
+      --sc.nkids[sc.parent[v]];
     }
   }
   auto xOf = [](long long k) { return static_cast<int>(static_cast<unsigned>(k & 0xffffffffLL)); };
   auto yOf = [](long long k) { return static_cast<int>(k >> 32); };
-  auto live = [&](long long v) { return !dead.count(v); };
-  // key nodes and pieces (parent key -> chain -> child key)
-  auto isKey = [&](long long v) { return v == root || pinRange.count(v) || nkids[v] != 1; };
-  struct Piece {
-    int parentKey, childKey;
-    std::vector<Alt> alts;
+  auto isKey = [&](int v) { return v == root || isPin(v) || sc.nkids[v] != 1; };
+  // key nodes and pieces (parent key -> chain -> child key), alts flat
+  sc.keys.assign(1, sc.nodeKey[root]);
+  std::vector<int> &keyNode = sc.keyNode; // key index -> node
+  keyNode.assign(1, root);
+  sc.keyIdx.assign(N, -1);
+  sc.keyIdx[root] = 0;
+  sc.pieceBegin.clear();
+  sc.pieceEnd.clear();
+  sc.pieceParent.clear();
+  sc.pieceChild.clear();
+  sc.altBegin.assign(1, 0);
+  sc.cornerBegin.assign(1, 0);
+  sc.corners.clear();
+  auto pushAlt = [&](const Point *c, size_t n) {
+    sc.corners.insert(sc.corners.end(), c, c + n);
+    sc.cornerBegin.push_back(static_cast<int>(sc.corners.size()));
   };
-  std::vector<long long> keys;
-  std::map<long long, int> keyIdx;
-  std::vector<Piece> pieces;
-  std::vector<std::vector<int>> childPieces;
-  keys.push_back(root);
-  keyIdx[root] = 0;
-  childPieces.emplace_back();
-  for (size_t ki = 0; ki < keys.size(); ++ki) {
-    long long u = keys[ki];
-    for (long long c : kids[u]) {
-      if (!live(c))
+  for (size_t ki = 0; ki < sc.keys.size(); ++ki) {
+    sc.pieceBegin.push_back(static_cast<int>(sc.pieceParent.size()));
+    int u = keyNode[ki];
+    for (int a = sc.kidStart[u]; a < sc.kidStart[u + 1]; ++a) {
+      int c = sc.kid[a];
+      if (sc.dead[c])
         continue;
-      std::vector<Point> path{{xOf(u), yOf(u)}};
-      long long w = c;
+      sc.path.assign(1, Point{xOf(sc.nodeKey[u]), yOf(sc.nodeKey[u])});
+      int w = c;
       while (true) {
-        path.push_back({xOf(w), yOf(w)});
+        sc.path.push_back({xOf(sc.nodeKey[w]), yOf(sc.nodeKey[w])});
         if (isKey(w))
           break;
-        long long nxt = -1;
-        for (long long k2 : kids[w])
-          if (live(k2))
-            nxt = k2;
+        int nxt = -1;
+        for (int b = sc.kidStart[w]; b < sc.kidStart[w + 1]; ++b)
+          if (!sc.dead[sc.kid[b]])
+            nxt = sc.kid[b];
         w = nxt;
       }
       int vi;
-      if (!keyIdx.count(w)) {
-        vi = static_cast<int>(keys.size());
-        keyIdx[w] = vi;
-        keys.push_back(w);
-        childPieces.emplace_back();
+      if (sc.keyIdx[w] < 0) {
+        vi = static_cast<int>(sc.keys.size());
+        sc.keyIdx[w] = vi;
+        sc.keys.push_back(sc.nodeKey[w]);
+        keyNode.push_back(w);
       } else {
-        vi = keyIdx[w];
+        vi = sc.keyIdx[w];
       }
-      Piece pc;
-      pc.parentKey = static_cast<int>(ki);
-      pc.childKey = vi;
+      sc.pieceParent.push_back(static_cast<int>(ki));
+      sc.pieceChild.push_back(vi);
       // current shape: corners of the path
-      Alt cur;
-      cur.corners.push_back(path.front());
-      for (size_t i = 1; i + 1 < path.size(); ++i) {
-        bool hPrev = path[i].y == path[i - 1].y, hNext = path[i + 1].y == path[i].y;
+      sc.cur.assign(1, sc.path.front());
+      for (size_t i = 1; i + 1 < sc.path.size(); ++i) {
+        bool hPrev = sc.path[i].y == sc.path[i - 1].y, hNext = sc.path[i + 1].y == sc.path[i].y;
         if (hPrev != hNext)
-          cur.corners.push_back(path[i]);
+          sc.cur.push_back(sc.path[i]);
       }
-      cur.corners.push_back(path.back());
-      pc.alts.push_back(cur);
-      Point a = path.front(), b = path.back();
-      if ((a.x == b.x || a.y == b.y) && cur.corners.size() > 2) {
-        Alt st; // aligned ends, a bent route: the straight run
-        st.corners = {a, b};
-        pc.alts.push_back(st);
-      } else if (a.x != b.x && a.y != b.y) {
-        Alt l1, l2;
-        l1.corners = {a, {b.x, a.y}, b}; // horizontal first
-        l2.corners = {a, {a.x, b.y}, b}; // vertical first
-        for (const Alt &al : {l1, l2}) {
-          bool same = al.corners.size() == cur.corners.size();
-          for (size_t i = 0; same && i < al.corners.size(); ++i)
-            same = al.corners[i].x == cur.corners[i].x && al.corners[i].y == cur.corners[i].y;
+      sc.cur.push_back(sc.path.back());
+      pushAlt(sc.cur.data(), sc.cur.size());
+      Point pa = sc.path.front(), pb = sc.path.back();
+      if ((pa.x == pb.x || pa.y == pb.y) && sc.cur.size() > 2) {
+        Point st[2] = {pa, pb}; // aligned ends, a bent route: the straight run
+        pushAlt(st, 2);
+      } else if (pa.x != pb.x && pa.y != pb.y) {
+        Point l1[3] = {pa, {pb.x, pa.y}, pb}; // horizontal first
+        Point l2[3] = {pa, {pa.x, pb.y}, pb}; // vertical first
+        for (const Point *al : {l1, l2}) {
+          bool same = sc.cur.size() == 3;
+          for (size_t i = 0; same && i < 3; ++i)
+            same = al[i].x == sc.cur[i].x && al[i].y == sc.cur[i].y;
           if (!same)
-            pc.alts.push_back(al);
+            pushAlt(al, 3);
         }
       }
-      childPieces[ki].push_back(static_cast<int>(pieces.size()));
-      pieces.push_back(std::move(pc));
+      sc.altBegin.push_back(static_cast<int>(sc.cornerBegin.size()) - 1);
     }
+    sc.pieceEnd.push_back(static_cast<int>(sc.pieceParent.size()));
   }
-  if (pieces.size() > 2000)
+  const size_t P = sc.pieceParent.size();
+  if (P > 2000)
     return false;
-  std::vector<int> parentPiece(keys.size(), -1);
-  for (size_t p = 0; p < pieces.size(); ++p)
-    parentPiece[pieces[p].childKey] = static_cast<int>(p);
+  const int K = static_cast<int>(sc.keys.size());
+  sc.parentPiece.assign(K, -1);
+  for (size_t p = 0; p < P; ++p)
+    sc.parentPiece[sc.pieceChild[p]] = static_cast<int>(p);
   // 2. Rip the net up, then the DP (children before parents: reverse key order).
   undoCharge(ru, rvu, charge);
   const int width = rn.net->minWidth;
-  struct AltSol {
-    std::vector<std::vector<double>> h; // [lFirst][lLast]
-    std::vector<std::vector<std::vector<int>>> layers; // [lFirst][lLast] -> run layers
-  };
-  // G[p][lu] and its choice
-  std::vector<std::vector<double>> G(pieces.size(), std::vector<double>(L, kInf));
-  std::vector<std::vector<int>> gAlt(pieces.size(), std::vector<int>(L, -1)), gLast(pieces.size(), std::vector<int>(L, -1));
-  std::vector<std::vector<AltSol>> sols(pieces.size());
-  // node resolution: Node[k][ref] (ref = L means root/virtual)
-  struct NodeSol {
-    double cost = 0;
-    int lo = 0, hi = 0;
-    std::vector<int> childLayer;
-  };
-  std::vector<std::vector<NodeSol>> node(keys.size(), std::vector<NodeSol>(L + 1));
+  const int nAlts = static_cast<int>(sc.cornerBegin.size()) - 1;
+  // per alt: h[lf][ll] and the run layers for each (lf, ll)
+  sc.altH.assign(static_cast<size_t>(nAlts) * L * L, kInf);
+  sc.layOff.assign(nAlts + 1, 0);
+  for (int a = 0; a < nAlts; ++a)
+    sc.layOff[a + 1] = sc.layOff[a] + (sc.cornerBegin[a + 1] - sc.cornerBegin[a] - 1) * L * L;
+  sc.altLay.assign(sc.layOff[nAlts], 0);
+  sc.G.assign(P * L, kInf);
+  sc.gAlt.assign(P * L, -1);
+  sc.gLast.assign(P * L, -1);
+  // node resolution: node[k][ref] (ref = L means root/virtual), flat
+  sc.nodeCost.assign(static_cast<size_t>(K) * (L + 1), 0.0);
+  sc.nodeLo.assign(static_cast<size_t>(K) * (L + 1), 0);
+  sc.nodeHi.assign(static_cast<size_t>(K) * (L + 1), 0);
+  sc.childOff.assign(K + 1, 0);
+  for (int k = 0; k < K; ++k)
+    sc.childOff[k + 1] = sc.childOff[k] + (L + 1) * (sc.pieceEnd[k] - sc.pieceBegin[k]);
+  sc.childLayer.assign(sc.childOff[K], 0);
   auto candidates = [&](bool h) -> const std::vector<int> & { return h ? lp.hLayers : lp.vLayers; };
-  // pd36route: viaDemandCost at a point, once per layer. Usage does not
-  // change while the net is ripped up, so these are the values the loops
-  // below used to recompute, added in the same order.
-  auto viaDemandRow = [&](int x, int y, std::vector<double> &row) {
-    row.assign(L, 0.0);
+  // pd36route: viaDemandCost at a point, once per layer (usage is fixed
+  // while the net is ripped up; the same values, added in the same order).
+  auto viaDemandRow = [&](int x, int y, double *row) {
+    row[0] = 0.0;
     for (int z = 1; z < L; ++z)
       row[z] = viaDemandCost(g, ru, x, y, z);
   };
-  std::vector<std::vector<double>> keyVd(keys.size());
+  sc.keyVd.assign(static_cast<size_t>(K) * L, 0.0);
+  sc.keyVdReady.assign(K, 0);
   auto resolveNode = [&](int k, int ref) {
-    long long kv = keys[k];
+    long long kv = sc.keys[k];
     int x = xOf(kv), y = yOf(kv);
-    if (keyVd[k].empty())
-      viaDemandRow(x, y, keyVd[k]);
-    const std::vector<double> &vd = keyVd[k];
-    int loMax = ref < L ? ref : L - 1, hiMin = ref < L ? ref : 0;
-    auto pr = pinRange.find(kv);
-    if (pr != pinRange.end()) {
-      loMax = std::min(loMax, pr->second.first);
-      hiMin = std::max(hiMin, pr->second.second);
+    if (!sc.keyVdReady[k]) {
+      viaDemandRow(x, y, &sc.keyVd[static_cast<size_t>(k) * L]);
+      sc.keyVdReady[k] = 1;
     }
-    NodeSol best;
-    best.cost = kInf;
-    const std::vector<int> &cp = childPieces[k];
-    std::vector<int> ch(cp.size(), -1); // pd36route: one scratch per call
+    const double *vd = &sc.keyVd[static_cast<size_t>(k) * L];
+    int loMax = ref < L ? ref : L - 1, hiMin = ref < L ? ref : 0;
+    int kn = keyNode[k];
+    if (isPin(kn)) {
+      loMax = std::min(loMax, sc.pinLo[kn]);
+      hiMin = std::max(hiMin, sc.pinHi[kn]);
+    }
+    double bestCost = kInf;
+    int bestLo = 0, bestHi = 0;
+    const int pb = sc.pieceBegin[k], nc = sc.pieceEnd[k] - pb;
+    sc.ch.assign(nc, -1);
+    sc.bestCh.clear();
     for (int lo = 0; lo <= loMax; ++lo)
       for (int hi = std::max(hiMin, lo); hi < L; ++hi) {
         double c = viaUnit() * (hi - lo);
-        std::fill(ch.begin(), ch.end(), -1);
+        std::fill(sc.ch.begin(), sc.ch.end(), -1);
         bool ok = true;
-        for (size_t j = 0; j < cp.size() && ok; ++j) {
+        for (int j = 0; j < nc && ok; ++j) {
           double b = kInf;
+          const double *Gp = &sc.G[static_cast<size_t>(pb + j) * L];
           for (int l = lo; l <= hi; ++l)
-            if (G[cp[j]][l] < b) {
-              b = G[cp[j]][l];
-              ch[j] = l;
+            if (Gp[l] < b) {
+              b = Gp[l];
+              sc.ch[j] = l;
             }
           if (b >= kInf)
             ok = false;
@@ -7954,23 +8064,29 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
           continue;
         for (int z = std::max(lo, 1); z < hi; ++z) {
           bool cov = ref < L && z == ref;
-          for (int l : ch)
+          for (int l : sc.ch)
             cov = cov || l == z;
           if (!cov)
             c += vd[z];
         }
-        if (c < best.cost) {
-          best.cost = c;
-          best.lo = lo;
-          best.hi = hi;
-          best.childLayer = ch;
+        if (c < bestCost) {
+          bestCost = c;
+          bestLo = lo;
+          bestHi = hi;
+          sc.bestCh = sc.ch;
         }
       }
-    node[k][ref] = best;
+    size_t slot = static_cast<size_t>(k) * (L + 1) + ref;
+    sc.nodeCost[slot] = bestCost;
+    sc.nodeLo[slot] = bestLo;
+    sc.nodeHi[slot] = bestHi;
+    // a never-improved resolution keeps an empty choice, as NodeSol did
+    int *out = &sc.childLayer[sc.childOff[k] + ref * nc];
+    for (int j = 0; j < nc; ++j)
+      out[j] = sc.bestCh.empty() ? 0 : sc.bestCh[j];
   };
   // process keys in reverse BFS discovery order (children have larger indices)
-  for (int k = static_cast<int>(keys.size()) - 1; k >= 0; --k) {
-    // pieces whose child key is k need node[k][*]; compute node[k][ref] for all ref
+  for (int k = K - 1; k >= 0; --k) {
     if (k != 0)
       for (int ref = 0; ref < L; ++ref)
         resolveNode(k, ref);
@@ -7979,78 +8095,73 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
     if (k == 0)
       break;
     // the piece ending at k: compute G
-    {
-      size_t p = static_cast<size_t>(parentPiece[k]);
-      Piece &pc = pieces[p];
-      sols[p].resize(pc.alts.size());
-      for (size_t ai = 0; ai < pc.alts.size(); ++ai) {
-        const Alt &al = pc.alts[ai];
-        size_t R = al.corners.size() - 1;
-        std::vector<bool> hr(R);
-        std::vector<std::vector<double>> rc(R, std::vector<double>(L, kInf));
-        for (size_t r = 0; r < R; ++r) {
-          hr[r] = al.corners[r].y == al.corners[r + 1].y;
-          for (int l : candidates(hr[r]))
-            rc[r][l] = runCost(g, ru, al.corners[r], al.corners[r + 1], l, width);
-        }
-        // pd36route: each inner corner's via-demand row, once per alt.
-        std::vector<std::vector<double>> cornerVd(R);
-        for (size_t r = 1; r < R; ++r)
-          viaDemandRow(al.corners[r].x, al.corners[r].y, cornerVd[r]);
-        AltSol &as = sols[p][ai];
-        as.h.assign(L, std::vector<double>(L, kInf));
-        as.layers.assign(L, std::vector<std::vector<int>>(L));
-        for (int lf = 0; lf < L; ++lf) {
-          if (rc[0][lf] >= kInf)
-            continue;
-          std::vector<double> cur(L, kInf);
-          std::vector<std::vector<int>> from(R, std::vector<int>(L, -1));
-          cur[lf] = rc[0][lf];
-          for (size_t r = 1; r < R; ++r) {
-            std::vector<double> nxt(L, kInf);
-            for (int la = 0; la < L; ++la) {
-              if (cur[la] >= kInf)
+    const size_t p = static_cast<size_t>(sc.parentPiece[k]);
+    for (int a = sc.altBegin[p]; a < sc.altBegin[p + 1]; ++a) {
+      const Point *al = &sc.corners[sc.cornerBegin[a]];
+      const size_t R = static_cast<size_t>(sc.cornerBegin[a + 1] - sc.cornerBegin[a]) - 1;
+      sc.rc.assign(R * L, kInf);
+      for (size_t r = 0; r < R; ++r) {
+        bool hr = al[r].y == al[r + 1].y;
+        for (int l : candidates(hr))
+          sc.rc[r * L + l] = runCost(g, ru, al[r], al[r + 1], l, width);
+      }
+      // pd36route: each inner corner's via-demand row, once per alt.
+      sc.cornerVd.assign(R * L, 0.0);
+      for (size_t r = 1; r < R; ++r)
+        viaDemandRow(al[r].x, al[r].y, &sc.cornerVd[r * L]);
+      double *ah = &sc.altH[static_cast<size_t>(a) * L * L];
+      int *alay = &sc.altLay[sc.layOff[a]];
+      for (int lf = 0; lf < L; ++lf) {
+        if (sc.rc[lf] >= kInf)
+          continue;
+        sc.curD.assign(L, kInf);
+        sc.from.assign(R * L, -1);
+        sc.curD[lf] = sc.rc[lf];
+        for (size_t r = 1; r < R; ++r) {
+          sc.nxtD.assign(L, kInf);
+          for (int la = 0; la < L; ++la) {
+            if (sc.curD[la] >= kInf)
+              continue;
+            for (int lb = 0; lb < L; ++lb) {
+              if (sc.rc[r * L + lb] >= kInf)
                 continue;
-              for (int lb = 0; lb < L; ++lb) {
-                if (rc[r][lb] >= kInf)
-                  continue;
-                double c = cur[la] + rc[r][lb] + viaUnit() * std::abs(la - lb);
-                for (int z = std::max(std::min(la, lb) + 1, 1); z < std::max(la, lb); ++z)
-                  c += cornerVd[r][z];
-                if (c < nxt[lb]) {
-                  nxt[lb] = c;
-                  from[r][lb] = la;
-                }
+              double c = sc.curD[la] + sc.rc[r * L + lb] + viaUnit() * std::abs(la - lb);
+              for (int z = std::max(std::min(la, lb) + 1, 1); z < std::max(la, lb); ++z)
+                c += sc.cornerVd[r * L + z];
+              if (c < sc.nxtD[lb]) {
+                sc.nxtD[lb] = c;
+                sc.from[r * L + lb] = la;
               }
             }
-            cur = nxt;
           }
-          for (int ll = 0; ll < L; ++ll) {
-            if (cur[ll] >= kInf)
-              continue;
-            as.h[lf][ll] = cur[ll];
-            std::vector<int> lay(R);
-            lay[R - 1] = ll;
-            for (size_t r = R - 1; r > 0; --r)
-              lay[r - 1] = from[r][lay[r]];
-            as.layers[lf][ll] = lay;
+          sc.curD.swap(sc.nxtD);
+        }
+        for (int ll = 0; ll < L; ++ll) {
+          if (sc.curD[ll] >= kInf)
+            continue;
+          ah[lf * L + ll] = sc.curD[ll];
+          int *lay = &alay[static_cast<size_t>(lf * L + ll) * R];
+          lay[R - 1] = ll;
+          for (size_t r = R - 1; r > 0; --r)
+            lay[r - 1] = sc.from[r * L + lay[r]];
+        }
+      }
+      const int ai = a - sc.altBegin[p];
+      for (int lf = 0; lf < L; ++lf)
+        for (int ll = 0; ll < L; ++ll) {
+          double nk = sc.nodeCost[static_cast<size_t>(k) * (L + 1) + ll];
+          if (ah[lf * L + ll] >= kInf || nk >= kInf)
+            continue;
+          double c = ah[lf * L + ll] + nk;
+          if (c < sc.G[p * L + lf]) {
+            sc.G[p * L + lf] = c;
+            sc.gAlt[p * L + lf] = ai;
+            sc.gLast[p * L + lf] = ll;
           }
         }
-        for (int lf = 0; lf < L; ++lf)
-          for (int ll = 0; ll < L; ++ll) {
-            if (as.h[lf][ll] >= kInf || node[k][ll].cost >= kInf)
-              continue;
-            double c = as.h[lf][ll] + node[k][ll].cost;
-            if (c < G[p][lf]) {
-              G[p][lf] = c;
-              gAlt[p][lf] = static_cast<int>(ai);
-              gLast[p][lf] = ll;
-            }
-          }
-      }
     }
   }
-  if (node[0][L].cost >= kInf) {
+  if (sc.nodeCost[static_cast<size_t>(0) * (L + 1) + L] >= kInf) {
     applyCharge(ru, rvu, charge);
     return false;
   }
@@ -8060,25 +8171,28 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
     for (int l = lo; l < hi; ++l)
       segs.push_back({x, y, l, x, y, l + 1});
   };
-  std::vector<std::pair<int, int>> todo{{0, L}}; // (key, ref)
-  while (!todo.empty()) {
-    auto [k, ref] = todo.back();
-    todo.pop_back();
-    const NodeSol &ns = node[k][ref];
-    emitStack(xOf(keys[k]), yOf(keys[k]), ns.lo, ns.hi);
-    const std::vector<int> &cp = childPieces[k];
-    for (size_t j = 0; j < cp.size(); ++j) {
-      int p = cp[j], lf = ns.childLayer[j];
-      int ai = gAlt[p][lf], ll = gLast[p][lf];
-      const Alt &al = pieces[p].alts[ai];
-      const std::vector<int> &lay = sols[p][ai].layers[lf][ll];
-      for (size_t r = 0; r + 1 < al.corners.size(); ++r) {
-        Point a = al.corners[r], b = al.corners[r + 1];
-        segs.push_back({std::min(a.x, b.x), std::min(a.y, b.y), lay[r], std::max(a.x, b.x), std::max(a.y, b.y), lay[r]});
+  sc.todo.assign(1, {0, L}); // (key, ref)
+  while (!sc.todo.empty()) {
+    auto [k, ref] = sc.todo.back();
+    sc.todo.pop_back();
+    size_t slot = static_cast<size_t>(k) * (L + 1) + ref;
+    emitStack(xOf(sc.keys[k]), yOf(sc.keys[k]), sc.nodeLo[slot], sc.nodeHi[slot]);
+    const int pb = sc.pieceBegin[k], nc = sc.pieceEnd[k] - pb;
+    const int *chosen = &sc.childLayer[sc.childOff[k] + ref * nc];
+    for (int j = 0; j < nc; ++j) {
+      int p = pb + j, lf = chosen[j];
+      int ai = sc.gAlt[static_cast<size_t>(p) * L + lf], ll = sc.gLast[static_cast<size_t>(p) * L + lf];
+      int a = sc.altBegin[p] + ai;
+      const Point *al = &sc.corners[sc.cornerBegin[a]];
+      const size_t R = static_cast<size_t>(sc.cornerBegin[a + 1] - sc.cornerBegin[a]) - 1;
+      const int *lay = &sc.altLay[sc.layOff[a] + static_cast<size_t>(lf * L + ll) * R];
+      for (size_t r = 0; r < R; ++r) {
+        Point pa = al[r], pq = al[r + 1];
+        segs.push_back({std::min(pa.x, pq.x), std::min(pa.y, pq.y), lay[r], std::max(pa.x, pq.x), std::max(pa.y, pq.y), lay[r]});
         if (r > 0 && lay[r - 1] != lay[r])
-          emitStack(a.x, a.y, std::min(lay[r - 1], lay[r]), std::max(lay[r - 1], lay[r]));
+          emitStack(pa.x, pa.y, std::min(lay[r - 1], lay[r]), std::max(lay[r - 1], lay[r]));
       }
-      todo.push_back({pieces[p].childKey, ll});
+      sc.todo.push_back({sc.pieceChild[p], ll});
     }
   }
   // 4. Commit and compare exactly.
@@ -14415,6 +14529,45 @@ void testPatternIncrementalRefreshIsExact() {
   check(!same(stale, full), "stale costs route differently: the fixture exercises the per-batch refresh");
 }
 
+// pd36route: the local-sum CPU pattern backend returns exactly the
+// reference backend's choices and costs, on random grids (costs up to 2^20
+// and some at kCostMax) and random batches of straight, L and Z pieces.
+void testLocalPatternBackendMatchesReference() {
+  unsigned st = 777;
+  auto rnd = [&](int n) {
+    st = st * 1103515245u + 12345u;
+    return static_cast<int>((st >> 8) % static_cast<unsigned>(n));
+  };
+  bool same = true;
+  size_t pieces = 0;
+  for (int t = 0; t < 40 && same; ++t) {
+    gpu::PatternGrid pg;
+    pg.nx = 2 + rnd(60);
+    pg.ny = 2 + rnd(60);
+    pg.h.resize(static_cast<size_t>(pg.nx - 1) * pg.ny);
+    pg.v.resize(static_cast<size_t>(pg.nx) * (pg.ny - 1));
+    for (auto &c : pg.h)
+      c = rnd(50) == 0 ? gpu::kCostMax : rnd(1 << 20);
+    for (auto &c : pg.v)
+      c = rnd(50) == 0 ? gpu::kCostMax : rnd(1 << 20);
+    gpu::PatternBatch pb;
+    for (int i = 0; i < 200; ++i) {
+      pb.x1.push_back(rnd(pg.nx));
+      pb.y1.push_back(rnd(pg.ny));
+      pb.x2.push_back(rnd(pg.nx));
+      pb.y2.push_back(rnd(pg.ny));
+    }
+    gpu::CpuPatternBackend ref;
+    gpu::CpuLocalPatternBackend loc;
+    gpu::PatternResult a, b;
+    ref.solve(pg, pb, a);
+    loc.solve(pg, pb, b);
+    same = a.best == b.best && a.cost == b.cost;
+    pieces += pb.size();
+  }
+  check(same && pieces == 8000, "local pattern backend: the reference's choices and costs on 8000 random pieces");
+}
+
 // pd36route: the stage report counts wire and vias from segments (a 3-unit
 // run, a 2-unit run, a 2-layer via), keeps rows in order, and prints each
 // objective's change from the previous one (100 -> 90: -10, -10%).
@@ -14704,6 +14857,7 @@ int run() {
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
+  testLocalPatternBackendMatchesReference();
   testPatternIncrementalRefreshIsExact();
   testG24StreamingMatchesInMemory();
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";

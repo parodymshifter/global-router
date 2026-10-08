@@ -9384,3 +9384,43 @@ The router's absolute score sits ~18% above the evaluator's (13700293):
 it prices wire demand per grid edge, the evaluator per GCell. The change
 column is what the router optimizes, and what the report is for. Already
 visible: the third 3D pass costs 14% of the run for 0.03%.
+
+**mempool_cluster_ranking on the lean pipeline** (pd36route of commit
+2d2a413, `lean24b.env`, LEGAL, `g24_verify` = official evaluator):
+**1773660600, -0.48% vs contest #1** (Part 114's standard: 1777655067),
+**5043 s** (Part 114: 61017 s, 12.1x), peak footprint 29.4 GB (layer
+assignment's first round, unchanged). Its stage report: pattern stage
+1358 s (27%), fallback 1475 s (29%; 2D overflow 11 -> 0, wire -0.04%),
+layer assignment round 0 1054 s (21%), 3D passes 321/313/317 s
+(-0.61% / -0.17% / -0.027%), the rest 194 s.
+
+**`fast24.env`** (the pipeline chosen): lean24b without the region stage,
+refinement and fallback -- equal to lean24b within 0.0003% on the ten
+designs where both ran (LS above), and the fallback was 25 min of the
+cluster run for its last 11 units of 2D overflow.
+
+**More exact cuts in pd36route, found with the stage report and `sample`:**
+- the CPU pattern backend built whole-grid prefix sums per batch (77% of
+  the pattern stage's later rounds on bsg_chip_rank);
+  `gpu::CpuLocalPatternBackend` (gpu/pattern_kernel.h) sums each piece's
+  own bounding box -- integer costs, so the same choices and costs (self
+  test: the reference's results on 8000 random pieces); the reference
+  backend, the GPU contract, is unchanged;
+- layer assignment's DP computes each tree node's via-demand terms once per
+  layer, kept as the two factors of the statement they replace;
+- the 3D pattern reroute builds its tree and runs its DP in flat scratch
+  reused across nets (sorted node keys, CSR adjacency) instead of maps,
+  sets and nested vectors per net.
+
+bsg_chip_rank, `lean24b.env`, stage times (s):
+
+| stage | pd35route | pd36route (2d2a413) | pd36route now |
+|---|---|---|---|
+| pattern stage | -- | 26.1 | 12.9 |
+| layer assignment, round 0 | -- | 44.3 | 33.0 |
+| 3D pattern passes (3) | -- | 49.3 | 20.7 |
+| total | 280 | 128.7 | **75.9** |
+
+(standard pipeline, pd35route: 1247 s.) Byte-identical vs pd35route:
+mempool_tile_rank and ariane_68_rank (standard), nvdla_rank (L and L2D),
+ariane133_68 (LS), bsg_chip_rank (L2D); adaptec1 2008 parity holds.

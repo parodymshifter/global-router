@@ -197,6 +197,97 @@ public:
   }
 };
 
+// pd36route (HISTORY_COST_SWEEP.md Part 115): the same results as
+// CpuPatternBackend without its whole-grid prefix sums per batch -- each
+// piece sums its own bounding box (every row and column of it, which is all
+// its candidates read). Costs are integers, so a run's sum is the same
+// whether taken from global or local prefix sums; the scan order and the
+// strict-minimum rule are the reference's. A batch's pieces have disjoint
+// boxes, so a batch costs at most one pass over the grid, and a late round
+// with a few small pieces costs almost nothing.
+class CpuLocalPatternBackend : public IPatternBackend {
+public:
+  std::string name() const override { return "cpu"; }
+  void solve(const PatternGrid &g, const PatternBatch &b, PatternResult &r) override {
+    const int nx = g.nx;
+    size_t n = b.size();
+    r.best.assign(n, -1);
+    r.cost.assign(n, 0);
+    for (size_t i = 0; i < n; ++i) {
+      const int x1 = b.x1[i], y1 = b.y1[i], x2 = b.x2[i], y2 = b.y2[i];
+      if (x1 == x2 && y1 == y2)
+        continue;
+      if (x1 == x2 || y1 == y2) {
+        int64_t s = 0;
+        if (y1 == y2)
+          for (int x = x1 < x2 ? x1 : x2; x < (x1 < x2 ? x2 : x1); ++x)
+            s += g.h[static_cast<size_t>(y1) * (nx - 1) + x];
+        else
+          for (int y = y1 < y2 ? y1 : y2; y < (y1 < y2 ? y2 : y1); ++y)
+            s += g.v[static_cast<size_t>(y) * nx + x1];
+        r.best[i] = 0;
+        r.cost[i] = s;
+        continue;
+      }
+      const int xlo = x1 < x2 ? x1 : x2, xhi = x1 < x2 ? x2 : x1;
+      const int ylo = y1 < y2 ? y1 : y2, yhi = y1 < y2 ? y2 : y1;
+      const int W = xhi - xlo + 1, H = yhi - ylo + 1;
+      // rp[(y - ylo) * W + (x - xlo)] = h edges (xlo..x-1, y); cp likewise by column.
+      rp_.assign(static_cast<size_t>(W) * H, 0);
+      cp_.assign(static_cast<size_t>(W) * H, 0);
+      for (int y = ylo; y <= yhi; ++y) {
+        int64_t *row = &rp_[static_cast<size_t>(y - ylo) * W];
+        const int64_t *src = &g.h[static_cast<size_t>(y) * (nx - 1)];
+        for (int x = xlo + 1; x <= xhi; ++x)
+          row[x - xlo] = row[x - xlo - 1] + src[x - 1];
+      }
+      for (int x = xlo; x <= xhi; ++x) {
+        int64_t *col = &cp_[static_cast<size_t>(x - xlo) * H];
+        for (int y = ylo + 1; y <= yhi; ++y)
+          col[y - ylo] = col[y - ylo - 1] + g.v[static_cast<size_t>(y - 1) * nx + x];
+      }
+      auto row = [&](int y, int a, int c) {
+        int lo = a < c ? a : c, hi = a < c ? c : a;
+        const int64_t *p = &rp_[static_cast<size_t>(y - ylo) * W];
+        return p[hi - xlo] - p[lo - xlo];
+      };
+      auto col = [&](int x, int a, int c) {
+        int lo = a < c ? a : c, hi = a < c ? c : a;
+        const int64_t *p = &cp_[static_cast<size_t>(x - xlo) * H];
+        return p[hi - ylo] - p[lo - ylo];
+      };
+      int64_t best = row(y1, x1, x2) + col(x2, y1, y2);
+      int32_t bi = 0;
+      int64_t c = col(x1, y1, y2) + row(y2, x1, x2);
+      if (c < best) {
+        best = c;
+        bi = 1;
+      }
+      int32_t k = 2;
+      int sx = x2 > x1 ? 1 : -1, sy = y2 > y1 ? 1 : -1;
+      for (int m = x1 + sx; m != x2; m += sx, ++k) {
+        c = row(y1, x1, m) + col(m, y1, y2) + row(y2, m, x2);
+        if (c < best) {
+          best = c;
+          bi = k;
+        }
+      }
+      for (int m = y1 + sy; m != y2; m += sy, ++k) {
+        c = col(x1, y1, m) + row(m, x1, x2) + col(x2, m, y2);
+        if (c < best) {
+          best = c;
+          bi = k;
+        }
+      }
+      r.best[i] = bi;
+      r.cost[i] = best;
+    }
+  }
+
+private:
+  std::vector<int64_t> rp_, cp_;
+};
+
 // Backend selection (backend_select.cpp): GR_GPU=auto|metal|cuda|cpu.
 // auto picks the first available of cuda, metal, cpu; an explicitly
 // requested backend that is not available is an error (returns nullptr and
