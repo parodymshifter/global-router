@@ -4954,32 +4954,70 @@ std::vector<std::vector<size_t>> commutingBatches(const std::vector<NetBox> &box
 // pool's threads, so a long net holds back only the nets that overlap it.
 // Every position sees exactly what it would have in sequential order.
 // Returns the number of dependency edges.
+// pd37route: the coarse cells (cell x cell tiles) a box covers, as CSR.
+struct CellLists {
+  std::vector<uint32_t> start{0};
+  std::vector<uint32_t> cells;
+  size_t nCells = 0;
+};
+CellLists cellsOfBoxes(const std::vector<NetBox> &boxes, int nx, int ny, int cell) {
+  CellLists cl;
+  const int cw = (nx + cell - 1) / cell, ch = (ny + cell - 1) / cell;
+  cl.nCells = static_cast<size_t>(cw) * ch;
+  cl.start.reserve(boxes.size() + 1);
+  for (const NetBox &bx : boxes) {
+    int cx0 = std::max(0, bx.x0) / cell, cx1 = std::min(nx - 1, bx.x1) / cell;
+    int cy0 = std::max(0, bx.y0) / cell, cy1 = std::min(ny - 1, bx.y1) / cell;
+    for (int cy = cy0; cy <= cy1; ++cy)
+      for (int cx = cx0; cx <= cx1; ++cx)
+        cl.cells.push_back(static_cast<uint32_t>(cy * cw + cx));
+    cl.start.push_back(static_cast<uint32_t>(cl.cells.size()));
+  }
+  return cl;
+}
+
+size_t runCommutingDagCells(const CellLists &cl, int threads, const std::function<void(size_t)> &f);
+
 size_t runCommutingDag(const std::vector<NetBox> &boxes, int nx, int ny, int cell, int threads,
                        const std::function<void(size_t)> &f) {
-  const size_t n = boxes.size();
-  const int cw = (nx + cell - 1) / cell, ch = (ny + cell - 1) / cell;
-  std::vector<int64_t> last(static_cast<size_t>(cw) * ch, -1);
+  return runCommutingDagCells(cellsOfBoxes(boxes, nx, ny, cell), threads, f);
+}
+
+// The same over explicit cell lists: position k depends on the last earlier
+// position listing each of its cells.
+size_t runCommutingDagCells(const CellLists &cl, int threads, const std::function<void(size_t)> &f) {
+  const size_t n = cl.start.size() - 1;
+  std::vector<int64_t> last(cl.nCells, -1);
   std::vector<uint32_t> predStart(n + 1, 0);
   std::vector<uint32_t> pred;
   std::vector<uint32_t> mine;
   for (size_t k = 0; k < n; ++k) {
-    const NetBox &bx = boxes[k];
-    int cx0 = std::max(0, bx.x0) / cell, cx1 = std::min(nx - 1, bx.x1) / cell;
-    int cy0 = std::max(0, bx.y0) / cell, cy1 = std::min(ny - 1, bx.y1) / cell;
     mine.clear();
-    for (int cy = cy0; cy <= cy1; ++cy)
-      for (int cx = cx0; cx <= cx1; ++cx) {
-        int64_t &l = last[static_cast<size_t>(cy) * cw + cx];
-        if (l >= 0)
-          mine.push_back(static_cast<uint32_t>(l));
-        l = static_cast<int64_t>(k);
-      }
+    for (uint32_t e = cl.start[k]; e < cl.start[k + 1]; ++e) {
+      int64_t &l = last[cl.cells[e]];
+      if (l >= 0 && static_cast<size_t>(l) != k)
+        mine.push_back(static_cast<uint32_t>(l));
+      l = static_cast<int64_t>(k);
+    }
     std::sort(mine.begin(), mine.end());
     mine.erase(std::unique(mine.begin(), mine.end()), mine.end());
     pred.insert(pred.end(), mine.begin(), mine.end());
     predStart[k + 1] = static_cast<uint32_t>(pred.size());
   }
   std::vector<int64_t>().swap(last);
+  // PD37ROUTE_BATCH_TRACE=1: the longest dependency chain (positions) --
+  // the speedup's ceiling is n / chain at equal work. Diagnostics only.
+  if (std::getenv("PD37ROUTE_BATCH_TRACE")) {
+    std::vector<uint32_t> depth(n, 1);
+    uint32_t longest = n ? 1 : 0;
+    for (size_t k = 0; k < n; ++k) {
+      for (uint32_t e = predStart[k]; e < predStart[k + 1]; ++e)
+        depth[k] = std::max(depth[k], depth[pred[e]] + 1);
+      longest = std::max(longest, depth[k]);
+    }
+    std::cerr << "dependency graph: " << n << " positions, " << pred.size() << " edges, longest chain " << longest
+              << " (n / chain " << (longest ? static_cast<double>(n) / longest : 0.0) << ")\n";
+  }
   // successors (CSR) and remaining-dependency counts
   std::vector<uint32_t> succStart(n + 1, 0), succ(pred.size());
   for (uint32_t p : pred)
@@ -5003,35 +5041,74 @@ size_t runCommutingDag(const std::vector<NetBox> &boxes, int nx, int ny, int cel
   for (size_t k = 0; k < n; ++k)
     if (waiting[k].load(std::memory_order_relaxed) == 0)
       ready.push(static_cast<uint32_t>(k));
+  // Workers: run one freed successor directly (no queue round trip), spin
+  // briefly before sleeping, and wake sleepers only when they exist. Which
+  // thread runs what, and when, does not matter: dependencies alone decide
+  // when a position may run.
   std::mutex m;
   std::condition_variable cv;
-  size_t done = 0;
+  size_t done = 0;           // under m
+  int sleepers = 0;          // under m
+  std::atomic<size_t> readyN{ready.size()};
+  std::atomic<bool> finished{n == 0};
   auto worker = [&]() {
+    bool have = false;
+    uint32_t k = 0;
+    std::vector<uint32_t> freed;
     while (true) {
-      uint32_t k;
-      {
+      if (!have) {
+        for (int spin = 0; spin < 4000 && readyN.load(std::memory_order_acquire) == 0 &&
+                           !finished.load(std::memory_order_acquire);
+             ++spin)
+          std::this_thread::yield();
         std::unique_lock<std::mutex> lk(m);
-        cv.wait(lk, [&] { return !ready.empty() || done == n; });
+        while (ready.empty() && done < n) {
+          ++sleepers;
+          cv.wait(lk);
+          --sleepers;
+        }
         if (ready.empty())
-          return;
+          return; // done == n
         k = ready.top();
         ready.pop();
+        readyN.fetch_sub(1, std::memory_order_release);
+        have = true;
       }
       f(k);
-      std::vector<uint32_t> freed;
+      have = false;
+      freed.clear();
       for (uint32_t e = succStart[k]; e < succStart[k + 1]; ++e)
         if (waiting[succ[e]].fetch_sub(1, std::memory_order_acq_rel) == 1)
           freed.push_back(succ[e]);
+      // keep the lowest freed position for this thread; queue the rest
+      if (!freed.empty()) {
+        size_t lo = 0;
+        for (size_t j = 1; j < freed.size(); ++j)
+          if (freed[j] < freed[lo])
+            lo = j;
+        k = freed[lo];
+        freed[lo] = freed.back();
+        freed.pop_back();
+        have = true;
+      }
+      int wake = 0;
       {
         std::lock_guard<std::mutex> lk(m);
         for (uint32_t s2 : freed)
           ready.push(s2);
+        readyN.fetch_add(freed.size(), std::memory_order_release);
         ++done;
+        if (done == n)
+          finished.store(true, std::memory_order_release);
+        wake = std::min<int>(sleepers, static_cast<int>(freed.size()));
+        if (done == n)
+          wake = sleepers;
       }
-      if (freed.size() > 1 || done == n)
+      if (wake >= sleepers && wake > 0)
         cv.notify_all();
-      else if (!freed.empty())
-        cv.notify_one();
+      else
+        for (int w = 0; w < wake; ++w)
+          cv.notify_one();
     }
   };
   std::vector<std::thread> pool;
@@ -8881,15 +8958,44 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     for (size_t k = 0; k < nets.size(); ++k)
       assignRound0(order[k]);
   } else {
-    std::vector<NetBox> boxes(nets.size());
-    for (size_t k = 0; k < nets.size(); ++k)
-      boxes[k] = netBoxOf(g, nets[order[k]]);
+    // pd37route: layer assignment touches only its 2D route's tiles (and
+    // pins, on the route) and one GCell around them -- so a net's cells
+    // are those of each segment's 3-tile-wide strip, not its whole box.
+    CellLists cl;
+    {
+      const int cell = gCommuteCell;
+      const int cw = (g.nx + cell - 1) / cell, ch = (g.ny + cell - 1) / cell;
+      cl.nCells = static_cast<size_t>(cw) * ch;
+      std::vector<uint32_t> mine;
+      auto addRect = [&](int x0, int y0, int x1, int y1) {
+        x0 = std::max(0, x0 - 1) / cell;
+        y0 = std::max(0, y0 - 1) / cell;
+        x1 = std::min(g.nx - 1, x1 + 1) / cell;
+        y1 = std::min(g.ny - 1, y1 + 1) / cell;
+        for (int cy = y0; cy <= y1; ++cy)
+          for (int cx = x0; cx <= x1; ++cx)
+            mine.push_back(static_cast<uint32_t>(cy * cw + cx));
+      };
+      for (size_t k = 0; k < nets.size(); ++k) {
+        const RoutedNet &rn = nets[order[k]];
+        mine.clear();
+        for (const Seg &sg : rn.segs)
+          addRect(std::min(sg.x1, sg.x2), std::min(sg.y1, sg.y2), std::max(sg.x1, sg.x2), std::max(sg.y1, sg.y2));
+        for (const Pin &pn : rn.net->pins)
+          addRect(pn.x, pn.y, pn.x, pn.y);
+        if (mine.empty())
+          addRect(0, 0, g.nx - 1, g.ny - 1); // nothing to place: everything, conservatively
+        std::sort(mine.begin(), mine.end());
+        mine.erase(std::unique(mine.begin(), mine.end()), mine.end());
+        cl.cells.insert(cl.cells.end(), mine.begin(), mine.end());
+        cl.start.push_back(static_cast<uint32_t>(cl.cells.size()));
+      }
+    }
     if (gCommuteTestIgnoreOverlap) {
       for (size_t k = nets.size(); k-- > 0;)
         assignRound0(order[k]);
     } else {
-      size_t edges = runCommutingDag(boxes, g.nx, g.ny, gCommuteCell, gThreads,
-                                     [&](size_t k) { assignRound0(order[k]); });
+      size_t edges = runCommutingDagCells(cl, gThreads, [&](size_t k) { assignRound0(order[k]); });
       round0Work = ", " + std::to_string(gThreads) + " threads, " + std::to_string(edges) + " dependencies";
     }
   }
