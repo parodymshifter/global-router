@@ -6376,26 +6376,57 @@ struct NetTree {
 // split at pins and a dropped stretch can never contain one.
 bool buildNetTree(const std::vector<Seg> &segs, NetTree &t, bool dropCycles = false,
                   const std::vector<Point> *pinTiles = nullptr) {
-  t = NetTree();
-  std::map<std::pair<int, int>, int> nodeIndex;
-  auto nodeFor = [&](int x, int y) -> int {
-    auto key = std::make_pair(x, y);
-    auto it = nodeIndex.find(key);
-    if (it != nodeIndex.end())
+  // pd37route: t is cleared, not reassigned (a reused tree keeps its
+  // capacity); node lookups use a sorted index, not a std::map. Nodes keep
+  // their first-seen indices, so the tree is the same.
+  t.nodes.clear();
+  t.edges.clear();
+  struct Scratch {
+    std::vector<std::pair<long long, int>> index; // (key, node), sorted by key
+    std::vector<std::pair<long long, int>> fresh; // added since the last sort
+    std::vector<const Seg *> legs;
+    std::vector<std::pair<int, int>> byY, byX; // (coord, node), sorted
+    std::vector<int> uf;
+    std::vector<std::pair<int, int>> onLine;
+  };
+  static thread_local Scratch sc;
+  sc.index.clear();
+  sc.fresh.clear();
+  auto keyOf = [](int x, int y) { return (static_cast<long long>(x) << 32) ^ static_cast<unsigned>(y); };
+  auto lookup = [&](long long k) -> int {
+    auto it = std::lower_bound(sc.index.begin(), sc.index.end(), std::make_pair(k, INT_MIN));
+    if (it != sc.index.end() && it->first == k)
       return it->second;
+    for (const auto &f : sc.fresh)
+      if (f.first == k)
+        return f.second;
+    return -1;
+  };
+  auto nodeFor = [&](int x, int y) -> int {
+    long long k = keyOf(x, y);
+    int found = lookup(k);
+    if (found >= 0)
+      return found;
     int idx = static_cast<int>(t.nodes.size());
     t.nodes.push_back({x, y});
-    nodeIndex[key] = idx;
+    sc.fresh.push_back({k, idx});
+    if (sc.fresh.size() >= 16) { // merge the recent ones into the sorted index
+      sc.index.insert(sc.index.end(), sc.fresh.begin(), sc.fresh.end());
+      std::sort(sc.index.begin(), sc.index.end());
+      sc.fresh.clear();
+    }
     return idx;
   };
 
-  std::vector<const Seg *> legs;
+  std::vector<const Seg *> &legs = sc.legs;
+  legs.clear();
   for (const Seg &s : segs)
     if (s.l1 == s.l2 && (s.x1 != s.x2 || s.y1 != s.y2))
       legs.push_back(&s);
   if (legs.empty()) {
     if (!segs.empty())
       nodeFor(segs.front().x1, segs.front().y1);
+    t.adj.clear(); // as before: a single-tile tree has no adjacency
     return true; // a single-tile net -- nothing to split or assign
   }
 
@@ -6412,16 +6443,22 @@ bool buildNetTree(const std::vector<Seg> &segs, NetTree &t, bool dropCycles = fa
           break;
         }
 
-  std::map<int, std::vector<int>> pointsByY, pointsByX;
+  // nodes by row and by column, in index order within each (as the
+  // per-coordinate vectors of the std::map version held them)
+  sc.byY.clear();
+  sc.byX.clear();
   for (int i = 0; i < static_cast<int>(t.nodes.size()); ++i) {
-    pointsByY[t.nodes[i].y].push_back(i);
-    pointsByX[t.nodes[i].x].push_back(i);
+    sc.byY.push_back({t.nodes[i].y, i});
+    sc.byX.push_back({t.nodes[i].x, i});
   }
+  std::sort(sc.byY.begin(), sc.byY.end());
+  std::sort(sc.byX.begin(), sc.byX.end());
 
-  std::vector<int> uf(t.nodes.size());
+  std::vector<int> &uf = sc.uf;
+  uf.resize(t.nodes.size());
   for (size_t i = 0; i < uf.size(); ++i)
     uf[i] = static_cast<int>(i);
-  std::function<int(int)> find = [&](int a) {
+  auto find = [&](int a) {
     while (uf[a] != a) {
       uf[a] = uf[uf[a]];
       a = uf[a];
@@ -6443,14 +6480,15 @@ bool buildNetTree(const std::vector<Seg> &segs, NetTree &t, bool dropCycles = fa
     int hi = horizontal ? std::max(s->x1, s->x2) : std::max(s->y1, s->y2);
     int cross = horizontal ? s->y1 : s->x1;
 
-    std::vector<std::pair<int, int>> onLine; // (coord along axis, node index)
-    auto ptIt = (horizontal ? pointsByY : pointsByX).find(cross);
-    if (ptIt != (horizontal ? pointsByY : pointsByX).end()) {
-      for (int ni : ptIt->second) {
-        int coord = horizontal ? t.nodes[ni].x : t.nodes[ni].y;
-        if (coord > lo && coord < hi)
-          onLine.push_back({coord, ni});
-      }
+    std::vector<std::pair<int, int>> &onLine = sc.onLine; // (coord along axis, node index)
+    onLine.clear();
+    const std::vector<std::pair<int, int>> &line = horizontal ? sc.byY : sc.byX;
+    for (auto it = std::lower_bound(line.begin(), line.end(), std::make_pair(cross, INT_MIN));
+         it != line.end() && it->first == cross; ++it) {
+      int ni = it->second;
+      int coord = horizontal ? t.nodes[ni].x : t.nodes[ni].y;
+      if (coord > lo && coord < hi)
+        onLine.push_back({coord, ni});
     }
     std::sort(onLine.begin(), onLine.end());
 
@@ -6467,7 +6505,11 @@ bool buildNetTree(const std::vector<Seg> &segs, NetTree &t, bool dropCycles = fa
       return false;
   }
 
-  t.adj.assign(t.nodes.size(), {});
+  if (t.adj.size() > t.nodes.size())
+    t.adj.resize(t.nodes.size());
+  for (std::vector<int> &a : t.adj)
+    a.clear();
+  t.adj.resize(t.nodes.size());
   for (int i = 0; i < static_cast<int>(t.edges.size()); ++i) {
     t.adj[t.edges[i].a].push_back(i);
     t.adj[t.edges[i].b].push_back(i);
@@ -6524,14 +6566,27 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
   if (t.edges.empty())
     return true; // single-tile net -- nothing to assign
 
-  std::vector<int> parentEdge(n, -1);
-  std::vector<int> order;
-  std::vector<char> visited(n, 0);
-  std::vector<int> q{0};
+  // pd37route: every per-call table lives in per-thread scratch, reused
+  // across nets (the same contents, flat where it was nested).
+  struct LaScratch {
+    std::vector<int> parentEdge, q, childStart, childList, choiceOff, choiceFlat, choiceTmp, bestRootChoice, stack,
+        rangeChoice;
+    std::vector<char> visited, rangeOk, vdReady;
+    std::vector<double> dp, rangeBase;
+    std::vector<std::pair<int, int>> rangeTable;
+    std::vector<std::array<std::pair<double, double>, 2>> vdTerm;
+    std::vector<uint8_t> vdCount;
+  };
+  static thread_local LaScratch sc;
+  std::vector<int> &parentEdge = sc.parentEdge;
+  parentEdge.assign(n, -1);
+  std::vector<char> &visited = sc.visited;
+  visited.assign(n, 0);
+  std::vector<int> &q = sc.q;
+  q.assign(1, 0);
   visited[0] = 1;
   for (size_t qi = 0; qi < q.size(); ++qi) {
     int u = q[qi];
-    order.push_back(u);
     for (int ei : t.adj[u]) {
       int v = (t.edges[ei].a == u) ? t.edges[ei].b : t.edges[ei].a;
       if (visited[v])
@@ -6543,12 +6598,28 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
   }
   if (static_cast<int>(q.size()) != n)
     return false; // buildNetTree should already guarantee this never fires
+  const std::vector<int> &order = q; // the BFS order (what `order` collected)
 
-  std::vector<std::vector<int>> childOfNode(n);
-  for (int v = 0; v < n; ++v)
+  // each node's child edges, CSR, in adjacency order
+  struct IntSpan {
+    const int *p = nullptr;
+    size_t n = 0;
+    size_t size() const { return n; }
+    int operator[](size_t i) const { return p[i]; }
+    const int *begin() const { return p; }
+    const int *end() const { return p + n; }
+  };
+  sc.childStart.assign(n + 1, 0);
+  sc.childList.clear();
+  for (int v = 0; v < n; ++v) {
     for (int ei : t.adj[v])
       if (ei != parentEdge[v])
-        childOfNode[v].push_back(ei);
+        sc.childList.push_back(ei);
+    sc.childStart[v + 1] = static_cast<int>(sc.childList.size());
+  }
+  auto childOfNode = [&](int v) {
+    return IntSpan{sc.childList.data() + sc.childStart[v], static_cast<size_t>(sc.childStart[v + 1] - sc.childStart[v])};
+  };
 
   int L = g.nLayers;
   const double kInf = std::numeric_limits<double>::max() / 4;
@@ -6640,7 +6711,8 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
   };
 
   // pd36route: one flat table, edge-major (was one vector per edge).
-  std::vector<double> dp_(t.edges.size() * static_cast<size_t>(L), kInf);
+  std::vector<double> &dp_ = sc.dp;
+  dp_.assign(t.edges.size() * static_cast<size_t>(L), kInf);
   auto dpAt = [&](int e, int l) -> double & { return dp_[static_cast<size_t>(e) * L + l]; };
 
   // Resolves the best via-stack range and per-child layer choices for a
@@ -6663,9 +6735,9 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
   // multiplied, and added back as `total += a * b`, so the arithmetic --
   // contraction included -- is the statement it replaces.
   const bool vdCache = nthuCost && gViaDemand.on;
-  std::vector<std::array<std::pair<double, double>, 2>> vdTerm;
-  std::vector<uint8_t> vdCount;
-  std::vector<char> vdReady;
+  std::vector<std::array<std::pair<double, double>, 2>> &vdTerm = sc.vdTerm;
+  std::vector<uint8_t> &vdCount = sc.vdCount;
+  std::vector<char> &vdReady = sc.vdReady;
   if (vdCache) {
     vdTerm.resize(static_cast<size_t>(n) * L);
     vdCount.assign(static_cast<size_t>(n) * L, 0);
@@ -6698,10 +6770,10 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
   // terms (which layers the parent covers) are added per parent layer.
   int rangeNode = -1;
   size_t rangeKids = 0;
-  std::vector<double> rangeBase;
-  std::vector<char> rangeOk;
-  std::vector<int> rangeChoice;
-  auto fillRanges = [&](int u, int x, int y, const std::vector<int> &children) {
+  std::vector<double> &rangeBase = sc.rangeBase;
+  std::vector<char> &rangeOk = sc.rangeOk;
+  std::vector<int> &rangeChoice = sc.rangeChoice;
+  auto fillRanges = [&](int u, int x, int y, const IntSpan &children) {
     rangeNode = u;
     rangeKids = children.size();
     rangeBase.assign(static_cast<size_t>(L) * L, 0.0);
@@ -6736,7 +6808,7 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
         rangeOk[rs] = feasible;
       }
   };
-  auto resolveNode = [&](int u, int x, int y, int ref, const std::vector<int> &children, double &outTotal,
+  auto resolveNode = [&](int u, int x, int y, int ref, const IntSpan &children, double &outTotal,
                           Range &outRange, std::vector<int> &outChoice) -> bool {
     if (vdCache && !vdReady[u])
       vdFill(u, x, y);
@@ -6788,8 +6860,12 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
     return any;
   };
 
-  std::vector<std::vector<std::vector<int>>> childChoice(t.edges.size());
-  std::vector<std::vector<Range>> edgeRangeTable(t.edges.size());
+  // childChoice[pe][l][k] at choiceFlat[choiceOff[pe] + l * kids + k];
+  // edgeRangeTable[pe][l] at rangeTable[pe * L + l]
+  sc.choiceOff.assign(t.edges.size(), 0);
+  sc.choiceFlat.clear();
+  sc.rangeTable.assign(t.edges.size() * static_cast<size_t>(L), Range{0, 0});
+  std::vector<int> &choice = sc.choiceTmp;
 
   for (auto it = order.rbegin(); it != order.rend(); ++it) {
     int u = *it;
@@ -6797,9 +6873,9 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
     if (pe < 0)
       continue; // root -- resolved after this loop
     const NetTree::Edge &e = t.edges[pe];
-    const std::vector<int> &children = childOfNode[u];
-    childChoice[pe].assign(L, std::vector<int>(children.size(), 0));
-    edgeRangeTable[pe].assign(L, Range{0, 0});
+    const IntSpan children = childOfNode(u);
+    sc.choiceOff[pe] = static_cast<int>(sc.choiceFlat.size());
+    sc.choiceFlat.resize(sc.choiceFlat.size() + static_cast<size_t>(L) * children.size(), 0);
 
     for (int l = 0; l < L; ++l) {
       double base = wireCostForEdge(e, l);
@@ -6807,31 +6883,32 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
         continue;
       double nodeTotal;
       Range range;
-      std::vector<int> choice;
+      choice.clear();
       if (!resolveNode(u, t.nodes[u].x, t.nodes[u].y, l, children, nodeTotal, range, choice))
         continue; // no via-stack range covers every child at this parent layer
       dpAt(pe, l) = base + nodeTotal;
-      edgeRangeTable[pe][l] = range;
-      childChoice[pe][l] = std::move(choice);
+      sc.rangeTable[static_cast<size_t>(pe) * L + l] = range;
+      std::copy(choice.begin(), choice.end(), sc.choiceFlat.begin() + sc.choiceOff[pe] + l * children.size());
     }
   }
 
-  const std::vector<int> &rootChildren = childOfNode[0];
+  const IntSpan rootChildren = childOfNode(0);
   double bestRootCost = kInf;
   int bestRootLayer = 0;
   Range bestRootRange{0, 0};
-  std::vector<int> bestRootChoice(rootChildren.size(), 0);
+  std::vector<int> &bestRootChoice = sc.bestRootChoice;
+  bestRootChoice.assign(rootChildren.size(), 0);
   for (int r = 0; r < L; ++r) {
     double total;
     Range range;
-    std::vector<int> choice;
+    choice.clear();
     if (!resolveNode(0, t.nodes[0].x, t.nodes[0].y, r, rootChildren, total, range, choice))
       continue;
     if (total < bestRootCost) {
       bestRootCost = total;
       bestRootLayer = r;
       bestRootRange = range;
-      bestRootChoice = std::move(choice);
+      bestRootChoice.assign(choice.begin(), choice.end());
     }
   }
   if (bestRootCost >= kInf)
@@ -6839,7 +6916,8 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
 
   rootLayer = bestRootLayer;
   nodeStackRange[0] = bestRootRange;
-  std::vector<int> stack;
+  std::vector<int> &stack = sc.stack;
+  stack.clear();
   for (size_t k = 0; k < rootChildren.size(); ++k) {
     int ce = rootChildren[k];
     edgeLayer[ce] = bestRootChoice[k];
@@ -6850,11 +6928,11 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
     stack.pop_back();
     int l = edgeLayer[e];
     int u = (parentEdge[t.edges[e].a] == e) ? t.edges[e].a : t.edges[e].b;
-    nodeStackRange[u] = edgeRangeTable[e][l];
-    const std::vector<int> &children = childOfNode[u];
+    nodeStackRange[u] = sc.rangeTable[static_cast<size_t>(e) * L + l];
+    const IntSpan children = childOfNode(u);
     for (size_t k = 0; k < children.size(); ++k) {
       int ce = children[k];
-      edgeLayer[ce] = childChoice[e][l][k];
+      edgeLayer[ce] = sc.choiceFlat[sc.choiceOff[e] + l * children.size() + k];
       stack.push_back(ce);
     }
   }
@@ -7347,8 +7425,10 @@ bool parseLaMode(const char *v, LaMode &out, std::string &err) {
 // (buildNetTree already splits a leg at every node lying on it), so the
 // result is still a tree with the same tile coverage.
 void splitToUnitEdges(const NetTree &in, NetTree &out) {
-  out = NetTree();
-  out.nodes = in.nodes;
+  // pd37route: cleared, not reassigned, so a reused `out` keeps its
+  // capacity (the same contents).
+  out.nodes.assign(in.nodes.begin(), in.nodes.end());
+  out.edges.clear();
   for (const NetTree::Edge &e : in.edges) {
     int prev = e.a;
     Point pa = in.nodes[e.a];
@@ -7369,7 +7449,11 @@ void splitToUnitEdges(const NetTree &in, NetTree &out) {
     int lo = std::min(endCoord - step, endCoord);
     out.edges.push_back({prev, e.b, e.horizontal, e.cross, lo, lo + 1});
   }
-  out.adj.assign(out.nodes.size(), {});
+  if (out.adj.size() > out.nodes.size())
+    out.adj.resize(out.nodes.size());
+  for (std::vector<int> &a : out.adj)
+    a.clear();
+  out.adj.resize(out.nodes.size());
   for (int ei = 0; ei < static_cast<int>(out.edges.size()); ++ei) {
     out.adj[out.edges[ei].a].push_back(ei);
     out.adj[out.edges[ei].b].push_back(ei);
@@ -8941,29 +9025,40 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   };
   std::vector<char> usesTreeDP(nets.size(), 0);
   auto buildLaTree = [&](size_t i, NetTree &t, std::vector<std::pair<int, int>> &pr) -> bool {
-    t = NetTree();
+    // pd37route: per-thread scratch, reused across nets (t is rebuilt in
+    // full by splitToUnitEdges; on failure the caller does not read it);
+    // pin layer ranges from a sorted list instead of a std::map.
     pr.clear();
-    NetTree legs;
-    std::vector<Point> pinTiles;
+    static thread_local NetTree legs;
+    static thread_local std::vector<Point> pinTiles;
+    pinTiles.clear();
     for (const Pin &pn : nets[i].net->pins)
       pinTiles.push_back({pn.x, pn.y});
     if (!buildNetTree(segs2DOf(i), legs, /*dropCycles=*/true, &pinTiles))
       return false;
     splitToUnitEdges(legs, t);
     if (laPins) {
-      std::map<std::pair<int, int>, std::pair<int, int>> at;
-      for (const Pin &pn : nets[i].net->pins) {
-        auto it = at.find({pn.x, pn.y});
-        if (it == at.end())
-          at[{pn.x, pn.y}] = {pn.layer, pn.layer};
-        else
-          it->second = {std::min(it->second.first, pn.layer), std::max(it->second.second, pn.layer)};
+      static thread_local std::vector<std::array<int, 4>> at; // (x, y, lowest, highest)
+      at.clear();
+      for (const Pin &pn : nets[i].net->pins)
+        at.push_back({pn.x, pn.y, pn.layer, pn.layer});
+      std::sort(at.begin(), at.end());
+      size_t w = 0;
+      for (size_t r = 0; r < at.size(); ++r) {
+        if (w > 0 && at[w - 1][0] == at[r][0] && at[w - 1][1] == at[r][1]) {
+          at[w - 1][2] = std::min(at[w - 1][2], at[r][2]);
+          at[w - 1][3] = std::max(at[w - 1][3], at[r][3]);
+        } else {
+          at[w++] = at[r];
+        }
       }
+      at.resize(w);
       pr.assign(t.nodes.size(), {-1, -1});
       for (size_t u = 0; u < t.nodes.size(); ++u) {
-        auto it = at.find({t.nodes[u].x, t.nodes[u].y});
-        if (it != at.end())
-          pr[u] = it->second;
+        std::array<int, 4> k{t.nodes[u].x, t.nodes[u].y, INT_MIN, INT_MIN};
+        auto it = std::lower_bound(at.begin(), at.end(), k);
+        if (it != at.end() && (*it)[0] == t.nodes[u].x && (*it)[1] == t.nodes[u].y)
+          pr[u] = {(*it)[2], (*it)[3]};
       }
     }
     return true;
@@ -9009,11 +9104,12 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
       stitchPinAccessForNet(rn);
       return;
     }
-    std::vector<int> edgeLayer;
+    // pd37route: per-thread scratch, reused across nets.
+    static thread_local std::vector<int> edgeLayer;
     int rootLayer = 0;
-    std::vector<std::pair<int, int>> nodeStackRange;
-    NetTree laTree;
-    std::vector<std::pair<int, int>> laPr;
+    static thread_local std::vector<std::pair<int, int>> nodeStackRange;
+    static thread_local NetTree laTree;
+    static thread_local std::vector<std::pair<int, int>> laPr;
     bool built = nthu ? (viaAware && buildLaTree(i, laTree, laPr)) : buildNetTree(rn.segs, trees[i]);
     // pd37route (memory): with no negotiation rounds a net's packed 2D
     // route is read only by its own tree build just above; free it now
