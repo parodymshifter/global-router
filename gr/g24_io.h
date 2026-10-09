@@ -39,6 +39,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <istream>
 #include <map>
 #include <ostream>
@@ -187,6 +188,258 @@ public:
 private:
   std::istream &in_;
   std::string pending_;
+  bool pendingName_ = false;
+};
+
+// pd37route (HISTORY_COST_SWEEP.md Part 117): readers for the same files
+// without iostream's per-value locale machinery (most of the input time on
+// the 2 GB cluster netlists). They accept the same text and produce the
+// same values as readResources / NetStream above, which stay as they are
+// (g24_verify keeps its own path):
+//   - an integer is what `>> int` reads: whitespace, an optional sign,
+//     digits; the first other character ends it, and none is a failure;
+//   - a decimal is the run of [0-9+-.eE] after the whitespace, converted by
+//     strtod -- the conversion iostream uses -- and must convert fully;
+//   - a line is what std::getline gives (up to '\n', which is dropped).
+class FastText {
+public:
+  FastText() = default;
+  FastText(const FastText &) = delete;
+  FastText &operator=(const FastText &) = delete;
+  ~FastText() {
+    if (f_)
+      std::fclose(f_);
+  }
+  bool open(const std::string &path) {
+    f_ = std::fopen(path.c_str(), "rb");
+    return f_ != nullptr;
+  }
+  bool readInt(long long &v) {
+    skipSpace();
+    int c = peek();
+    bool neg = false;
+    if (c == '+' || c == '-') {
+      neg = c == '-';
+      get();
+      c = peek();
+    }
+    if (c < '0' || c > '9')
+      return false;
+    long long r = 0;
+    while (c >= '0' && c <= '9') {
+      r = r * 10 + (c - '0');
+      get();
+      c = peek();
+    }
+    v = neg ? -r : r;
+    return true;
+  }
+  bool readInt(int &v) {
+    long long w;
+    if (!readInt(w) || w < INT_MIN || w > INT_MAX)
+      return false;
+    v = static_cast<int>(w);
+    return true;
+  }
+  bool readDouble(double &v) {
+    skipSpace();
+    char tok[64];
+    size_t n = 0;
+    int c = peek();
+    while (n + 1 < sizeof tok &&
+           ((c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.' || c == 'e' || c == 'E')) {
+      tok[n++] = static_cast<char>(c);
+      get();
+      c = peek();
+    }
+    if (n == 0)
+      return false;
+    tok[n] = 0;
+    char *end = nullptr;
+    v = std::strtod(tok, &end);
+    return end == tok + n;
+  }
+  bool readToken(std::string &t) {
+    skipSpace();
+    t.clear();
+    int c = peek();
+    while (c != EOF && !isSpace(c)) {
+      t.push_back(static_cast<char>(c));
+      get();
+      c = peek();
+    }
+    return !t.empty();
+  }
+  bool getline(std::string &line) {
+    line.clear();
+    bool any = false;
+    while (true) {
+      if (pos_ == len_ && !fill())
+        return any;
+      any = true;
+      const char *b = buf_.data() + pos_, *e = buf_.data() + len_;
+      const char *nl = static_cast<const char *>(std::memchr(b, '\n', static_cast<size_t>(e - b)));
+      if (nl) {
+        line.append(b, nl);
+        pos_ += static_cast<size_t>(nl - b) + 1;
+        return true;
+      }
+      line.append(b, e);
+      pos_ = len_;
+    }
+  }
+
+private:
+  static bool isSpace(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f'; }
+  bool fill() {
+    if (!f_)
+      return false;
+    if (buf_.empty())
+      buf_.resize(1 << 22);
+    len_ = std::fread(buf_.data(), 1, buf_.size(), f_);
+    pos_ = 0;
+    return len_ > 0;
+  }
+  int peek() {
+    if (pos_ == len_ && !fill())
+      return EOF;
+    return static_cast<unsigned char>(buf_[pos_]);
+  }
+  void get() { ++pos_; }
+  void skipSpace() {
+    while (true) {
+      int c = peek();
+      if (c == EOF || !isSpace(c))
+        return;
+      get();
+    }
+  }
+  FILE *f_ = nullptr;
+  std::vector<char> buf_;
+  size_t pos_ = 0, len_ = 0;
+};
+
+// readResources over FastText (the same checks and messages).
+inline bool readResourcesFast(FastText &in, Resources &r, std::string &err) {
+  if (!in.readInt(r.nLayers) || !in.readInt(r.xSize) || !in.readInt(r.ySize) || r.nLayers < 2 || r.xSize < 1 ||
+      r.ySize < 1) {
+    err = "bad .cap header (need nLayers >= 2, xSize >= 1, ySize >= 1)";
+    return false;
+  }
+  if (!in.readDouble(r.unitLength) || !in.readDouble(r.unitVia)) {
+    err = "bad .cap cost line";
+    return false;
+  }
+  r.overflowCost.resize(r.nLayers);
+  for (double &c : r.overflowCost)
+    if (!in.readDouble(c)) {
+      err = "bad .cap overflow costs";
+      return false;
+    }
+  r.xPitch.resize(r.xSize - 1);
+  r.yPitch.resize(r.ySize - 1);
+  for (long long &p : r.xPitch)
+    if (!in.readInt(p) || p < 0) {
+      err = "bad .cap horizontal pitch";
+      return false;
+    }
+  for (long long &p : r.yPitch)
+    if (!in.readInt(p) || p < 0) {
+      err = "bad .cap vertical pitch";
+      return false;
+    }
+  r.layers.resize(r.nLayers);
+  r.cap.assign(static_cast<size_t>(r.nLayers) * r.ySize * r.xSize, 0.0);
+  for (int z = 0; z < r.nLayers; ++z) {
+    Layer &L = r.layers[z];
+    if (!in.readToken(L.name) || !in.readInt(L.dir) || !in.readDouble(L.minLength) ||
+        (z > 0 && L.dir != 0 && L.dir != 1)) {
+      err = "bad .cap layer line for layer " + std::to_string(z);
+      return false;
+    }
+    for (int y = 0; y < r.ySize; ++y)
+      for (int x = 0; x < r.xSize; ++x) {
+        double c;
+        if (!in.readDouble(c)) {
+          err = "short capacity table on layer " + std::to_string(z);
+          return false;
+        }
+        r.cap[(static_cast<size_t>(z) * r.ySize + y) * r.xSize + x] = c;
+      }
+  }
+  return true;
+}
+
+// NetStream over FastText: the same lines, rules and pins; a pin line's
+// access tuples are read as `while (ss >> z >> x >> y)` reads them.
+class FastNetStream {
+public:
+  explicit FastNetStream(FastText &in) : in_(in) {}
+  bool next(Net &out, std::string &err) {
+    out.name.clear();
+    out.pins.clear();
+    bool have = false;
+    if (pendingName_) {
+      out.name = std::move(pending_);
+      pendingName_ = false;
+      have = true;
+    }
+    while (in_.getline(line_)) {
+      line_ = trimEnd(std::move(line_));
+      if (line_.find('(') == std::string::npos && line_.find(')') == std::string::npos && line_.length() > 1) {
+        if (have) {
+          pending_ = line_;
+          pendingName_ = true;
+          return true;
+        }
+        out.name = line_;
+        have = true;
+      } else if (line_.find('[') != std::string::npos) {
+        if (!have) {
+          err = "pin line before any net name";
+          return false;
+        }
+        std::vector<Access> pin;
+        size_t i = 0;
+        const size_t n = line_.size();
+        auto sep = [](char c) {
+          return c == '(' || c == ')' || c == ',' || c == '[' || c == ']' || c == ' ' || c == '\t' || c == '\n' ||
+                 c == '\r' || c == '\v' || c == '\f';
+        };
+        auto num = [&](int &v) {
+          while (i < n && sep(line_[i]))
+            ++i;
+          bool neg = false;
+          if (i < n && (line_[i] == '+' || line_[i] == '-')) {
+            neg = line_[i] == '-';
+            ++i;
+          }
+          if (i >= n || line_[i] < '0' || line_[i] > '9')
+            return false;
+          long long r = 0;
+          while (i < n && line_[i] >= '0' && line_[i] <= '9')
+            r = r * 10 + (line_[i++] - '0');
+          if (r > INT_MAX)
+            return false;
+          v = static_cast<int>(neg ? -r : r);
+          return true;
+        };
+        int x, y, z;
+        while (num(z) && num(x) && num(y))
+          pin.push_back({x, y, z});
+        if (pin.empty()) {
+          err = "net " + out.name + ": pin with no access points";
+          return false;
+        }
+        out.pins.push_back(std::move(pin));
+      }
+    }
+    return have;
+  }
+
+private:
+  FastText &in_;
+  std::string line_, pending_;
   bool pendingName_ = false;
 };
 

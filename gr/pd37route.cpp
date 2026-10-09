@@ -28,6 +28,9 @@
 //   - Layer assignment allocates no wire history when it runs no
 //     negotiation rounds (round 0 reads 1.0 everywhere, the no-history
 //     factor): -4.1 GB on mempool_cluster.
+//   - The 2024 inputs (and the writer's re-read of the netlist) go through
+//     g24::FastText readers: the same values without iostream's per-value
+//     locale machinery (Part 117).
 //   - The solution writer formats contiguous slices of each chunk of nets
 //     on the pool and writes them in order (the same text).
 //   - The pattern stage copies, at each new best round, only the pieces
@@ -9331,18 +9334,20 @@ const G24Input *g24Input = nullptr;
 // (the first, or InstantGR's rule when `align`) become its Design pins.
 void readG24Streaming(const std::string &capPath, const std::string &netPath, bool align, G24Input &in,
                       Design &d) {
-  std::ifstream cf(capPath), nf(netPath);
-  if (!cf)
+  // pd37route (Part 117): FastText readers -- the same values as the
+  // iostream ones (self-test testFastReadersMatchIostream).
+  g24::FastText cf, nf;
+  if (!cf.open(capPath))
     fail("cannot open " + capPath);
-  if (!nf)
+  if (!nf.open(netPath))
     fail("cannot open " + netPath);
   std::string err;
-  if (!g24::readResources(cf, in.res, err))
+  if (!g24::readResourcesFast(cf, in.res, err))
     fail("ISPD 2024 input: " + err);
   in.netPath = netPath;
   in.align = align;
   d = g24::designGrid(in.res);
-  g24::NetStream ns(nf);
+  g24::FastNetStream ns(nf);
   g24::Net n;
   size_t i = 0;
   while (ns.next(n, err)) {
@@ -9421,13 +9426,12 @@ g24::SolutionReport writeG24Solution(const std::string &path, const G24Input &in
   if (!out)
     fail("cannot write " + path);
   g24::SolutionReport rep;
-  std::ifstream nf;
-  std::unique_ptr<g24::NetStream> ns;
+  g24::FastText nf; // pd37route: the fast reader (Part 117)
+  std::unique_ptr<g24::FastNetStream> ns;
   if (in.nets.empty()) {
-    nf.open(in.netPath);
-    if (!nf)
+    if (!nf.open(in.netPath))
       fail("cannot open " + in.netPath);
-    ns = std::make_unique<g24::NetStream>(nf);
+    ns = std::make_unique<g24::FastNetStream>(nf);
   }
   g24::Net streamed;
   std::string err;
@@ -15236,6 +15240,70 @@ void testPatternColorBatchesMatchesFirstFit() {
         "pattern batch coloring: hand case {0,2} {1,3} {4}");
 }
 
+// pd37route (Part 117): the fast readers give the iostream readers' values
+// on a .cap and .net with mixed whitespace (tabs, CRLF, runs of blanks),
+// decimals in several spellings, signed and padded integers, and a last
+// line with no newline.
+void testFastReadersMatchIostream() {
+  const std::string cap = "pd37route_selftest_fast.cap", net = "pd37route_selftest_fast.net";
+  {
+    std::ofstream c(cap);
+    c << "3 4 3\r\n0.5\t4  5 1e1 +2.25\n1000 2000 1500\n3000 007\n"
+         "Metal1 0 0\n1 2 3 4\n0 0 0 0\n9.5 .5 5. 2e-1\n"
+         "Metal2   1\t100.0\r\n2 2 2 2\n1.25 1.5 1.75 2\n3 3 3 3\n"
+         "Metal3 0 0.25\n6.15 9.78571 10 0\n1E2 0.001 12.5 -0\n7 7 7 7";
+  }
+  {
+    std::ofstream n(net);
+    n << "net_alpha\r\n(\n[(0, 1, 2), (1,2,2)]\n[( 0 ,3 ,1 ) ]  \n)\n"
+         "b2\n(\n\t[(2, 0, 0), (+1, 1, 1), (0, 3, 2)]\r\n[(0,0,0)]\n)\n"
+         "c3\n(\n[(1, 2, 1)]\n[(2, 3, 2), (1, 0, 0)]\n)";
+  }
+  g24::Resources ra, rb;
+  std::string ea, eb;
+  std::ifstream ci(cap);
+  bool okA = g24::readResources(ci, ra, ea);
+  g24::FastText cf;
+  bool okB = cf.open(cap) && g24::readResourcesFast(cf, rb, eb);
+  bool sameCap = okA && okB && ra.nLayers == rb.nLayers && ra.xSize == rb.xSize && ra.ySize == rb.ySize &&
+                 ra.unitLength == rb.unitLength && ra.unitVia == rb.unitVia && ra.overflowCost == rb.overflowCost &&
+                 ra.xPitch == rb.xPitch && ra.yPitch == rb.yPitch && ra.cap.size() == rb.cap.size();
+  for (size_t i = 0; sameCap && i < ra.cap.size(); ++i)
+    sameCap = std::memcmp(&ra.cap[i], &rb.cap[i], sizeof(double)) == 0;
+  for (int z = 0; sameCap && z < ra.nLayers; ++z)
+    sameCap = ra.layers[z].name == rb.layers[z].name && ra.layers[z].dir == rb.layers[z].dir &&
+              ra.layers[z].minLength == rb.layers[z].minLength;
+  check(sameCap, "fast .cap reader: the iostream reader's values, bit for bit (" + ea + eb + ")");
+  std::ifstream ni(net);
+  g24::NetStream sa(ni);
+  g24::FastText nf;
+  nf.open(net);
+  g24::FastNetStream sb(nf);
+  g24::Net na, nb;
+  bool sameNet = true;
+  int count = 0;
+  while (true) {
+    bool a = sa.next(na, ea), b = sb.next(nb, eb);
+    if (a != b) {
+      sameNet = false;
+      break;
+    }
+    if (!a)
+      break;
+    ++count;
+    sameNet = sameNet && na.name == nb.name && na.pins.size() == nb.pins.size();
+    for (size_t p = 0; sameNet && p < na.pins.size(); ++p) {
+      sameNet = na.pins[p].size() == nb.pins[p].size();
+      for (size_t q = 0; sameNet && q < na.pins[p].size(); ++q)
+        sameNet = na.pins[p][q].x == nb.pins[p][q].x && na.pins[p][q].y == nb.pins[p][q].y &&
+                  na.pins[p][q].z == nb.pins[p][q].z;
+    }
+  }
+  check(sameNet && count == 3 && ea == eb, "fast .net reader: the same 3 nets, names and access points");
+  std::remove(cap.c_str());
+  std::remove(net.c_str());
+}
+
 // pd37route: the commuting scheduler. Boxes in order: A (0..3, 0..3), B
 // overlapping A, C disjoint from both, D overlapping B only, E overlapping
 // A, B and D. Expected batches: A and C in 0, B in 1, D in 2, E in 3 -- each
@@ -15686,6 +15754,7 @@ int run() {
   testStageReport();
   testLocalPatternBackendMatchesReference();
   testCommutingBatches();
+  testFastReadersMatchIostream();
   testPatternColorBatchesMatchesFirstFit();
   testCommutingDagOrder();
   testThreadedLayerAssignmentIsExact();
