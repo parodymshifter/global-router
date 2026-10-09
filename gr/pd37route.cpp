@@ -22,6 +22,9 @@
 //     passes, and inside the pattern stage the overflow scan, the full
 //     cost refresh, each batch's solve and its pieces' edge lists (the
 //     batch's pieces read only the frozen cost grid).
+//   - The pattern stage's batch coloring keeps a bitset of occupied batches
+//     per coarse cell instead of an occupancy grid per batch (the same
+//     first-fit batches; ~1.3 GB of grids on mempool_cluster round 0).
 //   - The solution writer formats contiguous slices of each chunk of nets
 //     on the pool and writes them in order (the same text).
 //   - The pattern stage copies, at each new best round, only the pieces
@@ -5120,6 +5123,82 @@ size_t runCommutingDagCells(const CellLists &cl, int threads, const std::functio
   return edges;
 }
 
+// pd37route: the pattern stage's batch coloring. Pieces (by coarse-cell
+// box, in order) go to the first batch none of whose pieces shares a cell
+// with them. patternColorFirstFit is pd36route's scan (every batch's
+// occupancy grid, first free); patternColorBatches gets the same answer
+// from a bitset of occupied batches per cell -- the first zero bit of the
+// OR over the piece's cells -- without a grid per batch.
+struct PatternCellBox {
+  int cx0, cy0, cx1, cy1;
+};
+std::vector<std::vector<int>> patternColorFirstFit(const std::vector<PatternCellBox> &bx, int cw, int ch) {
+  std::vector<std::vector<int>> batches;
+  std::vector<std::vector<char>> occ;
+  for (size_t j = 0; j < bx.size(); ++j) {
+    const PatternCellBox &b = bx[j];
+    size_t chosen = batches.size();
+    for (size_t bi = 0; bi < batches.size() && chosen == batches.size(); ++bi) {
+      bool free = true;
+      for (int cy = b.cy0; cy <= b.cy1 && free; ++cy)
+        for (int cx = b.cx0; cx <= b.cx1 && free; ++cx)
+          free = !occ[bi][static_cast<size_t>(cy) * cw + cx];
+      if (free)
+        chosen = bi;
+    }
+    if (chosen == batches.size()) {
+      batches.emplace_back();
+      occ.emplace_back(static_cast<size_t>(cw) * ch, 0);
+    }
+    batches[chosen].push_back(static_cast<int>(j));
+    for (int cy = b.cy0; cy <= b.cy1; ++cy)
+      for (int cx = b.cx0; cx <= b.cx1; ++cx)
+        occ[chosen][static_cast<size_t>(cy) * cw + cx] = 1;
+  }
+  return batches;
+}
+std::vector<std::vector<int>> patternColorBatches(const std::vector<PatternCellBox> &bx, int cw, int ch) {
+  const size_t cells = static_cast<size_t>(cw) * ch;
+  size_t W = 4; // words per cell (capacity 64 W batches); doubled as needed
+  std::vector<uint64_t> bits(cells * W, 0);
+  std::vector<std::vector<int>> batches;
+  std::vector<uint64_t> u;
+  for (size_t j = 0; j < bx.size(); ++j) {
+    const PatternCellBox &b = bx[j];
+    const size_t nb = batches.size(), words = nb / 64 + 1;
+    u.assign(words, 0);
+    for (int cy = b.cy0; cy <= b.cy1; ++cy)
+      for (int cx = b.cx0; cx <= b.cx1; ++cx) {
+        const uint64_t *row = &bits[(static_cast<size_t>(cy) * cw + cx) * W];
+        for (size_t w = 0; w < words && w < W; ++w)
+          u[w] |= row[w];
+      }
+    size_t chosen = nb;
+    for (size_t w = 0; w < words; ++w)
+      if (~u[w]) {
+        size_t bit = static_cast<size_t>(__builtin_ctzll(~u[w]));
+        chosen = std::min(nb, w * 64 + bit);
+        break;
+      }
+    if (chosen == nb) {
+      batches.emplace_back();
+      if (nb + 1 > W * 64) { // grow every cell's bitset, keeping its bits
+        size_t W2 = W * 2;
+        std::vector<uint64_t> nbits(cells * W2, 0);
+        for (size_t c = 0; c < cells; ++c)
+          std::copy(&bits[c * W], &bits[c * W] + W, &nbits[c * W2]);
+        bits.swap(nbits);
+        W = W2;
+      }
+    }
+    batches[chosen].push_back(static_cast<int>(j));
+    for (int cy = b.cy0; cy <= b.cy1; ++cy)
+      for (int cx = b.cx0; cx <= b.cx1; ++cx)
+        bits[(static_cast<size_t>(cy) * cw + cx) * W + chosen / 64] |= uint64_t(1) << (chosen % 64);
+  }
+  return batches;
+}
+
 // pd36route, self-tests only: 0 = the incremental refresh, 1 = a full
 // refresh before every batch (pd35route), 2 = no refresh after the round's
 // first batch (stale costs: proves the fixture depends on the refresh).
@@ -5203,29 +5282,24 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
     if (todo.empty())
       break;
     // Color into batches: disjoint coarse bounding boxes within a batch.
-    std::vector<std::vector<int>> batches;
-    std::vector<std::vector<char>> occ;
+    // pd37route: first fit through per-cell bitsets (patternColorBatches),
+    // the same batches as scanning every batch's occupancy grid.
+    std::vector<PatternCellBox> cellBoxes;
+    cellBoxes.reserve(todo.size());
     for (int k : todo) {
       const Piece &p = pieces[k];
-      int cx0 = std::min(p.a.x, p.b.x) / ps.cell, cx1 = std::max(p.a.x, p.b.x) / ps.cell;
-      int cy0 = std::min(p.a.y, p.b.y) / ps.cell, cy1 = std::max(p.a.y, p.b.y) / ps.cell;
-      size_t chosen = batches.size();
-      for (size_t bi = 0; bi < batches.size() && chosen == batches.size(); ++bi) {
-        bool free = true;
-        for (int cy = cy0; cy <= cy1 && free; ++cy)
-          for (int cx = cx0; cx <= cx1 && free; ++cx)
-            free = !occ[bi][static_cast<size_t>(cy) * cw + cx];
-        if (free)
-          chosen = bi;
+      cellBoxes.push_back({std::min(p.a.x, p.b.x) / ps.cell, std::min(p.a.y, p.b.y) / ps.cell,
+                           std::max(p.a.x, p.b.x) / ps.cell, std::max(p.a.y, p.b.y) / ps.cell});
+    }
+    std::vector<std::vector<int>> batches;
+    {
+      std::vector<std::vector<int>> pos = patternColorBatches(cellBoxes, cw, ch);
+      batches.resize(pos.size());
+      for (size_t bi = 0; bi < pos.size(); ++bi) {
+        batches[bi].reserve(pos[bi].size());
+        for (int j : pos[bi])
+          batches[bi].push_back(todo[static_cast<size_t>(j)]);
       }
-      if (chosen == batches.size()) {
-        batches.emplace_back();
-        occ.emplace_back(static_cast<size_t>(cw) * ch, 0);
-      }
-      batches[chosen].push_back(k);
-      for (int cy = cy0; cy <= cy1; ++cy)
-        for (int cx = cx0; cx <= cx1; ++cx)
-          occ[chosen][static_cast<size_t>(cy) * cw + cx] = 1;
     }
     // pd36route: a full refresh once per round (the round boundary moves
     // every price), then only the edges whose usage changed -- the
@@ -15144,6 +15218,29 @@ void testLocalPatternBackendMatchesReference() {
   check(same && pieces == 8000, "local pattern backend: the reference's choices and costs on 8000 random pieces");
 }
 
+// pd37route: the bitset batch coloring equals pd36route's first-fit scan,
+// on 40000 random coarse boxes over 20 x 20 cells (enough to need more than
+// 256 batches, so the bitsets grow), and on a few hand cases.
+void testPatternColorBatchesMatchesFirstFit() {
+  unsigned st = 31337;
+  auto rnd = [&](int n) {
+    st = st * 1103515245u + 12345u;
+    return static_cast<int>((st >> 8) % static_cast<unsigned>(n));
+  };
+  std::vector<PatternCellBox> bx;
+  for (int i = 0; i < 40000; ++i) {
+    int x = rnd(20), y = rnd(20);
+    bx.push_back({x, y, std::min(19, x + rnd(6)), std::min(19, y + rnd(6))});
+  }
+  auto a = patternColorFirstFit(bx, 20, 20), b = patternColorBatches(bx, 20, 20);
+  check(a.size() > 256, "pattern batch coloring fixture: more than 256 batches (" + std::to_string(a.size()) + ")");
+  check(a == b, "pattern batch coloring: bitsets = first-fit scan");
+  std::vector<PatternCellBox> hand = {{0, 0, 1, 1}, {1, 1, 2, 2}, {3, 3, 3, 3}, {0, 0, 0, 0}, {2, 2, 3, 3}};
+  check(patternColorBatches(hand, 4, 4) == patternColorFirstFit(hand, 4, 4) &&
+            patternColorBatches(hand, 4, 4) == std::vector<std::vector<int>>{{0, 2}, {1, 3}, {4}},
+        "pattern batch coloring: hand case {0,2} {1,3} {4}");
+}
+
 // pd37route: the commuting scheduler. Boxes in order: A (0..3, 0..3), B
 // overlapping A, C disjoint from both, D overlapping B only, E overlapping
 // A, B and D. Expected batches: A and C in 0, B in 1, D in 2, E in 3 -- each
@@ -15594,6 +15691,7 @@ int run() {
   testStageReport();
   testLocalPatternBackendMatchesReference();
   testCommutingBatches();
+  testPatternColorBatchesMatchesFirstFit();
   testCommutingDagOrder();
   testThreadedLayerAssignmentIsExact();
   testPatternIncrementalRefreshIsExact();
