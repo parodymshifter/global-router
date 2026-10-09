@@ -5211,6 +5211,7 @@ int gPatternRefreshTest = 0;
 PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &nets, Usage &usage,
                                   Prices &prices, const PatternStageSettings &ps, bool trace) {
   PatternStageReport rep;
+  auto tPre0 = std::chrono::steady_clock::now(); // pd37route: PD37ROUTE_BATCH_TRACE
   static gpu::CpuLocalPatternBackend cpuBackend; // pd36route: per-piece box sums, same results
   gpu::IPatternBackend *backend = &cpuBackend;
 #ifdef GR_PATTERN_SELECT
@@ -5268,7 +5269,18 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
   long long best = std::numeric_limits<long long>::max();
   std::vector<std::vector<int>> bestEdges;
   std::vector<char> changedSinceBest(pieces.size(), 1); // pd37route
+  // pd37route: PD37ROUTE_BATCH_TRACE=1 -- where the stage's time goes.
+  const bool ptrace = std::getenv("PD37ROUTE_BATCH_TRACE") != nullptr;
+  if (ptrace)
+    std::cerr << "pattern stage trace: setup "
+              << std::chrono::duration<double>(std::chrono::steady_clock::now() - tPre0).count() << " s\n";
+  double tScan = 0, tColor = 0, tRip = 0, tRefresh = 0, tSolve = 0, tCommit = 0, tRound = 0, tBest = 0;
+  auto now = [] { return std::chrono::steady_clock::now(); };
+  auto secs = [](std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b) {
+    return std::chrono::duration<double>(b - a).count();
+  };
   for (int round = 0; round < ps.rounds; ++round) {
+    auto c0 = now();
     std::vector<int> todo;
     if (round == 0 || gThreads <= 1) {
       for (int k = 0; k < static_cast<int>(pieces.size()); ++k)
@@ -5285,6 +5297,8 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
     }
     if (todo.empty())
       break;
+    auto c1 = now();
+    tScan += secs(c0, c1);
     // Color into batches: disjoint coarse bounding boxes within a batch.
     // pd37route: first fit through per-cell bitsets (patternColorBatches),
     // the same batches as scanning every batch's occupancy grid.
@@ -5312,13 +5326,17 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
     // 0 an edge's tile index is its index in pg, so pg holds exactly what
     // a full refresh would. Only when the prices read another usage than
     // this one (never, in route()) does every batch refresh in full.
+    tColor += secs(c1, now());
     bool fullRefresh = true;
     const bool incremental = prices.live == &usage || prices.model == CostModel::kLambda;
     for (const std::vector<int> &batch : batches) {
+      auto b0 = now();
       for (int k : batch) {
         addEdges(pieces[k], -1);
         pieces[k].edges.clear();
       }
+      auto b1 = now();
+      tRip += secs(b0, b1);
       if (fullRefresh || !incremental || gPatternRefreshTest == 1) {
         // pd37route: every entry on its own, so in row blocks on the pool.
         workerPool().run(static_cast<size_t>(g.ny), [&](size_t yy) {
@@ -5344,6 +5362,8 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
         }
       }
       dirty.clear();
+      auto b2 = now();
+      tRefresh += secs(b1, b2);
       gpu::PatternBatch pb;
       for (int k : batch) {
         pb.x1.push_back(pieces[k].a.x);
@@ -5376,6 +5396,8 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
       } else {
         backend->solve(pg, pb, pr);
       }
+      auto b3 = now();
+      tSolve += secs(b2, b3);
       // pd37route: each piece's new edge list on its own (the pool when
       // threaded), then its usage added in batch order as before.
       workerPool().run(nb, [&](size_t j) {
@@ -5389,13 +5411,17 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
         addEdges(pieces[batch[j]], +1);
         changedSinceBest[batch[j]] = 1;
       }
+      tCommit += secs(b3, now());
     }
+    auto r0 = now();
     advancePresentDemand(prices, usage);
     long long ov = totalOverflow(g, usage);
     rep.rounds = round + 1;
     if (trace)
       std::cerr << "pattern round " << round << ": " << todo.size() << " pieces in " << batches.size()
                 << " batches, 2D overflow " << ov << " (per-piece count)\n";
+    auto r1 = now();
+    tRound += secs(r0, r1);
     if (ov < best) {
       best = ov;
       // pd37route: only the pieces rerouted since the last best are copied
@@ -5407,9 +5433,15 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
           changedSinceBest[k] = 0;
         }
     }
+    tBest += secs(r1, now());
     if (ov == 0)
       break;
   }
+  auto tPost0 = now();
+  if (ptrace)
+    std::cerr << "pattern stage trace: scan " << tScan << " s, coloring " << tColor << " s, rip-up " << tRip
+              << " s, refresh " << tRefresh << " s, solve " << tSolve << " s, commit " << tCommit << " s, round end "
+              << tRound << " s, best copy " << tBest << " s\n";
   // The best round's pieces become each net's wiring: the union of its
   // pieces' tile edges, charged once per net.
   // pd35route (memory, Part 112): built net by net -- pieces are created in
@@ -5458,6 +5490,8 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
   }
   usage = usageFromCharges(g, nets);
   rep.overflow = totalOverflow(g, usage);
+  if (ptrace)
+    std::cerr << "pattern stage trace: wiring per net " << secs(tPost0, now()) << " s\n";
   return rep;
 }
 
@@ -5503,6 +5537,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       continue;
     nets.push_back(std::move(rn));
   }
+  auto t0trees = std::chrono::steady_clock::now();
   // pd37route: each net's tree from its own pins only, so on the pool.
   workerPool().run(nets.size(), [&](size_t ni) {
     RoutedNet &rn = nets[ni];
@@ -5529,10 +5564,18 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     }
     rn.giant = n.pins.size() > kGiantNetPins;
   });
+  if (std::getenv("PD37ROUTE_BATCH_TRACE"))
+    std::cerr << "route trace: net setup + trees "
+              << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0trees).count() << " s\n";
 
+  const bool rtrace = std::getenv("PD37ROUTE_BATCH_TRACE") != nullptr; // pd37route
+  auto g0 = std::chrono::steady_clock::now();
   for (RoutedNet &rn : nets)
     if (rn.giant)
       routeGiantNet(g, usage, lp, rn);
+  if (rtrace)
+    std::cerr << "route trace: giant nets "
+              << std::chrono::duration<double>(std::chrono::steady_clock::now() - g0).count() << " s\n";
 
   // This file's own new mechanism: let giant nets participate in the
   // fast tier's own per-leg price-negotiated reroute below, instead of
