@@ -9455,7 +9455,7 @@ g24::SolutionReport writeG24Solution(const std::string &path, const G24Input &in
       std::vector<g24::SolutionReport> reps(slices);
       workerPool().run(slices, [&](size_t c) {
         size_t b0 = c * m / slices, b1 = (c + 1) * m / slices;
-        std::ostringstream o;
+        std::string &o = text[c];
         std::vector<g24::Seg> sg;
         for (size_t j = b0; j < b1; ++j) {
           size_t i = base + j;
@@ -9472,9 +9472,8 @@ g24::SolutionReport writeG24Solution(const std::string &path, const G24Input &in
             for (const Seg &q : nets[static_cast<size_t>(routedOf[i])].segs)
               sg.push_back({std::min(q.x1, q.x2), std::min(q.y1, q.y2), std::min(q.l1, q.l2), std::max(q.x1, q.x2),
                             std::max(q.y1, q.y2), std::max(q.l1, q.l2)});
-          g24::emitNetSolution(in.res, *net, sg, o, reps[c]);
+          g24::emitNetSolutionFast(in.res, *net, sg, o, reps[c]);
         }
-        text[c] = o.str();
       });
       for (size_t c = 0; c < slices; ++c) {
         out << text[c];
@@ -15240,6 +15239,58 @@ void testPatternColorBatchesMatchesFirstFit() {
         "pattern batch coloring: hand case {0,2} {1,3} {4}");
 }
 
+// pd37route (Part 117): emitNetSolutionFast writes emitNetSolution's text
+// and counts, on 3000 random nets: random pins (1-6, 1-3 access points),
+// random straight wires and vias, some zero-length or bent pieces (dropped),
+// some unrouted nets, pins left uncovered (fixed by a via).
+void testEmitNetSolutionFastMatches() {
+  g24::Resources r;
+  r.nLayers = 6;
+  unsigned st = 2024;
+  auto rnd = [&](int n) {
+    st = st * 1103515245u + 12345u;
+    return static_cast<int>((st >> 8) % static_cast<unsigned>(n));
+  };
+  bool same = true;
+  g24::SolutionReport ra, rb;
+  for (int t = 0; t < 3000 && same; ++t) {
+    g24::Net n;
+    n.name = "n" + std::to_string(t);
+    int np = 1 + rnd(6);
+    for (int k = 0; k < np; ++k) {
+      std::vector<g24::Access> p;
+      int na = 1 + rnd(3);
+      for (int a = 0; a < na; ++a)
+        p.push_back({rnd(8), rnd(8), rnd(6)});
+      n.pins.push_back(p);
+    }
+    std::vector<g24::Seg> segs;
+    int ns = rnd(10) == 0 ? 0 : rnd(12);
+    for (int k = 0; k < ns; ++k) {
+      int x = rnd(8), y = rnd(8), z = rnd(6), kind = rnd(5);
+      if (kind == 0)
+        segs.push_back({x, y, z, std::min(7, x + rnd(5)), y, z});
+      else if (kind == 1)
+        segs.push_back({x, y, z, x, std::min(7, y + rnd(5)), z});
+      else if (kind == 2)
+        segs.push_back({x, y, std::min(z, 4), x, y, std::min(5, z + 1 + rnd(3))});
+      else if (kind == 3)
+        segs.push_back({x, y, z, x, y, z}); // zero-length
+      else
+        segs.push_back({x, y, 1, std::min(7, x + 1), y, 2}); // not straight
+    }
+    std::ostringstream oa;
+    g24::emitNetSolution(r, n, segs, oa, ra);
+    std::string ob;
+    g24::emitNetSolutionFast(r, n, segs, ob, rb);
+    same = oa.str() == ob;
+  }
+  same = same && ra.nets == rb.nets && ra.wires == rb.wires && ra.vias == rb.vias && ra.droppedZero == rb.droppedZero &&
+         ra.pinFixes == rb.pinFixes && ra.unroutedNets == rb.unroutedNets;
+  check(same && ra.pinFixes > 0 && ra.unroutedNets > 0 && ra.droppedZero > 0,
+        "fast net emitter: emitNetSolution's text and counts on 3000 random nets");
+}
+
 // pd37route (Part 117): the fast readers give the iostream readers' values
 // on a .cap and .net with mixed whitespace (tabs, CRLF, runs of blanks),
 // decimals in several spellings, signed and padded integers, and a last
@@ -15755,6 +15806,7 @@ int run() {
   testLocalPatternBackendMatchesReference();
   testCommutingBatches();
   testFastReadersMatchIostream();
+  testEmitNetSolutionFastMatches();
   testPatternColorBatchesMatchesFirstFit();
   testCommutingDagOrder();
   testThreadedLayerAssignmentIsExact();

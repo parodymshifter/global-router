@@ -765,6 +765,138 @@ inline void emitNetSolution(const Resources &r, const Net &n, const std::vector<
   o << ")\n";
 }
 
+// pd37route (Part 117): emitNetSolution's text appended to a string, the
+// same characters and counts. Coverage is only ever asked at pin access
+// points and pin GCells (every layer), so only those points are tracked --
+// marked by every kept segment, then by each pin fix in order, as before.
+inline void appendInt(std::string &o, long long v) {
+  char b[24];
+  int n = 0;
+  bool neg = v < 0;
+  unsigned long long u = neg ? 0ULL - static_cast<unsigned long long>(v) : static_cast<unsigned long long>(v);
+  do {
+    b[n++] = static_cast<char>('0' + u % 10);
+    u /= 10;
+  } while (u);
+  if (neg)
+    o.push_back('-');
+  while (n)
+    o.push_back(b[--n]);
+}
+inline void emitNetSolutionFast(const Resources &r, const Net &n, const std::vector<Seg> &netSegs, std::string &o,
+                                SolutionReport &rep) {
+  ++rep.nets;
+  std::vector<Seg> out;
+  out.reserve(netSegs.size() + n.pins.size());
+  // the query points: each pin's access points and its first access point's
+  // GCell on every layer
+  std::vector<Access> q;
+  for (const std::vector<Access> &p : n.pins) {
+    for (const Access &a : p)
+      q.push_back(a);
+    for (int z = 0; z < r.nLayers; ++z)
+      q.push_back({p[0].x, p[0].y, z});
+  }
+  auto key = [](int x, int y, int z) {
+    return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 40) ^ (static_cast<uint64_t>(static_cast<uint32_t>(y)) << 16) ^
+           static_cast<uint64_t>(static_cast<uint32_t>(z));
+  };
+  std::vector<uint64_t> qk(q.size());
+  for (size_t i = 0; i < q.size(); ++i)
+    qk[i] = key(q[i].x, q[i].y, q[i].z);
+  std::sort(qk.begin(), qk.end());
+  qk.erase(std::unique(qk.begin(), qk.end()), qk.end());
+  std::vector<char> cov(qk.size(), 0);
+  auto idxOf = [&](int x, int y, int z) -> long long {
+    uint64_t k = key(x, y, z);
+    auto it = std::lower_bound(qk.begin(), qk.end(), k);
+    return it != qk.end() && *it == k ? static_cast<long long>(it - qk.begin()) : -1;
+  };
+  auto cover = [&](const Seg &g) {
+    // mark every query point inside g (same set of points cover(g) inserted)
+    for (size_t i = 0; i < q.size(); ++i) {
+      const Access &a = q[i];
+      bool in = g.zl == g.zh ? (a.z == g.zl && a.x >= g.xl && a.x <= g.xh && a.y >= g.yl && a.y <= g.yh)
+                             : (a.x == g.xl && a.y == g.yl && a.z >= g.zl && a.z <= g.zh);
+      if (in)
+        cov[static_cast<size_t>(idxOf(a.x, a.y, a.z))] = 1;
+    }
+  };
+  auto covered = [&](int x, int y, int z) {
+    long long i = idxOf(x, y, z);
+    return i >= 0 && cov[static_cast<size_t>(i)];
+  };
+  for (const Seg &g : netSegs) {
+    bool via = g.xl == g.xh && g.yl == g.yh;
+    if ((via && g.zl == g.zh) || (!via && g.zl != g.zh)) {
+      ++rep.droppedZero;
+      continue;
+    }
+    out.push_back(g);
+    cover(g);
+  }
+  if (out.empty()) {
+    ++rep.unroutedNets;
+    if (!n.pins.empty()) {
+      const Access &a0 = n.pins[0][0];
+      int zl = a0.z, zh = a0.z;
+      for (const std::vector<Access> &p : n.pins)
+        if (p[0].x == a0.x && p[0].y == a0.y) {
+          zl = std::min(zl, p[0].z);
+          zh = std::max(zh, p[0].z);
+        }
+      if (zh == zl) {
+        if (zh + 1 < r.nLayers)
+          ++zh;
+        else
+          --zl;
+      }
+      Seg v{a0.x, a0.y, zl, a0.x, a0.y, zh};
+      out.push_back(v);
+      cover(v);
+    }
+  }
+  for (const std::vector<Access> &p : n.pins) {
+    bool ok = false;
+    for (const Access &a : p)
+      ok = ok || covered(a.x, a.y, a.z);
+    if (ok)
+      continue;
+    const Access &a = p[0];
+    int best = -1;
+    for (int z = 0; z < r.nLayers; ++z)
+      if (covered(a.x, a.y, z) && (best < 0 || std::abs(z - a.z) < std::abs(best - a.z)))
+        best = z;
+    if (best < 0)
+      best = a.z + 1 < r.nLayers ? a.z + 1 : a.z - 1;
+    Seg v{a.x, a.y, std::min(a.z, best), a.x, a.y, std::max(a.z, best)};
+    out.push_back(v);
+    cover(v);
+    ++rep.pinFixes;
+  }
+  o += n.name;
+  o += "\n(\n";
+  for (const Seg &g : out) {
+    appendInt(o, g.xl);
+    o.push_back(' ');
+    appendInt(o, g.yl);
+    o.push_back(' ');
+    appendInt(o, g.zl);
+    o.push_back(' ');
+    appendInt(o, g.xh);
+    o.push_back(' ');
+    appendInt(o, g.yh);
+    o.push_back(' ');
+    appendInt(o, g.zh);
+    o.push_back('\n');
+    if (g.zl == g.zh)
+      ++rep.wires;
+    else
+      ++rep.vias;
+  }
+  o += ")\n";
+}
+
 inline SolutionReport convertSolution(const Resources &r, const std::vector<Net> &nets, std::istream &sol,
                                       std::ostream &o) {
   SolutionReport rep;
