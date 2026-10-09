@@ -9534,3 +9534,45 @@ Contest #1: 217 s on 8 cores + 4 A100s. Left: the slow tier (not threaded:
 its maze search doubles its box when no path is found, so its region is
 not known in advance), input parsing, the pattern stage's sequential
 commit, and memory (26 GB on a 24 GB machine).
+
+## Part 117 -- I/O, memory and allocation cuts in pd37route (all byte-identical)
+
+Continuing step 3 on pd37route; every change byte-identical to pd36route
+at 1 and 8 threads (bsg_chip_rank, mempool_group_rank, nvdla_rank,
+mempool_cluster_ranking; adaptec1 2008 parity at 1 and 8 threads).
+
+- **Input:** `g24::FastText`, `readResourcesFast`, `FastNetStream`
+  (g24_io.h): the same values as the iostream readers -- integers as `>>`
+  reads them, decimals by strtod (the conversion iostream uses) -- without
+  per-value locale machinery; g24_verify keeps its own readers. Self-test
+  on a .cap/.net with mixed whitespace and number spellings, bit for bit.
+  mempool_cluster read 29 -> 9 s.
+- **Writer:** `emitNetSolutionFast` appends to a string and tracks pin
+  coverage only at pin points (the only places it is queried); self-test:
+  the same text and counts on 3000 random nets. With the fast re-read:
+  mempool_cluster write 52 -> 27 s.
+- **Memory:** with no negotiation rounds, each net's packed 2D route is
+  freed right after its round-0 tree (nothing else reads it):
+  mempool_group_rank peak 6176 -> 5288 MB.
+- **Layer assignment's per-net work** in reused per-thread flat scratch:
+  `buildNetTree` with a sorted-index node lookup instead of std::maps, CSR
+  child lists, flat choice tables, reused trees: LA round 0 -25-30%
+  (bsg_chip_rank 1 thread 30.9 -> 21.9 s).
+- Tried and dropped: caching / de-duplicating exact Steiner solves by
+  relative pin set (46-55% of calls repeat, but the repeats are the cheap
+  3-4 pin sets; the 8-pin solves that cost the time are nearly all
+  distinct -- no gain), and flattening the Steiner solver's tables
+  (slower). The solver is unchanged.
+
+`fast24.env`, 8 threads:
+
+| design | Part 116 | now | peak |
+|---|---|---|---|
+| bsg_chip_rank | 18.8 s | **14.0 s** | 1.7 GB |
+| mempool_group_rank | 78.5 s | **60.5 s** | 4.9 GB |
+| nvdla_rank | -- | **6.6 s** | 0.7 GB |
+| mempool_cluster_ranking | 623 s | **553 s** | **22.6 GB** (was 26.0; now under the 24 GB RAM) |
+
+Cluster stage report (s): input 9, pattern stage 128 (trees ~half), slow
+tier 79, layer assignment round 0 156, 3D passes 52 / 51 / 51, write 28.
+Part 114: 61017 s. Contest #1: 217 s (8 cores + 4 A100s).
