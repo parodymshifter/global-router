@@ -5,6 +5,19 @@
 //
 //   g24_verify <design.cap> <design.net> <solution>   score + legality
 //   g24_verify --selftest
+//   g24_verify <design.cap> <design.net> <solution> --grid out.grid [max_side [max|mean]]
+//     also writes a per-GCell congestion grid for the 3D viewer
+//     (gpu/grview.mm; grmap.cpp's GRMAP1 format): each GCell's worst
+//     routing layer by demand / capacity, classed as grmap does (violet
+//     <= 50%, blue 50-75%, green 75-90%, yellow 90-<100%, orange exactly
+//     full, red over; a layer with no capacity but demand is red; a GCell
+//     with no capacity on any layer is blocked). With max_side, blocks of
+//     ceil(max(x, y) / max_side) GCells are pooled: "max" (default) keeps
+//     the worst class, then highest ratio, so a single hot GCell survives;
+//     "mean" averages the GCells' ratios (each capped at 3; blocked ones
+//     left out) and classes the average, so a block reads red only when it
+//     is over capacity on average -- at 4x4 and up, max-pooling turns most
+//     of a congested design red.
 //
 // The scoring rules replicate the contest evaluator (ISPD24 contest,
 // evaluator.cpp as distributed with cuhk-eda/InstantGR, run/evaluator.cpp),
@@ -260,6 +273,71 @@ public:
     return rep;
   }
 
+  // After score(): the per-GCell grid described in the file header.
+  struct Grid {
+    int nx = 0, ny = 0;
+    std::vector<float> ratio;   // row-major, y * nx + x
+    std::vector<uint8_t> cls;
+  };
+  Grid congestionGrid(int maxSide, bool mean = false) const {
+    int bs = 1;
+    if (maxSide > 0)
+      bs = std::max(1, (std::max(r_.xSize, r_.ySize) + maxSide - 1) / maxSide);
+    Grid gr;
+    gr.nx = (r_.xSize + bs - 1) / bs;
+    gr.ny = (r_.ySize + bs - 1) / bs;
+    gr.ratio.assign(static_cast<size_t>(gr.nx) * gr.ny, 0.0f);
+    gr.cls.assign(static_cast<size_t>(gr.nx) * gr.ny, 6);
+    auto rank = [](int c) { return c == 6 ? -1 : c; }; // blocked is the least informative
+    std::vector<double> sum(mean ? gr.ratio.size() : 0, 0.0);
+    std::vector<int> cnt(mean ? gr.ratio.size() : 0, 0);
+    for (int x = 0; x < r_.xSize; ++x)
+      for (int y = 0; y < r_.ySize; ++y) {
+        int cls = 6;
+        float ratio = 0;
+        for (int z = 1; z < r_.nLayers; ++z) {
+          size_t i = idx(z, x, y);
+          double d = (2.0 * wire_[i] + viaDemand_[i]) / 2.0, c = r_.capacity(z, x, y);
+          int k;
+          float q;
+          if (c > 0.001) {
+            q = static_cast<float>(d / c);
+            k = d > c + 1e-9 ? 5 : d > c - 1e-9 ? 4 : q >= 0.9f ? 3 : q > 0.75f ? 2 : q > 0.5f ? 1 : 0;
+          } else if (d > 0) {
+            q = 3.0f;
+            k = 5;
+          } else {
+            continue;
+          }
+          if (rank(k) > rank(cls) || (k == cls && q > ratio)) {
+            cls = k;
+            ratio = q;
+          }
+        }
+        size_t o = static_cast<size_t>(y / bs) * gr.nx + x / bs;
+        if (mean) {
+          if (cls != 6) {
+            sum[o] += std::min(3.0f, ratio);
+            ++cnt[o];
+          }
+          continue;
+        }
+        if (rank(cls) > rank(gr.cls[o]) || (cls == gr.cls[o] && ratio > gr.ratio[o])) {
+          gr.cls[o] = static_cast<uint8_t>(cls);
+          gr.ratio[o] = ratio;
+        }
+      }
+    if (mean)
+      for (size_t o = 0; o < gr.ratio.size(); ++o) {
+        if (cnt[o] == 0)
+          continue; // blocked
+        double q = sum[o] / cnt[o];
+        gr.ratio[o] = static_cast<float>(q);
+        gr.cls[o] = q > 1 + 1e-9 ? 5 : q > 1 - 1e-9 ? 4 : q >= 0.9 ? 3 : q > 0.75 ? 2 : q > 0.5 ? 1 : 0;
+      }
+    return gr;
+  }
+
 private:
   const Resources &r_;
   std::vector<int> flag_, wire_, viaDemand_;
@@ -356,6 +434,19 @@ private:
     return true;
   }
 };
+
+bool writeGrid(const Scorer::Grid &gr, const std::string &path) {
+  std::ofstream f(path, std::ios::binary);
+  if (!f)
+    return false;
+  const char magic[8] = {'G', 'R', 'M', 'A', 'P', '1', 0, 0};
+  f.write(magic, 8);
+  int32_t dims[2] = {gr.nx, gr.ny};
+  f.write(reinterpret_cast<const char *>(dims), sizeof dims);
+  f.write(reinterpret_cast<const char *>(gr.ratio.data()), static_cast<std::streamsize>(gr.ratio.size() * sizeof(float)));
+  f.write(reinterpret_cast<const char *>(gr.cls.data()), static_cast<std::streamsize>(gr.cls.size()));
+  return static_cast<bool>(f);
+}
 
 void print(const Report &rep) {
   std::printf("wirelength %lld (cost %.4f)\n", rep.wireLength, rep.wlCost);
@@ -537,8 +628,43 @@ void testParserRejectsBadInput() {
   check(!readNets(e, nets, err), "a one-character name line is not a net (the evaluator's length > 1 rule)");
 }
 
+// The congestion grid on the hand fixture. M2 (horizontal): netA's wire
+// fills row 0 x 0-2 exactly (demand 1, capacity 1); netB's M2 via at (1, 2)
+// puts half a track on (0, 2), whose M2 capacity is 0, and on (1, 2)
+// (capacity 1: 50%). M3 (vertical): netB's wire fills (1, 1) exactly.
+void testCongestionGrid() {
+  Resources r;
+  std::vector<Net> nets;
+  std::string err;
+  std::istringstream c(kCap), n(kNet), s(kSol);
+  readResources(c, r, err);
+  readNets(n, nets, err);
+  Scorer sc(r);
+  sc.score(nets, s);
+  Scorer::Grid gr = sc.congestionGrid(0);
+  auto at = [&](int x, int y) { return static_cast<size_t>(y) * gr.nx + x; };
+  check(gr.nx == 4 && gr.ny == 3, "grid: one tile per GCell");
+  check(gr.cls[at(0, 0)] == 4 && gr.cls[at(2, 0)] == 4 && std::fabs(gr.ratio[at(0, 0)] - 1.0f) < 1e-6f,
+        "grid: a GCell at exactly its capacity is full (orange)");
+  check(gr.cls[at(0, 2)] == 5, "grid: demand on a zero-capacity layer is red");
+  check(gr.cls[at(1, 2)] == 0 && std::fabs(gr.ratio[at(1, 2)] - 0.5f) < 1e-6f,
+        "grid: half a via track on capacity 1 is 50% (violet)");
+  check(gr.cls[at(1, 1)] == 4, "grid: the worst layer wins (M2 25%, M3 full)");
+  check(gr.cls[at(3, 0)] == 0 && gr.ratio[at(3, 0)] == 0.0f, "grid: an unused GCell is 0%");
+  Scorer::Grid p = sc.congestionGrid(2);
+  check(p.nx == 2 && p.ny == 2 && p.cls[1 * 2 + 0] == 5 && p.cls[0 * 2 + 1] == 4,
+        "grid, pooled 2x2: the worst GCell of each block survives");
+  // mean: block (0, 0) = GCells (0..1, 0..1): (0, 0) and (1, 0) full (1.0),
+  // (1, 1) M3 full (1.0), (0, 1) netB's M2 via -- half a track on capacity
+  // 2 (0.25): (1 + 1 + 0.25 + 1) / 4 = 0.8125, green.
+  Scorer::Grid m = sc.congestionGrid(2, true);
+  check(m.nx == 2 && m.ny == 2 && std::fabs(m.ratio[0] - 0.8125f) < 1e-6f && m.cls[0] == 2,
+        "grid, mean-pooled 2x2: a block's average ratio and its class (0.8125, green)");
+}
+
 int run() {
   std::cout << "g24_verify self test\n";
+  testCongestionGrid();
   testHandComputedFixture();
   testBrokenSolutionsAreCaught();
   testZeroCapacityAndViaEdgeRules();
@@ -552,6 +678,23 @@ int run() {
 int main(int argc, char **argv) {
   if (argc == 2 && std::string(argv[1]) == "--selftest")
     return selftest::run();
+  std::string gridPath;
+  int maxSide = 0;
+  bool meanPool = false;
+  if (argc >= 6 && argc <= 8 && std::string(argv[4]) == "--grid") {
+    gridPath = argv[5];
+    if (argc >= 7)
+      maxSide = std::atoi(argv[6]);
+    if (argc == 8) {
+      std::string m = argv[7];
+      if (m != "max" && m != "mean") {
+        std::cerr << "pooling must be max or mean (got '" << m << "')\n";
+        return 2;
+      }
+      meanPool = m == "mean";
+    }
+    argc = 4;
+  }
   if (argc != 4) {
     std::cerr << "usage: " << argv[0] << " <design.cap> <design.net> <solution>\n       " << argv[0]
               << " --selftest\n";
@@ -573,5 +716,17 @@ int main(int argc, char **argv) {
   g24::Scorer sc(r);
   g24::Report rep = sc.score(nets, sf);
   g24::print(rep);
+  if (!gridPath.empty()) {
+    g24::Scorer::Grid gr = sc.congestionGrid(maxSide, meanPool);
+    if (!g24::writeGrid(gr, gridPath)) {
+      std::cerr << "cannot write " << gridPath << "\n";
+      return 2;
+    }
+    long long k[7] = {0, 0, 0, 0, 0, 0, 0};
+    for (uint8_t c : gr.cls)
+      ++k[c];
+    std::printf("grid %d x %d written to %s: violet %lld, blue %lld, green %lld, yellow %lld, full %lld, over %lld, "
+                "blocked %lld\n", gr.nx, gr.ny, gridPath.c_str(), k[0], k[1], k[2], k[3], k[4], k[5], k[6]);
+  }
   return rep.legal() ? 0 : 1;
 }

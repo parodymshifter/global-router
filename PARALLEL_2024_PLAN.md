@@ -78,3 +78,13 @@ Done in pd37route, byte-identical at every thread count: steps 1-3 and the
 writer half of step 4 (as a dependency graph, not batches). mempool_cluster
 _ranking 1599 s -> 623 s on 8 threads. Next: input parsing, the slow tier
 (step 5), the Metal backend for the pattern solve, memory.
+
+## Status (2026-10-09, Part 118)
+
+Step 5 done in pd38route: the slow tier is batched against snapshots (the
+pd24-pd27 scheme), not exact but the same at every thread count, and
+better on every design; mempool_cluster_ranking 526 s, mempool_cluster
+809 s. The exact dependency graph was tried first and could not help
+there (longest chain 19176 of 54283). Remaining: the slow tier's search
+work (not stragglers; p118g measures conflicts and contention), Steiner
+trees for big nets, and GPU paths with fixed-point scoring.

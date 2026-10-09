@@ -1,4 +1,8 @@
-# Queued: "Global Router Speed and Theory", second look
+# Done 2026-10-09: "Global Router Speed and Theory", second look
+
+Published at the same link (version 4); local copy
+`recaps/speed-theory-2026-10-09.html`. The brief below is kept for the record.
+
 
 Requested by the user 2026-10-08. **Trigger:** when the runtime work is
 complete -- the lean 2024 pipeline and pd36route's exact cuts (Part 115),

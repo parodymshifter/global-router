@@ -9576,3 +9576,84 @@ mempool_cluster_ranking; adaptec1 2008 parity at 1 and 8 threads).
 Cluster stage report (s): input 9, pattern stage 128 (trees ~half), slow
 tier 79, layer assignment round 0 156, 3D passes 52 / 51 / 51, write 28.
 Part 114: 61017 s. Contest #1: 217 s (8 cores + 4 A100s).
+
+## Part 118 -- the slow tier on threads (pd38route), and two 3D passes
+
+Item list from the user (2026-10-08): (1) thread the slow tier the 2008
+way, not exact; (2) drop the third 3D pass; keep in mind (3) the
+exact-Steiner pin limit / a FLUTE-like method and (4) GPU work with
+fixed-point scoring.
+
+**Two 3D passes** (`PD35ROUTE_PATTERN3D=2`, pd37route, 8 threads, all 13
+designs, p118a): +0.01% to +0.04% worse score everywhere for 6-8% less
+time (mempool_cluster_ranking 529.65 s, +0.0342%; mempool_cluster
+915.5 s, +0.0419%). Not adopted; stays a setting.
+
+**First attempt, exact: `PD38ROUTE_SLOW_DAG=1`.** Each slow round
+escalates every overflowed net at round start, then runs the escalated
+nets on the commuting dependency graph (region = route box widened by the
+search margin; a search that would leave its region or retry is put back
+and deferred to a sequential pass). Self-test: 4 threads = 1 thread on a
+40x40, 250-net fixture over 40 slow rounds. All 13 designs OK (p118b),
+1 thread = 8 threads byte for byte on nvdla_rank and bsg_chip_rank, score
+within noise of the 3-pass reference -- **and no faster** (mempool_cluster
+slow tier 391 s vs 394 s sequential, 180 s more CPU). The trace (p118c,
+`PD37ROUTE_BATCH_TRACE=1`) said why: round 0 had 54283 positions and a
+**longest dependency chain of 19176** (ceiling 2.8x; round 1 2.4x) -- the
+hard nets' margin-48 boxes pile onto the same hotspots. Graph 202 s,
+deferred pass 1.9 s, round 205 s; bookkeeping negligible.
+
+**The fix, the 2008 way: `PD38ROUTE_SLOW_BATCH=B`** (pd27route's executor,
+adapted). Escalation as above; then batches of B nets searched on
+`PD37ROUTE_THREADS` workers, each against its own copy of the batch-start
+2D usage (the cost functions read it through a thread-local
+`gLiveOverride`; prices are shared and read-only within a round, so no
+0.8 GB Prices copy per worker; present-demand cost required, checked),
+committed in net order. A net whose new route crosses an edge that had
+room when it was searched and that an earlier commit in the batch filled
+is put back and leads the next batch ("fresh" + carry); the first changed
+net of a batch always commits. `PD38ROUTE_SLOW_LPT=1` (default) hands out
+a batch's nets biggest search box first (same routes). Self-tests: batch
+16 at 1 = 4 threads route for route, every replica equal to the live
+usage after every batch, conflicts carried (854), batch 16 differs from
+batch 1 (control) and ends near it (1830 vs 1816), biggest-first = plain
+order. With the setting off, nvdla_rank's output is byte-identical to
+pd38route's earlier build.
+
+All 13 designs, batch 64, 8 threads (p118d; all OK, evaluator = verifier;
+1 thread = 8 threads on nvdla_rank and bsg_chip_rank):
+
+| design | score | vs 3-pass reference | time | slow tier (graph mode) |
+|---|---|---|---|---|
+| mempool_tile_rank | 13699264 | -0.0075% | 2.3 s | 0.0 s |
+| mempool_tile | 15106440 | -0.0038% | 2.6 s | 0.0 s |
+| ariane133_68 | 19683433 | -0.0596% | 2.7 s | 0.1 s |
+| ariane133_51 | 22387080 | -0.0098% | 2.8 s | 0.1 s |
+| ariane_68_rank | 22501266 | -0.0135% | 3.9 s | 0.1 s |
+| nvdla | 48026184 | -0.0417% | 5.7 s | 0.4 s (0.8) |
+| nvdla_rank | 42943280 | -0.0386% | 5.8 s | 0.5 s (1.1) |
+| bsg_chip_rank | 109382606 | -0.0355% | 14.7 s | 0.3 s |
+| bsg_chip | 111817924 | -0.0235% | 16.8 s | 0.7 s (1.3) |
+| mempool_group_rank | 381333366 | -0.0113% | 63.4 s | 1.4 s |
+| mempool_group | 396165479 | -0.0106% | 72.5 s | 3.7 s (5.0) |
+| mempool_cluster_ranking | 1772049659 | -0.0005% | **526.3 s** (clean rerun, p118f) | **40.7 s** (74.8) |
+| mempool_cluster | 1615279912 | -0.0025% | **809 s** (791.7 s stage total with biggest-first) | **268 s** (391) |
+
+Better on every design; adopted in `fast24.env` (`PD38ROUTE_SLOW_BATCH=64`).
+mempool_cluster round 0: 172 s (35444 overflow) vs the graph's 202 s
+(41282); rounds 1-3: 47 / 17 / 9 s vs 78 / 41 / 27 s. Batch 256 (p118e):
+twice the carried nets (41135), round 0 255 s, slow tier 365 s -- worse.
+Peak footprint varies 21-25 GB run to run in either mode (23.9 GB on the
+clean cluster_ranking run).
+
+**Where round 0's time goes now** (p118f trace, mempool_cluster): search
+phase 162 s of 164; commit 0.7 s, replica sync 0.2 s; task time summed
+1162 s over 8 workers (about 90% busy); each batch's longest task summed
+65 s, the longest single task 3.4 s. So not stragglers: the work itself,
+about 38% of it conflict re-searches. Queued (p118g): batch 32, and batch
+64 on 1 thread (does memory contention inflate each search?).
+
+The second Speed and Theory page (v1 vs now, and the analysis discipline)
+and recap 5, with 3D congestion maps of all 29 final runs (`g24_verify
+--grid out.grid [max_side [max|mean]]` writes the 2024 grid for grview;
+the 2008 grids are the existing ones), are published at the same links.

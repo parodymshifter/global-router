@@ -219,6 +219,16 @@ run ends with a `stage report:` table (per-stage time, footprint,
 objective and its change, work): read it before tuning anything. The
 2008 standard is unchanged.
 
+**2026-10-09: the ISPD 2024 standard is `./pd38route @standard.env
+@standard24.env @fast24.env PD37ROUTE_THREADS=8`** (Part 118). The slow
+tier now runs in batches of 64 searched in parallel against snapshots and
+committed in net order (`PD38ROUTE_SLOW_BATCH=64`, in `fast24.env`): a
+better score on all 13 designs, the same at any thread count.
+mempool_cluster_ranking takes 526 s (Part 114: 61017 s). An exact
+dependency graph could not thread this stage: its hard nets crowd into
+the same hotspots (longest chain 19176 of 54283 nets). Measure a parallel
+scheme's ceiling before building on it.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned
