@@ -28,6 +28,8 @@
 //   - Layer assignment allocates no wire history when it runs no
 //     negotiation rounds (round 0 reads 1.0 everywhere, the no-history
 //     factor): -4.1 GB on mempool_cluster.
+//   - With no negotiation rounds, each net's packed 2D route is freed right
+//     after its round-0 tree is built (nothing else reads it).
 //   - The 2024 inputs (and the writer's re-read of the netlist) go through
 //     g24::FastText readers: the same values without iostream's per-value
 //     locale machinery (Part 117).
@@ -9013,6 +9015,15 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     NetTree laTree;
     std::vector<std::pair<int, int>> laPr;
     bool built = nthu ? (viaAware && buildLaTree(i, laTree, laPr)) : buildNetTree(rn.segs, trees[i]);
+    // pd37route (memory): with no negotiation rounds a net's packed 2D
+    // route is read only by its own tree build just above; free it now
+    // (its own entry, so safe on any thread).
+    if (nthu && maxRounds <= 0) {
+      if (pack16)
+        std::vector<Seg16>().swap(segs2D16[i]);
+      else
+        std::vector<Seg>().swap(segs2D[i]);
+    }
     NetTree &tree = nthu ? laTree : trees[i];
     const std::vector<std::pair<int, int>> &pr0 = nthu ? laPr : pinRange[i];
     if (built &&
