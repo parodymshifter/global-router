@@ -71,3 +71,10 @@ Parallelism plan).
   it is a quality trade, the user's call, not an exact speedup.
 - Peak memory (28 GB on a 24 GB machine) is still layer assignment's
   first round; independent of threading.
+
+## Status (2026-10-08, HISTORY_COST_SWEEP.md Part 116)
+
+Done in pd37route, byte-identical at every thread count: steps 1-3 and the
+writer half of step 4 (as a dependency graph, not batches). mempool_cluster
+_ranking 1599 s -> 623 s on 8 threads. Next: input parsing, the slow tier
+(step 5), the Metal backend for the pattern solve, memory.

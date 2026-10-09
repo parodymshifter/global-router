@@ -9475,3 +9475,62 @@ design is faster by 12-38x (single-threaded; contest #1: 5-217 s on 8
 cores + 4 A100s). What is left for step 3 (threads, GPU), from the
 cluster stage reports: layer assignment's first round (35-45%), the
 pattern stage (19-20%), the 3D passes (21-25%) -- all net-parallel.
+
+## Part 116 -- threads (pd37route), byte-identical at every thread count
+
+`gr/pd37route.cpp` (fork of pd36route; species `pd`, gen. 37), plan in
+`PARALLEL_2024_PLAN.md`. `PD37ROUTE_THREADS=T` (default 1 = pd36route's
+loops). Every output is byte-identical to pd36route at every thread count.
+
+**The scheduler.** Layer assignment's first round and the 3D passes take
+nets one at a time, each touching usage only in a known region. Position
+k (in the stage's own net order) depends on the last earlier position to
+cover each of its coarse cells (4 x 4 tiles), so -- transitively -- on
+every earlier net it overlaps; `runCommutingDagFn` runs each net once its
+dependencies are done, on T threads. Overlapping nets keep their order and
+the rest commute, so every net sees exactly the usage it saw sequentially.
+No usage is copied per thread. Regions: layer assignment, each 2D
+segment's 3-tile-wide strip plus pins (it touches its route and one GCell
+around it); the 3D passes, the route's box plus one (alternatives turn at
+the pieces' own corners). A first version with batch barriers lost most of
+the parallelism to long nets holding each batch; per-net dependencies fixed
+that. Cells are generated per net while the graph is built (storing them
+cost ~2 GB on mempool_cluster and tripped the watchdog once).
+
+**Also threaded, all order-free:** the per-net Steiner trees; inside the
+pattern stage the overflow scan, the full cost refresh, each batch's solve
+(contiguous chunks, each with its own backend scratch) and its pieces' edge
+lists; the solution writer (slices formatted on the pool, written in
+order).
+
+**Exact single-thread cuts found on the way:** the pattern stage's batch
+coloring (first fit) by per-cell bitsets instead of an occupancy grid per
+batch (1.3 GB of grids on mempool_cluster round 0); the best-round snapshot
+copies only pieces rerouted since the last best; layer assignment skips
+the wire history when it runs no negotiation rounds (all 1.0 in round 0,
+the no-history factor): -4.1 GB on mempool_cluster.
+
+Self-tests: the scheduler (hand cases; on 300 random boxes at 4 threads
+every position starts after every earlier overlapping one finished);
+layer assignment + 3D passes at 4 threads = 1 thread byte for byte under
+the 2008 cost and the 2024 score with via demand, with a control (reverse
+order, overlap ignored) that routes differently; the bitset coloring =
+the first-fit scan on 40000 random boxes (1331 batches); the threaded
+writer's text = the sequential one. Byte-identical vs pd36route on
+bsg_chip_rank, mempool_group_rank and mempool_cluster_ranking at 8
+threads; adaptec1 2008 parity at 1 and 8 threads.
+
+`fast24.env`, 8 threads, M4 Pro:
+
+| design | pd36route (1 thread) | pd37route, 8 threads | peak |
+|---|---|---|---|
+| bsg_chip_rank | 74 s | **18.8 s** | 2.2 GB |
+| mempool_group_rank | 320 s | **78.5 s** | 6.2 GB |
+| mempool_cluster_ranking | 1599 s | **623 s** | 26.0 GB (was 28.0) |
+
+The cluster run's stage report (s): input 29, pattern stage 131, slow tier
+72, layer assignment round 0 178, 3D passes 56 / 55 / 51, write 52.
+Contest #1: 217 s on 8 cores + 4 A100s. Left: the slow tier (not threaded:
+its maze search doubles its box when no path is found, so its region is
+not known in advance), input parsing, the pattern stage's sequential
+commit, and memory (26 GB on a 24 GB machine).

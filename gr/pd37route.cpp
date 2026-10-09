@@ -25,6 +25,9 @@
 //   - The pattern stage's batch coloring keeps a bitset of occupied batches
 //     per coarse cell instead of an occupancy grid per batch (the same
 //     first-fit batches; ~1.3 GB of grids on mempool_cluster round 0).
+//   - Layer assignment allocates no wire history when it runs no
+//     negotiation rounds (round 0 reads 1.0 everywhere, the no-history
+//     factor): -4.1 GB on mempool_cluster.
 //   - The solution writer formats contiguous slices of each chunk of nets
 //     on the pool and writes them in order (the same text).
 //   - The pattern stage copies, at each new best round, only the pieces
@@ -4957,47 +4960,43 @@ std::vector<std::vector<size_t>> commutingBatches(const std::vector<NetBox> &box
 // pool's threads, so a long net holds back only the nets that overlap it.
 // Every position sees exactly what it would have in sequential order.
 // Returns the number of dependency edges.
-// pd37route: the coarse cells (cell x cell tiles) a box covers, as CSR.
-struct CellLists {
-  std::vector<uint32_t> start{0};
-  std::vector<uint32_t> cells;
-  size_t nCells = 0;
-};
-CellLists cellsOfBoxes(const std::vector<NetBox> &boxes, int nx, int ny, int cell) {
-  CellLists cl;
-  const int cw = (nx + cell - 1) / cell, ch = (ny + cell - 1) / cell;
-  cl.nCells = static_cast<size_t>(cw) * ch;
-  cl.start.reserve(boxes.size() + 1);
-  for (const NetBox &bx : boxes) {
-    int cx0 = std::max(0, bx.x0) / cell, cx1 = std::min(nx - 1, bx.x1) / cell;
-    int cy0 = std::max(0, bx.y0) / cell, cy1 = std::min(ny - 1, bx.y1) / cell;
-    for (int cy = cy0; cy <= cy1; ++cy)
-      for (int cx = cx0; cx <= cx1; ++cx)
-        cl.cells.push_back(static_cast<uint32_t>(cy * cw + cx));
-    cl.start.push_back(static_cast<uint32_t>(cl.cells.size()));
-  }
-  return cl;
-}
-
-size_t runCommutingDagCells(const CellLists &cl, int threads, const std::function<void(size_t)> &f);
+// pd37route: position k's coarse cells come from cellsOf(k, out) -- called
+// once per position, in order, while the graph is built, so no position's
+// list is kept (a die-spanning box covers tens of thousands of cells).
+using CellsOfFn = std::function<void(size_t, std::vector<uint32_t> &)>;
+size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int threads,
+                         const std::function<void(size_t)> &f);
 
 size_t runCommutingDag(const std::vector<NetBox> &boxes, int nx, int ny, int cell, int threads,
                        const std::function<void(size_t)> &f) {
-  return runCommutingDagCells(cellsOfBoxes(boxes, nx, ny, cell), threads, f);
+  const int cw = (nx + cell - 1) / cell, ch = (ny + cell - 1) / cell;
+  return runCommutingDagFn(
+      boxes.size(), static_cast<size_t>(cw) * ch,
+      [&](size_t k, std::vector<uint32_t> &out) {
+        const NetBox &bx = boxes[k];
+        int cx0 = std::max(0, bx.x0) / cell, cx1 = std::min(nx - 1, bx.x1) / cell;
+        int cy0 = std::max(0, bx.y0) / cell, cy1 = std::min(ny - 1, bx.y1) / cell;
+        for (int cy = cy0; cy <= cy1; ++cy)
+          for (int cx = cx0; cx <= cx1; ++cx)
+            out.push_back(static_cast<uint32_t>(cy * cw + cx));
+      },
+      threads, f);
 }
 
-// The same over explicit cell lists: position k depends on the last earlier
-// position listing each of its cells.
-size_t runCommutingDagCells(const CellLists &cl, int threads, const std::function<void(size_t)> &f) {
-  const size_t n = cl.start.size() - 1;
-  std::vector<int64_t> last(cl.nCells, -1);
+// The graph: position k depends on the last earlier position listing each
+// of its cells (duplicates in a list are harmless).
+size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int threads,
+                         const std::function<void(size_t)> &f) {
+  std::vector<int64_t> last(nCells, -1);
   std::vector<uint32_t> predStart(n + 1, 0);
   std::vector<uint32_t> pred;
-  std::vector<uint32_t> mine;
+  std::vector<uint32_t> mine, cellsK;
   for (size_t k = 0; k < n; ++k) {
     mine.clear();
-    for (uint32_t e = cl.start[k]; e < cl.start[k + 1]; ++e) {
-      int64_t &l = last[cl.cells[e]];
+    cellsK.clear();
+    cellsOf(k, cellsK);
+    for (uint32_t c : cellsK) {
+      int64_t &l = last[c];
       if (l >= 0 && static_cast<size_t>(l) != k)
         mine.push_back(static_cast<uint32_t>(l));
       l = static_cast<int64_t>(k);
@@ -6270,9 +6269,9 @@ struct WirePrices {
   // any streak threshold <= 255 (updateWireHistory refuses more).
   std::vector<uint8_t> streakH, streakV;
   OpStacks histOpsH, histOpsV; // pd35route: sparse (see OpStacks)
-  explicit WirePrices(const RoutingGrid &g)
-      : histH(g.hCount(), 1.0), histV(g.vCount(), 1.0), streakH(g.hCount(), 0),
-        streakV(g.vCount(), 0) {}
+  explicit WirePrices(const RoutingGrid &g, bool allocate = true)
+      : histH(allocate ? g.hCount() : 0, 1.0), histV(allocate ? g.vCount() : 0, 1.0),
+        streakH(allocate ? g.hCount() : 0, 0), streakV(allocate ? g.vCount() : 0, 0) {}
 };
 
 // Called once per round boundary, same discipline as updateViaHistory.
@@ -8874,7 +8873,6 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   // pd35route (memory): NTHU's cost never reads via-site history (spanCost
   // counts vias only), so in that mode it is neither allocated nor updated.
   ViaPrices vp(g, !nthu);
-  WirePrices wireHist(g);
   bool trace = std::getenv("NV2ROUTE_TRACE") != nullptr;
 
   bool viaAware = true;
@@ -8887,8 +8885,14 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   bool wireAware = true;
   if (const char *r = std::getenv("NV2ROUTE_WIRE_AWARE"); r)
     wireAware = std::string(r) != "0";
-  const std::vector<double> *wireHistH = wireAware ? &wireHist.histH : nullptr;
-  const std::vector<double> *wireHistV = wireAware ? &wireHist.histV : nullptr;
+  // pd37route (memory): with no negotiation rounds the wire history is
+  // never read after round 0, where every value is 1.0 -- the factor the
+  // DP uses with no history -- so it is not allocated (3.7 GB of doubles
+  // and 0.46 GB of streaks on mempool_cluster) and not updated.
+  const bool keepWireHist = wireAware && maxRounds > 0;
+  WirePrices wireHist(g, keepWireHist);
+  const std::vector<double> *wireHistH = keepWireHist ? &wireHist.histH : nullptr;
+  const std::vector<double> *wireHistV = keepWireHist ? &wireHist.histV : nullptr;
 
   std::vector<NetCharge> charges(nets.size());
   // pd35route (memory): under kNthu no tree is kept per net. Each net's 2D
@@ -9035,12 +9039,10 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     // pd37route: layer assignment touches only its 2D route's tiles (and
     // pins, on the route) and one GCell around them -- so a net's cells
     // are those of each segment's 3-tile-wide strip, not its whole box.
-    CellLists cl;
-    {
-      const int cell = gCommuteCell;
-      const int cw = (g.nx + cell - 1) / cell, ch = (g.ny + cell - 1) / cell;
-      cl.nCells = static_cast<size_t>(cw) * ch;
-      std::vector<uint32_t> mine;
+    const int cell = gCommuteCell;
+    const int cw = (g.nx + cell - 1) / cell, ch = (g.ny + cell - 1) / cell;
+    CellsOfFn stripCells = [&](size_t k, std::vector<uint32_t> &out) {
+      const RoutedNet &rn = nets[order[k]];
       auto addRect = [&](int x0, int y0, int x1, int y1) {
         x0 = std::max(0, x0 - 1) / cell;
         y0 = std::max(0, y0 - 1) / cell;
@@ -9048,28 +9050,21 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
         y1 = std::min(g.ny - 1, y1 + 1) / cell;
         for (int cy = y0; cy <= y1; ++cy)
           for (int cx = x0; cx <= x1; ++cx)
-            mine.push_back(static_cast<uint32_t>(cy * cw + cx));
+            out.push_back(static_cast<uint32_t>(cy * cw + cx));
       };
-      for (size_t k = 0; k < nets.size(); ++k) {
-        const RoutedNet &rn = nets[order[k]];
-        mine.clear();
-        for (const Seg &sg : rn.segs)
-          addRect(std::min(sg.x1, sg.x2), std::min(sg.y1, sg.y2), std::max(sg.x1, sg.x2), std::max(sg.y1, sg.y2));
-        for (const Pin &pn : rn.net->pins)
-          addRect(pn.x, pn.y, pn.x, pn.y);
-        if (mine.empty())
-          addRect(0, 0, g.nx - 1, g.ny - 1); // nothing to place: everything, conservatively
-        std::sort(mine.begin(), mine.end());
-        mine.erase(std::unique(mine.begin(), mine.end()), mine.end());
-        cl.cells.insert(cl.cells.end(), mine.begin(), mine.end());
-        cl.start.push_back(static_cast<uint32_t>(cl.cells.size()));
-      }
-    }
+      for (const Seg &sg : rn.segs)
+        addRect(std::min(sg.x1, sg.x2), std::min(sg.y1, sg.y2), std::max(sg.x1, sg.x2), std::max(sg.y1, sg.y2));
+      for (const Pin &pn : rn.net->pins)
+        addRect(pn.x, pn.y, pn.x, pn.y);
+      if (out.empty())
+        addRect(0, 0, g.nx - 1, g.ny - 1); // nothing to place: everything, conservatively
+    };
     if (gCommuteTestIgnoreOverlap) {
       for (size_t k = nets.size(); k-- > 0;)
         assignRound0(order[k]);
     } else {
-      size_t edges = runCommutingDagCells(cl, gThreads, [&](size_t k) { assignRound0(order[k]); });
+      size_t edges = runCommutingDagFn(nets.size(), static_cast<size_t>(cw) * ch, stripCells, gThreads,
+                                       [&](size_t k) { assignRound0(order[k]); });
       round0Work = ", " + std::to_string(gThreads) + " threads, " + std::to_string(edges) + " dependencies";
     }
   }
@@ -9133,7 +9128,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     updateViaHistory(g, vp, rvu, viaCap, viaKnobs.step, viaKnobs.mode, viaKnobs.factor,
                      viaKnobs.streakThreshold, viaKnobs.scaleByOverflow, viaKnobs.relaxEnabled,
                      viaKnobs.ratioExponent, viaKnobs.exponentEscalation);
-  if (wireAware)
+  if (keepWireHist)
     updateWireHistory(g, wireHist, ru, wireKnobs.step, wireKnobs.mode, wireKnobs.factor,
                       wireKnobs.streakThreshold, wireKnobs.scaleByOverflow, wireKnobs.relaxEnabled,
                       wireKnobs.ratioExponent, wireKnobs.exponentEscalation);
