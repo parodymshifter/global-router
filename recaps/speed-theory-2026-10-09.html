@@ -1,0 +1,276 @@
+<title>Global Router Speed and Theory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (the project's recap look); stat strip, then the four questions in the order asked, then the suggested order of work. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --hatch: #b07a12;
+  --hatch-bg: #f8edd6;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --hatch: #e2b55a; --hatch-bg: #352a13;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --hatch: #e2b55a; --hatch-bg: #352a13;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 920px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 12px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 6px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; text-wrap: balance; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { font-size: 17.5px; color: var(--ink-soft); }
+.q { font-family: var(--font-mono); font-size: 13px; color: var(--ink-soft); margin-bottom: 14px; }
+section { padding-block: 36px 8px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+.num { font-variant-numeric: tabular-nums; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 22px; }
+.stat { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; }
+.stat b { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 13.5px; color: var(--ink-soft); }
+
+.scroll { overflow-x: auto; margin: 14px 0 16px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--sheet); }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-soft); background: var(--paper); }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+figure { margin: 18px 0 20px; }
+figcaption { font-size: 13.5px; color: var(--ink-soft); max-width: 70ch; margin-top: 8px; }
+.chart { min-width: 560px; width: 100%; height: auto; display: block; }
+.chart text { fill: var(--ink); font-family: var(--font-body); font-size: 12.5px; }
+.chart .soft { fill: var(--ink-soft); font-size: 11.5px; font-family: var(--font-mono); }
+.chart .grid { stroke: var(--rule); stroke-width: 1; }
+.chart .solid { fill: var(--bar); }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13.5px; color: var(--ink-soft); }
+.key { display: inline-block; width: 14px; height: 10px; vertical-align: -1px; margin-right: 6px; border-radius: 2px; }
+.key.solid { background: var(--bar); }
+.key.hatch { background: repeating-linear-gradient(135deg, var(--hatch) 0 2px, var(--hatch-bg) 2px 5px); }
+
+.recs { display: grid; gap: 12px; margin: 14px 0 6px; padding: 0; list-style: none; counter-reset: rec; }
+.recs li { max-width: none; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px 6px 54px; position: relative; counter-increment: rec; margin: 0; }
+.recs li::before { content: counter(rec); position: absolute; left: 16px; top: 13px; width: 26px; height: 26px; border-radius: 50%; background: var(--trace-soft); color: var(--trace); font-family: var(--font-display); font-weight: 700; display: grid; place-items: center; font-size: 14px; }
+.recs h4 { font-family: var(--font-display); font-weight: 600; font-size: 16.5px; margin: 1px 0 6px; }
+.recs p { font-size: 15px; }
+.est { border-left: 3px solid var(--trace); padding: 8px 14px; background: var(--trace-soft); border-radius: 0 6px 6px 0; margin: 14px 0; max-width: 70ch; }
+
+.pill { display: inline-block; font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.pill.ok { background: var(--good-bg); color: var(--good); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.no { background: var(--bad-bg); color: var(--bad); }
+
+.loop { min-width: 520px; width: 100%; height: auto; display: block; }
+.loop rect.box { fill: var(--sheet); stroke: var(--ink-soft); stroke-width: 1.2; }
+.loop rect.hot { fill: var(--trace-soft); stroke: var(--trace); stroke-width: 1.6; }
+.loop text { fill: var(--ink); font-family: var(--font-body); font-size: 13px; }
+.loop text.t { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+.loop text.s { fill: var(--ink-soft); font-size: 12px; }
+.loop path { fill: none; stroke: var(--ink-soft); stroke-width: 1.4; }
+.loop .ah { fill: var(--ink-soft); }
+
+.lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
+.lane { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; min-width: 0; }
+.lane.hot { border-color: var(--trace); }
+.lane h4 { font-family: var(--font-display); font-weight: 600; font-size: 15.5px; margin: 0 0 8px; }
+.lane ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; }
+.lane li { font-size: 13.5px; line-height: 1.45; margin: 0; }
+.lane .fx { display: block; margin-top: 2px; }
+.fx .big { background: var(--good-bg); color: var(--good); }
+.fx .small { background: var(--paper); color: var(--ink-soft); border: 1px solid var(--rule); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 14px 0; }
+.card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px 6px; min-width: 0; }
+.card h4 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+.card p { font-size: 14.5px; }
+.card .lbl { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--trace); display: block; margin-bottom: 2px; }
+.formula { font-family: var(--font-mono); font-size: 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; overflow-x: auto; white-space: pre; margin: 12px 0 14px; }
+footer { padding-top: 26px; font-size: 13.5px; color: var(--ink-soft); }
+@media (max-width: 520px) { .recs li { padding-left: 48px; } .recs li::before { left: 12px; } }
+
+.cmp td:first-child { width: 34%; }
+.cmp td:nth-child(2) { width: 46%; }
+.hbar { min-width: 560px; }
+td.mono { white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Second look · 9 October 2026 · Parts 115–118</div>
+  <h1>Global Router Speed and Theory</h1>
+  <p class="lede">The first version of this page asked why the router took 16.9 hours on mempool_cluster_ranking, the
+  largest ISPD 2024 design it had routed, when the contest winners took minutes. That run now takes 526 seconds on 8
+  threads of the same laptop, with a slightly better score. This page looks at where the time goes now, checks the first
+  version's analysis against what actually happened, and asks how the answer could have been found sooner.</p>
+  <div class="stats">
+    <div class="stat"><b>526 s</b><span>mempool_cluster_ranking, 8 threads; was 61,017 s on 1 core</span></div>
+    <div class="stat"><b>116×</b><span>faster overall: about 38× from removing work, 3× from threads</span></div>
+    <div class="stat"><b>23.9 GB</b><span>peak memory footprint; was 29.4 GB on a 24 GB machine</span></div>
+    <div class="stat"><b>−0.57%</b><span>score vs contest #1, whose run took 217 s on 8 cores + 4 A100s</span></div>
+  </div>
+</header>
+
+<section>
+  <h2>Where the time goes now</h2>
+  <div class="q">Measured by the per-stage report every run now prints</div>
+  <p>No stage dominates any more. The four largest are all threaded, and the slow tier (the maze search that resolves the
+  last overflow) is now under a tenth of the run on this design.</p>
+  <figure><div class="scroll"><svg class="chart hbar" viewBox="0 0 760 230" role="img" aria-label="Stage times on mempool_cluster_ranking">
+<line class="grid" x1="220.0" y1="14" x2="220.0" y2="206"/>
+<text class="soft" x="220.0" y="222" text-anchor="middle">0 s</text>
+<line class="grid" x1="337.5" y1="14" x2="337.5" y2="206"/>
+<text class="soft" x="337.5" y="222" text-anchor="middle">50 s</text>
+<line class="grid" x1="455.0" y1="14" x2="455.0" y2="206"/>
+<text class="soft" x="455.0" y="222" text-anchor="middle">100 s</text>
+<line class="grid" x1="572.5" y1="14" x2="572.5" y2="206"/>
+<text class="soft" x="572.5" y="222" text-anchor="middle">150 s</text>
+<line class="grid" x1="690.0" y1="14" x2="690.0" y2="206"/>
+<text class="soft" x="690.0" y="222" text-anchor="middle">200 s</text>
+<text x="210" y="33" text-anchor="end">Layer assignment, round 0</text>
+<rect class="solid" x="220" y="21" width="372.0" height="17" rx="2"/>
+<text class="soft" x="598.0" y="34">158 s · 31%</text>
+<text x="210" y="63" text-anchor="end">3D pattern passes (3)</text>
+<rect class="solid" x="220" y="51" width="351.6" height="17" rx="2"/>
+<text class="soft" x="577.6" y="64">150 s · 29%</text>
+<text x="210" y="93" text-anchor="end">Pattern stage</text>
+<rect class="solid" x="220" y="81" width="310.2" height="17" rx="2"/>
+<text class="soft" x="536.2" y="94">132 s · 26%</text>
+<text x="210" y="123" text-anchor="end">Slow tier (maze search)</text>
+<rect class="solid" x="220" y="111" width="95.6" height="17" rx="2"/>
+<text class="soft" x="321.6" y="124">41 s · 8%</text>
+<text x="210" y="153" text-anchor="end">Write solution</text>
+<rect class="solid" x="220" y="141" width="63.2" height="17" rx="2"/>
+<text class="soft" x="289.2" y="154">27 s · 5%</text>
+<text x="210" y="183" text-anchor="end">Read input</text>
+<rect class="solid" x="220" y="171" width="20.9" height="17" rx="2"/>
+<text class="soft" x="246.9" y="184">9 s · 2%</text>
+</svg></div>
+  <figcaption>mempool_cluster_ranking, 10.6 million nets, 8 threads on an Apple M4 Pro, total 526 s. The public
+  mempool_cluster, which needs far more maze search, takes about 810 s, a third of it in the slow tier.</figcaption></figure>
+  <h3>How it came down</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>step</th><th>what changed</th><th class="r">time</th><th>quality</th></tr></thead>
+    <tbody><tr><td class="mono">Part 114</td><td>Full ISPD 2008 pipeline, 1 core</td><td class="r">61,017 s</td><td>–</td></tr><tr><td class="mono">Part 115</td><td>Lean pipeline for the 2024 score (dropped: WL recovery, LA rounds 1+, region, refinement, fallback, tree rebuild)</td><td class="r">5,043 s</td><td>score −0.3%</td></tr><tr><td class="mono">Part 115</td><td>Exact cuts: incremental cost refresh, per-piece prefix sums, cached via terms, LA range cache</td><td class="r">1,599 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 116</td><td>8 threads on a commuting dependency graph: LA round 0, 3D passes, pattern-stage solve, Steiner trees, writer</td><td class="r">800 → 623 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 117</td><td>Fast readers, threaded writer, per-thread scratch, freeing data early</td><td class="r">553 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 118</td><td>Slow tier batched against snapshots (the 2008 scheme)</td><td class="r">526 s</td><td>score −0.0005%</td></tr></tbody>
+  </table></div>
+  <p>Hardware is not most of the gap. Before any thread was added, the run had already dropped from 61,017 s to 1,599 s
+  on one core. The work was the difference, not the 8 cores or the GPUs.</p>
+</section>
+
+<section>
+  <h2>What the first version got right</h2>
+  <div class="q">Its claims, set against what the measurements later showed</div>
+  <div class="scroll"><table class="cmp">
+    <thead><tr><th>first version said</th><th>what happened</th><th>verdict</th></tr></thead>
+    <tbody><tr><td>Fifteen of the 16.9 hours sit in two loops that keep running after routing is legal: layer assignment's later rounds and wirelength recovery.</td><td>Correct, and it was the biggest lever. The remedy was wrong: not stop rules but deleting both. Under the 2024 score, wirelength recovery made the score <i>worse</i> and the later rounds gained ±0.01%.</td><td><span class="pill ok">pointed the way</span></td></tr><tr><td>Stop rules alone: about 6–8 hours. With 10 threads on those loops: about 2–3 hours.</td><td>1,599 s on one core after the drops and the exact cuts; 526 s on 8 threads. The estimate was 15–50× too pessimistic because it assumed the stages were needed and only asked how long they should run.</td><td><span class="pill no">far off</span></td></tr><tr><td>Run the two loops on many cores, batched against a snapshot, without per-worker 0.9 GB copies.</td><td>The loops were deleted, so the threads went to the stages that remained. The no-copies principle held and went further: nets with disjoint regions commute, so the threaded stages are byte-identical with no copies at all. The batched scheme returned in Part 118 for the slow tier, where regions do overlap.</td><td><span class="pill warn">partly</span></td></tr><tr><td>Next in line: the pattern stage (55 min) and layer assignment round 0 (41 min, +10.8 GB).</td><td>Right order. Both were cut with exact changes: the pattern stage refreshed the whole cost grid after every batch, which was found only by reading the code, and layer assignment repeated work per net. Both are now threaded. Peak memory 23.9 GB.</td><td><span class="pill ok">pointed the way</span></td></tr><tr><td>The GPU becomes useful again once the loops are fast and the pattern stage is a larger share.</td><td>Still true and still pending. The pattern stage is now about a quarter of the run; layer assignment and the 3D passes need fixed-point scoring before a GPU path can match the CPU bit for bit.</td><td><span class="pill ok">still holds</span></td></tr><tr><td>Theory: the big wins came from widening a restricted search, so look for the next restriction.</td><td>True for quality on ISPD 2008, wrong lens for runtime on 2024. The contest winner restricts search further (L-shapes, one pass, no negotiation) and wins on time at equal quality. The gains here came from removing work the objective does not reward.</td><td><span class="pill no">missed</span></td></tr><tr><td>A duality-gap stop signal for every loop.</td><td>Not built. A cheaper version did the job: the per-stage report's score change, which showed straight away which stages earn nothing.</td><td><span class="pill warn">partly</span></td></tr><tr><td>Scaling laws across tile, group and cluster to predict tera_cluster.</td><td>Not done; still the right step before a 21 GB download.</td><td><span class="pill warn">open</span></td></tr></tbody>
+  </table></div>
+  <h3>What it did not see</h3>
+  <ul>
+    <li><b>The objective had changed.</b> Every stage was built for ISPD 2008's zero-overflow goal. Nobody re-asked whether
+    each stage still earned its time under the 2024 score. Two of them made the new score worse or no better.</li>
+    <li><b>Work hidden inside a stage.</b> The pattern stage refreshed costs over the whole grid after each of thousands of
+    batches. That is invisible on small designs and dominant at 10 million nets.</li>
+    <li><b>The competitor's flow.</b> The winner's source showed one pattern pass, one rip-up, one detour pass and no
+    negotiation loop. That alone said the gap was algorithmic, two orders of magnitude, not a matter of cores.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>How to find this sooner</h2>
+  <div class="q">What analysis discipline would have surfaced these findings on day one</div>
+  <ol class="recs">
+    <li><h4>Report the objective's change per stage, every run</h4><p>The first version had stage times, from a memory
+    log, but not what each stage bought. Time and score change side by side show at once a stage that costs hours and
+    earns nothing. The router now prints that table on every run.</p></li>
+    <li><h4>Re-ablate when the objective changes</h4><p>When the score function changes, every inherited stage gets
+    switched off one at a time and earns its place again. Here that one experiment was worth 12×.</p></li>
+    <li><h4>Check the competitor's runtime and flow first</h4><p>A gap of 100× or more is never hardware or constant
+    factors. It means work the other side is not doing, and their flow says which.</p></li>
+    <li><h4>Profile at full scale, by operation</h4><p>Costs that grow with grid size times batch count only show on the
+    largest design. A sampling profile of one cluster-size run beats any amount of reasoning on small ones.</p></li>
+    <li><h4>Measure a parallel scheme's ceiling before trusting it</h4><p>For a dependency graph, the ceiling is the
+    number of tasks over the longest chain. One trace showed the slow tier's ceiling was 2.8× before any tuning: hot nets
+    pile onto the same hotspots. That pointed to batching instead.</p></li>
+  </ol>
+  <div class="est">These five rules are kept in the project's notes and the assistant's persistent memory, so the next
+  algorithm review starts from them rather than rediscovering them.</div>
+</section>
+
+<section>
+  <h2>The theory, revisited</h2>
+  <div class="q">What the model of the routers says now</div>
+  <p>The first version modeled every router as four choices in one loop: price update, the per-net search (oracle),
+  acceptance, schedule. That model explained where quality came from. Runtime needs a second, simpler model:</p>
+  <div class="formula">time = Σ over stages ( work_s / effective parallelism_s )
+work_s     = what the objective still needs from stage s  (zero for a stage that earns nothing)
+parallel_s = tasks / longest dependency chain, if regions commute
+           = threads × (1 − conflicts) × balance, if batched against snapshots</div>
+  <p>Read that way, the steps were:</p>
+  <ul>
+    <li><b>Part 115</b> set work to zero for stages that earned nothing, and cut redundant work inside the others.</li>
+    <li><b>Part 116</b> used the fact that nets touching disjoint regions commute, for parallelism that cannot change the answer.</li>
+    <li><b>Part 118</b> handled the one stage where regions overlap: speculate in batches and redo the conflicts.</li>
+  </ul>
+  <p>The quality model still matters. Its lesson, a restricted search caps quality, is why the router's score beats the
+  winner. The two models just answer different questions.</p>
+</section>
+
+<section>
+  <h2>What is left</h2>
+  <div class="q">In the order the measurements suggest</div>
+  <ol class="recs">
+    <li><h4>The slow tier's search work</h4><p>On the public mempool_cluster it is still a third of the run. A trace ruled out
+    stragglers: in round 0, each batch's longest search adds up to 65 s of the 162 s, and the 8 workers are busy about 90% of the
+    time. The cost is the searching itself, 1,162 s of it, of which about 38% re-searches conflicts. Next: smaller batches for
+    fewer conflicts, and a 1-thread run to see whether memory contention inflates each search.</p></li>
+    <li><h4>Steiner trees for big nets</h4><p>Exact trees up to a pin limit, a FLUTE-like method above it.</p></li>
+    <li><h4>GPU for layer assignment and the 3D passes</h4><p>Together about half the run. Needs integer fixed-point scoring
+    so the GPU path matches the CPU bit for bit, as the pattern-stage kernel already does.</p></li>
+    <li><h4>Cloud and tera_cluster</h4><p>A cluster design now needs about 15 minutes and 23 GB, which fits a
+    larger GitHub runner. tera_cluster, about 5× bigger, needs a 21 GB download and a scaling check first.</p></li>
+  </ol>
+</section>
+
+<footer>Figures from the runs recorded in HISTORY_COST_SWEEP.md, Parts 114–118. Every score is checked by the contest's official
+evaluator and the project's own verifier, which agree to every digit. The first version of this page is kept as a frozen copy
+in the repository (<span class="mono">recaps/speed-theory-v1-2026-10-08.html</span>). Results on every benchmark, with 3D congestion maps:
+<a href="https://claude.ai/artifact/BFvFpA5vEgBrNq6gcjvR1F">Global Router Recap</a>.</footer>
+</div>
+</body>
+</html>

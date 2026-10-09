@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Router Recap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+a { color: var(--trace); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+figure.shot { margin: 10px 0 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+figure.shot figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 5px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.shots > * { min-width: 0; }
+img.px { image-rendering: pixelated; }
+/* Recap 4 additions: a diverging bar for "ours vs the contest". */
+.div { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 10px; margin: 8px 0 10px; overflow-x: auto; }
+.div-inner { min-width: 560px; }
+.dvrow { display: grid; grid-template-columns: 170px 1fr 92px; align-items: center; gap: 10px; height: 26px; font-size: 13px; }
+.dvrow .nm { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+.dvrow .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.dvrow .v.good { color: var(--good); }
+.dvrow .v.bad { color: var(--bad); }
+.dvtrack { position: relative; height: 16px; }
+.dvtrack .zero { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--ink-soft); }
+.dvtrack .gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.dvtrack b { position: absolute; top: 2px; height: 12px; }
+.dvtrack b.good { background: var(--good); }
+.dvtrack b.bad { background: var(--bad); }
+.dvaxis { display: grid; grid-template-columns: 170px 1fr 92px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.dvaxis .t { position: relative; height: 16px; }
+.dvaxis .t span { position: absolute; transform: translateX(-50%); }
+.dvgroup { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); margin: 10px 0 4px; }
+.dvgroup:first-child { margin-top: 0; }
+
+/* Recap 5 additions: runtime bars and the congestion gallery. */
+.rt { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 10px; margin: 8px 0 12px; overflow-x: auto; }
+.rt-inner { min-width: 600px; }
+.rtrow { display: grid; grid-template-columns: 270px 1fr 80px; align-items: center; gap: 10px; min-height: 28px; font-size: 13px; }
+.rtrow .nm { font-size: 13px; }
+.rtrow .nm small { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); }
+.rtrow .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rtbar { position: relative; height: 14px; }
+.rtbar b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--bar); }
+.rtbar b.old { background: var(--bar-neg); }
+.rtaxis { display: grid; grid-template-columns: 270px 1fr 80px; gap: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); }
+.rtaxis .t { position: relative; height: 16px; }
+.rtaxis .t span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.rtaxis .t span:first-child { transform: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--ink-soft); margin: 6px 0 12px; }
+.legend i { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 5px; border: 1px solid rgba(0,0,0,.15); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin: 10px 0 18px; }
+.gallery figure { margin: 0; background: var(--sheet); border: 1px solid var(--rule); }
+.gallery a { display: block; }
+.gallery img { display: block; width: 100%; height: auto; aspect-ratio: 14 / 9; object-fit: cover; background: #eceff1; }
+.gallery figcaption { padding: 7px 10px 9px; font-size: 13px; line-height: 1.4; }
+.gallery figcaption b { font-family: var(--font-mono); font-weight: 500; font-size: 12.5px; }
+.gallery figcaption span { display: block; color: var(--ink-soft); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap 5 · 9 October 2026 · Parts 115–118</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">Recap 4 ended with the router matching the ISPD 2024 contest on score but taking 16.9 hours on the largest
+  design it could fit, against the winner's 3.6 minutes. Since then that run has come down to 526 s: 116 times faster, with
+  a slightly <i>better</i> score. Most of the gain came from removing work the 2024 score does not reward, the rest from
+  threads that give the same answer at any thread count. The router now beats the contest's best raw score on all six hidden
+  designs and the best beta submission on all seven public ones, and on the four smallest hidden designs it is also faster than
+  the contest winner.</p>
+  <div class="meta"><span><b>Standard (2024):</b> <span class="mono">pd38route @standard.env @standard24.env @fast24.env</span>, 8 threads</span>
+  <span><b>Standard (2008):</b> <span class="mono">pd23route @standard.env</span> (unchanged)</span>
+  <span><b>Checks:</b> every 2024 result legal and equal to the official evaluator to every digit</span></div>
+</header>
+<nav class="toc">
+  <a href="#glance">At a glance</a><a href="#since">Since 8 October</a><a href="#ispd24">ISPD 2024 vs the contest</a>
+  <a href="#runtime">Runtime</a><a href="#maps">Congestion maps</a><a href="#ispd08">ISPD 2008</a>
+  <a href="#caveats">Caveats</a><a href="#next">Next</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">6 of 6</div><div class="lab">hidden benchmarks routed with a raw score below the best of the contest's top three (tera_cluster not downloaded)</div></div>
+    <div class="tile"><div class="fig">7 of 7</div><div class="lab">public benchmarks below the best beta-round submission, mempool_cluster now included (−2.89%)</div></div>
+    <div class="tile"><div class="fig">116×</div><div class="lab">faster on mempool_cluster_ranking: 61,017 s → 526 s, peak 29.4 → 23.9 GB</div></div>
+    <div class="tile"><div class="fig">4 of 6</div><div class="lab">hidden designs where our runtime on an M4 Pro is now below the contest winner's on 8 cores + 4 A100s</div></div>
+  </div>
+</section>
+
+<section id="since">
+  <h2>Since 8 October</h2>
+  <ol>
+    <li><b>Part 115, re-ablating for the 2024 score.</b> The pipeline was built for ISPD 2008, where only overflow and
+    wire count. Re-tested stage by stage under the 2024 score: wirelength recovery made the score <i>worse</i>, layer
+    assignment's later rounds gained ±0.01%, and the region, refinement and fallback stages changed nothing. All dropped
+    (<span class="mono">fast24.env</span>). Then <span class="mono">pd36route</span> removed redundant work inside the
+    remaining stages, byte-identical: incremental cost refresh in the pattern stage, per-piece prefix sums, cached via terms.
+    61,017 s → 1,599 s. Every run now ends with a per-stage report: time, footprint, score and its change, work done.</li>
+    <li><b>Part 116, threads.</b> <span class="mono">pd37route</span> runs layer assignment and the 3D passes on a dependency
+    graph, and the pattern stage's solve in parallel: a net waits only for earlier nets whose regions overlap its own, so every net sees exactly
+    the state it would see sequentially. Byte-identical at 1, 4 and 8 threads, with no per-thread copies. 1,599 s → 623 s.</li>
+    <li><b>Part 117, I/O and memory.</b> Faster readers and a threaded writer, per-thread scratch, data freed as soon as
+    stages finish with it. 553 s, peak 22.6 GB, still byte-identical.</li>
+    <li><b>Part 118, the slow tier on threads.</b> The exact dependency graph could not help here: a trace showed the hard
+    nets' search boxes pile onto the same hotspots (54,283 nets, longest chain 19,176), capping it at 2.8× and in practice 1×.
+    The 2008 router's batched scheme replaced it: batches of 64 searched in parallel against a snapshot, committed in net
+    order, conflicts carried to the next batch. Same routes at any thread count, a better score on all 13 designs (−0.0005% to
+    −0.06%), and the slow tier faster on both cluster designs (mempool_cluster 392 s → 268 s,
+    mempool_cluster_ranking 75 s → 41 s). Dropping the third 3D pass was also tested:
+    6–8% less time for a 0.01–0.04% worse score, so it stays.</li>
+  </ol>
+</section>
+
+<section id="ispd24">
+  <h2>ISPD 2024: ours against the contest</h2>
+  <p>Raw score = wirelength cost + via cost + overflow cost, as the official evaluator computes it. Negative is better than
+  the reference. The contest ranked a runtime-scaled score; runtimes are compared separately below.</p>
+  <div class="div"><div class="div-inner"><div class="dvgroup">Hidden benchmarks, against the best of the contest's top three</div><div class="dvrow"><span class="nm">ariane_68_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:44.38%;width:5.62%"></b></div><span class="v good">-0.45%</span></div><div class="dvrow"><span class="nm">bsg_chip_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:31.93%;width:18.07%"></b></div><span class="v good">-1.45%</span></div><div class="dvrow"><span class="nm">nvdla_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:42.69%;width:7.31%"></b></div><span class="v good">-0.59%</span></div><div class="dvrow"><span class="nm">mempool_tile_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:38.44%;width:11.56%"></b></div><span class="v good">-0.92%</span></div><div class="dvrow"><span class="nm">mempool_group_rank</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:42.49%;width:7.51%"></b></div><span class="v good">-0.60%</span></div><div class="dvrow"><span class="nm">mempool_cluster_ranking</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:42.89%;width:7.11%"></b></div><span class="v good">-0.57%</span></div><div class="dvgroup">Public benchmarks, against the best beta-round submission</div><div class="dvrow"><span class="nm">ariane133_51</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:29.23%;width:20.77%"></b></div><span class="v good">-1.66%</span></div><div class="dvrow"><span class="nm">ariane133_68</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:14.95%;width:35.05%"></b></div><span class="v good">-2.80%</span></div><div class="dvrow"><span class="nm">bsg_chip</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:31.07%;width:18.93%"></b></div><span class="v good">-1.51%</span></div><div class="dvrow"><span class="nm">nvdla</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:2.82%;width:47.18%"></b></div><span class="v good">-3.77%</span></div><div class="dvrow"><span class="nm">mempool_tile</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:25.95%;width:24.05%"></b></div><span class="v good">-1.92%</span></div><div class="dvrow"><span class="nm">mempool_group</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:9.86%;width:40.14%"></b></div><span class="v good">-3.21%</span></div><div class="dvrow"><span class="nm">mempool_cluster</span><div class="dvtrack"><i class="gl" style="left:0.0%"></i><i class="gl" style="left:12.5%"></i><i class="gl" style="left:25.0%"></i><i class="gl" style="left:37.5%"></i><i class="gl" style="left:62.5%"></i><i class="gl" style="left:75.0%"></i><i class="gl" style="left:87.5%"></i><i class="gl" style="left:100.0%"></i><i class="zero"></i><b class="good" style="left:13.88%;width:36.12%"></b></div><span class="v good">-2.89%</span></div><div class="dvaxis"><span></span><div class="t"><span style="left:0.0%">-4%</span><span style="left:25.0%">-2%</span><span style="left:50%">0</span><span style="left:75.0%">+2%</span><span style="left:100.0%">+4%</span></div><span></span></div></div></div>
+  <h3>Hidden benchmarks</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>file</th><th>contest name</th><th class="num">ours</th><th class="num">best of top 3</th><th class="num">vs best</th><th class="num">recap 4</th><th class="num">our time · peak</th><th class="num">contest #1 time</th><th class="num">recap 4 time</th></tr></thead>
+    <tbody><tr><td class="mono">ariane_68_rank</td><td>Ariane_rank</td><td class="num"><b>22,501,266</b></td><td class="num">22,602,876 (#1)</td><td class="num">-0.45%</td><td class="num was">22,669,151</td><td class="num">3.9 s · 0.4 GB</td><td class="num">6.2 s</td><td class="num was">231 s</td></tr><tr><td class="mono">bsg_chip_rank</td><td>BlackParrot_rank</td><td class="num"><b>109,382,606</b></td><td class="num">110,986,781 (#2)</td><td class="num">-1.45%</td><td class="num was">109,707,507</td><td class="num">14.7 s · 1.8 GB</td><td class="num">16.6 s</td><td class="num was">1,247 s</td></tr><tr><td class="mono">nvdla_rank</td><td>Nvdla_rank</td><td class="num"><b>42,943,280</b></td><td class="num">43,195,979 (#1)</td><td class="num">-0.59%</td><td class="num was">43,192,839</td><td class="num">5.8 s · 0.8 GB</td><td class="num">7.5 s</td><td class="num was">393 s</td></tr><tr><td class="mono">mempool_tile_rank</td><td>MemPool-Tile_rank</td><td class="num"><b>13,699,264</b></td><td class="num">13,827,142 (#1)</td><td class="num">-0.92%</td><td class="num was">13,730,842</td><td class="num">2.3 s · 0.2 GB</td><td class="num">5.1 s</td><td class="num was">115 s</td></tr><tr><td class="mono">mempool_group_rank</td><td>MemPool-Group_rank</td><td class="num"><b>381,333,366</b></td><td class="num">383,637,652 (#1)</td><td class="num">-0.60%</td><td class="num was">383,517,195</td><td class="num">63.4 s · 5.7 GB</td><td class="num">45.5 s</td><td class="num was">2.7 h</td></tr><tr><td class="mono">mempool_cluster_ranking</td><td>MemPool-Cluster_rank</td><td class="num"><b>1,772,049,659</b></td><td class="num">1,782,191,834 (#1)</td><td class="num">-0.57%</td><td class="num was">1,777,655,067</td><td class="num">526 s · 23.9 GB</td><td class="num">217 s</td><td class="num was">16.9 h</td></tr></tbody>
+  </table></div>
+  <p class="note">Our times: Apple M4 Pro, 8 threads. Contest: 8 cores + 4 NVIDIA A100 GPUs. bsg_chip_rank's best raw score
+  in the contest was #2's. tera_cluster_rank is not downloaded (two 10.7 GB net files).</p>
+  <h3>Public benchmarks</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>file</th><th class="num">ours</th><th class="num">best beta submission</th><th class="num">vs beta</th><th class="num">our time · peak</th></tr></thead>
+    <tbody><tr><td class="mono">ariane133_51</td><td class="num"><b>22,387,080</b></td><td class="num">22,765,372</td><td class="num">-1.66%</td><td class="num">2.8 s · 0.4 GB</td></tr><tr><td class="mono">ariane133_68</td><td class="num"><b>19,683,433</b></td><td class="num">20,251,238</td><td class="num">-2.80%</td><td class="num">2.7 s · 0.5 GB</td></tr><tr><td class="mono">bsg_chip</td><td class="num"><b>111,817,924</b></td><td class="num">113,537,664</td><td class="num">-1.51%</td><td class="num">16.8 s · 1.8 GB</td></tr><tr><td class="mono">nvdla</td><td class="num"><b>48,026,184</b></td><td class="num">49,909,986</td><td class="num">-3.77%</td><td class="num">5.7 s · 0.9 GB</td></tr><tr><td class="mono">mempool_tile</td><td class="num"><b>15,106,440</b></td><td class="num">15,402,753</td><td class="num">-1.92%</td><td class="num">2.6 s · 0.2 GB</td></tr><tr><td class="mono">mempool_group</td><td class="num"><b>396,165,479</b></td><td class="num">409,309,772</td><td class="num">-3.21%</td><td class="num">72.5 s · 5.4 GB</td></tr><tr><td class="mono">mempool_cluster</td><td class="num"><b>1,615,279,912</b></td><td class="num">1,663,344,708</td><td class="num">-2.89%</td><td class="num">809 s · 20.0 GB</td></tr></tbody>
+  </table></div>
+</section>
+
+<section id="runtime">
+  <h2>Runtime</h2>
+  <p>mempool_cluster_ranking, 10.6 million nets, one step at a time. Log scale: each axis mark is ten times the last. Every
+  step through Part 117 produced byte-identical routes; Part 118 changed the slow tier and improved the score slightly.</p>
+  <div class="rt"><div class="rt-inner"><div class="rtrow"><span class="nm">Part 114: full 2008-style pipeline<small>pd35route, 1 core</small></span><div class="rtbar"><b class="old" style="width:92.8%"></b></div><span class="v">16.9 h</span></div><div class="rtrow"><span class="nm">Part 115: lean pipeline for the 2024 score<small>lean24b, 1 core</small></span><div class="rtbar"><b class="old" style="width:56.8%"></b></div><span class="v">1.4 h</span></div><div class="rtrow"><span class="nm">Part 115: + exact cuts (fast24)<small>pd36route, 1 core</small></span><div class="rtbar"><b class="old" style="width:40.1%"></b></div><span class="v">1,599 s</span></div><div class="rtrow"><span class="nm">Part 116: threads, exact at any count<small>pd37route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:30.1%"></b></div><span class="v">800 s</span></div><div class="rtrow"><span class="nm">Part 117: fast I/O, less allocation<small>pd37route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:24.8%"></b></div><span class="v">553 s</span></div><div class="rtrow"><span class="nm">Part 118: batched slow tier<small>pd38route, 8 threads</small></span><div class="rtbar"><b class="" style="width:24.0%"></b></div><span class="v">526 s</span></div><div class="rtrow"><span class="nm">Contest #1 (InstantGR)<small>8 cores + 4 A100 GPUs</small></span><div class="rtbar"><b class="" style="width:11.2%"></b></div><span class="v">217 s</span></div><div class="rtaxis"><span></span><div class="t"><span style="left:0.0%">100 s</span><span style="left:33.3%">1,000 s</span><span style="left:66.7%">10,000 s</span><span style="left:100.0%">100,000 s</span></div><span></span></div></div></div>
+  <div class="findings">
+    <div class="finding"><h3>Most of it was work, not hardware</h3><p>Re-ablating under the 2024 score removed 92% of
+    the time with no score loss. Exact cuts inside the remaining stages took another 3×. Threads, the obvious lever, gave
+    the last 3×.</p></div>
+    <div class="finding"><h3>Exact threads where regions commute</h3><p>Nets whose regions don't overlap give the same
+    result in either order. Scheduling on that fact made threads byte-identical, which kept every earlier comparison
+    valid. Where hard nets pile onto one hotspot, it stops working, and batching takes over.</p></div>
+    <div class="finding"><h3>Where the rest goes</h3><p>At 8 threads on the hidden cluster: layer assignment's first round
+    31%, three 3D passes 29%, the pattern stage 26%, the slow tier 8%, read and write 7%. No single stage dominates
+    any more.</p></div>
+  </div>
+</section>
+
+<section id="maps">
+  <h2>Congestion maps</h2>
+  <p>One bar per GCell (ISPD 2024) or tile (ISPD 2008), rendered with the project's Metal viewer. Height is demand over
+  capacity on the GCell's fullest routing layer (2024) or its fullest 2D edge (2008); color is the class. Red bars are lifted
+  half a bar so overflow stands out. mempool_group and the two cluster designs are drawn at reduced resolution, each bar the
+  average of a small block of GCells; the others are full resolution. Every map is from the final run in the tables above. Select an image to open it full size.</p>
+  <div class="legend"><span><i style="background:#8040c8"></i>≤ 50% full</span><span><i style="background:#2864e6"></i>50–75%</span><span><i style="background:#28aa46"></i>75–90%</span><span><i style="background:#f0d228"></i>90–99%</span><span><i style="background:#f5821e"></i>exactly full</span><span><i style="background:#d71e1e"></i>over capacity</span><span><i style="background:#3c3c3c"></i>blocked</span></div>
+  <h3>ISPD 2024</h3>
+  <div class="gallery"><figure><a href="img/3d/2024-ariane_68_rank.jpg"><img src="img/3d/2024-ariane_68_rank.jpg" alt="3D congestion view of ariane_68_rank" loading="lazy"></a><figcaption><b>ariane_68_rank</b><span>22,501,266 · -0.45% vs best of top 3</span></figcaption></figure><figure><a href="img/3d/2024-bsg_chip_rank.jpg"><img src="img/3d/2024-bsg_chip_rank.jpg" alt="3D congestion view of bsg_chip_rank" loading="lazy"></a><figcaption><b>bsg_chip_rank</b><span>109,382,606 · -1.45% vs best of top 3</span></figcaption></figure><figure><a href="img/3d/2024-nvdla_rank.jpg"><img src="img/3d/2024-nvdla_rank.jpg" alt="3D congestion view of nvdla_rank" loading="lazy"></a><figcaption><b>nvdla_rank</b><span>42,943,280 · -0.59% vs best of top 3</span></figcaption></figure><figure><a href="img/3d/2024-mempool_tile_rank.jpg"><img src="img/3d/2024-mempool_tile_rank.jpg" alt="3D congestion view of mempool_tile_rank" loading="lazy"></a><figcaption><b>mempool_tile_rank</b><span>13,699,264 · -0.92% vs best of top 3</span></figcaption></figure><figure><a href="img/3d/2024-mempool_group_rank.jpg"><img src="img/3d/2024-mempool_group_rank.jpg" alt="3D congestion view of mempool_group_rank" loading="lazy"></a><figcaption><b>mempool_group_rank</b><span>381,333,366 · -0.60% vs best of top 3</span></figcaption></figure><figure><a href="img/3d/2024-mempool_cluster_ranking.jpg"><img src="img/3d/2024-mempool_cluster_ranking.jpg" alt="3D congestion view of mempool_cluster_ranking" loading="lazy"></a><figcaption><b>mempool_cluster_ranking</b><span>1,772,049,659 · -0.57% vs best of top 3</span></figcaption></figure><figure><a href="img/3d/2024-ariane133_51.jpg"><img src="img/3d/2024-ariane133_51.jpg" alt="3D congestion view of ariane133_51" loading="lazy"></a><figcaption><b>ariane133_51</b><span>22,387,080 · -1.66% vs best beta</span></figcaption></figure><figure><a href="img/3d/2024-ariane133_68.jpg"><img src="img/3d/2024-ariane133_68.jpg" alt="3D congestion view of ariane133_68" loading="lazy"></a><figcaption><b>ariane133_68</b><span>19,683,433 · -2.80% vs best beta</span></figcaption></figure><figure><a href="img/3d/2024-bsg_chip.jpg"><img src="img/3d/2024-bsg_chip.jpg" alt="3D congestion view of bsg_chip" loading="lazy"></a><figcaption><b>bsg_chip</b><span>111,817,924 · -1.51% vs best beta</span></figcaption></figure><figure><a href="img/3d/2024-nvdla.jpg"><img src="img/3d/2024-nvdla.jpg" alt="3D congestion view of nvdla" loading="lazy"></a><figcaption><b>nvdla</b><span>48,026,184 · -3.77% vs best beta</span></figcaption></figure><figure><a href="img/3d/2024-mempool_tile.jpg"><img src="img/3d/2024-mempool_tile.jpg" alt="3D congestion view of mempool_tile" loading="lazy"></a><figcaption><b>mempool_tile</b><span>15,106,440 · -1.92% vs best beta</span></figcaption></figure><figure><a href="img/3d/2024-mempool_group.jpg"><img src="img/3d/2024-mempool_group.jpg" alt="3D congestion view of mempool_group" loading="lazy"></a><figcaption><b>mempool_group</b><span>396,165,479 · -3.21% vs best beta</span></figcaption></figure><figure><a href="img/3d/2024-mempool_cluster.jpg"><img src="img/3d/2024-mempool_cluster.jpg" alt="3D congestion view of mempool_cluster" loading="lazy"></a><figcaption><b>mempool_cluster</b><span>1,615,279,912 · -2.89% vs best beta</span></figcaption></figure></div>
+  <h3>ISPD 2008</h3>
+  <div class="gallery"><figure><a href="img/3d/2008-adaptec1.jpg"><img src="img/3d/2008-adaptec1.jpg" alt="3D congestion view of adaptec1" loading="lazy"></a><figcaption><b>adaptec1</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-adaptec2.jpg"><img src="img/3d/2008-adaptec2.jpg" alt="3D congestion view of adaptec2" loading="lazy"></a><figcaption><b>adaptec2</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-adaptec3.jpg"><img src="img/3d/2008-adaptec3.jpg" alt="3D congestion view of adaptec3" loading="lazy"></a><figcaption><b>adaptec3</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-adaptec4.jpg"><img src="img/3d/2008-adaptec4.jpg" alt="3D congestion view of adaptec4" loading="lazy"></a><figcaption><b>adaptec4</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-adaptec5.jpg"><img src="img/3d/2008-adaptec5.jpg" alt="3D congestion view of adaptec5" loading="lazy"></a><figcaption><b>adaptec5</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-bigblue1.jpg"><img src="img/3d/2008-bigblue1.jpg" alt="3D congestion view of bigblue1" loading="lazy"></a><figcaption><b>bigblue1</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-bigblue2.jpg"><img src="img/3d/2008-bigblue2.jpg" alt="3D congestion view of bigblue2" loading="lazy"></a><figcaption><b>bigblue2</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-bigblue3.jpg"><img src="img/3d/2008-bigblue3.jpg" alt="3D congestion view of bigblue3" loading="lazy"></a><figcaption><b>bigblue3</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-bigblue4.jpg"><img src="img/3d/2008-bigblue4.jpg" alt="3D congestion view of bigblue4" loading="lazy"></a><figcaption><b>bigblue4</b><span>overflow 356</span></figcaption></figure><figure><a href="img/3d/2008-newblue1.jpg"><img src="img/3d/2008-newblue1.jpg" alt="3D congestion view of newblue1" loading="lazy"></a><figcaption><b>newblue1</b><span>overflow 38</span></figcaption></figure><figure><a href="img/3d/2008-newblue2.jpg"><img src="img/3d/2008-newblue2.jpg" alt="3D congestion view of newblue2" loading="lazy"></a><figcaption><b>newblue2</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-newblue3.jpg"><img src="img/3d/2008-newblue3.jpg" alt="3D congestion view of newblue3" loading="lazy"></a><figcaption><b>newblue3</b><span>overflow 38,916</span></figcaption></figure><figure><a href="img/3d/2008-newblue4.jpg"><img src="img/3d/2008-newblue4.jpg" alt="3D congestion view of newblue4" loading="lazy"></a><figcaption><b>newblue4</b><span>overflow 144</span></figcaption></figure><figure><a href="img/3d/2008-newblue5.jpg"><img src="img/3d/2008-newblue5.jpg" alt="3D congestion view of newblue5" loading="lazy"></a><figcaption><b>newblue5</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-newblue6.jpg"><img src="img/3d/2008-newblue6.jpg" alt="3D congestion view of newblue6" loading="lazy"></a><figcaption><b>newblue6</b><span>zero overflow</span></figcaption></figure><figure><a href="img/3d/2008-newblue7.jpg"><img src="img/3d/2008-newblue7.jpg" alt="3D congestion view of newblue7" loading="lazy"></a><figcaption><b>newblue7</b><span>overflow 108</span></figcaption></figure></div>
+</section>
+
+<section id="ispd08">
+  <h2>ISPD 2008</h2>
+  <p>Unchanged since recap 4: eleven of sixteen benchmarks at zero overflow, the rest at 38 (newblue1), 108 (newblue7), 144
+  (newblue4), 356 (bigblue4) and 38,916 (newblue3, at least 26,264 of it provably forced). The 3D pattern pass shortens wire on all
+  sixteen (−0.13% to −0.45%) and is still waiting for one full-pipeline confirmation before the 2008 standard adopts it.</p>
+</section>
+
+<section id="caveats">
+  <h2>Caveats</h2>
+  <ul>
+    <li><b>Hardware.</b> Our runs use 8 threads of one laptop-class M4 Pro; the contest machine had 8 cores and 4 A100 GPUs.
+    Neither side's numbers transfer to the other's machine exactly.</li>
+    <li><b>The cluster designs are still slower than the winner:</b> 526 s against 217 s on the hidden cluster
+    (the contest's #2 took 124 s, #3 275 s), and mempool_group_rank 63 s against 46 s.</li>
+    <li><b>Margins.</b> The score leads over the contest are 0.45–1.45% on the hidden designs: real, but small.</li>
+    <li><b>Tuning.</b> All settings come from one design and the gap analysis; nothing is tuned per design.</li>
+  </ul>
+</section>
+
+<section id="next">
+  <h2>Next</h2>
+  <ol>
+    <li><b>The slow tier's search work</b>, still a third of the public mempool_cluster's run. A trace ruled out
+    stragglers (workers busy about 90% of the time); the cost is the searches themselves, about 38% of them conflict
+    re-searches. Next: smaller batches, and a 1-thread run to check whether memory contention slows each search.</li>
+    <li><b>Steiner trees for big nets.</b> Exact trees up to a pin limit, then a FLUTE-like method, to cut tree-building time.</li>
+    <li><b>GPU.</b> The pattern stage's Metal kernel exists and matches the CPU bit for bit; layer assignment and the 3D
+    passes would need fixed-point scoring to do the same.</li>
+    <li><b>tera_cluster</b> (about 5× the cluster design) needs a 21 GB download and more memory work.</li>
+  </ol>
+  <p class="note">The runtime analysis in depth, and what the first version of that analysis got right and wrong:
+  <a href="https://claude.ai/artifact/4vLqP5qoUvbHf3CCTh5o2Y">Global Router Speed and Theory</a>.</p>
+</section>
+</div>
+</body>
+</html>
