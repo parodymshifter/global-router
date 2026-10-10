@@ -1,0 +1,282 @@
+<title>Steiner Research Roadmap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the project's recap look. A reading column: findings first (one table, grouped by what each paper balances),
+   then the plan as four stages, each experiment a card with its source, test and stop rule. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --muted-bg: #eceeed;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --muted-bg: #222829; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --muted-bg: #222829; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  padding-inline: 16px; padding-block: 0 64px; }
+.wrap { max-width: 940px; margin: 0 auto; }
+header.snap { padding-block: 40px 26px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 12px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 8px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; text-wrap: balance; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { font-size: 17.5px; color: var(--ink-soft); }
+.q { font-family: var(--font-mono); font-size: 13px; color: var(--ink-soft); margin-bottom: 14px; }
+section { padding-block: 34px 8px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+a { color: var(--trace); }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-size: .9em; }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 20px; }
+.fact { background: var(--sheet); border: 1px solid var(--rule); padding: 12px 14px; min-width: 0; }
+.fact b { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fact span { font-size: 13.5px; color: var(--ink-soft); }
+
+.scroll { overflow-x: auto; margin: 12px 0 16px; border: 1px solid var(--rule); background: var(--sheet); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 820px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+td.grp { background: var(--paper); font-family: var(--font-mono); font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--trace); }
+td.yr { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+.fit { display: inline-block; font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.fit.high { background: var(--good-bg); color: var(--good); }
+.fit.mid { background: var(--warn-bg); color: var(--warn); }
+.fit.low { background: var(--muted-bg); color: var(--ink-soft); }
+
+.stage { margin-top: 26px; }
+.stage-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin-bottom: 12px; }
+.stage-head h3 { margin: 0; }
+.stage-head span { font-size: 14px; color: var(--ink-soft); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
+.card { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; min-width: 0; display: flex; flex-direction: column; }
+.card.now { border-color: var(--trace); }
+.card h4 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 6px; text-wrap: balance; }
+.card p { font-size: 14.5px; }
+.card dl { margin: 4px 0 8px; font-size: 13.5px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; }
+.card dt { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-soft); padding-top: 2px; }
+.card dd { margin: 0; min-width: 0; }
+.tag { font-family: var(--font-mono); font-size: 11.5px; color: var(--trace); margin-bottom: 4px; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 80ch; }
+.rule-box { border-left: 3px solid var(--trace); background: var(--trace-soft); padding: 10px 14px; margin: 14px 0; max-width: 72ch; }
+footer { padding-top: 24px; font-size: 13.5px; color: var(--ink-soft); }
+footer ul { padding-left: 18px; }
+footer li { max-width: none; margin-bottom: 3px; }
+@media (max-width: 520px) { .card dl { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Global router · literature since 2024 · 10 October 2026</div>
+  <h1>Steiner Research Roadmap</h1>
+  <p class="lede">Every net in a global router is a Steiner tree, and the shape of that tree decides wire, vias, congestion and
+  delay at once. This page collects what has been published since 2024 on building trees that balance wire length against
+  capacity, path length, delay and proximity to obstacles. It then sorts those ideas into a plan for this router, by what
+  the router's own measurements say each one could buy.</p>
+  <div class="facts">
+    <div class="fact"><b>0.2–0.8%</b><span>our multi-pin trees above an iterated 1-Steiner reference (Part 105): little left in tree length alone</span></div>
+    <div class="fact"><b>71M</b><span>of the hidden cluster's 309M overflow cost comes from busy but legal GCells, the part a topology choice can move</span></div>
+    <div class="fact"><b>+0.45%</b><span>our wire cost against contest #1 on the hidden cluster, while our vias are 3.9% and overflow 1.5% lower</span></div>
+    <div class="fact"><b>511 s</b><span>hidden cluster runtime on 8 threads, against the 2024 winner's 217 s</span></div>
+  </div>
+</header>
+
+<section id="literature">
+  <h2>What has been published</h2>
+  <div class="q">Grouped by what each method trades against wire length</div>
+  <p>Fit rates how directly the idea applies to this router as it stands: a deterministic C++ router that scores against the
+  ISPD 2024 formula and must give the same answer at any thread count.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>work</th><th>year</th><th>what it balances, and how</th><th>reported result</th><th>fit</th></tr></thead>
+    <tbody>
+      <tr><td class="grp" colspan="5">Delay and path length against wire and congestion</td></tr>
+      <tr><td><a href="https://arxiv.org/abs/2503.04419">Cost-distance Steiner trees</a> (Held, Perner; Bonn)</td><td class="yr">2025</td>
+        <td>One tree minimizes congestion cost plus a weighted sum of source-to-sink delays, treating the two edge costs as unrelated. Adds a delay penalty per branch point to anticipate buffering.</td>
+        <td>O(log t) approximation in O(t(n log n + m)) time; beats topology-then-embed methods (no numbers in the abstract)</td><td><span class="fit high">high</span></td></tr>
+      <tr><td><a href="https://dl.acm.org/doi/10.1145/3764386.3779588">Gradient-guided RC weighting</a> (CUHK, HKBU)</td><td class="yr">2026</td>
+        <td>Each segment's sensitivity of timing to its capacitance and resistance becomes a weight on its routing cost, inside a pattern router built on the 2024 winner's code.</td>
+        <td>ISPD 2025 benchmarks: worst slack 14.3% and total negative slack 18.5% better at comparable congestion; switching power 10.6% lower</td><td><span class="fit high">high</span></td></tr>
+      <tr><td><a href="https://arxiv.org/abs/2607.17005">Provably good Prim-Dijkstra revisited</a> (Zhu)</td><td class="yr">2026</td>
+        <td>The wire against maximum-path-length tradeoff: proves the terminal-only Manhattan version NP-complete, gives a balanced (2, 2) guarantee and a practical solver (HP-RCRST).</td>
+        <td>Matches or beats the union of published methods on all 28 test cases, strictly better on 23 (preprint)</td><td><span class="fit mid">medium</span></td></tr>
+      <tr><td><a href="https://www.cse.cuhk.edu.hk/~byu/papers/J128-TCAD2025-CTS.pdf">Delay-driven rectilinear Steiner trees</a> (CUHK)</td><td class="yr">2025</td>
+        <td>Starts from the observation that shallow-light trees (SALT) balance wire and path length well but not real delay; adds delay-driven edge shifting.</td>
+        <td>Lowest total delay among compared methods, competitive wire</td><td><span class="fit mid">medium</span></td></tr>
+      <tr><td><a href="https://www.cse.cuhk.edu.hk/~byu/papers/J129-TCAD2025-TSteiner.pdf">TSteiner</a> (CUHK, HKBU)</td><td class="yr">2023, 2025</td>
+        <td>A learned model of sign-off timing supplies gradients that move Steiner points; the journal version also rebuilds topology.</td>
+        <td>Worst slack 11.2%, total negative slack 7.1% better</td><td><span class="fit low">low</span></td></tr>
+
+      <tr><td class="grp" colspan="5">Capacity and congestion in the topology itself</td></tr>
+      <tr><td><a href="https://nips.cc/virtual/2024/poster/93636">NeuralSteiner</a></td><td class="yr">2024</td>
+        <td>A network predicts Steiner points from the overflow map, then a graph step connects them: the tree is shaped around congestion instead of drawn on empty space.</td>
+        <td>Up to 99.8% less overflow than earlier learned routers for at most 1.8% more wire; with CUGR, 4.4% fewer shorts and 19.1% fewer spacing violations</td><td><span class="fit mid">medium (the idea, not the network)</span></td></tr>
+      <tr><td><a href="https://arxiv.org/abs/2503.07268">Obstacle-avoiding global routing flow</a></td><td class="yr">2025</td>
+        <td>Obstacle-avoiding trees at the start, then maze routing guided by those trees and aware of obstacles.</td>
+        <td>No obstacle violations; less wire and overflow than prior flows (TODAES)</td><td><span class="fit low">low</span></td></tr>
+      <tr><td><a href="https://dl.acm.org/doi/pdf/10.1145/3649329.3656530">DGR, differentiable global router</a></td><td class="yr">2024</td>
+        <td>Relaxes the joint choice of Steiner tree and two-pin paths into a continuous problem, solved on GPUs. Details not verified here.</td>
+        <td>Not verified</td><td><span class="fit low">low</span></td></tr>
+
+      <tr><td class="grp" colspan="5">Faster construction at scale</td></tr>
+      <tr><td><a href="https://csl.yale.edu/~rajit/ps/pdsec22.pdf">SFP</a> (Yale)</td><td class="yr">2022</td>
+        <td>A simple heuristic built for GPUs, deterministic, so its output does not depend on thread count.</td>
+        <td>86× faster than FLUTE for 0.38% more wire on the 16 ISPD 2008 benchmarks</td><td><span class="fit high">high</span></td></tr>
+      <tr><td><a href="https://yibolin.com/publications/papers/ROUTING_ICCAD2022_Guo.pdf">GPU FLUTE</a> (Peking University)</td><td class="yr">2022</td>
+        <td>FLUTE's lookup-table method on a GPU.</td><td>Up to 10.5× faster than FLUTE on 40 CPU cores</td><td><span class="fit mid">medium</span></td></tr>
+      <tr><td><a href="https://arxiv.org/abs/2407.01440">GAT-Steiner</a>, <a href="https://arxiv.org/html/2407.03792v1">NeuroSteiner</a></td><td class="yr">2024</td>
+        <td>Graph networks predict all Steiner points of many nets at once, in GPU batches.</td>
+        <td>GAT-Steiner: 99.85% of ISPD 2019 nets exact, +0.48% wire on the rest; NeuroSteiner: 0.3% error, 60% faster than GeoSteiner</td><td><span class="fit low">low</span></td></tr>
+      <tr><td><a href="https://arxiv.org/abs/2503.02319">Augmented bounding-volume hierarchy</a></td><td class="yr">2025</td>
+        <td>A spatial index that speeds up exact solvers on very large nets.</td><td>GeoSteiner on 1,000-pin nets: 5.16% error, 0.46 s each</td><td><span class="fit low">low</span></td></tr>
+
+      <tr><td class="grp" colspan="5">Scheduling and tuning the whole router</td></tr>
+      <tr><td><a href="https://arxiv.org/abs/2511.17665">GANGR</a></td><td class="yr">2025</td>
+        <td>A generative model forms the batches of nets routed in parallel: fewer, better batches.</td>
+        <td>ISPD 2024 benchmarks: up to 40% less runtime for 0.002% quality loss (DATE 2026)</td><td><span class="fit mid">medium</span></td></tr>
+      <tr><td><a href="https://arxiv.org/abs/2607.19768">AlphaRoute</a></td><td class="yr">2026</td>
+        <td>A language model tunes rip-up penalties from per-net overflow attribution.</td>
+        <td>Large overflow cuts on ISPD 2025 benchmarks, but under a different score and in Python; not comparable</td><td><span class="fit low">low</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Context: the <a href="https://www.ispd.cc/contests/25/index.html">ISPD 2025 contest</a> moved global routing to a
+  timing-driven score through OpenROAD (winners: Hippo, Peking University, RL-Route). The winners' own write-ups were not found.
+  Results marked "not verified" or taken from abstracts and slides are reported as their authors state them.</p>
+</section>
+
+<section id="plan">
+  <h2>How these fit this router</h2>
+  <div class="q">The plan, ordered by what the router's own measurements say each step can buy</div>
+  <p>Three facts set the order. Tree length alone has little room: our trees are within 0.2–0.8% of a strong reference.
+  The score's movable part is congestion that never quite overflows: 71M of cost on busy but legal GCells. And runtime is
+  still 2.4× the winner's on the hidden cluster, with threads earning only 1.7–2.5× in two big stages.</p>
+  <div class="rule-box">Every experiment follows the project's rules. One design screens first, then all 13. Scores are checked by the
+  official evaluator. Changes meant to be exact must be byte-identical at 1 and 8 threads. Score changes inside ±0.02% count as
+  noise, and a change is adopted only if it holds on every design.</div>
+
+  <div class="stage">
+    <div class="stage-head"><h3>Now</h3><span>runtime work already started; exact, so no quality risk</span></div>
+    <div class="cards">
+      <div class="card now"><div class="tag">runtime · exact</div><h4>3D passes: skip what cannot change</h4>
+        <p>Passes 1 and 2 re-examine all 9.6M nets, but only 0.74M and 0.31M change. A net whose surroundings have not
+        changed since it last kept its route would choose the same again, so it can be skipped. Also: remove the scheduler's shared
+        lock on every finished task, and build its dependency graph in parallel.</p>
+        <dl><dt>source</dt><dd>this router's stage report</dd><dt>test</dt><dd>byte-identical output, every design, 1 and 8 threads</dd>
+        <dt>bar</dt><dd>the three passes, 139 s on the public cluster, under 80 s</dd></dl></div>
+      <div class="card now"><div class="tag">runtime · exact</div><h4>Pattern stage: the single-threaded parts</h4>
+        <p>Threads give this stage only 1.7×. Each batch still rips up, refreshes changed costs and commits on one thread, and
+        the later rounds are thousands of small batches. A traced run is measuring each part before any change.</p>
+        <dl><dt>source</dt><dd>this router's stage report</dd><dt>test</dt><dd>byte-identical output</dd>
+        <dt>bar</dt><dd>215 s on the public cluster toward 120 s</dd></dl></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head"><h3>Next</h3><span>score experiments where the measured room is</span></div>
+    <div class="cards">
+      <div class="card"><div class="tag">score · from NeuralSteiner, FastRoute</div><h4>Congestion-aware topology</h4>
+        <p>After the pattern stage, take the nets crossing the busiest GCells and try alternative trees with their Steiner
+        points moved inside the bounding box, scored with the live congestion cost. Keep a change only if the net's cost
+        falls. This is NeuralSteiner's idea without the network: shape the tree around congestion.</p>
+        <dl><dt>targets</dt><dd>the 71M busy-but-legal cost, and wire</dd><dt>screen</dt><dd>ariane_68_rank, bsg_chip_rank, mempool_group_rank</dd>
+        <dt>stop if</dt><dd>under 0.05% on all three</dd></dl></div>
+      <div class="card"><div class="tag">score · from the contest gap</div><h4>Wire against vias</h4>
+        <p>The winner spends 0.45% less on wire and 3.9% more on vias than we do on the hidden cluster. Layer assignment's
+        weighting of vias against wire is one setting; a sweep of it is the cheapest experiment on this page.</p>
+        <dl><dt>targets</dt><dd>total score through the wire/via balance</dd><dt>screen</dt><dd>five values on three designs</dd>
+        <dt>stop if</dt><dd>the best value is within ±0.02% of today's</dd></dl></div>
+      <div class="card"><div class="tag">score · already on the list</div><h4>Z shapes and wider detours in the 3D pass</h4>
+        <p>The 3D pass chooses a net's shape and layers together but considers only L shapes and straight runs. Adding Z
+        shapes and one-step detours lets it move load off busy GCells it cannot avoid today.</p>
+        <dl><dt>targets</dt><dd>busy-but-legal cost</dd><dt>screen</dt><dd>ariane_68_rank first (its last gap was overflow cost)</dd>
+        <dt>stop if</dt><dd>no design improves by 0.05%</dd></dl></div>
+      <div class="card"><div class="tag">runtime · ISPD 2008</div><h4>Bring threads to the 2008 standard</h4>
+        <p>The 2008 router still runs on one core for 1 to 27 hours. Its batched threading was set aside when newblue1's
+        residue rose. Part 119 found that unspread batches waste most of their work on conflicts, so it is worth retrying with
+        spreading.</p>
+        <dl><dt>targets</dt><dd>2008 runtime; residues no worse</dd><dt>screen</dt><dd>newblue1 and bigblue2, three runs each</dd>
+        <dt>stop if</dt><dd>newblue1's residue rises outside its measured range</dd></dl></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head"><h3>Later</h3><span>a new objective: timing, the project's original aim</span></div>
+    <div class="cards">
+      <div class="card"><div class="tag">timing · from Held and Perner</div><h4>Cost-distance trees as the per-net solver</h4>
+        <p>The project's founding idea is a Lagrangian loop in which each net solves a minimum-cost Steiner tree under its own
+        shaped costs. Cost-distance trees are exactly that solver with delay added: congestion prices plus each sink's
+        criticality times its path delay.</p>
+        <dl><dt>needs</dt><dd>an Elmore delay model and criticality per sink</dd><dt>first test</dt><dd>slack against wire on one ISPD 2025 design</dd></dl></div>
+      <div class="card"><div class="tag">timing · from the ISPD 2026 paper</div><h4>RC weights on segment costs</h4>
+        <p>Per-segment weights from timing sensitivity drop into the pattern stage's cost grid with no change to its structure.
+        The paper's router shares a code base with the 2024 winner, so its results are the closest comparison we have.</p>
+        <dl><dt>needs</dt><dd>timing sensitivities from a timer</dd><dt>first test</dt><dd>worst and total slack at equal congestion</dd></dl></div>
+      <div class="card"><div class="tag">timing · from Zhu, SALT</div><h4>A per-net shape slider</h4>
+        <p>CLAUDE.md plans a Prim-Dijkstra slider per net, from shortest wire to shortest paths. HP-RCRST and SALT are today's best
+        versions of that slider, with guarantees on both ends.</p>
+        <dl><dt>needs</dt><dd>slack per net (net typing)</dd><dt>first test</dt><dd>wire against maximum path length on critical nets</dd></dl></div>
+      <div class="card"><div class="tag">benchmarks</div><h4>The ISPD 2025 designs</h4>
+        <p>Timing work needs designs with timing data. The 2025 contest provides them, scored through OpenROAD. That means a
+        download and an OpenROAD setup, so it waits for your go-ahead.</p>
+        <dl><dt>needs</dt><dd>download approval, OpenROAD</dd><dt>first test</dt><dd>reproduce a published baseline</dd></dl></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head"><h3>Not now</h3><span>and why</span></div>
+    <ul>
+      <li><b>Learned Steiner trees</b> (GAT-Steiner, NeuroSteiner). Our trees are already near optimal in length, and a
+      network would add a GPU dependency and break the same-answer-at-any-thread-count rule for at most a few tenths of a percent.</li>
+      <li><b>A GPU tree builder</b> (SFP, GPU FLUTE). Tree building now takes about 16 s of the public cluster's 658 s on 8
+      threads. SFP is the right choice if trees ever become a bottleneck again, because it is deterministic.</li>
+      <li><b>Learned batching</b> (GANGR). Part 119's tile spreading already removed the wasted work it targets; the slow tier is
+      now 7% of the hidden cluster's run.</li>
+      <li><b>Language-model tuning</b> (AlphaRoute). Its results use a different score and are not comparable; the project's record
+      favors structural changes over parameter tuning.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>Router figures come from HISTORY_COST_SWEEP.md, Parts 105 and 115–119. Every score is checked by the contest's official
+  evaluator. Related pages: <a href="https://claude.ai/artifact/BFvFpA5vEgBrNq6gcjvR1F">Global Router Recap</a> and
+  <a href="https://claude.ai/artifact/4vLqP5qoUvbHf3CCTh5o2Y">Global Router Speed and Theory</a>.</p>
+  <p>Further sources:</p>
+  <ul>
+    <li><a href="https://www.cse.cuhk.edu.hk/~fyyoung/paper/ICCAD17_SALT.pdf">SALT, Steiner shallow-light trees (ICCAD 2017)</a> · <a href="https://github.com/chengengjie/salt">code</a></li>
+    <li><a href="https://vlsicad.ucsd.edu/Publications/Conferences/355/c355.pdf">Prim-Dijkstra Revisited (ISPD 2018)</a></li>
+    <li><a href="http://www.or.uni-bonn.de/~held/publications/brb_jrnl.pdf">Global interconnect optimization by resource sharing (Bonn)</a></li>
+    <li><a href="https://bonndoc.ulb.uni-bonn.de/xmlui/handle/20.500.11811/7945?show=full">Timing-constrained global routing with RC-aware Steiner trees (Bonn)</a></li>
+    <li><a href="https://nips.cc/media/neurips-2024/Slides/93636.pdf">NeuralSteiner slides (NeurIPS 2024)</a></li>
+    <li><a href="https://dl.acm.org/doi/10.1145/3698364.3715706">ISPD 2025 contest paper</a></li>
+  </ul>
+</footer>
+</div>
