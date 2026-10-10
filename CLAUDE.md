@@ -234,6 +234,10 @@ tiles in batches of 256 (`PD38ROUTE_SLOW_SPREAD=64`, also in
 onto one hotspot and threw away 78% of their search work on collisions.
 mempool_cluster 809 -> 658 s, mempool_cluster_ranking 511 s; scores
 within +-0.02%.
+Part 120 then threaded the pattern stage's batches on the dependency graph
+and shared one graph across the 3D passes (`PD38ROUTE_PATTERN_DAG=1`,
+`PD38ROUTE_P3D_REUSE=1`, in `fast24.env`), byte-identical:
+mempool_cluster_ranking 461 s, mempool_cluster 584 s.
 
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check

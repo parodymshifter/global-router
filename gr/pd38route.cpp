@@ -5329,6 +5329,16 @@ std::vector<std::vector<size_t>> commutingBatches(const std::vector<NetBox> &box
 using CellsOfFn = std::function<void(size_t, std::vector<uint32_t> &)>;
 size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int threads,
                          const std::function<void(size_t)> &f);
+// pd38route: the graph built once and run any number of times (the 3D
+// passes run the same positions; a box only shrinks when its net is
+// rerouted, so the first pass's graph orders every pair that can overlap
+// later -- more edges than needed, never fewer).
+struct CommutingDagPlan {
+  size_t n = 0, edges = 0;
+  std::vector<uint32_t> succStart, succ, indeg;
+};
+CommutingDagPlan buildCommutingDag(size_t n, size_t nCells, const CellsOfFn &cellsOf);
+void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::function<void(size_t)> &f);
 
 size_t runCommutingDag(const std::vector<NetBox> &boxes, int nx, int ny, int cell, int threads,
                        const std::function<void(size_t)> &f) {
@@ -5350,6 +5360,13 @@ size_t runCommutingDag(const std::vector<NetBox> &boxes, int nx, int ny, int cel
 // of its cells (duplicates in a list are harmless).
 size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int threads,
                          const std::function<void(size_t)> &f) {
+  CommutingDagPlan plan = buildCommutingDag(n, nCells, cellsOf);
+  runCommutingDagPlan(plan, threads, f);
+  return plan.edges;
+}
+
+CommutingDagPlan buildCommutingDag(size_t n, size_t nCells, const CellsOfFn &cellsOf) {
+  const auto tBuild0 = std::chrono::steady_clock::now(); // pd38route: PD37ROUTE_BATCH_TRACE timing
   std::vector<int64_t> last(nCells, -1);
   std::vector<uint32_t> predStart(n + 1, 0);
   std::vector<uint32_t> pred;
@@ -5395,12 +5412,26 @@ size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int 
       for (uint32_t e = predStart[k]; e < predStart[k + 1]; ++e)
         succ[fill[pred[e]]++] = static_cast<uint32_t>(k);
   }
-  const size_t edges = pred.size();
+  CommutingDagPlan plan;
+  plan.n = n;
+  plan.edges = pred.size();
+  plan.indeg.resize(n);
+  for (size_t k = 0; k < n; ++k)
+    plan.indeg[k] = predStart[k + 1] - predStart[k];
+  plan.succStart = std::move(succStart);
+  plan.succ = std::move(succ);
+  if (std::getenv("PD37ROUTE_BATCH_TRACE"))
+    std::cerr << "dependency graph: build "
+              << std::chrono::duration<double>(std::chrono::steady_clock::now() - tBuild0).count() << " s\n";
+  return plan;
+}
+
+void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::function<void(size_t)> &f) {
+  const size_t n = plan.n;
+  const std::vector<uint32_t> &succStart = plan.succStart, &succ = plan.succ;
   std::vector<std::atomic<uint32_t>> waiting(n);
   for (size_t k = 0; k < n; ++k)
-    waiting[k].store(predStart[k + 1] - predStart[k], std::memory_order_relaxed);
-  std::vector<uint32_t>().swap(pred);
-  std::vector<uint32_t>().swap(predStart);
+    waiting[k].store(plan.indeg[k], std::memory_order_relaxed);
   // ready positions, lowest first (keeps the long tail of the order moving)
   std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
   for (size_t k = 0; k < n; ++k)
@@ -5412,7 +5443,7 @@ size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int 
   // when a position may run.
   std::mutex m;
   std::condition_variable cv;
-  size_t done = 0;           // under m
+  std::atomic<size_t> done{0}; // pd38route: atomic; the lock is taken only to queue or to finish
   int sleepers = 0;          // under m
   std::atomic<size_t> readyN{ready.size()};
   std::atomic<bool> finished{n == 0};
@@ -5427,7 +5458,7 @@ size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int 
              ++spin)
           std::this_thread::yield();
         std::unique_lock<std::mutex> lk(m);
-        while (ready.empty() && done < n) {
+        while (ready.empty() && done.load(std::memory_order_acquire) < n) {
           ++sleepers;
           cv.wait(lk);
           --sleepers;
@@ -5457,16 +5488,19 @@ size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int 
         have = true;
       }
       int wake = 0;
-      {
+      // pd38route: a task that frees nothing beyond the one this thread
+      // keeps needs no lock (most do); sleepers recheck `done` under the
+      // lock, and the last task takes it to wake them.
+      const bool last = done.fetch_add(1, std::memory_order_acq_rel) + 1 == n;
+      if (!freed.empty() || last) {
         std::lock_guard<std::mutex> lk(m);
         for (uint32_t s2 : freed)
           ready.push(s2);
         readyN.fetch_add(freed.size(), std::memory_order_release);
-        ++done;
-        if (done == n)
+        if (last)
           finished.store(true, std::memory_order_release);
         wake = std::min<int>(sleepers, static_cast<int>(freed.size()));
-        if (done == n)
+        if (last)
           wake = sleepers;
       }
       if (wake >= sleepers && wake > 0)
@@ -5476,13 +5510,16 @@ size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int 
           cv.notify_one();
     }
   };
+  const auto tRun0 = std::chrono::steady_clock::now();
   std::vector<std::thread> pool;
   for (int t = 1; t < threads; ++t)
     pool.emplace_back(worker);
   worker();
   for (std::thread &t : pool)
     t.join();
-  return edges;
+  if (std::getenv("PD37ROUTE_BATCH_TRACE"))
+    std::cerr << "dependency graph: run " << std::chrono::duration<double>(std::chrono::steady_clock::now() - tRun0).count()
+              << " s\n";
 }
 
 // pd37route: the pattern stage's batch coloring. Pieces (by coarse-cell
@@ -5565,6 +5602,9 @@ std::vector<std::vector<int>> patternColorBatches(const std::vector<PatternCellB
 // refresh before every batch (pd35route), 2 = no refresh after the round's
 // first batch (stale costs: proves the fixture depends on the refresh).
 int gPatternRefreshTest = 0;
+// pd38route: PD38ROUTE_PATTERN_DAG=1 runs each round's batches (in their
+// order) on the commuting dependency graph instead of batch by batch.
+bool gPatternDag = false;
 
 PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &nets, Usage &usage,
                                   Prices &prices, const PatternStageSettings &ps, bool trace) {
@@ -5668,8 +5708,8 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
                            std::max(p.a.x, p.b.x) / ps.cell, std::max(p.a.y, p.b.y) / ps.cell});
     }
     std::vector<std::vector<int>> batches;
+    std::vector<std::vector<int>> pos = patternColorBatches(cellBoxes, cw, ch);
     {
-      std::vector<std::vector<int>> pos = patternColorBatches(cellBoxes, cw, ch);
       batches.resize(pos.size());
       for (size_t bi = 0; bi < pos.size(); ++bi) {
         batches[bi].reserve(pos[bi].size());
@@ -5687,7 +5727,85 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
     tColor += secs(c1, now());
     bool fullRefresh = true;
     const bool incremental = prices.live == &usage || prices.model == CostModel::kLambda;
-    for (const std::vector<int> &batch : batches) {
+    // pd38route: PD38ROUTE_PATTERN_DAG. The batches' pieces in batch order
+    // become positions of the commuting dependency graph, each depending on
+    // the earlier pieces that share one of its coarse cells. Pieces in one
+    // batch share none (that is how they were colored), and a piece reads
+    // and writes only edges inside its own box: its solve reads the cost
+    // grid there, its route stays there. Each piece keeps the grid exact
+    // for the edges it changes: a cost depends only on that edge's usage
+    // and on prices fixed within the round, so after the round's full
+    // refresh, updating an edge's cost whenever its usage changes gives
+    // every piece the values the batch loop's refreshes give it. Same
+    // routes at any thread count; the batch loop below is unchanged.
+    bool dagDone = false;
+    if (gPatternDag && backend == &cpuBackend && incremental && gPatternRefreshTest == 0) {
+      dagDone = true;
+      auto d0 = now();
+      workerPool().run(static_cast<size_t>(g.ny), [&](size_t yy) {
+        int y = static_cast<int>(yy);
+        for (int x = 0; x + 1 < g.nx; ++x) {
+          size_t i = static_cast<size_t>(y) * (g.nx - 1) + x;
+          pg.h[i] = gpu::quantizeCost(wireCostH(prices, g.hIndex(x, y, 0), amount));
+        }
+        if (y + 1 < g.ny)
+          for (int x = 0; x < g.nx; ++x) {
+            size_t i = static_cast<size_t>(y) * g.nx + x;
+            pg.v[i] = gpu::quantizeCost(wireCostV(prices, g.vIndex(x, y, 0), amount));
+          }
+      });
+      dirty.clear();
+      auto d1 = now();
+      tRefresh += secs(d0, d1);
+      std::vector<uint32_t> seq; // positions in todo, batch by batch
+      seq.reserve(todo.size());
+      for (const std::vector<int> &bt : pos)
+        for (int j : bt)
+          seq.push_back(static_cast<uint32_t>(j));
+      runCommutingDagFn(
+          seq.size(), static_cast<size_t>(cw) * ch,
+          [&](size_t k, std::vector<uint32_t> &out) {
+            const PatternCellBox &b = cellBoxes[seq[k]];
+            for (int cy = b.cy0; cy <= b.cy1; ++cy)
+              for (int cx = b.cx0; cx <= b.cx1; ++cx)
+                out.push_back(static_cast<uint32_t>(cy * cw + cx));
+          },
+          gThreads, [&](size_t k) {
+            const int pk = todo[seq[k]];
+            Piece &p = pieces[pk];
+            auto change = [&](int code, int sign) {
+              size_t idx = static_cast<size_t>(code >> 1);
+              if (code & 1) {
+                usage.v[idx] += sign * amount;
+                pg.v[idx] = gpu::quantizeCost(wireCostV(prices, idx, amount));
+              } else {
+                usage.h[idx] += sign * amount;
+                pg.h[idx] = gpu::quantizeCost(wireCostH(prices, idx, amount));
+              }
+            };
+            for (int code : p.edges)
+              change(code, -1);
+            p.edges.clear();
+            static thread_local gpu::CpuLocalPatternBackend local;
+            gpu::PatternBatch one;
+            one.x1.push_back(p.a.x);
+            one.y1.push_back(p.a.y);
+            one.x2.push_back(p.b.x);
+            one.y2.push_back(p.b.y);
+            gpu::PatternResult r;
+            local.solve(pg, one, r);
+            gpu::forEachCandidateEdge(p.a.x, p.a.y, p.b.x, p.b.y, r.best[0], [&](bool h, int x, int y) {
+              size_t idx = h ? g.hIndex(x, y, 0) : g.vIndex(x, y, 0);
+              p.edges.push_back(static_cast<int>(idx * 2 + (h ? 0 : 1)));
+            });
+            for (int code : p.edges)
+              change(code, +1);
+            changedSinceBest[pk] = 1;
+          });
+      tSolve += secs(d1, now());
+    }
+    static const std::vector<std::vector<int>> kNoBatches;
+    for (const std::vector<int> &batch : dagDone ? kNoBatches : batches) {
       auto b0 = now();
       for (int k : batch) {
         addEdges(pieces[k], -1);
@@ -8969,7 +9087,28 @@ Pattern3DSettings gPattern3D;
 struct Pattern3DStats {
   long long nets = 0, accepted = 0;
   double gain = 0;
+  long long skipped = 0; // pd38route: PD38ROUTE_P3D_SKIP (counted in nets too)
 };
+
+// pd38route: PD38ROUTE_P3D_SKIP=1. A net is reexamined only if something in
+// its box changed since it was last examined. Its choice depends only on
+// the usage inside its box (plus one GCell, already in netBoxOf) and on its
+// own route, so with neither changed it would keep its route again. Each
+// coarse cell holds the stamp of the last net accepted with that cell in its
+// box (2 * sequence + 1; an examination is 2 * sequence), so a net is
+// reexamined when one of its cells carries a stamp above its last
+// examination, its own acceptance included. Nets sharing a cell are ordered
+// by the dependency graph, so the stamps a net reads do not depend on the
+// thread count.
+struct Pattern3DMemo {
+  int pass = 0;
+  std::vector<int64_t> cellStamp, lastExam;
+  CommutingDagPlan plan; // PD38ROUTE_P3D_REUSE: the first pass's graph
+};
+bool gP3dSkip = false;
+bool gP3dReuse = false; // PD38ROUTE_P3D_REUSE
+long long gP3dSkippedTotal = 0; // self-test
+bool gP3dSkipTestAll = false;    // self-test control: skip every net after the first pass (wrong on purpose)
 
 namespace p3d {
 
@@ -9535,17 +9674,92 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
 // version wins).
 Pattern3DStats pattern3DPass(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, std::vector<RoutedNet> &nets,
                              std::vector<NetCharge> &charges, const std::vector<char> &eligible,
-                             const std::vector<size_t> &order) {
+                             const std::vector<size_t> &order, Pattern3DMemo *memo = nullptr) {
   Pattern3DStats st;
   RealLayerPlan lp(g);
+  // pd38route: PD38ROUTE_P3D_SKIP bookkeeping (see Pattern3DMemo)
+  const int cell = gCommuteCell;
+  const int cw = (g.nx + cell - 1) / cell, ch = (g.ny + cell - 1) / cell;
+  Pattern3DMemo *sk = gP3dSkip ? memo : nullptr;
+  if (sk && sk->cellStamp.empty()) {
+    sk->cellStamp.assign(static_cast<size_t>(cw) * ch, -1);
+    sk->lastExam.assign(nets.size(), -1);
+  }
+  const int64_t base = memo ? static_cast<int64_t>(memo->pass) * static_cast<int64_t>(nets.size() + 1) : 0;
+  auto forCells = [&](const NetBox &bx, auto fn) {
+    int cx0 = std::max(0, bx.x0) / cell, cx1 = std::min(g.nx - 1, bx.x1) / cell;
+    int cy0 = std::max(0, bx.y0) / cell, cy1 = std::min(g.ny - 1, bx.y1) / cell;
+    for (int cy = cy0; cy <= cy1; ++cy)
+      for (int cx = cx0; cx <= cx1; ++cx)
+        fn(static_cast<size_t>(cy) * cw + cx);
+  };
+  // whether net i (position k, box bx) must be examined; records the examination
+  auto examine = [&](size_t i, size_t k, const NetBox &bx) {
+    if (!sk)
+      return true;
+    const int64_t seq = base + static_cast<int64_t>(k);
+    if (sk->pass > 0 && gP3dSkipTestAll)
+      return false;
+    if (sk->pass > 0) {
+      int64_t mx = -1;
+      forCells(bx, [&](size_t c) { mx = std::max(mx, sk->cellStamp[c]); });
+      if (mx <= sk->lastExam[i])
+        return false;
+    }
+    sk->lastExam[i] = 2 * seq;
+    return true;
+  };
+  // An accepted net changed usage only along its old and new routes (via
+  // demand reaches one GCell further), so only the coarse cells those GCells
+  // fall in are stamped -- all inside its box, so no concurrent net writes
+  // them. (Stamping the whole box marked nearly every cell on a large design.)
+  auto accepted = [&](size_t k, const std::vector<Seg> &oldSegs, const std::vector<Seg> &newSegs) {
+    if (!sk)
+      return;
+    const int64_t stamp = 2 * (base + static_cast<int64_t>(k)) + 1;
+    auto tile = [&](int x, int y) {
+      int cx0 = std::max(0, x - 1) / cell, cx1 = std::min(g.nx - 1, x + 1) / cell;
+      int cy0 = std::max(0, y - 1) / cell, cy1 = std::min(g.ny - 1, y + 1) / cell;
+      for (int cy = cy0; cy <= cy1; ++cy)
+        for (int cx = cx0; cx <= cx1; ++cx)
+          sk->cellStamp[static_cast<size_t>(cy) * cw + cx] = stamp;
+    };
+    for (const std::vector<Seg> *ss : {&oldSegs, &newSegs})
+      for (const Seg &sg : *ss) {
+        if (sg.x1 == sg.x2 && sg.y1 == sg.y2) {
+          tile(sg.x1, sg.y1);
+        } else if (sg.y1 == sg.y2) {
+          for (int x = std::min(sg.x1, sg.x2); x <= std::max(sg.x1, sg.x2); ++x)
+            tile(x, sg.y1);
+        } else {
+          for (int y = std::min(sg.y1, sg.y2); y <= std::max(sg.y1, sg.y2); ++y)
+            tile(sg.x1, y);
+        }
+      }
+  };
   if (gThreads <= 1) {
+    size_t k = 0;
     for (size_t i : order) {
       if (!eligible[i] || nets[i].net->pins.size() < 2)
         continue;
       ++st.nets;
-      if (pattern3DNet(g, ru, rvu, lp, nets[i], charges[i], st.gain))
-        ++st.accepted;
+      const NetBox bx = sk ? netBoxOf(g, nets[i]) : NetBox{};
+      if (!examine(i, k, bx)) {
+        ++st.skipped;
+      } else {
+        std::vector<Seg> oldSegs;
+        if (sk)
+          oldSegs = nets[i].segs;
+        if (pattern3DNet(g, ru, rvu, lp, nets[i], charges[i], st.gain)) {
+          ++st.accepted;
+          accepted(k, oldSegs, nets[i].segs);
+        }
+      }
+      ++k;
     }
+    if (memo)
+      ++memo->pass;
+    gP3dSkippedTotal += st.skipped;
     return st;
   }
   // pd37route: threaded. A net's new route stays inside its current route's
@@ -9562,18 +9776,42 @@ Pattern3DStats pattern3DPass(const RoutingGrid &g, RealUsage &ru, RealViaUsage &
     boxes[k] = netBoxOf(g, nets[run[k]]);
   std::vector<double> gain(run.size(), 0.0);
   std::vector<char> kept(run.size(), 0);
-  runCommutingDag(boxes, g.nx, g.ny, gCommuteCell, gThreads, [&](size_t k) {
+  auto task = [&](size_t k) {
+    if (!examine(run[k], k, boxes[k])) {
+      kept[k] = 2; // skipped
+      return;
+    }
     double gk = 0;
+    std::vector<Seg> oldSegs;
+    if (sk)
+      oldSegs = nets[run[k]].segs;
     kept[k] = pattern3DNet(g, ru, rvu, lp, nets[run[k]], charges[run[k]], gk) ? 1 : 0;
     gain[k] = gk;
-  });
+    if (kept[k])
+      accepted(k, oldSegs, nets[run[k]].segs);
+  };
+  if (memo && gP3dReuse) {
+    // pd38route: PD38ROUTE_P3D_REUSE -- the first pass's graph for every pass
+    if (memo->plan.n != run.size() || memo->pass == 0)
+      memo->plan = buildCommutingDag(run.size(), static_cast<size_t>(cw) * ch, [&](size_t k, std::vector<uint32_t> &out) {
+        forCells(boxes[k], [&](size_t c) { out.push_back(static_cast<uint32_t>(c)); });
+      });
+    runCommutingDagPlan(memo->plan, gThreads, task);
+  } else {
+    runCommutingDag(boxes, g.nx, g.ny, gCommuteCell, gThreads, task);
+  }
   for (size_t k = 0; k < run.size(); ++k) {
     ++st.nets;
-    if (kept[k]) {
+    if (kept[k] == 1) {
       ++st.accepted;
       st.gain += gain[k];
+    } else if (kept[k] == 2) {
+      ++st.skipped;
     }
   }
+  if (memo)
+    ++memo->pass;
+  gP3dSkippedTotal += st.skipped;
   return st;
 }
 
@@ -9881,8 +10119,11 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   auto runPattern3D = [&]() {
     if (!gScore.on && !gPattern3D.mode2008)
       return;
+    Pattern3DMemo memo; // pd38route: PD38ROUTE_P3D_SKIP
     for (int pass = 0; pass < gPattern3D.passes; ++pass) {
-      Pattern3DStats st = pattern3DPass(g, ru, rvu, nets, charges, usesTreeDP, order);
+      Pattern3DStats st = pattern3DPass(g, ru, rvu, nets, charges, usesTreeDP, order, &memo);
+      if (gP3dSkip && std::getenv("PD37ROUTE_BATCH_TRACE"))
+        std::cerr << "pattern 3D pass " << pass << " trace: " << st.skipped << " nets skipped (nothing changed nearby)\n";
       memTrace("a pattern 3D pass", &nets);
       if (gStages.on)
         gStages.mark("3D pattern pass " + std::to_string(pass), &nets, -1, stageObjective(),
@@ -15913,15 +16154,23 @@ void testPatternIncrementalRefreshIsExact() {
           " 1\n";
   }
   gr += "0\n";
-  auto run = [&](int mode, long long &overflow) {
+  auto run = [&](int mode, long long &overflow, int cell = 0, bool dag = false, int threads = 1) {
     Design d = parse("pd36route_selftest_refresh.gr", gr.c_str());
     CostSettings cs;
     cs.model = CostModel::kPresentDemand;
     PatternStageSettings ps;
     ps.rounds = 5;
+    if (cell > 0)
+      ps.cell = cell;
     gPatternRefreshTest = mode;
+    const bool savedDag = gPatternDag;
+    const int savedT = gThreads;
+    gPatternDag = dag;
+    gThreads = threads;
     RunReport rep = route(d, 60, 0, 0.02, 0.05, HistMode::kAdditive, 1.1, 1, false, true, 1.0, 0.0, true, true,
                           true, 8, BoxGrowth{}, cs, AcceptMode::kKeep, false, -1, &ps);
+    gPatternDag = savedDag;
+    gThreads = savedT;
     gPatternRefreshTest = 0;
     overflow = rep.bestOverflow;
     std::vector<std::vector<Seg>> segs;
@@ -15948,6 +16197,13 @@ void testPatternIncrementalRefreshIsExact() {
   check(ovFull > 0, "refresh fixture is congested (2D overflow " + std::to_string(ovFull) + " after 5 rounds)");
   check(same(inc, full) && ovInc == ovFull, "incremental refresh: the same routes as a full refresh per batch");
   check(!same(stale, full), "stale costs route differently: the fixture exercises the per-batch refresh");
+  // pd38route: PD38ROUTE_PATTERN_DAG -- the batches on the dependency graph,
+  // with 4-tile coarse cells so many pieces run at once: exactly the batch
+  // loop's routes, at 1 and at 4 threads.
+  long long ovB = 0, ovD1 = 0, ovD4 = 0;
+  auto bl = run(0, ovB, 4), d1 = run(0, ovD1, 4, true, 1), d4 = run(0, ovD4, 4, true, 4);
+  check(same(bl, d1) && ovB == ovD1, "pattern stage on the dependency graph, 1 thread: the batch loop's routes");
+  check(same(bl, d4) && ovB == ovD4, "pattern stage on the dependency graph, 4 threads: the batch loop's routes");
 }
 
 // pd36route: the local-sum CPU pattern backend returns exactly the
@@ -16393,6 +16649,33 @@ void testThreadedLayerAssignmentIsExact() {
     }
   auto seqS = run(1, false), parS = run(4, false), revS = run(4, true);
   check(same(seqS, parS), "threaded layer assignment + 3D passes (2024 score, via demand): 4 threads = 1 thread");
+  {
+    // pd38route: PD38ROUTE_P3D_SKIP -- three passes, with and without skipping
+    // unchanged nets, at 1 and 4 threads: the same routes, and nets skipped.
+    const int savedPasses = gPattern3D.passes;
+    gPattern3D.passes = 3;
+    auto ref = run(1, false);
+    gP3dSkip = true;
+    gP3dSkippedTotal = 0;
+    auto sk1 = run(1, false);
+    long long skipped1 = gP3dSkippedTotal;
+    auto sk4 = run(4, false);
+    gP3dReuse = true;
+    auto skr4 = run(4, false);
+    gP3dSkip = false;
+    auto r4 = run(4, false);
+    gP3dReuse = false;
+    gP3dSkip = true;
+    gP3dSkipTestAll = true;
+    auto wrong = run(1, false);
+    gP3dSkipTestAll = false;
+    gP3dSkip = false;
+    gPattern3D.passes = savedPasses;
+    check(skipped1 > 0, "3D passes, skipping unchanged nets: some nets skipped (" + std::to_string(skipped1) + ")");
+    check(same(ref, sk1) && same(ref, sk4), "3D passes, skipping unchanged nets: the same routes at 1 and 4 threads");
+    check(!same(ref, wrong), "control: skipping every net after the first pass routes differently (later passes matter)");
+    check(same(ref, r4) && same(ref, skr4), "3D passes on the first pass's graph, with and without skipping: the same routes");
+  }
   check(!same(seqS, revS), "control (2024 score): reversed order routes differently");
   gViaDemand = savedV;
   gScore = savedS;
@@ -16738,6 +17021,24 @@ int main(int argc, char **argv) {
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_SLOW_DAG must be 0 or 1 (got '" + sv + "')");
     gSlowDag = sv == "1";
+  }
+  if (const char *v = std::getenv("PD38ROUTE_P3D_REUSE"); v) {
+    std::string sv(v);
+    if (sv != "0" && sv != "1")
+      fail("PD38ROUTE_P3D_REUSE must be 0 or 1 (got '" + sv + "')");
+    gP3dReuse = sv == "1";
+  }
+  if (const char *v = std::getenv("PD38ROUTE_P3D_SKIP"); v) {
+    std::string sv(v);
+    if (sv != "0" && sv != "1")
+      fail("PD38ROUTE_P3D_SKIP must be 0 or 1 (got '" + sv + "')");
+    gP3dSkip = sv == "1";
+  }
+  if (const char *v = std::getenv("PD38ROUTE_PATTERN_DAG"); v) {
+    std::string sv(v);
+    if (sv != "0" && sv != "1")
+      fail("PD38ROUTE_PATTERN_DAG must be 0 or 1 (got '" + sv + "')");
+    gPatternDag = sv == "1";
   }
   if (const char *v = std::getenv("PD38ROUTE_SLOW_BATCH"); v) {
     char *end = nullptr;

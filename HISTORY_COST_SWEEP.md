@@ -9735,3 +9735,66 @@ longest search. A barrier-free scheme (the next batch searching against
 a slightly older snapshot) is the next step if the slow tier matters
 again; at 137 s it is now ~20% of the public cluster's run and ~7% of
 the hidden one's.
+
+## Part 120 -- threading the pattern stage and the 3D passes (exact)
+
+Measured first (p120, mempool_cluster, `PD37ROUTE_BATCH_TRACE=1` and a
+20 s `sample` profile of each stage), at the Part 119 standard:
+
+- **Pattern stage** (240 s): solving pieces 177 s; scan 11, coloring 6,
+  rip-up 2, refresh 11, commit 6, best copy 2 s; trees 16 s (already
+  threaded). In the 29 later rounds each batch holds ~65 pieces, under the
+  64-piece threshold for the threaded solve, and every batch waits for the
+  previous one: the profile shows the 8 threads idle 87% of the time.
+- **3D passes**: the dependency graph allows 435-590 positions at once
+  (longest chain 16270-22083 of 9.6M), so not chain-bound. Each pass:
+  graph build ~14 s on one thread, run 25-29 s. The scheduler took one
+  shared lock per finished task (9.6M per pass).
+
+Three exact changes in pd38route, each self-tested (1 = 4 threads, equal to
+the unchanged path) and byte-identical to Part 119 on real designs:
+
+1. **Scheduler**: a finished task takes the lock only to queue extra freed
+   positions or to finish the run (atomic completion count otherwise);
+   the graph builds and runs as separate steps (`buildCommutingDag`,
+   `runCommutingDagPlan`). Small on its own: 3D passes 50 -> 45 s.
+2. **`PD38ROUTE_PATTERN_DAG=1`**: each round's batches, in their order,
+   become positions of the dependency graph over the coloring's coarse
+   cells. Pieces in a batch share no cell, and a piece reads and writes
+   only edges inside its own box. After the round's full refresh, each
+   piece re-prices exactly the edges whose usage it changes (rip-up and
+   commit), so every piece sees the cost grid the batch loop would give it.
+   Self-test: the batch loop's routes at 1 and 4 threads (4-tile cells).
+   Pattern stage 229 -> 198 s alone; later rounds are no longer bound by
+   batch barriers but by work (a later-round piece costs ~35x a round-0
+   piece: only long congested pieces remain, and Z shapes cost box area).
+3. **`PD38ROUTE_P3D_REUSE=1`**: the three passes share the first pass's
+   graph. A net's box only shrinks when it is rerouted, so the first
+   graph orders every pair that can overlap later (more edges, never
+   fewer). Passes 1-2: 45 -> 30 s each.
+
+Byte-identical to Part 119 (cmp of the solution files): mempool_cluster
+(each change alone and combined), mempool_cluster_ranking, bsg_chip_rank,
+mempool_group_rank, nvdla_rank (also at 1 thread).
+
+| design | Part 119 stage total | Part 120 | pattern stage | 3D passes |
+|---|---|---|---|---|
+| mempool_cluster | 651 s | **576 s** (wall 584) | 215 -> 167 s | 139 -> 103 s |
+| mempool_cluster_ranking | 503 s | **453 s** (wall 461) | 127 -> 107 s | 151 -> 108 s |
+
+Tried and not adopted:
+- **`PD38ROUTE_P3D_SKIP=1`** (exact): skip a net in passes 1-2 when nothing
+  near it changed since it last kept its route (coarse-cell stamps; then
+  only cells along changed routes). Self-tested (identical routes at 1 and
+  4 threads; a deliberately wrong skip routes differently), but on
+  mempool_cluster it skipped 5 and 1505 of 9.6M nets: at this density
+  nearly every net's box holds some route that changed. Off.
+- **Pattern rounds capped at 10 / 15** (not exact, judged on score): the
+  slow tier spends what the pattern stage saves (pattern 167 -> 120 /
+  134 s, slow tier 140 -> 184 / 172 s, total 576 -> 571 / 571 s); score
+  1615032398 at 10 rounds, -0.016%, inside the noise band. Kept at 30.
+
+What remains on mempool_cluster (576 s): pattern stage 167 s (work-bound
+in the later rounds), slow tier 140 s (each batch waits on its longest
+search), layer assignment round 0 129 s (4x on 8 threads), 3D passes
+103 s, I/O 35 s.

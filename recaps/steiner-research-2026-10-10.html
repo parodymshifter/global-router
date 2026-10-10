@@ -192,10 +192,12 @@ footer li { max-width: none; margin-bottom: 3px; }
         <dl><dt>source</dt><dd>this router's stage report</dd><dt>test</dt><dd>byte-identical output, every design, 1 and 8 threads</dd>
         <dt>bar</dt><dd>the three passes, 139 s on the public cluster, under 80 s</dd></dl></div>
       <div class="card now"><div class="tag">runtime · exact</div><h4>Pattern stage: the single-threaded parts</h4>
-        <p>Threads give this stage only 1.7×. Each batch still rips up, refreshes changed costs and commits on one thread, and
-        the later rounds are thousands of small batches. A traced run is measuring each part before any change.</p>
-        <dl><dt>source</dt><dd>this router's stage report</dd><dt>test</dt><dd>byte-identical output</dd>
-        <dt>bar</dt><dd>215 s on the public cluster toward 120 s</dd></dl></div>
+        <p>Threads give this stage only 1.7×. A traced run found that solving pieces takes 177 of its 240 s. In the 29 later
+        rounds, each batch holds about 65 pieces, under the size where solving goes parallel. The threads sit idle 87% of
+        the time. Pieces in a batch never overlap, so each piece can wait only for the earlier pieces that overlap it,
+        as layer assignment's pieces already do.</p>
+        <dl><dt>source</dt><dd>this router's stage trace and CPU profile</dd><dt>test</dt><dd>byte-identical output</dd>
+        <dt>bar</dt><dd>240 s on the public cluster toward 100 s</dd></dl></div>
     </div>
   </div>
 
