@@ -128,21 +128,24 @@ footer { padding-top: 26px; font-size: 13.5px; color: var(--ink-soft); }
 .cmp td:nth-child(2) { width: 46%; }
 .hbar { min-width: 560px; }
 td.mono { white-space: nowrap; }
+table.room { min-width: 760px; }
+table.room td:last-child { width: 48%; }
 </style>
 </head>
 <body>
 <div class="wrap">
 <header class="snap">
-  <div class="eyebrow">Second look · 9 October 2026 · Parts 115–118</div>
+  <div class="eyebrow">Second look · 9 October 2026, updated 10 October · Parts 115–119</div>
   <h1>Global Router Speed and Theory</h1>
   <p class="lede">The first version of this page asked why the router took 16.9 hours on mempool_cluster_ranking, the
-  largest ISPD 2024 design it had routed, when the contest winners took minutes. That run now takes 526 seconds on 8
+  largest ISPD 2024 design it had routed, when the contest winners took minutes. That run now takes 511 seconds on 8
   threads of the same laptop, with a slightly better score. This page looks at where the time goes now, checks the first
-  version's analysis against what actually happened, and asks how the answer could have been found sooner.</p>
+  version's analysis against what actually happened, asks how the answer could have been found sooner, and maps where
+  there is still room in time, wirelength and overflow.</p>
   <div class="stats">
-    <div class="stat"><b>526 s</b><span>mempool_cluster_ranking, 8 threads; was 61,017 s on 1 core</span></div>
-    <div class="stat"><b>116×</b><span>faster overall: about 38× from removing work, 3× from threads</span></div>
-    <div class="stat"><b>23.9 GB</b><span>peak memory footprint; was 29.4 GB on a 24 GB machine</span></div>
+    <div class="stat"><b>511 s</b><span>mempool_cluster_ranking, 8 threads; was 61,017 s on 1 core</span></div>
+    <div class="stat"><b>119×</b><span>faster overall: about 38× from removing work, 3× from threads</span></div>
+    <div class="stat"><b>22.8 GB</b><span>peak memory footprint; was 29.4 GB on a 24 GB machine</span></div>
     <div class="stat"><b>−0.57%</b><span>score vs contest #1, whose run took 217 s on 8 cores + 4 A100s</span></div>
   </div>
 </header>
@@ -164,30 +167,30 @@ td.mono { white-space: nowrap; }
 <line class="grid" x1="690.0" y1="14" x2="690.0" y2="206"/>
 <text class="soft" x="690.0" y="222" text-anchor="middle">200 s</text>
 <text x="210" y="33" text-anchor="end">Layer assignment, round 0</text>
-<rect class="solid" x="220" y="21" width="372.0" height="17" rx="2"/>
-<text class="soft" x="598.0" y="34">158 s · 31%</text>
+<rect class="solid" x="220" y="21" width="361.2" height="17" rx="2"/>
+<text class="soft" x="587.2" y="34">154 s · 31%</text>
 <text x="210" y="63" text-anchor="end">3D pattern passes (3)</text>
-<rect class="solid" x="220" y="51" width="351.6" height="17" rx="2"/>
-<text class="soft" x="577.6" y="64">150 s · 29%</text>
+<rect class="solid" x="220" y="51" width="355.8" height="17" rx="2"/>
+<text class="soft" x="581.8" y="64">151 s · 30%</text>
 <text x="210" y="93" text-anchor="end">Pattern stage</text>
-<rect class="solid" x="220" y="81" width="310.2" height="17" rx="2"/>
-<text class="soft" x="536.2" y="94">132 s · 26%</text>
+<rect class="solid" x="220" y="81" width="298.2" height="17" rx="2"/>
+<text class="soft" x="524.2" y="94">127 s · 25%</text>
 <text x="210" y="123" text-anchor="end">Slow tier (maze search)</text>
-<rect class="solid" x="220" y="111" width="95.6" height="17" rx="2"/>
-<text class="soft" x="321.6" y="124">41 s · 8%</text>
+<rect class="solid" x="220" y="111" width="79.2" height="17" rx="2"/>
+<text class="soft" x="305.2" y="124">34 s · 7%</text>
 <text x="210" y="153" text-anchor="end">Write solution</text>
-<rect class="solid" x="220" y="141" width="63.2" height="17" rx="2"/>
-<text class="soft" x="289.2" y="154">27 s · 5%</text>
+<rect class="solid" x="220" y="141" width="65.1" height="17" rx="2"/>
+<text class="soft" x="291.1" y="154">28 s · 6%</text>
 <text x="210" y="183" text-anchor="end">Read input</text>
-<rect class="solid" x="220" y="171" width="20.9" height="17" rx="2"/>
-<text class="soft" x="246.9" y="184">9 s · 2%</text>
+<rect class="solid" x="220" y="171" width="20.7" height="17" rx="2"/>
+<text class="soft" x="246.7" y="184">9 s · 2%</text>
 </svg></div>
-  <figcaption>mempool_cluster_ranking, 10.6 million nets, 8 threads on an Apple M4 Pro, total 526 s. The public
-  mempool_cluster, which needs far more maze search, takes about 810 s, a third of it in the slow tier.</figcaption></figure>
+  <figcaption>mempool_cluster_ranking, 10.6 million nets, 8 threads on an Apple M4 Pro, total 511 s. The public
+  mempool_cluster, which needs far more maze search, takes 658 s, a fifth of it in the slow tier.</figcaption></figure>
   <h3>How it came down</h3>
   <div class="scroll"><table>
     <thead><tr><th>step</th><th>what changed</th><th class="r">time</th><th>quality</th></tr></thead>
-    <tbody><tr><td class="mono">Part 114</td><td>Full ISPD 2008 pipeline, 1 core</td><td class="r">61,017 s</td><td>–</td></tr><tr><td class="mono">Part 115</td><td>Lean pipeline for the 2024 score (dropped: WL recovery, LA rounds 1+, region, refinement, fallback, tree rebuild)</td><td class="r">5,043 s</td><td>score −0.3%</td></tr><tr><td class="mono">Part 115</td><td>Exact cuts: incremental cost refresh, per-piece prefix sums, cached via terms, LA range cache</td><td class="r">1,599 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 116</td><td>8 threads on a commuting dependency graph: LA round 0, 3D passes, pattern-stage solve, Steiner trees, writer</td><td class="r">800 → 623 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 117</td><td>Fast readers, threaded writer, per-thread scratch, freeing data early</td><td class="r">553 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 118</td><td>Slow tier batched against snapshots (the 2008 scheme)</td><td class="r">526 s</td><td>score −0.0005%</td></tr></tbody>
+    <tbody><tr><td class="mono">Part 114</td><td>Full ISPD 2008 pipeline, 1 core</td><td class="r">61,017 s</td><td>–</td></tr><tr><td class="mono">Part 115</td><td>Lean pipeline for the 2024 score (dropped: WL recovery, LA rounds 1+, region, refinement, fallback, tree rebuild)</td><td class="r">5,043 s</td><td>score −0.3%</td></tr><tr><td class="mono">Part 115</td><td>Exact cuts: incremental cost refresh, per-piece prefix sums, cached via terms, LA range cache</td><td class="r">1,599 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 116</td><td>8 threads on a commuting dependency graph: LA round 0, 3D passes, pattern-stage solve, Steiner trees, writer</td><td class="r">800 → 623 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 117</td><td>Fast readers, threaded writer, per-thread scratch, freeing data early</td><td class="r">553 s</td><td>byte-identical</td></tr><tr><td class="mono">Part 118</td><td>Slow tier batched against snapshots (the 2008 scheme)</td><td class="r">526 s</td><td>score −0.0005%</td></tr><tr><td class="mono">Part 119</td><td>Slow-tier batches dealt round-robin over 64 × 64-GCell tiles, 256 a batch</td><td class="r">511 s</td><td>±0.02%</td></tr></tbody>
   </table></div>
   <p>Hardware is not most of the gap. Before any thread was added, the run had already dropped from 61,017 s to 1,599 s
   on one core. The work was the difference, not the 8 cores or the GPUs.</p>
@@ -198,7 +201,7 @@ td.mono { white-space: nowrap; }
   <div class="q">Its claims, set against what the measurements later showed</div>
   <div class="scroll"><table class="cmp">
     <thead><tr><th>first version said</th><th>what happened</th><th>verdict</th></tr></thead>
-    <tbody><tr><td>Fifteen of the 16.9 hours sit in two loops that keep running after routing is legal: layer assignment's later rounds and wirelength recovery.</td><td>Correct, and it was the biggest lever. The remedy was wrong: not stop rules but deleting both. Under the 2024 score, wirelength recovery made the score <i>worse</i> and the later rounds gained ±0.01%.</td><td><span class="pill ok">pointed the way</span></td></tr><tr><td>Stop rules alone: about 6–8 hours. With 10 threads on those loops: about 2–3 hours.</td><td>1,599 s on one core after the drops and the exact cuts; 526 s on 8 threads. The estimate was 15–50× too pessimistic because it assumed the stages were needed and only asked how long they should run.</td><td><span class="pill no">far off</span></td></tr><tr><td>Run the two loops on many cores, batched against a snapshot, without per-worker 0.9 GB copies.</td><td>The loops were deleted, so the threads went to the stages that remained. The no-copies principle held and went further: nets with disjoint regions commute, so the threaded stages are byte-identical with no copies at all. The batched scheme returned in Part 118 for the slow tier, where regions do overlap.</td><td><span class="pill warn">partly</span></td></tr><tr><td>Next in line: the pattern stage (55 min) and layer assignment round 0 (41 min, +10.8 GB).</td><td>Right order. Both were cut with exact changes: the pattern stage refreshed the whole cost grid after every batch, which was found only by reading the code, and layer assignment repeated work per net. Both are now threaded. Peak memory 23.9 GB.</td><td><span class="pill ok">pointed the way</span></td></tr><tr><td>The GPU becomes useful again once the loops are fast and the pattern stage is a larger share.</td><td>Still true and still pending. The pattern stage is now about a quarter of the run; layer assignment and the 3D passes need fixed-point scoring before a GPU path can match the CPU bit for bit.</td><td><span class="pill ok">still holds</span></td></tr><tr><td>Theory: the big wins came from widening a restricted search, so look for the next restriction.</td><td>True for quality on ISPD 2008, wrong lens for runtime on 2024. The contest winner restricts search further (L-shapes, one pass, no negotiation) and wins on time at equal quality. The gains here came from removing work the objective does not reward.</td><td><span class="pill no">missed</span></td></tr><tr><td>A duality-gap stop signal for every loop.</td><td>Not built. A cheaper version did the job: the per-stage report's score change, which showed straight away which stages earn nothing.</td><td><span class="pill warn">partly</span></td></tr><tr><td>Scaling laws across tile, group and cluster to predict tera_cluster.</td><td>Not done; still the right step before a 21 GB download.</td><td><span class="pill warn">open</span></td></tr></tbody>
+    <tbody><tr><td>Fifteen of the 16.9 hours sit in two loops that keep running after routing is legal: layer assignment's later rounds and wirelength recovery.</td><td>Correct, and it was the biggest lever. The remedy was wrong: not stop rules but deleting both. Under the 2024 score, wirelength recovery made the score <i>worse</i> and the later rounds gained ±0.01%.</td><td><span class="pill ok">pointed the way</span></td></tr><tr><td>Stop rules alone: about 6–8 hours. With 10 threads on those loops: about 2–3 hours.</td><td>1,599 s on one core after the drops and the exact cuts; 511 s on 8 threads. The estimate was 15–50× too pessimistic because it assumed the stages were needed and only asked how long they should run.</td><td><span class="pill no">far off</span></td></tr><tr><td>Run the two loops on many cores, batched against a snapshot, without per-worker 0.9 GB copies.</td><td>The loops were deleted, so the threads went to the stages that remained. The no-copies principle held and went further: nets with disjoint regions commute, so the threaded stages are byte-identical with no copies at all. The batched scheme returned in Part 118 for the slow tier, where regions do overlap.</td><td><span class="pill warn">partly</span></td></tr><tr><td>Next in line: the pattern stage (55 min) and layer assignment round 0 (41 min, +10.8 GB).</td><td>Right order. Both were cut with exact changes: the pattern stage refreshed the whole cost grid after every batch, which was found only by reading the code, and layer assignment repeated work per net. Both are now threaded. Peak memory 22.8 GB.</td><td><span class="pill ok">pointed the way</span></td></tr><tr><td>The GPU becomes useful again once the loops are fast and the pattern stage is a larger share.</td><td>Still true and still pending. The pattern stage is now about a quarter of the run; layer assignment and the 3D passes need fixed-point scoring before a GPU path can match the CPU bit for bit.</td><td><span class="pill ok">still holds</span></td></tr><tr><td>Theory: the big wins came from widening a restricted search, so look for the next restriction.</td><td>True for quality on ISPD 2008, wrong lens for runtime on 2024. The contest winner restricts search further (L-shapes, one pass, no negotiation) and wins on time at equal quality. The gains here came from removing work the objective does not reward.</td><td><span class="pill no">missed</span></td></tr><tr><td>A duality-gap stop signal for every loop.</td><td>Not built. A cheaper version did the job: the per-stage report's score change, which showed straight away which stages earn nothing.</td><td><span class="pill warn">partly</span></td></tr><tr><td>Scaling laws across tile, group and cluster to predict tera_cluster.</td><td>Not done; still the right step before a 21 GB download.</td><td><span class="pill warn">open</span></td></tr></tbody>
   </table></div>
   <h3>What it did not see</h3>
   <ul>
@@ -246,28 +249,82 @@ parallel_s = tasks / longest dependency chain, if regions commute
     <li><b>Part 115</b> set work to zero for stages that earned nothing, and cut redundant work inside the others.</li>
     <li><b>Part 116</b> used the fact that nets touching disjoint regions commute, for parallelism that cannot change the answer.</li>
     <li><b>Part 118</b> handled the one stage where regions overlap: speculate in batches and redo the conflicts.</li>
+    <li><b>Part 119</b> changed which nets share a batch. Consecutive nets sit together, so a batch landed on one hotspot
+    and 78% of the search work was thrown away on conflicts. Dealing nets round-robin over tiles cut conflicts from 20,740 to
+    2,784 and halved the public cluster's slow tier. The project notes said it from the start: the scheduler is not just a
+    work queue, because it decides which nets see the same prices.</li>
   </ul>
   <p>The quality model still matters. Its lesson, a restricted search caps quality, is why the router's score beats the
   winner. The two models just answer different questions.</p>
 </section>
 
 <section>
-  <h2>What is left</h2>
-  <div class="q">In the order the measurements suggest</div>
-  <ol class="recs">
-    <li><h4>The slow tier's search work</h4><p>On the public mempool_cluster it is still a third of the run. A trace ruled out
-    stragglers: in round 0, each batch's longest search adds up to 65 s of the 162 s, and the 8 workers are busy about 90% of the
-    time. The cost is the searching itself, 1,162 s of it, of which about 38% re-searches conflicts. Next: smaller batches for
-    fewer conflicts, and a 1-thread run to see whether memory contention inflates each search.</p></li>
-    <li><h4>Steiner trees for big nets</h4><p>Exact trees up to a pin limit, a FLUTE-like method above it.</p></li>
-    <li><h4>GPU for layer assignment and the 3D passes</h4><p>Together about half the run. Needs integer fixed-point scoring
-    so the GPU path matches the CPU bit for bit, as the pattern-stage kernel already does.</p></li>
-    <li><h4>Cloud and tera_cluster</h4><p>A cluster design now needs about 15 minutes and 23 GB, which fits a
-    larger GitHub runner. tera_cluster, about 5× bigger, needs a 21 GB download and a scaling check first.</p></li>
-  </ol>
+  <h2>Where there is still room</h2>
+  <div class="q">Time, wirelength and overflow, from the latest runs</div>
+
+  <h3>Time</h3>
+  <p>The hidden cluster takes 511 s against contest #1's 217 s. The threads are not yet earning their 8×: measured
+  stage by stage on the public mempool_cluster, at 1 thread and at 8, only layer assignment reaches 4×.</p>
+  <div class="scroll"><table class="room">
+    <thead><tr><th>stage</th><th class="r">1 thread</th><th class="r">8 threads</th><th class="r">speedup</th><th>where the room is</th></tr></thead>
+    <tbody>
+      <tr><td>Pattern stage</td><td class="r">358 s</td><td class="r">215 s</td><td class="r">1.7×</td><td>Each batch's
+      commit and cost refresh still run on one thread, and about half the solve time is building Steiner trees. A
+      FLUTE-style table for small nets, and the project's Metal kernel for the solve (already bit-identical to the CPU, 4.4×
+      per batch, but not wired into this router).</td></tr>
+      <tr><td>Layer assignment, round 0</td><td class="r">499 s</td><td class="r">126 s</td><td class="r">4.0×</td><td>The
+      best-threaded stage. Next is the GPU, which needs fixed-point scoring so the result stays identical.</td></tr>
+      <tr><td>3D pattern passes (3)</td><td class="r">353 s</td><td class="r">139 s</td><td class="r">2.5×</td><td>Same
+      scheduler as layer assignment, but half its speedup: worth a trace of the dependency chains. The third pass buys
+      0.03–0.04% of score for about 45 s, so dropping it is a quality-for-time option.</td></tr>
+      <tr><td>Slow tier</td><td class="r">401 s<br><small>one at a time</small></td><td class="r">137 s</td><td class="r">2.9×</td><td>Every
+      batch now waits for its longest search. A barrier-free version, where the next batch searches against a slightly
+      older snapshot, is the remaining idea.</td></tr>
+      <tr><td>Read and write</td><td class="r">84 s</td><td class="r">35 s</td><td class="r">2.4×</td><td>The winner
+      writes the solution while it is still routing; overlapping the write with the 3D passes would hide most of it.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="est"><b>Estimate, not measured:</b> if the pattern stage and the 3D passes threaded as well as layer
+  assignment does (4×), the public cluster would drop from 658 s to about 480 s. Closing the rest of the gap to the
+  winner's 217 s on the hidden cluster needs a GPU path for at least one of the three big stages.</p>
+  <p>On ISPD 2008 the time story has not started. The 2008 standard is still single-threaded at 1 to 27 hours on the
+  large benchmarks. Its time is in the slow tier and the region stage. The 2008 router's batched threading reached
+  2.4×, but it was not adopted because newblue1's residue grew. Part 119's finding, that unspread batches waste most of
+  their work on conflicts, is a reason to try it again with spreading.</p>
+
+  <h3>Wirelength</h3>
+  <ul>
+    <li><b>ISPD 2024.</b> On the hidden cluster our wire cost is 0.45% above contest #1's (1,191.2M against 1,185.9M), while
+    our via cost is 3.9% and our overflow cost 1.5% below. Two-pin and three-pin nets already route at exactly their
+    bounding box, and multi-pin trees came within 0.2–0.8% of an iterated 1-Steiner reference (Part 105). So better trees for
+    multi-pin nets can recover up to about half a percent of wire. The slow tier's detours are small (+0.08% wire on the
+    hidden cluster, +0.37% on the public one) and the 3D passes take them back. The winner spends less on wire and more on
+    vias, so the wire/via balance in layer assignment is worth one sweep.</li>
+    <li><b>ISPD 2008.</b> Within −0.05% to +2.3% of NTHU-Route 2.0 on the eleven zero-overflow benchmarks, more where
+    overflow remains (bigblue4 +9%). The 3D pattern pass shortens all sixteen by 0.13–0.45% and is waiting on one
+    confirmation run to join the 2008 standard.</li>
+  </ul>
+
+  <h3>Overflow</h3>
+  <ul>
+    <li><b>ISPD 2024.</b> Of the hidden cluster's 309M overflow cost, 234M is what every idle GCell pays under the
+    contest's formula, and no router can avoid it. GCells actually over capacity contribute only 3.3M. The other 71M comes from
+    busy but legal GCells, so the room is in spreading load more evenly across layers and neighbors: Z shapes and wider
+    detours in the 3D pass are the obvious next step. A certified lower bound per design, which v1 proposed and nobody has
+    built yet, would say how much of the 71M is reachable at all.</li>
+    <li><b>ISPD 2008.</b> Five benchmarks keep a residue: newblue1 38 (another router reached 0), newblue7 108 (at least 54
+    provably forced; best published 68), newblue4 144 (pin-bound, at 98.4% of its tightest cut), bigblue4 356 (best published
+    166), newblue3 38,916 (at least 26,264 provably forced; best published about 31,000). bigblue4 and newblue7 have the clearest
+    measured room. The project's record says the next real gain there comes from changing what the search can do, not
+    from another price formula.</li>
+  </ul>
+
+  <h3>Scale</h3>
+  <p>A cluster design now needs about 11 minutes and 23 GB, which fits a larger GitHub runner. tera_cluster, about 5× bigger,
+  needs a 21 GB download and a scaling check first.</p>
 </section>
 
-<footer>Figures from the runs recorded in HISTORY_COST_SWEEP.md, Parts 114–118. Every score is checked by the contest's official
+<footer>Figures from the runs recorded in HISTORY_COST_SWEEP.md, Parts 114–119. Every score is checked by the contest's official
 evaluator and the project's own verifier, which agree to every digit. The first version of this page is kept as a frozen copy
 in the repository (<span class="mono">recaps/speed-theory-v1-2026-10-08.html</span>). Results on every benchmark, with 3D congestion maps:
 <a href="https://claude.ai/artifact/BFvFpA5vEgBrNq6gcjvR1F">Global Router Recap</a>.</footer>
