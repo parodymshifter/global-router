@@ -9657,3 +9657,81 @@ The second Speed and Theory page (v1 vs now, and the analysis discipline)
 and recap 5, with 3D congestion maps of all 29 final runs (`g24_verify
 --grid out.grid [max_side [max|mean]]` writes the 2024 grid for grview;
 the 2008 grids are the existing ones), are published at the same links.
+
+## Part 119 -- where the batched slow tier's work went, and spreading batches over tiles
+
+Follow-ups to Part 118 (mempool_cluster, pd38route, 8 threads unless noted;
+all OK, evaluator = verifier):
+
+- **Batch 32** (p118g): 712 s vs 793 s at batch 64, same score
+  (1615279385). On all 13 designs (p119) within +-0.01% of batch 64.
+- **Batch 64 on 1 thread** (p118g): slow tier 1413 s vs the sequential
+  loop's 394 s. Per-search contention at 8 threads is only ~17% (round 0
+  task time 989 s on 1 thread, 1162 s on 8), so the batched tier did ~3x
+  the work: 67743 piece reroutes vs 24174 sequential.
+- **Expansion counts** (p119, new trace: `pops` per slow round, and for
+  batches `pops incl. carried`): round 0 sequential 1.23e9 in 241 s;
+  batch 64 committed 1.18e9 but **5.44e9 including carried searches**.
+  The routing work matched; ~78% of the expansions were thrown away on
+  collided searches, and the collided ones are the expensive hotspot nets
+  (~200K pops each vs ~22K for a committed search). Consecutive nets sit
+  together, so a batch of 64 lands on one hotspot: every member sees the
+  same overflow at the batch start, reroutes, and collides.
+
+`PD38ROUTE_SLOW_SPREAD=T` (new, `spreadByTile`): each round's escalated
+nets are dealt round-robin over T x T-GCell tiles (by route-box center),
+so a batch draws from many places and a hotspot's nets fall in
+successive batches. Self-tests: 1 = 4 threads with spreading; it changes
+the order (control); fewer carried on the fixture (543 vs 854); final
+overflow 1808 vs batch 1's 1816. Also `PD38ROUTE_SLOW_CONFLICT=0` (no
+conflict rule): nothing carried, 1 = 4 threads.
+
+| mempool_cluster | batch | tile | carried, round 0 | slow tier | total | score |
+|---|---|---|---|---|---|---|
+| sequential (pd37 loop) | - | - | - | 400.5 s | 944.7 s | 1615320900 |
+| batched | 64 | - | 20740 | 253.8 s | 809.4 s | 1615279912 |
+| batched | 32 | - | 13183 | 205.2 s | 712.4 s | 1615279385 |
+| spread | 32 | 64 | 340 | 222.6 s | 768.0 s | 1615305151 |
+| spread | 64 | 64 | 512 | 188.3 s | 705.1 s | 1615294109 |
+| spread | 64 | 128 | -- | 208.5 s | 749.6 s | 1615277729 |
+| spread | 128 | 32 | 1866 | 160.6 s | -- | 1615342085 |
+| spread | 128 | 64 | 1097 | 159.0 s | 680.3 s | 1615298494 |
+| **spread** | **256** | **64** | 2784 | **137.0 s** | **658 s** | 1615294385 |
+| spread | 512 | 64 | 10664 | 142.7 s | 671 s | 1615281691 |
+| spread | 1024 | 64 | 22941 | 196.7 s | 753 s | 1615230340 |
+| no conflict rule | 64 | - | 0 | diverged | killed | 2D overflow 3.4M -> 18M by round 4, escalated 54K -> 262K |
+| no conflict rule, spread | 64 | 64 | 0 | ~similar | 717.8 s | 1615326048 |
+
+(Total = stage-report total, or wall time where marked "s" from the
+summary.) Once spread, collisions are rare and batches wait on their
+longest search (round 0, batch 64: the batches' longest tasks sum to
+87.7 s of 88 s), so bigger batches pay until collisions return past 256.
+The conflict rule stays: without it, unspread batches stampede exactly as
+CLAUDE.md's escalation rule predicts, and with spreading it saves nothing.
+
+**Adopted: `PD38ROUTE_SLOW_BATCH=256 PD38ROUTE_SLOW_SPREAD=64` in
+`fast24.env`.** All 13 designs (p119g; 1 thread = 8 threads on
+nvdla_rank and bsg_chip_rank):
+
+| design | score | vs Part 118 (batch 64) | vs 3-pass sequential reference | time (Part 118) | slow tier (Part 118) |
+|---|---|---|---|---|---|
+| mempool_tile_rank | 13699356 | +0.0007% | -0.0068% | 2.3 s (2.3) | 0.0 s |
+| mempool_tile | 15106426 | -0.0001% | -0.0039% | 2.7 s (2.6) | 0.0 s |
+| ariane133_68 | 19682122 | -0.0067% | -0.0662% | 2.8 s (2.7) | 0.1 s |
+| ariane133_51 | 22386812 | -0.0012% | -0.0110% | 2.8 s (2.8) | 0.0 s |
+| ariane_68_rank | 22499080 | -0.0097% | -0.0232% | 4.0 s (3.9) | 0.1 s |
+| nvdla | 48026876 | +0.0014% | -0.0403% | 5.7 s (5.7) | 0.3 s (0.4) |
+| nvdla_rank | 42949425 | +0.0143% | -0.0243% | 6.0 s (5.8) | 0.3 s (0.5) |
+| bsg_chip_rank | 109400633 | +0.0165% | -0.0190% | 14.8 s (14.7) | 0.3 s |
+| bsg_chip | 111835518 | +0.0157% | -0.0077% | 17.6 s (16.8) | 0.6 s (0.7) |
+| mempool_group_rank | 381375035 | +0.0109% | -0.0004% | 68.7 s (63.4) | 1.6 s (1.4) |
+| mempool_group | 396208769 | +0.0109% | +0.0004% | 74.5 s (72.5) | 3.9 s (3.7) |
+| mempool_cluster_ranking | 1771988786 | -0.0034% | -0.0039% | **511.2 s** (526.3) | 33.7 s (40.7) |
+| mempool_cluster | 1615294385 | +0.0009% | -0.0016% | **658.2 s** (809.5) | **137.0 s** (268.2) |
+
+Scores move +-0.02% (noise); the public cluster's slow tier halves.
+What remains in it is straggler-bound: a barrier per batch waits on its
+longest search. A barrier-free scheme (the next batch searching against
+a slightly older snapshot) is the next step if the slow tier matters
+again; at 137 s it is now ~20% of the public cluster's run and ~7% of
+the hidden one's.

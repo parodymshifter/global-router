@@ -32,6 +32,12 @@
 //     a batch always commits. Routes depend on B, not on the thread count.
 //     PD38ROUTE_SLOW_LPT=1 (default): workers take a batch's nets biggest
 //     search box first (the same routes; 0 = net order).
+//     PD38ROUTE_SLOW_SPREAD=T (default 0 = net order): the round's nets are
+//     ordered round-robin over T x T-GCell tiles (spreadByTile), so a batch
+//     draws from many places instead of one hotspot.
+//     PD38ROUTE_SLOW_CONFLICT=0 (default 1): no conflict rule -- every net
+//     commits as searched against its batch-start snapshot (nothing is
+//     carried); present-demand history polices what that lets through.
 //
 // RESULTS: see HISTORY_COST_SWEEP.md Part 118.
 //
@@ -4875,6 +4881,9 @@ int gSlowBatch = 0;              // PD38ROUTE_SLOW_BATCH
 bool gSlowBatchCheck = false;    // self-test: replicas checked against the live state after every batch
 long long gSlowBatchCarried = 0; // self-test: carried nets, run-wide
 bool gSlowBatchLpt = true;       // PD38ROUTE_SLOW_LPT (1): biggest searches first within a batch
+int gSlowSpread = 0;             // PD38ROUTE_SLOW_SPREAD: tile size for spreading batches (0 = net order)
+bool gSlowConflict = true;       // PD38ROUTE_SLOW_CONFLICT (1): the "fresh" conflict rule; 0 commits every net as searched
+
 
 // pd38route: PD38ROUTE_SLOW_BATCH -- pd27route's batched executor (carry +
 // "fresh" conflicts), adapted: replicas copy usage only (prices are shared
@@ -4886,6 +4895,7 @@ struct SlowBatchReport {
   long long batches = 0, committed = 0, unchanged = 0, carried = 0;
   double searchS = 0, commitS = 0, syncS = 0; // trace
   double taskS = 0, longestS = 0, topS = 0;      // trace: all tasks, each batch's longest, the run's longest
+  long long popsAll = 0;                         // trace: search pops of every task, carried ones included
 };
 
 void addCharge2D(const RoutingGrid &g, Usage &u, const ChargeRecord &c) {
@@ -4991,6 +5001,8 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
     br.searchS += std::chrono::duration<double>(tC0 - tS0).count();
     {
       double mx = 0;
+      for (long long pp : pops)
+        br.popsAll += pp;
       for (double d : dur) {
         br.taskS += d;
         mx = std::max(mx, d);
@@ -5018,6 +5030,8 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
         undoCharge(g, live, c);
       bool conflict = false;
       for (const ChargeRecord &c : res[k].charges) {
+        if (!gSlowConflict)
+          break;
         if (c.horizontal)
           for (int x = c.a; x < c.b && !conflict; ++x) {
             size_t e = g.hIndex(x, c.cross, c.layer);
@@ -5240,6 +5254,40 @@ NetBox netBoxOf(const RoutingGrid &g, const RoutedNet &rn) {
     return NetBox{0, 0, g.nx - 1, g.ny - 1}; // nothing to place: the whole grid, conservatively
   return NetBox{std::max(0, b.x0 - 1), std::max(0, b.y0 - 1), std::min(g.nx - 1, b.x1 + 1),
                 std::min(g.ny - 1, b.y1 + 1)};
+}
+
+// pd38route: PD38ROUTE_SLOW_SPREAD. The escalated nets, reordered so that
+// consecutive positions come from different tiles of `tile` x `tile`
+// GCells (by route-box center): round-robin over the non-empty tiles, in
+// order of each tile's first net, each tile's nets in their own order.
+// Consecutive nets tend to sit together; a batch of them lands on one
+// hotspot, every member sees the same overflow at the batch start and
+// reroutes, and most collide. Spread out, a batch's members rarely
+// overlap, and a hotspot's nets fall in successive batches, each seeing
+// the clearing the earlier ones did.
+std::vector<size_t> spreadByTile(const RoutingGrid &g, const std::vector<RoutedNet> &nets,
+                                 const std::vector<size_t> &cand, int tile) {
+  if (tile <= 0 || cand.size() < 2)
+    return cand;
+  const int tx = (g.nx + tile - 1) / tile;
+  std::vector<int> slotOf(static_cast<size_t>(tx) * ((g.ny + tile - 1) / tile), -1);
+  std::vector<std::vector<size_t>> lists;
+  for (size_t i : cand) {
+    NetBox b = netBoxOf(g, nets[i]);
+    size_t key = static_cast<size_t>((b.y0 + b.y1) / 2 / tile) * tx + (b.x0 + b.x1) / 2 / tile;
+    if (slotOf[key] < 0) {
+      slotOf[key] = static_cast<int>(lists.size());
+      lists.emplace_back();
+    }
+    lists[slotOf[key]].push_back(i);
+  }
+  std::vector<size_t> out;
+  out.reserve(cand.size());
+  for (size_t r = 0; out.size() < cand.size(); ++r)
+    for (const auto &l : lists)
+      if (r < l.size())
+        out.push_back(l[r]);
+  return out;
 }
 
 // Batches of positions 0..boxes.size()-1, taken in order: each position goes
@@ -6049,6 +6097,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   int slowReclaims = 0;         // pd18route
   for (int round = 0; round < maxSlowRounds; ++round) {
     int accepted = 0, rejected = 0, keptWorse = 0;
+    const long long popsRound0 = gSearchPops; // pd38route: trace
     // This file's own mechanism: search-box margin bookkeeping for trace.
     long long marginSum = 0;
     int marginCount = 0, atCap = 0;
@@ -6074,6 +6123,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       for (size_t i = 0; i < nets.size(); ++i)
         if (!nets[i].giant && nets[i].escalated)
           cand.push_back(i);
+      if (gSlowSpread > 0)
+        cand = spreadByTile(g, nets, cand, gSlowSpread);
       struct BatchOut {
         int accepted = 0, rejected = 0, keptWorse = 0, margin = -1;
         bool ran = false;
@@ -6394,6 +6445,11 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       if (marginCount > 0)
         std::cerr << " box margin mean " << (marginSum / marginCount) << ", at cap "
                   << atCap << " of " << marginCount;
+      std::cerr << ", pops " << gSearchPops - popsRound0 // pd38route: committed searches' expansions
+                << ", round " << std::chrono::duration<double>(std::chrono::steady_clock::now() - tRound0).count()
+                << " s";
+      if (gSlowBatch > 0) // pd38route
+        std::cerr << ", pops incl. carried " << sbr.popsAll;
       if (gSlowBatch > 0) // pd38route
         std::cerr << ", batches " << sbr.batches << ": committed " << sbr.committed << ", unchanged "
                   << sbr.unchanged << ", carried " << sbr.carried << "; " << tDag << " s (search " << sbr.searchS
@@ -16164,6 +16220,30 @@ void testSlowDagSameAtAnyThreadCount() {
   auto c4n = run(4, ob4n, eb4n, 16);
   gSlowBatchLpt = true;
   check(sameRoutes(c4, c4n) && ob4 == ob4n, "batched slow tier: biggest-first work order = plain order, route for route");
+  gSlowSpread = 8;
+  long long sp1 = 0, sp4 = 0;
+  int esp1 = 0, esp4 = 0;
+  gSlowBatchCarried = 0;
+  auto p1 = run(1, sp1, esp1, 16);
+  long long carriedSpread = gSlowBatchCarried;
+  auto p4 = run(4, sp4, esp4, 16);
+  gSlowSpread = 0;
+  gSlowConflict = false;
+  long long nc1 = 0, nc4 = 0;
+  int enc1 = 0, enc4 = 0;
+  gSlowBatchCarried = 0;
+  auto q1 = run(1, nc1, enc1, 16);
+  long long carriedNone = gSlowBatchCarried;
+  auto q4 = run(4, nc4, enc4, 16);
+  gSlowConflict = true;
+  check(carriedNone == 0 && sameRoutes(q1, q4) && nc1 == nc4,
+        "batched slow tier, no conflict rule: nothing carried, 4 threads = 1 thread");
+  check(sameRoutes(p1, p4) && sp1 == sp4, "batched slow tier, spread over 8x8 tiles: 4 threads = 1 thread, route for route");
+  check(!sameRoutes(p1, c1), "batched slow tier: spreading changes the order (control)");
+  check(carriedSpread < carried1, "batched slow tier: spread batches collide less (" + std::to_string(carriedSpread) +
+                                      " carried vs " + std::to_string(carried1) + ")");
+  check(sp1 <= std::max(os1 * 3 / 2, os1 + 10), "batched slow tier, spread: ends near batch 1 (2D overflow " +
+                                                    std::to_string(sp1) + " vs " + std::to_string(os1) + ")");
   check(carried1 > 0, "batched slow tier: the conflict rule carried nets to the next batch (" +
                           std::to_string(carried1) + ")");
   check(sameRoutes(c1, c4) && ob1 == ob4 && eb1 == eb4,
@@ -16665,6 +16745,19 @@ int main(int argc, char **argv) {
     if (!*v || *end || b < 0 || b > 1000000)
       fail(std::string("PD38ROUTE_SLOW_BATCH must be 0..1000000 (got '") + v + "')");
     gSlowBatch = static_cast<int>(b);
+  }
+  if (const char *v = std::getenv("PD38ROUTE_SLOW_SPREAD"); v) {
+    char *end = nullptr;
+    long t = std::strtol(v, &end, 10);
+    if (!*v || *end || t < 0 || t > 100000)
+      fail(std::string("PD38ROUTE_SLOW_SPREAD must be 0..100000 GCells (got '") + v + "')");
+    gSlowSpread = static_cast<int>(t);
+  }
+  if (const char *v = std::getenv("PD38ROUTE_SLOW_CONFLICT"); v) {
+    std::string sv(v);
+    if (sv != "0" && sv != "1")
+      fail("PD38ROUTE_SLOW_CONFLICT must be 0 or 1 (got '" + sv + "')");
+    gSlowConflict = sv == "1";
   }
   if (const char *v = std::getenv("PD38ROUTE_SLOW_LPT"); v) {
     std::string sv(v);

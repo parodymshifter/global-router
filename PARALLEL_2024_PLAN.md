@@ -88,3 +88,10 @@ better on every design; mempool_cluster_ranking 526 s, mempool_cluster
 there (longest chain 19176 of 54283). Remaining: the slow tier's search
 work (not stragglers; p118g measures conflicts and contention), Steiner
 trees for big nets, and GPU paths with fixed-point scoring.
+
+## Status (2026-10-10, Part 119)
+
+Batches spread round-robin over 64 x 64 tiles, 256 a batch: wasted
+(collided) search work gone, mempool_cluster's slow tier 268 -> 137 s,
+mempool_cluster_ranking 511 s overall. The slow tier is now bound by
+each batch's longest search; a barrier-free variant is the remaining idea.

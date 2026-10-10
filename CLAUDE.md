@@ -228,6 +228,12 @@ mempool_cluster_ranking takes 526 s (Part 114: 61017 s). An exact
 dependency graph could not thread this stage: its hard nets crowd into
 the same hotspots (longest chain 19176 of 54283 nets). Measure a parallel
 scheme's ceiling before building on it.
+Part 119 then dealt each round's nets round-robin over 64 x 64-GCell
+tiles in batches of 256 (`PD38ROUTE_SLOW_SPREAD=64`, also in
+`fast24.env`): consecutive nets sit together, so unspread batches piled
+onto one hotspot and threw away 78% of their search work on collisions.
+mempool_cluster 809 -> 658 s, mempool_cluster_ranking 511 s; scores
+within +-0.02%.
 
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
