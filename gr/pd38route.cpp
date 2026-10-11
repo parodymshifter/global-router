@@ -1009,7 +1009,7 @@
 // `nv`, generation 3 -- a direct refinement (widening which nets
 // participate in the existing fast tier's own per-leg price negotiation),
 // not a new core algorithm, per CLAUDE.md's naming convention. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: a per-net ranking diagnostic (`diag7`, throwaway, not part of the
 // repo, complementing `diag5`'s pin-count buckets and `diag6`'s
@@ -2248,12 +2248,17 @@ struct Seg {
 };
 struct ChargeRecord {
   bool horizontal;
+  // pd38route: the byte the compiler would leave as padding after the bool,
+  // named and always zero, so a record has no uninitialised bytes (NetSpill
+  // writes records whole; Valgrind flagged the padding). Same size and layout.
+  uint8_t pad = 0;
   int16_t cross, a, b, layer, amount;
   ChargeRecord() = default;
   ChargeRecord(bool h, int c, int aa, int bb, int l, int am)
       : horizontal(h), cross(static_cast<int16_t>(c)), a(static_cast<int16_t>(aa)), b(static_cast<int16_t>(bb)),
         layer(static_cast<int16_t>(l)), amount(static_cast<int16_t>(am)) {}
 };
+static_assert(sizeof(ChargeRecord) == 12, "ChargeRecord: a bool, a zero byte and five int16 -- no hidden padding");
 
 // Fails loudly on a design whose tile coordinates, layers or per-net charge
 // amounts (width + spacing) would not fit Seg's and ChargeRecord's 16 bits.
@@ -16306,6 +16311,20 @@ void testNetDeltaMatchesAFullCopy() {
 
 // pd35route (memory): NetSpill round trip -- pointers (as indices), flags,
 // margin and all four vectors.
+// pd38route: a ChargeRecord built over dirty memory, by either constructor,
+// has every byte set -- the one after the bool is zero -- so writing whole
+// records (NetSpill) writes no uninitialised bytes.
+void testChargeRecordHasNoUninitialisedBytes() {
+  alignas(ChargeRecord) unsigned char buf[sizeof(ChargeRecord)];
+  std::memset(buf, 0xAB, sizeof buf);
+  ChargeRecord *c = new (buf) ChargeRecord(true, 1, 2, 3, 4, 5);
+  bool ok = buf[1] == 0 && c->horizontal && c->cross == 1 && c->amount == 5;
+  std::memset(buf, 0xAB, sizeof buf);
+  new (buf) ChargeRecord();
+  ok = ok && buf[1] == 0;
+  check(ok, "ChargeRecord: the byte after the bool is zero whichever constructor runs, even over dirty memory");
+}
+
 void testNetSpillRoundTrip() {
   const char *gr = "grid 4 3 2\nvertical capacity 0 4\nhorizontal capacity 4 0\nminimum width 1 1\n"
                    "minimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\nnum net 2\n"
@@ -17265,6 +17284,7 @@ int run() {
   testPattern3D2008RemovesADetour();
   testOpStacksIsASparseLifo();
   testNetDeltaMatchesAFullCopy();
+  testChargeRecordHasNoUninitialisedBytes();
   testNetSpillRoundTrip();
   testLowMemFallbackMatches();
   testScoreCapTableIsExact();

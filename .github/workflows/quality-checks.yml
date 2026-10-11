@@ -173,7 +173,7 @@ jobs:
         run: |
           set +e
           valgrind -q --error-exitcode=9 --track-origins=yes \
-            --suppressions=../perf/valgrind.supp "./$ROUTER.vg" --selftest > ../valgrind.log 2>&1
+            "./$ROUTER.vg" --selftest > ../valgrind.log 2>&1
           rc=$?
           set -e
           echo "exit status $rc (9 means Valgrind found a problem; 1 alone is a failing self-test)"
