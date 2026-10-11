@@ -9827,3 +9827,12 @@ search and conflicts), each channel scaled once per sequence (99.5th percentile)
 `recaps/build_replay.py` builds the player page with view tabs. bsg_chip_rank tier 2: byte-identical
 to Part 119. Replays: https://claude.ai/artifact/GZGTDddhMTt73SZNhxXF7R (bsg_chip_rank, four views),
 https://claude.ai/artifact/18bhEEbP8XpDV17dNJL8dK (mempool_cluster).
+
+**2026-10-11: history rewritten to drop the ISPD 2008 evaluator.** `eval2008.pl` (IBM/Cadence, no
+license) was removed from every commit with `git filter-branch` (paths `eval2008/` and
+`gr/eval2008/`; empty commits kept, so the 355 commits map one to one) and force-pushed; it is now
+fetched by `gr/fetch_eval2008.sh`. Every commit hash changed, so hashes quoted in earlier Parts
+refer to the old history: the old-to-new map is `~/Code/GlobalRouterBackups/commit-map-2026-10-11.txt`
+(old hash, new hash per line), and the old history is kept in the same folder as a bundle and a
+mirror clone. Verified: each rewritten commit differs from its original only by the evaluator
+files, and a fresh clone of GitHub holds no copy of it by path or content.
