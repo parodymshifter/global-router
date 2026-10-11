@@ -681,6 +681,19 @@ agent knew from scratch just to keep going. Two rules follow from that:
   sweeps in groups of 3 or fewer, even when hardware headroom would allow
   more.
 
+## Automatic checks (2026-10-11)
+
+- `QUALITY_CHECKS.md` explains the automatic checks: static analysis,
+  sanitizers, a nightly Valgrind run and a timing canary
+  (`.github/workflows/quality-checks.yml`), and GitHub's CodeQL scanner
+  (`.github/workflows/codeql.yml`), next to the per-router build and
+  self-test matrix (`build-and-validate.yml`).
+- Do not use `[skip ci]` on commits that change routing code.
+- When a new router generation (like `pd39route`) becomes current, change
+  `ROUTER` at the top of `quality-checks.yml` and the file names in
+  `codeql.yml`.
+- Run `./<router> --selftest` on the Mac before each commit.
+
 ## Memory tracking
 
 Every run recorded as a measured result -- not just overflow, max
