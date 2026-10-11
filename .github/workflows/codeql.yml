@@ -1,0 +1,38 @@
+name: CodeQL
+
+# GitHub's code scanner. It is free for public repositories and needs a paid
+# GitHub Advanced Security plan for private ones, so the job skips itself while
+# the repository is private and starts working the day it goes public.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 7 * * 1"
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: CodeQL (C++)
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          build-mode: manual
+      - name: Build the current router and the verifier
+        working-directory: gr
+        run: |
+          g++ -std=c++17 -O0 -o /tmp/pd38route pd38route.cpp
+          g++ -std=c++17 -O0 -o /tmp/gr_verify gr_verify.cpp
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:c-cpp"

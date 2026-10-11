@@ -1,0 +1,226 @@
+name: Quality checks
+
+# Bug finding and speed tracking for the current router. The older workflow,
+# build-and-validate.yml, builds and self-tests every router generation; this
+# one goes deeper on the one being developed. To move to a newer router, change
+# ROUTER below.
+#
+# Scheduled runs happen nightly on main and ignore "[skip ci]" in commit
+# messages, so work committed with that tag still gets checked within a day.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+env:
+  ROUTER: pd38route
+  # Set to "true" once the static-analysis findings are cleaned up, to make
+  # cppcheck errors fail the job. Until then the job reports and never fails.
+  STATIC_GATE: "false"
+  # Set to "true" to fail the timing job when CPU time or memory grows past the
+  # limits in perf/compare.py. Shared runners vary in speed, so start with false
+  # and watch a few runs first.
+  PERF_GATE: "false"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-analysis:
+    name: Static analysis (clang-tidy, cppcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy cppcheck
+
+      - name: clang-tidy
+        working-directory: gr
+        shell: bash
+        run: |
+          for src in "$ROUTER.cpp" gr_verify.cpp; do
+            clang-tidy "$src" -quiet \
+              -checks='-*,bugprone-*,-bugprone-easily-swappable-parameters,-bugprone-narrowing-conversions,clang-analyzer-*,performance-*,-performance-avoid-endl' \
+              -- -std=c++17 > "../tidy-${src%.cpp}.txt" 2>&1 || true
+          done
+
+      - name: cppcheck
+        shell: bash
+        run: |
+          cppcheck --enable=warning,performance,portability --std=c++17 --max-configs=1 \
+            --inline-suppr --suppress=missingIncludeSystem \
+            --template='{file}:{line}: {severity}: {message} [{id}]' \
+            "gr/$ROUTER.cpp" gr/gr_verify.cpp 2> cppcheck.txt || true
+
+      - name: Summarize
+        shell: bash
+        run: |
+          {
+            echo "### Static analysis"
+            for f in tidy-*.txt; do
+              echo "- \`$f\`: $(grep -c 'warning:' "$f" || true) warnings"
+            done
+            echo "- cppcheck: $(grep -c -E ': (warning|performance|portability):' cppcheck.txt || true) findings, $(grep -c ': error:' cppcheck.txt || true) errors"
+            echo
+            echo "Full reports are in the \`static-analysis\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$STATIC_GATE" = "true" ] && grep -q ': error:' cppcheck.txt; then
+            echo "cppcheck reported errors:"; grep ': error:' cppcheck.txt
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: static-analysis
+          path: |
+            tidy-*.txt
+            cppcheck.txt
+
+  sanitizers:
+    name: Sanitizers (AddressSanitizer + UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with sanitizers
+        working-directory: gr
+        run: |
+          flags="-std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+          g++ $flags -o "$ROUTER.san" "$ROUTER.cpp"
+          g++ $flags -o gr_verify.san gr_verify.cpp
+
+      - name: Run self-tests under sanitizers
+        working-directory: gr
+        shell: bash
+        run: |
+          export UBSAN_OPTIONS=print_stacktrace=1
+          status=0
+          for t in "$ROUTER" gr_verify; do
+            set +e
+            "./$t.san" --selftest > "../san-selftest-$t.log" 2>&1
+            rc=$?
+            set -e
+            echo "$t --selftest exited $rc"
+            # A failing self-test is reported by build-and-validate.yml. This job
+            # fails only when a sanitizer reports a memory or undefined-behaviour bug.
+            if grep -q -E 'ERROR: (Address|Leak)Sanitizer|runtime error:' "../san-selftest-$t.log"; then
+              grep -n -E -B2 -A12 'ERROR: (Address|Leak)Sanitizer|runtime error:' "../san-selftest-$t.log" | head -80
+              status=1
+            fi
+          done
+          exit $status
+
+      - name: Route the synthetic design under sanitizers
+        shell: bash
+        run: |
+          python3 perf/gen_synth.py > synth.gr
+          set -a; . gr/standard.env; set +a
+          export VROUTE_FAST_ROUNDS=4 VROUTE_SLOW_ROUNDS=4 UBSAN_OPTIONS=print_stacktrace=1
+          set +e
+          "gr/$ROUTER.san" synth.gr synth.route > san-route.log 2>&1
+          rc=$?
+          set -e
+          echo "router exited $rc"
+          if grep -q -E 'ERROR: (Address|Leak)Sanitizer|runtime error:' san-route.log; then
+            grep -n -E -B2 -A12 'ERROR: (Address|Leak)Sanitizer|runtime error:' san-route.log | head -80
+            exit 1
+          fi
+          [ "$rc" = "0" ] || { tail -20 san-route.log; exit 1; }
+          gr/gr_verify.san synth.gr synth.route | tee verify.txt
+          for k in 'malformed segments' 'out of bounds' 'disconnected nets' 'incomplete nets' 'unrouted nets'; do
+            v=$(grep "$k" verify.txt | awk '{print $NF}')
+            [ "$v" = "0" ] || { echo "illegal output: $k = $v"; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sanitizer-logs
+          path: |
+            san-selftest-*.log
+            san-route.log
+
+  valgrind:
+    name: Valgrind (nightly)
+    # Valgrind is about 30 times slower than a normal run, so it runs on the
+    # nightly schedule and on request, not on every push.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Build
+        working-directory: gr
+        run: g++ -std=c++17 -O1 -g -o "$ROUTER.vg" "$ROUTER.cpp"
+      - name: Self-test under Valgrind
+        working-directory: gr
+        shell: bash
+        run: |
+          set +e
+          valgrind -q --error-exitcode=9 --track-origins=yes \
+            --suppressions=../perf/valgrind.supp "./$ROUTER.vg" --selftest > ../valgrind.log 2>&1
+          rc=$?
+          set -e
+          echo "exit status $rc (9 means Valgrind found a problem; 1 alone is a failing self-test)"
+          grep -n -E '^==[0-9]+== ' ../valgrind.log | head -60 || true
+          [ "$rc" != "9" ]
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: valgrind-log
+          path: valgrind.log
+
+  perf:
+    name: Timing and quality canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the last good result from main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p prev
+          run_id=$(gh run list --workflow quality-checks.yml --branch main --status success \
+                     --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+          if [ -n "$run_id" ]; then
+            gh run download "$run_id" -n perf-results -D prev 2>/dev/null || echo "no earlier perf result found"
+          fi
+
+      - name: Build, route the synthetic design three times, verify
+        run: python3 perf/run_perf.py --router "$ROUTER" --out perf/out --repeat 3
+
+      - name: Compare with the last good result
+        shell: bash
+        run: |
+          args=""
+          [ "$PERF_GATE" = "true" ] && args="--fail-on-regression"
+          old=""
+          [ -f prev/results.json ] && old=prev/results.json
+          python3 perf/compare.py perf/out/results.json $old $args | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results
+          path: |
+            perf/out/results.json
+            perf/out/verify*.txt
+            perf/out/run*.log
