@@ -7,7 +7,7 @@
 // nv2route.cpp's own header for everything downstream of the 2D stage.
 // Species `mt`, generation 2 -- a direct refinement (a smarter
 // provisionality rule at one promotion point), not a new core algorithm.
-// Scoped in /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// Scoped in ~/.claude/plans/async-shimmying-pancake.md.
 //
 // mt1route's own real result: a clean, unanimous regression on all three
 // benchmarks, despite the core mechanical hypothesis being *confirmed

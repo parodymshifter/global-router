@@ -8,7 +8,7 @@
 // (CLAUDE.md's "Router naming convention" addendum) -- a refinement of
 // the same 2D-collapsed pricing loop, not a different core algorithm, so
 // the letters stay the same and only the generation number advances.
-// Scoped in /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// Scoped in ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: fr1route's 2D collapse cut overflow 10-35% versus full 3D routing
 // but stayed far short of the zero contest winners reach on adaptec1/

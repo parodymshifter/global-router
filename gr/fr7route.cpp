@@ -10,7 +10,7 @@
 // naming convention" addendum) -- still the same pipeline stage (layer
 // assignment), generation 3 specifically: a direct fix to fr6route's own
 // DP, not a new core algorithm. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: fr6route's via-cost/capacity-aware DP was a clean, unanimous
 // regression on real overflow (HISTORY_COST_SWEEP.md Part 26), and a

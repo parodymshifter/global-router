@@ -2205,7 +2205,7 @@ own finding (every layer at a hot tile simultaneously over capacity,
 cost-hint approximation of the same idea and landed as a wash twice; this
 actually collapses the search space instead of nudging its cost.
 
-Full design in `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`,
+Full design in `~/.claude/plans/async-shimmying-pancake.md`,
 including the explicit topology decision (kept vroute's MST + MSMV
 unchanged, no RSMT, to isolate the 2D-first variable) and the
 generation-1/generation-2 split (2D routing now; capacity-aware DP layer
@@ -3519,7 +3519,7 @@ for nets with at most 8 unique pins; larger nets fall back to
 any degree>=3 branch point. The cap was picked with no empirical sweep
 ("the DP gets expensive past here," never measured), and no data existed
 on how much this actually costs in real overflow. Scoped in
-`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+`~/.claude/plans/async-shimmying-pancake.md`.
 
 **Stage 1 diagnostic** (`diag5`, throwaway, not part of the repo, matching
 the `diag4` precedent from Part 30/31): built a fair-share overflow
@@ -3619,7 +3619,7 @@ Part 32 closed the RSMT-cap direction as negative. The user picked the
 other, stronger-looking open item: the 2D pricing loop's own convergence
 gap, since 84-98% of nv2route's remaining real overflow tracks that
 loop's own unresolved "2D overflow" number almost exactly (Part 30/31).
-Scoped in `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+Scoped in `~/.claude/plans/async-shimmying-pancake.md`.
 
 **Diagnostic first** (`VROUTE_TRACE=1 FR1ROUTE_TWOD_ONLY=1`, zero new
 code -- both env vars already existed): read the loop's own round-by-round
@@ -3731,7 +3731,7 @@ early-processed nets systematically bias the price state later-processed
 nets react to. `negotiateWire` mutates `prices` immediately per committed
 leg, not once per round, so this mechanism is real and direct, not
 speculative. Scoped in
-`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+`~/.claude/plans/async-shimmying-pancake.md`.
 
 **Prior art found while scoping this**: net ordering was already tested
 once, in isolation, with a real positive result -- `gr/xroute.cpp` (Part
@@ -3814,7 +3814,7 @@ supervised per net... revert on the spot if it made things worse"). The
 slow tier and `relaxedCleanup` both already implement exactly this
 supervision, proven and working -- the fix looked like a structurally
 trivial copy-adapt of existing, battle-tested code. Scoped in
-`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+`~/.claude/plans/async-shimmying-pancake.md`.
 
 **Stage 1 -- scratch probe and a real, self-correcting decisive test.**
 A throwaway scratch copy (`VROUTE_FAST_SUPERVISED=0|1`, default
@@ -3907,7 +3907,7 @@ tolerance for a fix is far higher than anywhere else in this codebase.
 `diag7` reads the final `.route` output, so this is real, scored
 overflow (self-check reconciled exactly with `gr_verify`'s own
 `totalOverflow`), not `route()`'s own internal 2D metric. Scoped in
-`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`, run in
+`~/.claude/plans/async-shimmying-pancake.md`, run in
 parallel with Part 35's own investigation per explicit user direction.
 
 **Root cause, confirmed by direct code reading:** giant nets are routed
@@ -4004,7 +4004,7 @@ option if 1-2 don't close the remaining gap.
 Part 36 scoped two immediate follow-ups to nv3route's own giant-fast-tier
 win: (1) slow-tier (MSMV) eligibility for giant nets, (2) a
 congestion-aware corner choice inside `routeGiantNet`'s own initial
-commit. Scoped in `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+commit. Scoped in `~/.claude/plans/async-shimmying-pancake.md`.
 
 **#1, MSMV eligibility -- a real, disclosed risk, tested carefully, and a
 clear negative.** Direct code reading found `multiSourceDijkstra`'s own
@@ -4106,7 +4106,7 @@ unlike a monolithic giant net. Since nothing downstream of `route()`
 tolerates more than one output block per net name, all pieces plus the
 backbone are merged into a single `RoutedNet` immediately before
 `route()` returns. Scoped in
-`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+`~/.claude/plans/async-shimmying-pancake.md`.
 
 **Self-tests**: 58 functions, 278 checks, all passing, including two
 decisive fixtures built specifically for this mechanism -- one proving a
@@ -4202,7 +4202,7 @@ that oscillation but costs the early win itself (round 1 only reaches
 supervised from round N onward -- combines both diagnoses directly rather
 than guessing blindly: keep the early win, then stabilize before it
 oscillates away. Scoped in
-`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+`~/.claude/plans/async-shimmying-pancake.md`.
 
 **A fast-tier-only trace (N=2, `FR1ROUTE_TWOD_ONLY=1`, 25 rounds) looked
 dramatic**: round 1 reaches 248800 (matching unsupervised exactly), then
@@ -4416,7 +4416,7 @@ of nets touching more than one overflowed edge are already escalated to
 slow-tier MSMV and still overflow; and the median overflow-touching net
 shows essentially zero detour. User-proposed mechanism, refined over
 several rounds of discussion (full design in
-`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`): a discrete
+`~/.claude/plans/async-shimmying-pancake.md`): a discrete
 "jolt" -- a significant, threshold-triggered multiplicative cost penalty
 on currently-overflowed edges, distinct from the existing smooth `hist`
 term -- plus a smaller "halo" penalty on grid-adjacent (not themselves
@@ -4779,7 +4779,7 @@ tile-adjacency union-find), a Gompertz-decaying base wirelength cost, and
 a two-stage overflow-prediction pricing term (folding in iteration count
 and how long an edge has stayed overflowed, not just its current usage/
 capacity ratio -- exact formulas in `gr/nv8route.cpp`'s own header and
-`/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`).
+`~/.claude/plans/async-shimmying-pancake.md`).
 
 Built as `gr/nv8route.cpp`, forked from `gr/nv7route.cpp` (inheriting
 Part 44's own two mechanisms, both left ON by default per this

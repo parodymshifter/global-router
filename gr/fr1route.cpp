@@ -9,7 +9,7 @@
 // naming convention" addendum) -- species `fr` (FastRoute/NTHU-Route
 // family: 2D global routing, then a separate layer-assignment stage),
 // generation 1, the 2D-collapse half of that pipeline. Scoped and
-// designed in /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// designed in ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: the ISPD-2008 contest record is unambiguous -- NTHU-Route 2.0 and
 // FastRoute both routed 12 of 16 benchmarks to exactly zero overflow,

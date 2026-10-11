@@ -23,7 +23,7 @@
 // already ran settles for staying inside it -- not a prioritization gap.
 //
 // User-proposed mechanism (refined over several rounds of discussion,
-// full record in /Users/bobboyd/.claude/plans/async-shimmying-pancake.md):
+// full record in ~/.claude/plans/async-shimmying-pancake.md):
 // a **jolt** -- at round-boundary checkpoints, any edge currently over
 // capacity gets a significant, discrete multiplicative cost penalty
 // (distinct from the existing smooth/gradual `hist` mechanism), so it is
@@ -205,7 +205,7 @@
 // `nv`, generation 3 -- a direct refinement (widening which nets
 // participate in the existing fast tier's own per-leg price negotiation),
 // not a new core algorithm, per CLAUDE.md's naming convention. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: a per-net ranking diagnostic (`diag7`, throwaway, not part of the
 // repo, complementing `diag5`'s pin-count buckets and `diag6`'s

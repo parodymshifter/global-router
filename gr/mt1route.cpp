@@ -10,7 +10,7 @@
 // species' own domain) -- new letters per CLAUDE.md's naming convention,
 // the same reasoning `vr` (MSMV) and `kr` (negotiated congestion) each
 // got their own letters under. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: nv2route's own real result (HISTORY_COST_SWEEP.md Part 30) beat
 // fr5route unanimously for the first time in this project's via-cost-

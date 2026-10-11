@@ -19,7 +19,7 @@
 // congestion (kroute's own domain) to via-site congestion, a domain no
 // prior generation in this project's via-cost-aware DP lineage (fr6route,
 // fr7route) ever revisited after a net's first, permanent commit. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: two direct generations of via-cost-aware layer assignment (fr6route,
 // fr7route) both regressed real total overflow on all three benchmarks

@@ -9,7 +9,7 @@
 // direct refinement (a second resource's own history term added to the
 // existing round loop), not a new core algorithm, per CLAUDE.md's naming
 // convention. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: nv1route's own real newblue1 result (46908 -- a real, large
 // improvement over fr7route's 79420, but still +75.2% over fr5route's

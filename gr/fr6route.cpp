@@ -11,7 +11,7 @@
 // assignment specifically, replacing fr5route's own per-segment-
 // independent-then-stitch approach with a joint via-cost/capacity-aware
 // tree DP. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: fr5route beat vroute's own historic real total overflow on all
 // three benchmarks (HISTORY_COST_SWEEP.md Part 25), but its own two

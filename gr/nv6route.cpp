@@ -36,7 +36,7 @@
 // older fixed-topology `routeNetSlow` -- plus a bounded multi-pass sweep
 // per cluster. Full design and honest up-front assessment of how much
 // each difference was expected to matter:
-// `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+// `~/.claude/plans/async-shimmying-pancake.md`.
 //
 // **Real result: a second clean, decisive negative, closed at the cheap
 // diagnostic-checkpoint stage without needing the full screen.** adaptec1,
@@ -177,7 +177,7 @@
 // `nv`, generation 3 -- a direct refinement (widening which nets
 // participate in the existing fast tier's own per-leg price negotiation),
 // not a new core algorithm, per CLAUDE.md's naming convention. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: a per-net ranking diagnostic (`diag7`, throwaway, not part of the
 // repo, complementing `diag5`'s pin-count buckets and `diag6`'s

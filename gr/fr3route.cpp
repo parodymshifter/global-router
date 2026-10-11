@@ -8,7 +8,7 @@
 // measured against the same fr1route base as fr2route, not stacked on
 // top of it, per the user's own framing of three parallel candidates
 // (current fr1route, escalation [fr2route], Steinerization [this file]).
-// Scoped in /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// Scoped in ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: fr2route's escalation-architecture experiment (a monotonic middle
 // tier) was a clean, unanimous *regression* (+7.4% to +9.9%,

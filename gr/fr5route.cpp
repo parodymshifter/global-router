@@ -10,7 +10,7 @@
 // assignment**. `FR1ROUTE_TWOD_ONLY` has been carried, documented but
 // inert, through every generation since fr1route specifically reserved it
 // for this moment. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: fr4route was chosen as the winner of the four `fr`-family topology
 // variants (HISTORY_COST_SWEEP.md Part 24), but every fr*route file up to

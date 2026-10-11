@@ -10,7 +10,7 @@
 // refinement of it (exact-solve the nets fr3's cheap pass structurally
 // can't help, keep fr3's own proven cheap pass as the fallback for the
 // rest) -- see the plan this was scoped from,
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md, for the full
+// ~/.claude/plans/async-shimmying-pancake.md, for the full
 // reasoning on that deviation.
 //
 // Why: fr3route's cheap, degree-2-only median Steinerization was a real,

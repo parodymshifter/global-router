@@ -47,7 +47,7 @@
 // starting guess (k1=1.5, k2=1.0, k3=1.0), consistent with this project's
 // "empirical tuning over reasoned guesses" rule. Full design, exact
 // formulas, self-test plan, and staged verification order:
-// `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+// `~/.claude/plans/async-shimmying-pancake.md`.
 //
 // Experimental design, directly answering the "must they be combined"
 // question: run the full five-mechanism combination first (all of C, D, E
@@ -180,7 +180,7 @@
 // deferral note (lines 31-36): "Revisit this once stage 7 makes the
 // stampede real," never revisited since. Full design, honest up-front
 // assessment of each mechanism's own likely failure mode, and the exact
-// formulas used: `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+// formulas used: `~/.claude/plans/async-shimmying-pancake.md`.
 //
 // Mechanism A real result: a THIRD clean, decisive negative for this
 // specific family, closed at the cheap diagnostic-checkpoint stage
@@ -253,7 +253,7 @@
 // older fixed-topology `routeNetSlow` -- plus a bounded multi-pass sweep
 // per cluster. Full design and honest up-front assessment of how much
 // each difference was expected to matter:
-// `/Users/bobboyd/.claude/plans/async-shimmying-pancake.md`.
+// `~/.claude/plans/async-shimmying-pancake.md`.
 //
 // **Real result: a second clean, decisive negative, closed at the cheap
 // diagnostic-checkpoint stage without needing the full screen.** adaptec1,
@@ -394,7 +394,7 @@
 // `nv`, generation 3 -- a direct refinement (widening which nets
 // participate in the existing fast tier's own per-leg price negotiation),
 // not a new core algorithm, per CLAUDE.md's naming convention. Scoped in
-// /Users/bobboyd/.claude/plans/async-shimmying-pancake.md.
+// ~/.claude/plans/async-shimmying-pancake.md.
 //
 // Why: a per-net ranking diagnostic (`diag7`, throwaway, not part of the
 // repo, complementing `diag5`'s pin-count buckets and `diag6`'s
