@@ -180,6 +180,7 @@ jobs:
       - name: Cross-check with eval2008.pl
         working-directory: gr
         run: |
+          sh fetch_eval2008.sh # the contest's evaluator, fetched from ispd.cc (not kept in the repository)
           perl eval2008/eval2008.pl bench/adaptec1.capo70.3d.35.50.90.gr adaptec1.route | tee adaptec1.eval
           perl eval2008/eval2008.pl bench/newblue1.ntup50.3d.30.50.90.gr newblue1.route | tee newblue1.eval
           perl eval2008/eval2008.pl bench/bigblue1.capo60.3d.50.10.100.gr bigblue1.route | tee bigblue1.eval

@@ -57,7 +57,11 @@ if [ "$router_exit" -ne 0 ] || [ ! -s "${prefix}.route" ]; then
 fi
 
 "$here/gr_verify" "$bench" "${prefix}.route" > "${prefix}.verify" 2>&1
-perl "$here/eval2008/eval2008.pl" "$bench" "${prefix}.route" > "${prefix}.eval" 2>&1
+if [ ! -f "$here/eval2008/eval2008.pl" ]; then
+  # Not kept in the repository (no license); sh fetch_eval2008.sh installs it.
+  echo "eval2008.pl missing: run sh $here/fetch_eval2008.sh" > "${prefix}.eval"
+fi
+perl "$here/eval2008/eval2008.pl" "$bench" "${prefix}.route" >> "${prefix}.eval" 2>&1
 
 of=$(field "${prefix}.verify" 'total overflow')
 max=$(field "${prefix}.verify" 'max overflow')

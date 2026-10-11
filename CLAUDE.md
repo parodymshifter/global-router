@@ -554,7 +554,9 @@ code needs a test that would fail if it were wrong.
 always passes.** The self test in `gr_verify.cpp` deliberately feeds broken
 solutions: a net in two disconnected pieces, a net omitted, a diagonal segment.
 
-**Cross-check against the official Perl evaluator** (`eval2008.zip`). Total
+**Cross-check against the official Perl evaluator** (`eval2008.zip`; not kept
+in the repository since it carries no license -- `sh gr/fetch_eval2008.sh`
+downloads it from ispd.cc into `gr/eval2008/` and checks its SHA-256). Total
 overflow, max overflow, and wirelength must agree. If they diverge, assume our
 code is wrong first: theirs scored an actual contest. Note that 2008-era Perl
 may fail on modern interpreters, usually `defined(@array)`, removed in 5.22.

@@ -134,3 +134,6 @@ pd38route.p120s
 pd38route.p120t
 pd38route.p121
 pd38route.p122
+
+# ISPD 2008 evaluator: fetched by gr/fetch_eval2008.sh, not redistributed (no license)
+gr/eval2008/
