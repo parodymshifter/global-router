@@ -648,6 +648,13 @@ helps.
   at the reader boundary.
 - Prefer dense arrays over hash maps for per-edge data. The access pattern
   determines the parallel ceiling later.
+- **Licensing** (2026-10-11): source code is Apache-2.0 (`LICENSE`),
+  documents -- the top-level Markdown files and `recaps/` -- are CC BY 4.0
+  (`LICENSE-DOCS`); `NOTICE` says which is which. New files follow the same
+  split. Third-party code or data comes in only under a license compatible
+  with Apache-2.0, with its license file kept beside it; anything without
+  one (like the ISPD 2008 evaluator) is fetched from its source by a
+  script, never committed.
 
 ## Long-running work and background agents
 

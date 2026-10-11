@@ -1,0 +1,21 @@
+Global Router
+Copyright 2026 Robert Boyd
+
+This repository is under two licenses.
+
+Source code -- everything under gr/ (the routers, verifiers, tools, scripts
+and settings files), any other script or program in the repository (for
+example recaps/build_replay.py), and the CI workflow under .github/ -- is
+licensed under the Apache License, Version 2.0. See LICENSE.
+
+Documents -- the Markdown files at the top level (CLAUDE.md,
+HISTORY_COST_SWEEP.md and the plans and notes) and the pages and images
+under recaps/ -- are licensed under the Creative Commons Attribution 4.0
+International license (CC BY 4.0). See LICENSE-DOCS. Please credit them as
+"Robert Boyd, Global Router project", with a link to this repository.
+
+Not included: the ISPD 2008 and ISPD 2024 benchmark designs and the ISPD 2008
+contest evaluator (eval2008.pl) are third-party files. They are not in this
+repository; gr/bench/ispd24/download.sh, the CI workflow and
+gr/fetch_eval2008.sh download them from their sources, and they keep their
+own terms.
