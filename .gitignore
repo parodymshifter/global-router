@@ -1,3 +1,21 @@
+# Local machine files: never commit
+.claude/
+.DS_Store
+.fuse_hidden*
+# Built programs. The routers and tools in gr/ build to names without an
+# extension; frozen copies (pd38route.p120), rebuilds (.new) and sanitizer
+# or Valgrind builds (.san, .vg) carry one, so they are listed too.
+gr/*
+!gr/*.*
+!gr/*/
+gr/*route.p[0-9]*
+gr/*.new
+gr/*.san
+gr/*.vg
+*.dSYM/
+# Files the self-tests write into the working folder
+*_selftest_stream*
+
 gr_verify
 g24_verify
 g24_lroute
