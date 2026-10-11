@@ -186,10 +186,10 @@ img.px { image-rendering: pixelated; }
 <body>
 <div class="wrap">
 <header class="snap">
-  <div class="eyebrow">Recap 5 · 9 October 2026, updated 10 October · Parts 115–119</div>
+  <div class="eyebrow">Recap 5 · 9 October 2026, updated 10 October · Parts 115–120</div>
   <h1>Global Router Recap</h1>
   <p class="lede">Recap 4 ended with the router matching the ISPD 2024 contest on score but taking 16.9 hours on the largest
-  design it could fit, against the winner's 3.6 minutes. Since then that run has come down to 511 s: 119 times faster, with
+  design it could fit, against the winner's 3.6 minutes. Since then that run has come down to 461 s: 132 times faster, with
   a slightly <i>better</i> score. Most of the gain came from removing work the 2024 score does not reward, the rest from
   threads that give the same answer at any thread count. The router now beats the contest's best raw score on all six hidden
   designs and the best beta submission on all seven public ones, and on the four smallest hidden designs it is also faster than
@@ -209,7 +209,7 @@ img.px { image-rendering: pixelated; }
   <div class="tiles">
     <div class="tile"><div class="fig">6 of 6</div><div class="lab">hidden benchmarks routed with a raw score below the best of the contest's top three (tera_cluster not downloaded)</div></div>
     <div class="tile"><div class="fig">7 of 7</div><div class="lab">public benchmarks below the best beta-round submission, mempool_cluster now included (−2.89%)</div></div>
-    <div class="tile"><div class="fig">119×</div><div class="lab">faster on mempool_cluster_ranking: 61,017 s → 511 s, peak 29.4 → 22.9 GB</div></div>
+    <div class="tile"><div class="fig">132×</div><div class="lab">faster on mempool_cluster_ranking: 61,017 s → 461 s, peak 29.4 → 23.0 GB</div></div>
     <div class="tile"><div class="fig">4 of 6</div><div class="lab">hidden designs where our runtime on an M4 Pro is now below the contest winner's on 8 cores + 4 A100s</div></div>
   </div>
 </section>
@@ -240,6 +240,11 @@ img.px { image-rendering: pixelated; }
     once, and most collided. Dealing each round's nets round-robin over 64 × 64-GCell tiles cut first-round collisions from
     20,740 to 2,784. That made batches of 256 pay off, and mempool_cluster's slow tier fell from 268 s to 137 s (809 s → 658 s
     overall). Scores moved within ±0.02%.</li>
+    <li><b>Part 120, the pattern stage and 3D passes threaded.</b> A profile showed the pattern stage's later rounds
+    leaving the 8 threads idle 87% of the time: thousands of small batches, each waiting for the last. Its pieces now run on
+    the same dependency graph as layer assignment, each waiting only for earlier pieces that overlap it, and the three 3D
+    passes share one graph instead of building three. Every output is byte-identical to Part 119: mempool_cluster_ranking
+    511 s → 461 s, mempool_cluster 658 s → 584 s.</li>
   </ol>
 </section>
 
@@ -251,14 +256,14 @@ img.px { image-rendering: pixelated; }
   <h3>Hidden benchmarks</h3>
   <div class="tablebox"><table>
     <thead><tr><th>file</th><th>contest name</th><th class="num">ours</th><th class="num">best of top 3</th><th class="num">vs best</th><th class="num">recap 4</th><th class="num">our time · peak</th><th class="num">contest #1 time</th><th class="num">recap 4 time</th></tr></thead>
-    <tbody><tr><td class="mono">ariane_68_rank</td><td>Ariane_rank</td><td class="num"><b>22,499,080</b></td><td class="num">22,602,876 (#1)</td><td class="num">-0.46%</td><td class="num was">22,669,151</td><td class="num">4.0 s · 0.4 GB</td><td class="num">6.2 s</td><td class="num was">231 s</td></tr><tr><td class="mono">bsg_chip_rank</td><td>BlackParrot_rank</td><td class="num"><b>109,400,633</b></td><td class="num">110,986,781 (#2)</td><td class="num">-1.43%</td><td class="num was">109,707,507</td><td class="num">14.8 s · 1.8 GB</td><td class="num">16.6 s</td><td class="num was">1,247 s</td></tr><tr><td class="mono">nvdla_rank</td><td>Nvdla_rank</td><td class="num"><b>42,949,425</b></td><td class="num">43,195,979 (#1)</td><td class="num">-0.57%</td><td class="num was">43,192,839</td><td class="num">6.0 s · 0.8 GB</td><td class="num">7.5 s</td><td class="num was">393 s</td></tr><tr><td class="mono">mempool_tile_rank</td><td>MemPool-Tile_rank</td><td class="num"><b>13,699,356</b></td><td class="num">13,827,142 (#1)</td><td class="num">-0.92%</td><td class="num was">13,730,842</td><td class="num">2.3 s · 0.2 GB</td><td class="num">5.1 s</td><td class="num was">115 s</td></tr><tr><td class="mono">mempool_group_rank</td><td>MemPool-Group_rank</td><td class="num"><b>381,375,035</b></td><td class="num">383,637,652 (#1)</td><td class="num">-0.59%</td><td class="num was">383,517,195</td><td class="num">68.7 s · 5.7 GB</td><td class="num">45.5 s</td><td class="num was">2.7 h</td></tr><tr><td class="mono">mempool_cluster_ranking</td><td>MemPool-Cluster_rank</td><td class="num"><b>1,771,988,786</b></td><td class="num">1,782,191,834 (#1)</td><td class="num">-0.57%</td><td class="num was">1,777,655,067</td><td class="num">511 s · 22.9 GB</td><td class="num">217 s</td><td class="num was">16.9 h</td></tr></tbody>
+    <tbody><tr><td class="mono">ariane_68_rank</td><td>Ariane_rank</td><td class="num"><b>22,499,080</b></td><td class="num">22,602,876 (#1)</td><td class="num">-0.46%</td><td class="num was">22,669,151</td><td class="num">4.0 s · 0.4 GB</td><td class="num">6.2 s</td><td class="num was">231 s</td></tr><tr><td class="mono">bsg_chip_rank</td><td>BlackParrot_rank</td><td class="num"><b>109,400,633</b></td><td class="num">110,986,781 (#2)</td><td class="num">-1.43%</td><td class="num was">109,707,507</td><td class="num">14.8 s · 1.8 GB</td><td class="num">16.6 s</td><td class="num was">1,247 s</td></tr><tr><td class="mono">nvdla_rank</td><td>Nvdla_rank</td><td class="num"><b>42,949,425</b></td><td class="num">43,195,979 (#1)</td><td class="num">-0.57%</td><td class="num was">43,192,839</td><td class="num">6.0 s · 0.8 GB</td><td class="num">7.5 s</td><td class="num was">393 s</td></tr><tr><td class="mono">mempool_tile_rank</td><td>MemPool-Tile_rank</td><td class="num"><b>13,699,356</b></td><td class="num">13,827,142 (#1)</td><td class="num">-0.92%</td><td class="num was">13,730,842</td><td class="num">2.3 s · 0.2 GB</td><td class="num">5.1 s</td><td class="num was">115 s</td></tr><tr><td class="mono">mempool_group_rank</td><td>MemPool-Group_rank</td><td class="num"><b>381,375,035</b></td><td class="num">383,637,652 (#1)</td><td class="num">-0.59%</td><td class="num was">383,517,195</td><td class="num">68.7 s · 5.7 GB</td><td class="num">45.5 s</td><td class="num was">2.7 h</td></tr><tr><td class="mono">mempool_cluster_ranking</td><td>MemPool-Cluster_rank</td><td class="num"><b>1,771,988,786</b></td><td class="num">1,782,191,834 (#1)</td><td class="num">-0.57%</td><td class="num was">1,777,655,067</td><td class="num">461 s · 23.0 GB</td><td class="num">217 s</td><td class="num was">16.9 h</td></tr></tbody>
   </table></div>
   <p class="note">Our times: Apple M4 Pro, 8 threads. Contest: 8 cores + 4 NVIDIA A100 GPUs. bsg_chip_rank's best raw score
   in the contest was #2's. tera_cluster_rank is not downloaded (two 10.7 GB net files).</p>
   <h3>Public benchmarks</h3>
   <div class="tablebox"><table>
     <thead><tr><th>file</th><th class="num">ours</th><th class="num">best beta submission</th><th class="num">vs beta</th><th class="num">our time · peak</th></tr></thead>
-    <tbody><tr><td class="mono">ariane133_51</td><td class="num"><b>22,386,812</b></td><td class="num">22,765,372</td><td class="num">-1.66%</td><td class="num">2.8 s · 0.5 GB</td></tr><tr><td class="mono">ariane133_68</td><td class="num"><b>19,682,122</b></td><td class="num">20,251,238</td><td class="num">-2.81%</td><td class="num">2.8 s · 0.4 GB</td></tr><tr><td class="mono">bsg_chip</td><td class="num"><b>111,835,518</b></td><td class="num">113,537,664</td><td class="num">-1.50%</td><td class="num">17.6 s · 2.0 GB</td></tr><tr><td class="mono">nvdla</td><td class="num"><b>48,026,876</b></td><td class="num">49,909,986</td><td class="num">-3.77%</td><td class="num">5.7 s · 1.3 GB</td></tr><tr><td class="mono">mempool_tile</td><td class="num"><b>15,106,426</b></td><td class="num">15,402,753</td><td class="num">-1.92%</td><td class="num">2.7 s · 0.3 GB</td></tr><tr><td class="mono">mempool_group</td><td class="num"><b>396,208,769</b></td><td class="num">409,309,772</td><td class="num">-3.20%</td><td class="num">74.5 s · 5.2 GB</td></tr><tr><td class="mono">mempool_cluster</td><td class="num"><b>1,615,294,385</b></td><td class="num">1,663,344,708</td><td class="num">-2.89%</td><td class="num">658 s · 22.9 GB</td></tr></tbody>
+    <tbody><tr><td class="mono">ariane133_51</td><td class="num"><b>22,386,812</b></td><td class="num">22,765,372</td><td class="num">-1.66%</td><td class="num">2.8 s · 0.5 GB</td></tr><tr><td class="mono">ariane133_68</td><td class="num"><b>19,682,122</b></td><td class="num">20,251,238</td><td class="num">-2.81%</td><td class="num">2.8 s · 0.4 GB</td></tr><tr><td class="mono">bsg_chip</td><td class="num"><b>111,835,518</b></td><td class="num">113,537,664</td><td class="num">-1.50%</td><td class="num">17.6 s · 2.0 GB</td></tr><tr><td class="mono">nvdla</td><td class="num"><b>48,026,876</b></td><td class="num">49,909,986</td><td class="num">-3.77%</td><td class="num">5.7 s · 1.3 GB</td></tr><tr><td class="mono">mempool_tile</td><td class="num"><b>15,106,426</b></td><td class="num">15,402,753</td><td class="num">-1.92%</td><td class="num">2.7 s · 0.3 GB</td></tr><tr><td class="mono">mempool_group</td><td class="num"><b>396,208,769</b></td><td class="num">409,309,772</td><td class="num">-3.20%</td><td class="num">74.5 s · 5.2 GB</td></tr><tr><td class="mono">mempool_cluster</td><td class="num"><b>1,615,294,385</b></td><td class="num">1,663,344,708</td><td class="num">-2.89%</td><td class="num">584 s · 24.0 GB</td></tr></tbody>
   </table></div>
 </section>
 
@@ -266,7 +271,7 @@ img.px { image-rendering: pixelated; }
   <h2>Runtime</h2>
   <p>mempool_cluster_ranking, 10.6 million nets, one step at a time. Log scale: each axis mark is ten times the last. Every
   step through Part 117 produced byte-identical routes; Part 118 changed the slow tier and improved the score slightly.</p>
-  <div class="rt"><div class="rt-inner"><div class="rtrow"><span class="nm">Part 114: full 2008-style pipeline<small>pd35route, 1 core</small></span><div class="rtbar"><b class="old" style="width:92.8%"></b></div><span class="v">16.9 h</span></div><div class="rtrow"><span class="nm">Part 115: lean pipeline for the 2024 score<small>lean24b, 1 core</small></span><div class="rtbar"><b class="old" style="width:56.8%"></b></div><span class="v">1.4 h</span></div><div class="rtrow"><span class="nm">Part 115: + exact cuts (fast24)<small>pd36route, 1 core</small></span><div class="rtbar"><b class="old" style="width:40.1%"></b></div><span class="v">1,599 s</span></div><div class="rtrow"><span class="nm">Part 116: threads, exact at any count<small>pd37route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:30.1%"></b></div><span class="v">800 s</span></div><div class="rtrow"><span class="nm">Part 117: fast I/O, less allocation<small>pd37route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:24.8%"></b></div><span class="v">553 s</span></div><div class="rtrow"><span class="nm">Part 118: batched slow tier<small>pd38route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:24.0%"></b></div><span class="v">526 s</span></div><div class="rtrow"><span class="nm">Part 119: batches spread over tiles<small>pd38route, 8 threads</small></span><div class="rtbar"><b class="" style="width:23.6%"></b></div><span class="v">511 s</span></div><div class="rtrow"><span class="nm">Contest #1 (InstantGR)<small>8 cores + 4 A100 GPUs</small></span><div class="rtbar"><b class="" style="width:11.2%"></b></div><span class="v">217 s</span></div><div class="rtaxis"><span></span><div class="t"><span style="left:0.0%">100 s</span><span style="left:33.3%">1,000 s</span><span style="left:66.7%">10,000 s</span><span style="left:100.0%">100,000 s</span></div><span></span></div></div></div>
+  <div class="rt"><div class="rt-inner"><div class="rtrow"><span class="nm">Part 114: full 2008-style pipeline<small>pd35route, 1 core</small></span><div class="rtbar"><b class="old" style="width:92.8%"></b></div><span class="v">16.9 h</span></div><div class="rtrow"><span class="nm">Part 115: lean pipeline for the 2024 score<small>lean24b, 1 core</small></span><div class="rtbar"><b class="old" style="width:56.8%"></b></div><span class="v">1.4 h</span></div><div class="rtrow"><span class="nm">Part 115: + exact cuts (fast24)<small>pd36route, 1 core</small></span><div class="rtbar"><b class="old" style="width:40.1%"></b></div><span class="v">1,599 s</span></div><div class="rtrow"><span class="nm">Part 116: threads, exact at any count<small>pd37route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:30.1%"></b></div><span class="v">800 s</span></div><div class="rtrow"><span class="nm">Part 117: fast I/O, less allocation<small>pd37route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:24.8%"></b></div><span class="v">553 s</span></div><div class="rtrow"><span class="nm">Part 118: batched slow tier<small>pd38route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:24.0%"></b></div><span class="v">526 s</span></div><div class="rtrow"><span class="nm">Part 119: batches spread over tiles<small>pd38route, 8 threads</small></span><div class="rtbar"><b class="old" style="width:23.6%"></b></div><span class="v">511 s</span></div><div class="rtrow"><span class="nm">Part 120: pattern stage and 3D passes threaded<small>pd38route, 8 threads</small></span><div class="rtbar"><b class="" style="width:22.1%"></b></div><span class="v">461 s</span></div><div class="rtrow"><span class="nm">Contest #1 (InstantGR)<small>8 cores + 4 A100 GPUs</small></span><div class="rtbar"><b class="" style="width:11.2%"></b></div><span class="v">217 s</span></div><div class="rtaxis"><span></span><div class="t"><span style="left:0.0%">100 s</span><span style="left:33.3%">1,000 s</span><span style="left:66.7%">10,000 s</span><span style="left:100.0%">100,000 s</span></div><span></span></div></div></div>
   <div class="findings">
     <div class="finding"><h3>Most of it was work, not hardware</h3><p>Re-ablating under the 2024 score removed 92% of
     the time with no score loss. Exact cuts inside the remaining stages took another 3×. Threads, the obvious lever, gave
@@ -275,7 +280,7 @@ img.px { image-rendering: pixelated; }
     result in either order. Scheduling on that fact made threads byte-identical, which kept every earlier comparison
     valid. Where hard nets pile onto one hotspot, it stops working, and batching takes over.</p></div>
     <div class="finding"><h3>Where the rest goes</h3><p>At 8 threads on the hidden cluster: layer assignment's first round
-    31%, three 3D passes 30%, the pattern stage 25%, the slow tier 7%, read and write 7%. No single stage dominates
+    37%, the pattern stage 24%, three 3D passes 24%, the slow tier 7%, read and write 8%. No single stage dominates
     any more.</p></div>
   </div>
 </section>
@@ -305,7 +310,7 @@ img.px { image-rendering: pixelated; }
   <ul>
     <li><b>Hardware.</b> Our runs use 8 threads of one laptop-class M4 Pro; the contest machine had 8 cores and 4 A100 GPUs.
     Neither side's numbers transfer to the other's machine exactly.</li>
-    <li><b>The cluster designs are still slower than the winner:</b> 511 s against 217 s on the hidden cluster
+    <li><b>The cluster designs are still slower than the winner:</b> 461 s against 217 s on the hidden cluster
     (the contest's #2 took 124 s, #3 275 s), and mempool_group_rank 69 s against 46 s.</li>
     <li><b>Margins.</b> The score leads over the contest are 0.46–1.43% on the hidden designs: real, but small.</li>
     <li><b>Tuning.</b> All settings come from one design and the gap analysis; nothing is tuned per design.</li>
@@ -317,10 +322,10 @@ img.px { image-rendering: pixelated; }
   <p>The full analysis is on <a href="https://claude.ai/artifact/4vLqP5qoUvbHf3CCTh5o2Y">Global Router Speed and
   Theory</a>; the short version:</p>
   <div class="findings">
-    <div class="finding"><h3>Time</h3><p>The hidden cluster takes 511 s against the winner's 217 s. The threads
-    give 1.7× in the pattern stage, 2.5× in the 3D passes and 4.0× in layer assignment, out of a possible 8×. Raising the first two
-    to 4× would cut the public cluster from 658 s to about 480 s (estimate). The rest needs a GPU path, a FLUTE-style
-    tree table for small nets, and a slow tier that doesn't wait on each batch's slowest search. The ISPD 2008 standard is
+    <div class="finding"><h3>Time</h3><p>The hidden cluster takes 461 s against the winner's 217 s. Part 120
+    threaded the pattern stage and the 3D passes better (2.1× and 3.4× on 8 threads now, layer assignment 3.9×); each big
+    stage is now limited by its own work rather than by waiting. The rest of the gap needs cheaper work per piece and per net,
+    a GPU path for one of the big stages, and a slow tier that doesn't wait on each batch's slowest search. The ISPD 2008 standard is
     still single-threaded at 1–27 hours on the large benchmarks, and Part 119's fix is a reason to retry threading
     there.</p></div>
     <div class="finding"><h3>Wirelength</h3><p>On the hidden cluster our wire cost is 0.45% above the winner's, while vias
