@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""Build a Router Replay page.
+usage: build_replay.py <frames.tsv> <out.html> <title> <eyebrow> <views comma list> <hold seconds> <lede...>
+Views: congestion, layers, vias, search (images at img/<view>/fNNNN.jpg)."""
+import csv, json, sys
+
+tsv, out, title, eyebrow, views, hold = sys.argv[1:7]
+lede = " ".join(sys.argv[7:])
+views = views.split(",")
+rows = list(csv.DictReader(open(tsv), delimiter="\t"))
+frames = [{"stage": r["stage"], "label": r["label"], "t": round(float(r["seconds"]), 2), "ov": int(r["overflow2d"]),
+           "ch": int(r["changed"])} for r in rows]
+
+VIEWS = {
+    "congestion": {
+        "name": "Congestion",
+        "about": "Bar height and color: how full each GCell's busiest edge is. Glow: routes changed since the previous frame.",
+        "legend": [("#8040c8", "up to 50% full"), ("#2864e6", "50–75%"), ("#28aa46", "75–90%"), ("#f0d228", "90–99%"),
+                   ("#f5821e", "exactly full"), ("#d71e1e", "over capacity (lifted)"), ("#9ff0ff", "glow: routes changed here")],
+    },
+    "layers": {
+        "name": "Layers",
+        "about": "Color: the average metal layer of the wire in each GCell, low (violet) to high (yellow); height: congestion. "
+                 "Pink glow: wire moved between layers since the previous 3D frame. Empty before layer assignment.",
+        "legend": [("#45005a", "low metal"), ("#3b528c", ""), ("#21918c", "middle"), ("#5ec962", ""), ("#fde725", "high metal"),
+                   ("#ff8cc0", "glow: wire changed layers"), ("#cdd0d6", "no wire yet")],
+    },
+    "vias": {
+        "name": "Vias",
+        "about": "Height and color: vias through each GCell, so towers are via stacks. Glow: routes changed since the previous "
+                 "frame. Empty before layer assignment.",
+        "legend": [("#45005a", "few vias"), ("#21918c", ""), ("#fde725", "many vias"), ("#9ff0ff", "glow: routes changed"),
+                   ("#cdd0d6", "no vias")],
+    },
+    "search": {
+        "name": "Search and conflicts",
+        "about": "Height and color: how many maze searches covered each GCell in a slow-tier round. Red glow: nets that "
+                 "collided with an earlier commit in their batch and were searched again. Empty outside the slow tier.",
+        "legend": [("#45005a", "few searches"), ("#21918c", ""), ("#fde725", "many searches"), ("#ff5a5a", "glow: conflicts"),
+                   ("#cdd0d6", "no search")],
+    },
+}
+vdefs = {v: VIEWS[v] for v in views}
+
+html = r'''<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the project's recap look around a player. The frame on top, view tabs above it, transport and stage
+   timeline under it, the live counters and the legend beside or below. */
+:root {
+  --paper: #f6f7f5; --sheet: #ffffff; --ink: #1b2124; --ink-soft: #4d585c; --rule: #d9dedc;
+  --trace: #0b6e72; --trace-soft: #d7ecec; --frame-bg: #edeff1;
+  --st-start: #7c8b8f; --st-pattern: #0b6e72; --st-slow: #b0571b; --st-la: #6d4fb3; --st-3d: #2f7d3a;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --frame-bg: #1d2325;
+    --st-start: #8b9a9e; --st-pattern: #5cc3c5; --st-slow: #e08a4a; --st-la: #a58ae6; --st-3d: #6cc27a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --frame-bg: #1d2325;
+  --st-start: #8b9a9e; --st-pattern: #5cc3c5; --st-slow: #e08a4a; --st-la: #a58ae6; --st-3d: #6cc27a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+  padding-inline: 16px; padding-block: 0 48px; }
+.wrap { max-width: 1240px; margin: 0 auto; }
+header { padding-block: 28px 14px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(26px, 4vw, 36px); line-height: 1.1; margin: 4px 0 8px; }
+.lede { color: var(--ink-soft); max-width: 80ch; margin: 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
+.tabs button { font: inherit; font-size: 14px; padding: 6px 14px; border: 1px solid var(--rule); background: var(--sheet);
+  color: var(--ink); border-radius: 4px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--trace); border-color: var(--trace); color: var(--paper); font-weight: 600; }
+.about { font-size: 13.5px; color: var(--ink-soft); margin: 8px 0 0; max-width: 90ch; min-height: 2.6em; }
+.player { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; margin-top: 10px; }
+@media (max-width: 900px) { .player { grid-template-columns: minmax(0, 1fr); } }
+.stagebox { min-width: 0; }
+.screen { position: relative; aspect-ratio: 1280 / 800; max-width: 100%; background: var(--frame-bg); border: 1px solid var(--rule); overflow: hidden; }
+.screen img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.badge { position: absolute; left: 12px; top: 10px; font-family: var(--font-mono); font-size: 12px; padding: 3px 8px;
+  background: rgba(20, 26, 28, .78); color: #f2f6f6; border-radius: 3px; max-width: calc(100% - 24px); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 10px; }
+button, select { font: inherit; font-size: 14px; color: var(--ink); background: var(--sheet); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--trace); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+button.primary { background: var(--trace); color: var(--paper); border-color: var(--trace); min-width: 84px; font-weight: 600; }
+.speeds { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+.speeds button { border: 0; border-radius: 0; padding: 6px 9px; font-family: var(--font-mono); font-size: 12.5px; }
+.speeds button + button { border-left: 1px solid var(--rule); }
+.speeds button[aria-pressed="true"] { background: var(--trace-soft); color: var(--trace); font-weight: 600; }
+.pos { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; margin-left: auto; }
+input[type=range] { width: 100%; margin: 10px 0 2px; accent-color: var(--trace); }
+.timeline { position: relative; display: flex; height: 22px; border: 1px solid var(--rule); background: var(--sheet); }
+.timeline div { height: 100%; cursor: pointer; opacity: .82; min-width: 1px; }
+.timeline div:hover { opacity: 1; }
+.timeline .cursor { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); pointer-events: none; opacity: 1; min-width: 0; }
+.tl-labels { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--ink-soft); margin-top: 6px; }
+.tl-labels i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
+aside { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.panel { background: var(--sheet); border: 1px solid var(--rule); padding: 12px 14px; }
+.panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 8px; }
+dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13.5px; }
+dt { color: var(--ink-soft); }
+dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.legend { display: grid; gap: 4px; font-size: 13px; }
+.legend span i { display: inline-block; width: 12px; height: 12px; margin-right: 7px; vertical-align: -2px; border: 1px solid rgba(0,0,0,.15); }
+.keys { font-size: 12.5px; color: var(--ink-soft); }
+.keys kbd { font-family: var(--font-mono); font-size: 11.5px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; padding: 0 5px; background: var(--paper); }
+.notes { margin-top: 22px; max-width: 80ch; font-size: 14px; color: var(--ink-soft); }
+.notes p { margin: 0 0 8px; }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">__EYEBROW__</div>
+  <h1>__TITLE__</h1>
+  <p class="lede">__LEDE__</p>
+</header>
+
+<div class="tabs" role="tablist" id="tabs"></div>
+<p class="about" id="about"></p>
+
+<div class="player">
+  <div class="stagebox">
+    <div class="screen" aria-label="Router frame">
+      <img id="imgA" alt="">
+      <img id="imgB" alt="">
+      <div class="badge" id="badge"></div>
+    </div>
+    <input type="range" id="scrub" min="0" max="0" step="0.001" value="0" aria-label="Position in the run">
+    <div class="timeline" id="timeline" aria-hidden="true"></div>
+    <div class="tl-labels" id="tlLabels"></div>
+    <div class="controls">
+      <button id="back" title="Previous frame (←)" aria-label="Previous frame">◀︎</button>
+      <button id="play" class="primary">Play</button>
+      <button id="fwd" title="Next frame (→)" aria-label="Next frame">▶︎</button>
+      <div class="speeds" role="group" aria-label="Speed" id="speeds"></div>
+      <label style="font-size:13.5px"><input type="checkbox" id="loop"> Loop</label>
+      <span class="pos" id="pos"></span>
+    </div>
+  </div>
+  <aside>
+    <div class="panel">
+      <h2>This frame</h2>
+      <dl>
+        <dt>Stage</dt><dd id="vStage"></dd>
+        <dt>Step</dt><dd id="vLabel"></dd>
+        <dt>Run time</dt><dd id="vTime"></dd>
+        <dt>2D overflow</dt><dd id="vOv"></dd>
+        <dt>GCells changed</dt><dd id="vCh"></dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <h2>Colors</h2>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="panel keys">
+      <kbd>Space</kbd> play or pause · <kbd>←</kbd> <kbd>→</kbd> step · <kbd>−</kbd> <kbd>+</kbd> slower or faster ·
+      <kbd>1</kbd>–<kbd>4</kbd> views · <kbd>Home</kbd> start · click the timeline to jump to a stage
+    </div>
+  </aside>
+</div>
+
+<div class="notes">
+  <p>At 1× each frame holds for __HOLD__ s. The first pattern round is shown in 12 slices as its pieces land; every
+  later round, slow-tier round and 3D pass is one frame. Run times are seconds since the router started; recording the
+  frames leaves the routes byte-identical to a run without them.</p>
+  <p>Before layer assignment the congestion map is the router's 2D view; from the layer-assignment frame on it sums
+  all metal layers and includes via demand, so its scale shifts once there.</p>
+</div>
+</div>
+
+<script>
+const FRAMES = __FRAMES__;
+const VIEWS = __VIEWS__;
+const VIEW_ORDER = Object.keys(VIEWS);
+const STAGE_COLORS = {"start": "--st-start", "pattern stage": "--st-pattern", "slow tier": "--st-slow",
+  "layer assignment": "--st-la", "3D pass": "--st-3d"};
+const BASE_HOLD = __HOLD__;
+const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
+const n = FRAMES.length;
+let view = VIEW_ORDER[0];
+const src = (v, i) => "img/" + v + "/f" + String(i).padStart(4, "0") + ".jpg";
+const $ = id => document.getElementById(id);
+const imgA = $("imgA"), imgB = $("imgB"), scrub = $("scrub");
+let pos = 0, playing = false, speed = 1, last = null, shownA = "", shownB = "";
+const warmed = {};
+function warm(v) {
+  if (warmed[v]) return;
+  warmed[v] = FRAMES.map((f, i) => { const im = new Image(); im.src = src(v, i); return im; });
+}
+function fmt(x) { return Number(x).toLocaleString("en-US"); }
+
+// view tabs
+const tabs = $("tabs");
+VIEW_ORDER.forEach((v, k) => {
+  const b = document.createElement("button");
+  b.setAttribute("role", "tab");
+  b.textContent = VIEWS[v].name;
+  b.title = `${VIEWS[v].name} (${k + 1})`;
+  b.addEventListener("click", () => setView(v));
+  tabs.appendChild(b);
+});
+if (VIEW_ORDER.length < 2) tabs.hidden = true;
+function setView(v) {
+  view = v;
+  [...tabs.children].forEach((b, k) => b.setAttribute("aria-selected", VIEW_ORDER[k] === v ? "true" : "false"));
+  $("about").textContent = VIEWS[v].about;
+  $("legend").innerHTML = VIEWS[v].legend.map(([c, t]) => `<span><i style="background:${c}"></i>${t || "&nbsp;"}</span>`).join("");
+  shownA = shownB = "";
+  warm(v);
+  render();
+}
+
+// timeline
+const tl = $("timeline");
+FRAMES.forEach((f, i) => {
+  const d = document.createElement("div");
+  d.style.flex = "1";
+  d.style.background = `var(${STAGE_COLORS[f.stage] || "--st-start"})`;
+  d.title = `${f.stage}: ${f.label}`;
+  d.addEventListener("click", () => { pause(); setPos(i); });
+  tl.appendChild(d);
+});
+const cursor = document.createElement("div");
+cursor.className = "cursor";
+tl.appendChild(cursor);
+const seen = [];
+FRAMES.forEach(f => { if (!seen.includes(f.stage)) seen.push(f.stage); });
+$("tlLabels").innerHTML = seen.map(s => `<span><i style="background:var(${STAGE_COLORS[s]})"></i>${s}</span>`).join("");
+
+// speeds
+const sp = $("speeds");
+SPEEDS.forEach(v => {
+  const b = document.createElement("button");
+  b.textContent = v + "×";
+  b.addEventListener("click", () => setSpeed(v));
+  sp.appendChild(b);
+});
+function setSpeed(v) {
+  speed = v;
+  [...sp.children].forEach((b, k) => b.setAttribute("aria-pressed", SPEEDS[k] === v ? "true" : "false"));
+}
+setSpeed(1);
+
+scrub.max = String(n - 1);
+scrub.addEventListener("input", () => { pause(); setPos(parseFloat(scrub.value)); });
+
+function render() {
+  const i = Math.floor(pos), j = Math.min(n - 1, i + 1), t = pos - i;
+  const a = src(view, i), b = src(view, j);
+  if (shownA !== a) { imgA.src = a; shownA = a; }
+  if (shownB !== b) { imgB.src = b; shownB = b; }
+  // each frame reads clearly first; the crossfade fills the last 40% of its hold
+  const fade = j === i ? 0 : Math.max(0, (t - 0.6) / 0.4);
+  imgB.style.opacity = String(fade);
+  const k = fade > 0.5 ? j : i, f = FRAMES[k];
+  $("badge").textContent = `${f.stage} · ${f.label}`;
+  $("vStage").textContent = f.stage;
+  $("vLabel").textContent = f.label;
+  $("vTime").textContent = f.t.toFixed(2) + " s";
+  $("vOv").textContent = fmt(f.ov);
+  $("vCh").textContent = fmt(f.ch);
+  $("pos").textContent = `frame ${k + 1} / ${n}`;
+  scrub.value = String(pos);
+  cursor.style.left = `calc(${(pos / Math.max(1, n - 1)) * 100}% - 1px)`;
+}
+function setPos(p) { pos = Math.max(0, Math.min(n - 1, p)); render(); }
+function tick(ts) {
+  if (!playing) return;
+  if (last !== null) {
+    pos += ((ts - last) / 1000) * speed / BASE_HOLD;
+    if (pos >= n - 1) {
+      if ($("loop").checked) pos = 0;
+      else { pos = n - 1; render(); pause(); return; }
+    }
+    render();
+  }
+  last = ts;
+  requestAnimationFrame(tick);
+}
+function play() {
+  if (pos >= n - 1) pos = 0;
+  playing = true; last = null;
+  $("play").textContent = "Pause";
+  requestAnimationFrame(tick);
+}
+function pause() { playing = false; $("play").textContent = "Play"; }
+$("play").addEventListener("click", () => (playing ? pause() : play()));
+$("back").addEventListener("click", () => { pause(); setPos(Math.ceil(pos) - 1); });
+$("fwd").addEventListener("click", () => { pause(); setPos(Math.floor(pos) + 1); });
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === " ") { e.preventDefault(); playing ? pause() : play(); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); pause(); setPos(Math.floor(pos) + 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); pause(); setPos(Math.ceil(pos) - 1); }
+  else if (e.key === "+" || e.key === "=") { const k = SPEEDS.indexOf(speed); setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, k + 1)]); }
+  else if (e.key === "-" || e.key === "_") { const k = SPEEDS.indexOf(speed); setSpeed(SPEEDS[Math.max(0, k - 1)]); }
+  else if (e.key === "Home") { pause(); setPos(0); }
+  else if (/^[1-9]$/.test(e.key) && VIEW_ORDER[+e.key - 1]) setView(VIEW_ORDER[+e.key - 1]);
+});
+setView(view);
+</script>
+'''
+html = (html.replace("__TITLE__", title).replace("__EYEBROW__", eyebrow).replace("__LEDE__", lede)
+        .replace("__HOLD__", hold).replace("__FRAMES__", json.dumps(frames)).replace("__VIEWS__", json.dumps(vdefs)))
+open(out, "w").write(html)
+print("wrote", out, len(frames), "frames,", ",".join(views))

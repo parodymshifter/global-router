@@ -14,6 +14,9 @@
 //   grview --sequence frames.tsv --out-dir DIR [--video out.mp4] [--fps n] [--hold s] [camera options]
 //          render every frame a router's video trace lists (pd38route PD38ROUTE_FRAMES) with one camera, to
 //          DIR/fNNNN.jpg, and optionally an H.264 movie holding each frame --hold seconds (0.5) at --fps (30)
+//          view options (tier 2 channels, fNNNN.ch beside each grid): --height CH --color CH --glow CH|act|none
+//          --glow-color r,g,b; channels via, layer, shift, search, conflict, each scaled by its 99.5th
+//          percentile over the whole sequence (bars) or its range (colors)
 //   grview --selftest
 // A GRMAP2 grid adds a per-tile activity in [0, 1] (the share of the tile's
 // GCells whose routes changed since the previous frame), drawn as a glow.
@@ -48,6 +51,7 @@
 #import <CoreVideo/CoreVideo.h>
 #include <simd/simd.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -64,7 +68,67 @@ struct Grid {
   std::vector<float> ratio;
   std::vector<uint8_t> cls;
   std::vector<float> act; // GRMAP2 only: activity in [0, 1]
+  std::vector<std::pair<std::string, std::vector<float>>> ch; // tier 2 channels (.ch beside the grid)
+  const std::vector<float> *channel(const std::string &name) const {
+    for (const auto &c : ch)
+      if (c.first == name)
+        return &c.second;
+    return nullptr;
+  }
 };
+
+// The .ch file beside a frame: "GRCH1\0\0\0", int32 nx, ny, nch, nch 16-byte names, nch * nx*ny floats.
+bool readChannels(const std::string &path, Grid &g, std::string &err) {
+  g.ch.clear();
+  std::ifstream f(path, std::ios::binary);
+  if (!f)
+    return true; // optional
+  char magic[8];
+  int32_t d[3];
+  if (!f.read(magic, 8) || std::memcmp(magic, "GRCH1\0\0\0", 8) != 0 || !f.read(reinterpret_cast<char *>(d), sizeof d) ||
+      d[0] != g.nx || d[1] != g.ny || d[2] < 0 || d[2] > 64) {
+    err = path + ": not a channel file for this grid";
+    return false;
+  }
+  std::vector<std::string> names(d[2]);
+  for (auto &nm : names) {
+    char buf[16];
+    if (!f.read(buf, 16)) {
+      err = path + ": truncated";
+      return false;
+    }
+    nm.assign(buf, strnlen(buf, 16));
+  }
+  const size_t n = static_cast<size_t>(g.nx) * g.ny;
+  for (auto &nm : names) {
+    std::vector<float> v(n);
+    if (!f.read(reinterpret_cast<char *>(v.data()), static_cast<std::streamsize>(n * sizeof(float)))) {
+      err = path + ": truncated";
+      return false;
+    }
+    g.ch.emplace_back(nm, std::move(v));
+  }
+  return true;
+}
+
+// What a frame shows: bar height, color and glow, each from the grid or a channel.
+struct View {
+  std::string height = "grid", color = "class", glow = "act";
+  float hmax = 1, cmin = 0, cmax = 1, gmax = 1;
+  float glowR = 0.0f, glowG = 0.32f, glowB = 0.40f; // added toward this tint
+};
+
+// A perceptual ramp, dark violet to yellow.
+void ramp(float t, float &r, float &g, float &b) {
+  static const float S[5][3] = {{0.27f, 0.00f, 0.33f}, {0.23f, 0.32f, 0.55f}, {0.13f, 0.57f, 0.55f},
+                                {0.37f, 0.79f, 0.38f}, {0.99f, 0.91f, 0.14f}};
+  t = std::min(1.0f, std::max(0.0f, t)) * 4.0f;
+  int k = std::min(3, static_cast<int>(t));
+  float u = t - k;
+  r = S[k][0] + (S[k + 1][0] - S[k][0]) * u;
+  g = S[k][1] + (S[k + 1][1] - S[k][1]) * u;
+  b = S[k][2] + (S[k + 1][2] - S[k][2]) * u;
+}
 
 bool readGrid(const std::string &path, Grid &g, std::string &err) {
   std::ifstream f(path, std::ios::binary);
@@ -120,15 +184,41 @@ struct Instance {
   float r, g, b, pad;
 };
 
-std::vector<Instance> instances(const Grid &g) {
+std::vector<Instance> instances(const Grid &g, const View &v = View()) {
   std::vector<Instance> out(static_cast<size_t>(g.nx) * g.ny);
+  const std::vector<float> *hc = v.height == "grid" ? nullptr : g.channel(v.height);
+  const std::vector<float> *cc = v.color == "class" ? nullptr : g.channel(v.color);
+  const std::vector<float> *gc = (v.glow == "act" || v.glow == "none") ? nullptr : g.channel(v.glow);
   for (int y = 0; y < g.ny; ++y)
     for (int x = 0; x < g.nx; ++x) {
       size_t i = static_cast<size_t>(y) * g.nx + x;
-      const float *c = kColor[g.cls[i]];
-      float a = g.act.empty() ? 0.0f : std::min(1.0f, std::max(0.0f, g.act[i]));
-      out[i] = {static_cast<float>(x), static_cast<float>(y), std::min(g.ratio[i], 3.0f),
-                static_cast<float>(g.cls[i]), c[0], c[1], c[2], a};
+      float h = std::min(g.ratio[i], 3.0f), cls = static_cast<float>(g.cls[i]);
+      if (v.height != "grid") {
+        h = hc ? std::min(1.5f, (*hc)[i] / std::max(1e-9f, v.hmax)) : 0.0f;
+        cls = 0; // channel views: no red lift
+      }
+      float r, gr, b;
+      if (v.color == "class") {
+        const float *c = kColor[g.cls[i]];
+        r = c[0];
+        gr = c[1];
+        b = c[2];
+      } else if (cc && (*cc)[i] > 0) {
+        ramp(((*cc)[i] - v.cmin) / std::max(1e-9f, v.cmax - v.cmin), r, gr, b);
+        if (v.height == "grid")
+          cls = 0;
+      } else {
+        r = 0.80f, gr = 0.81f, b = 0.84f; // no data here
+        if (v.height == "grid")
+          cls = 0;
+      }
+      float a = 0;
+      if (v.glow == "act")
+        a = g.act.empty() ? 0.0f : g.act[i];
+      else if (gc)
+        a = (*gc)[i] / std::max(1e-9f, v.gmax);
+      a = std::min(1.0f, std::max(0.0f, a));
+      out[i] = {static_cast<float>(x), static_cast<float>(y), h, cls, r, gr, b, a};
     }
   return out;
 }
@@ -174,6 +264,7 @@ struct Uniforms {
   simd_float4x4 mvp;
   simd_float4 light; // xyz direction
   float hscale, minClass, redLift, pad1;
+  simd_float4 glow; // rgb tint the glow adds
 };
 
 const char *kShader = R"MSL(
@@ -181,7 +272,7 @@ const char *kShader = R"MSL(
 using namespace metal;
 struct Vtx { float4 p; float4 n; };
 struct Inst { float x, y, ratio, cls; float r, g, b, pad; };
-struct Uni { float4x4 mvp; float4 light; float hscale, minClass, redLift, pad1; };
+struct Uni { float4x4 mvp; float4 light; float hscale, minClass, redLift, pad1; float4 glow; };
 struct Out { float4 pos [[position]]; float3 col; };
 vertex Out vmain(uint vid [[vertex_id]], uint iid [[instance_id]],
                  const device Vtx *verts [[buffer(0)]], const device Inst *inst [[buffer(1)]],
@@ -203,7 +294,7 @@ vertex Out vmain(uint vid [[vertex_id]], uint iid [[instance_id]],
   o.col = float3(t.r, t.g, t.b) * d;
   // activity: routes changed here since the last frame -- a bright glow
   // (lightened toward cyan, in proportion; the congestion color stays readable underneath)
-  if (t.pad > 0.0) o.col = min(mix(o.col, float3(1.0), 0.30 * t.pad) + float3(0.0, 0.32, 0.40) * t.pad, float3(1.0));
+  if (t.pad > 0.0) o.col = min(mix(o.col, float3(1.0), 0.30 * t.pad) + u.glow.rgb * t.pad, float3(1.0));
   return o;
 }
 fragment float4 fmain(Out i [[stage_in]]) { return float4(i.col, 1); }
@@ -234,6 +325,7 @@ struct Renderer {
   id<MTLDepthStencilState> depth;
   id<MTLBuffer> verts, inst;
   NSUInteger vertCount = 0, instCount = 0;
+  View view;
   bool init(id<MTLDevice> d, MTLPixelFormat color, const Grid &g, std::string &err) {
     dev = d;
     queue = [dev newCommandQueue];
@@ -260,13 +352,13 @@ struct Renderer {
     std::vector<Vtx> c = cube();
     vertCount = c.size();
     verts = [dev newBufferWithBytes:c.data() length:c.size() * sizeof(Vtx) options:MTLResourceStorageModeShared];
-    std::vector<Instance> in = instances(g);
+    std::vector<Instance> in = instances(g, view);
     instCount = in.size();
     inst = [dev newBufferWithBytes:in.data() length:in.size() * sizeof(Instance) options:MTLResourceStorageModeShared];
     return true;
   }
   void setGrid(const Grid &g) {
-    std::vector<Instance> in = instances(g);
+    std::vector<Instance> in = instances(g, view);
     if (in.size() != instCount || !inst) {
       instCount = in.size();
       inst = [dev newBufferWithBytes:in.data() length:in.size() * sizeof(Instance) options:MTLResourceStorageModeShared];
@@ -282,6 +374,7 @@ struct Renderer {
     u.minClass = cam.minClass;
     u.redLift = cam.redLift;
     u.pad1 = 0;
+    u.glow = simd_make_float4(view.glowR, view.glowG, view.glowB, 0);
     [enc setRenderPipelineState:pipe];
     [enc setDepthStencilState:depth];
     [enc setCullMode:MTLCullModeBack];
@@ -607,6 +700,40 @@ static int selftest() {
     f.write(reinterpret_cast<const char *>(c), sizeof c);
   }
   check(!gv::readGrid(tmp, t, err), "a GRMAP2 grid without its activity is rejected");
+  {
+    // tier 2: a channel file beside the grid, and a view built from it
+    const char *chf = "grview_selftest.ch";
+    std::ofstream f(chf, std::ios::binary);
+    f.write("GRCH1\0\0\0", 8);
+    int32_t d[3] = {2, 1, 2};
+    f.write(reinterpret_cast<const char *>(d), sizeof d);
+    char n1[16] = "via", n2[16] = "conflict";
+    f.write(n1, 16);
+    f.write(n2, 16);
+    float via[2] = {0.0f, 4.0f}, con[2] = {2.0f, 0.0f};
+    f.write(reinterpret_cast<const char *>(via), sizeof via);
+    f.write(reinterpret_cast<const char *>(con), sizeof con);
+    f.close();
+    gv::Grid g3 = g2;
+    check(gv::readChannels(chf, g3, err) && g3.channel("via") && (*g3.channel("via"))[1] == 4.0f &&
+              g3.channel("conflict") && !g3.channel("layer"),
+          "a channel file reads back by name");
+    gv::View v;
+    v.height = "via";
+    v.color = "via";
+    v.glow = "conflict";
+    v.hmax = 4;
+    v.cmin = 0;
+    v.cmax = 4;
+    v.gmax = 2;
+    std::vector<gv::Instance> in3 = gv::instances(g3, v);
+    check(in3[1].ratio == 1.0f && in3[0].ratio == 0.0f && in3[1].cls == 0,
+          "channel view: bar height is the channel over its scale, no red lift");
+    check(in3[0].pad == 1.0f && in3[1].pad == 0.0f, "channel view: the glow comes from the chosen channel");
+    check(in3[1].r > 0.9f && in3[1].g > 0.8f && in3[0].r > 0.75f && in3[0].b > 0.8f,
+          "channel view: the top of the scale is yellow, a tile without data is light grey");
+    std::remove(chf);
+  }
   std::remove(tmp);
   gv::Camera cam;
   cam.reset(g);
@@ -663,6 +790,7 @@ int main(int argc, char **argv) {
       }
       gv::Camera cam;
       cam.reset(g);
+      gv::View view;
       for (int i = 3; i < argc; ++i) {
         std::string a = argv[i];
         auto next = [&]() -> double {
@@ -690,7 +818,18 @@ int main(int argc, char **argv) {
           cam.hscale *= static_cast<float>(next());
         else if (a == "--red-lift")
           cam.redLift = static_cast<float>(next());
-        else if (a == "--size" && i + 1 < argc) {
+        else if (a == "--height" && i + 1 < argc)
+          view.height = argv[++i];
+        else if (a == "--color" && i + 1 < argc)
+          view.color = argv[++i];
+        else if (a == "--glow" && i + 1 < argc)
+          view.glow = argv[++i];
+        else if (a == "--glow-color" && i + 1 < argc) {
+          if (std::sscanf(argv[++i], "%f,%f,%f", &view.glowR, &view.glowG, &view.glowB) != 3) {
+            std::cerr << "grview: --glow-color r,g,b\n";
+            return 2;
+          }
+        } else if (a == "--size" && i + 1 < argc) {
           if (std::sscanf(argv[++i], "%dx%d", &W, &H) != 2 || W < 16 || H < 16 || W > 8192 || H > 8192) {
             std::cerr << "grview: --size WxH\n";
             return 2;
@@ -699,11 +838,69 @@ int main(int argc, char **argv) {
           H &= ~1;
         }
       }
+      auto chPath = [&](const std::string &file) {
+        std::string c = dir + "/" + file;
+        if (c.size() > 5 && c.compare(c.size() - 5, 5, ".grid") == 0)
+          c = c.substr(0, c.size() - 5) + ".ch";
+        return c;
+      };
+      // Channel views: one scale for the whole sequence (bars and glow at the 99.5th percentile
+      // of their nonzero values, colors over their nonzero range), so frames compare.
+      const bool hCh = view.height != "grid", cCh = view.color != "class",
+                 gCh = view.glow != "act" && view.glow != "none";
+      if (hCh || cCh || gCh) {
+        std::vector<float> hv, gv2;
+        float cmin = 1e30f, cmax = -1e30f;
+        for (const std::string &file : files) {
+          gv::Grid t;
+          if (!gv::readGrid(dir + "/" + file, t, err) || !gv::readChannels(chPath(file), t, err)) {
+            std::cerr << "grview: " << err << "\n";
+            return 1;
+          }
+          auto take = [&](const std::string &name, std::vector<float> &into) {
+            if (const std::vector<float> *c = t.channel(name))
+              for (float x : *c)
+                if (x > 0)
+                  into.push_back(x);
+          };
+          if (hCh)
+            take(view.height, hv);
+          if (gCh)
+            take(view.glow, gv2);
+          if (cCh)
+            if (const std::vector<float> *c = t.channel(view.color))
+              for (float x : *c)
+                if (x > 0) {
+                  cmin = std::min(cmin, x);
+                  cmax = std::max(cmax, x);
+                }
+        }
+        auto pct = [](std::vector<float> &v) {
+          if (v.empty())
+            return 1.0f;
+          size_t k = static_cast<size_t>(0.995 * (v.size() - 1));
+          std::nth_element(v.begin(), v.begin() + k, v.end());
+          return std::max(1e-6f, v[k]);
+        };
+        view.hmax = pct(hv);
+        view.gmax = pct(gv2);
+        if (cmax > cmin) {
+          view.cmin = cmin;
+          view.cmax = cmax;
+        }
+        std::printf("view: height %s (scale %.3g), color %s (%.3g..%.3g), glow %s (scale %.3g)\n", view.height.c_str(),
+                    view.hmax, view.color.c_str(), view.cmin, view.cmax, view.glow.c_str(), view.gmax);
+      }
+      if (!gv::readChannels(chPath(files[0]), g, err)) {
+        std::cerr << "grview: " << err << "\n";
+        return 1;
+      }
       if (outDir.empty()) {
         std::cerr << "grview: --sequence needs --out-dir\n";
         return 2;
       }
       gv::Offscreen off;
+      off.r.view = view;
       if (!off.init(g, W, H, err)) {
         std::cerr << "grview: " << err << "\n";
         return 1;
@@ -717,7 +914,7 @@ int main(int argc, char **argv) {
       const int repeat = std::max(1, static_cast<int>(std::lround(hold * fps)));
       for (size_t k = 0; k < files.size(); ++k) {
         @autoreleasepool {
-          if (k > 0 && !gv::readGrid(dir + "/" + files[k], g, err)) {
+          if (k > 0 && (!gv::readGrid(dir + "/" + files[k], g, err) || !gv::readChannels(chPath(files[k]), g, err))) {
             std::cerr << "grview: " << err << "\n";
             return 1;
           }

@@ -9817,3 +9817,13 @@ search), layer assignment round 0 129 s (4x on 8 threads), 3D passes
   counters): https://claude.ai/artifact/GZGTDddhMTt73SZNhxXF7R (`recaps/router-replay.html`).
 - Lesson repeated: `cp` over an existing signed binary makes macOS kill it at launch ("signal:
   Invalid argument"); remove the file first.
+
+**Part 121b -- video trace tier 2.** Frames gain a channel file (`fNNNN.ch`, GRCH1): vias per GCell, the
+usage-weighted mean metal layer, how far that mean moved since the last 3D frame, maze searches covering
+each tile in a slow-tier round (search box = route box +- the round's margin), and nets carried as
+conflicts (the batched executor lists them when frames are on). grview `--height/--color/--glow CH`,
+`--glow-color`: four views per run (congestion; layers: color by mean layer, glow by layer shift; vias;
+search and conflicts), each channel scaled once per sequence (99.5th percentile) so frames compare.
+`recaps/build_replay.py` builds the player page with view tabs. bsg_chip_rank tier 2: byte-identical
+to Part 119. Replays: https://claude.ai/artifact/GZGTDddhMTt73SZNhxXF7R (bsg_chip_rank, four views),
+https://claude.ai/artifact/18bhEEbP8XpDV17dNJL8dK (mempool_cluster).

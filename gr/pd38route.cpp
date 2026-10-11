@@ -4896,7 +4896,9 @@ struct SlowBatchReport {
   double searchS = 0, commitS = 0, syncS = 0; // trace
   double taskS = 0, longestS = 0, topS = 0;      // trace: all tasks, each batch's longest, the run's longest
   long long popsAll = 0;                         // trace: search pops of every task, carried ones included
+  std::vector<size_t> carriedNets;               // video trace (gRecordCarried): nets carried, in commit order
 };
+bool gRecordCarried = false; // pd38route: set when PD38ROUTE_FRAMES is on
 
 void addCharge2D(const RoutingGrid &g, Usage &u, const ChargeRecord &c) {
   if (c.horizontal)
@@ -5052,6 +5054,8 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
           addCharge2D(g, live, c);
         carried.push_back(pos);
         ++br.carried;
+        if (gRecordCarried)
+          br.carriedNets.push_back(i);
         continue;
       }
       Delta dl;
@@ -5619,6 +5623,86 @@ struct FrameDumper {
   std::chrono::steady_clock::time_point t0;
   std::vector<int64_t> prevSum;
   std::ofstream index;
+  // tier 2 channels, per pooled tile (fNNNN.ch beside each frame): vias per GCell, the
+  // usage-weighted mean metal layer (1-based), how far that mean moved since the last
+  // 3D frame, maze searches covering the tile this round, nets carried (conflicts) here.
+  std::vector<float> chVia, chLayer, chShift, chSearch, chConflict;
+  std::vector<float> prevLayer; // per GCell
+  void ensureCh() {
+    if (chVia.empty()) {
+      const size_t pn = static_cast<size_t>(pnx) * pny;
+      chVia.assign(pn, 0);
+      chLayer.assign(pn, 0);
+      chShift.assign(pn, 0);
+      chSearch.assign(pn, 0);
+      chConflict.assign(pn, 0);
+    }
+  }
+  void paint(std::vector<float> &ch, const RoutingGrid &g, int x0, int y0, int x1, int y1) {
+    if (!on)
+      return;
+    init(g);
+    ensureCh();
+    x0 = std::max(0, x0) / bs;
+    y0 = std::max(0, y0) / bs;
+    x1 = std::min(g.nx - 1, x1) / bs;
+    y1 = std::min(g.ny - 1, y1) / bs;
+    for (int y = y0; y <= y1; ++y)
+      for (int x = x0; x <= x1; ++x)
+        ch[static_cast<size_t>(y) * pnx + x] += 1.0f;
+  }
+  // per GCell: vias through it, and the mean layer of its wire (< 0: none)
+  void setLayerInfo(const RoutingGrid &g, const std::vector<float> &via, const std::vector<float> &layer) {
+    init(g);
+    ensureCh();
+    const size_t pn = static_cast<size_t>(pnx) * pny;
+    std::vector<double> vs(pn, 0), ls(pn, 0), sh(pn, 0);
+    std::vector<int> cells(pn, 0), lc(pn, 0), sc(pn, 0);
+    const bool first = prevLayer.empty();
+    if (first)
+      prevLayer.assign(layer.size(), -1.0f);
+    for (int y = 0; y < g.ny; ++y)
+      for (int x = 0; x < g.nx; ++x) {
+        const size_t gi = static_cast<size_t>(y) * g.nx + x, o = static_cast<size_t>(y / bs) * pnx + x / bs;
+        vs[o] += via[gi];
+        ++cells[o];
+        if (layer[gi] >= 0) {
+          ls[o] += layer[gi];
+          ++lc[o];
+          if (!first && prevLayer[gi] >= 0) {
+            sh[o] += std::fabs(layer[gi] - prevLayer[gi]);
+            ++sc[o];
+          }
+        }
+        prevLayer[gi] = layer[gi];
+      }
+    for (size_t o = 0; o < pn; ++o) {
+      chVia[o] = cells[o] ? static_cast<float>(vs[o] / cells[o]) : 0;
+      chLayer[o] = lc[o] ? static_cast<float>(ls[o] / lc[o]) : 0;
+      chShift[o] = sc[o] ? static_cast<float>(sh[o] / sc[o]) : 0;
+    }
+  }
+  void writeChannels(const std::string &name) {
+    ensureCh();
+    std::ofstream f(dir + "/" + name, std::ios::binary);
+    if (!f)
+      fail("PD38ROUTE_FRAMES: cannot write " + dir + "/" + name);
+    const char magic[8] = {'G', 'R', 'C', 'H', '1', 0, 0, 0};
+    f.write(magic, 8);
+    int32_t dims[3] = {pnx, pny, 5};
+    f.write(reinterpret_cast<const char *>(dims), sizeof dims);
+    const char *names[5] = {"via", "layer", "shift", "search", "conflict"};
+    for (const char *nm : names) {
+      char buf[16] = {0};
+      std::strncpy(buf, nm, 15);
+      f.write(buf, 16);
+    }
+    for (const std::vector<float> *c : {&chVia, &chLayer, &chShift, &chSearch, &chConflict})
+      f.write(reinterpret_cast<const char *>(c->data()), static_cast<std::streamsize>(c->size() * sizeof(float)));
+    std::fill(chShift.begin(), chShift.end(), 0.0f); // per-step channels start fresh
+    std::fill(chSearch.begin(), chSearch.end(), 0.0f);
+    std::fill(chConflict.begin(), chConflict.end(), 0.0f);
+  }
   void init(const RoutingGrid &g) {
     if (!on || pnx)
       return;
@@ -5708,6 +5792,11 @@ struct FrameDumper {
     f.write(reinterpret_cast<const char *>(ratio.data()), static_cast<std::streamsize>(pn * sizeof(float)));
     f.write(reinterpret_cast<const char *>(cls.data()), static_cast<std::streamsize>(pn));
     f.write(reinterpret_cast<const char *>(act.data()), static_cast<std::streamsize>(pn * sizeof(float)));
+    {
+      char cname[32];
+      std::snprintf(cname, sizeof cname, "f%04d.ch", idx);
+      writeChannels(cname);
+    }
     index << idx << "\t" << name << "\t" << stage << "\t" << label << "\t"
           << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() << "\t" << overflow << "\t"
           << nChanged << "\n";
@@ -6449,6 +6538,18 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
           },
           gSlowBatchLpt ? &wt : nullptr);
       tDag = std::chrono::duration<double>(std::chrono::steady_clock::now() - tDag0).count();
+      if (gFrames.on) { // pd38route: video trace -- search boxes and conflicts this round
+        for (size_t k = 0; k < cand.size(); ++k)
+          if (bouts[k].ran) {
+            NetBox b = netBoxOf(g, nets[cand[k]]);
+            int m = std::max(0, bouts[k].margin);
+            gFrames.paint(gFrames.chSearch, g, b.x0 - m, b.y0 - m, b.x1 + m, b.y1 + m);
+          }
+        for (size_t i : sbr.carriedNets) {
+          NetBox b = netBoxOf(g, nets[i]);
+          gFrames.paint(gFrames.chConflict, g, b.x0, b.y0, b.x1, b.y1);
+        }
+      }
       for (const BatchOut &o : bouts) {
         accepted += o.accepted;
         rejected += o.rejected;
@@ -10255,6 +10356,31 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
         t += arr[static_cast<size_t>(l) * plane + i];
       return t;
     };
+    { // tier 2: vias and the mean wire layer per GCell
+      const size_t n = static_cast<size_t>(g.nx) * g.ny;
+      std::vector<float> via(n, 0.0f), layer(n, -1.0f);
+      for (int y = 0; y < g.ny; ++y)
+        for (int x = 0; x < g.nx; ++x) {
+          const size_t gi = static_cast<size_t>(y) * g.nx + x;
+          long long vsum = 0;
+          for (int l = 0; l + 1 < g.nLayers; ++l)
+            vsum += rvu.usage[viaIndex(g, x, y, l)];
+          via[gi] = static_cast<float>(vsum);
+          double w = 0, wl = 0;
+          for (int l = 0; l < g.nLayers; ++l) {
+            double u = 0;
+            if (x + 1 < g.nx)
+              u += ru.h[g.hIndex(x, y, l)];
+            if (y + 1 < g.ny)
+              u += ru.v[g.vIndex(x, y, l)];
+            w += u;
+            wl += u * (l + 1);
+          }
+          if (w > 0)
+            layer[gi] = static_cast<float>(wl / w);
+        }
+      gFrames.setLayerInfo(g, via, layer);
+    }
     gFrames.frame(g, stage, label, [&](size_t i) { return sumL(ru.h, i, planeH); },
                   [&](size_t i) { return sumL(g.hcap, i, planeH); }, [&](size_t i) { return sumL(ru.v, i, planeV); },
                   [&](size_t i) { return sumL(g.vcap, i, planeV); });
@@ -17184,6 +17310,7 @@ int main(int argc, char **argv) {
   }
   if (const char *v = std::getenv("PD38ROUTE_FRAMES"); v && *v) {
     gFrames.on = true;
+    gRecordCarried = true;
     gFrames.dir = v;
     gFrames.t0 = std::chrono::steady_clock::now();
     if (const char *w = std::getenv("PD38ROUTE_FRAME_SIDE"); w)
