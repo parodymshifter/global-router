@@ -58,10 +58,16 @@ jobs:
       - name: cppcheck
         shell: bash
         run: |
-          cppcheck --enable=warning,performance,portability --std=c++17 --max-configs=1 \
-            --inline-suppr --suppress=missingIncludeSystem \
-            --template='{file}:{line}: {severity}: {message} [{id}]' \
-            "gr/$ROUTER.cpp" gr/gr_verify.cpp 2> cppcheck.txt || true
+          # One run per program: checked together, cppcheck treats the router and
+          # the verifier as one program and reports their separate RoutedNet
+          # structs as a one-definition-rule error.
+          : > cppcheck.txt
+          for src in "gr/$ROUTER.cpp" gr/gr_verify.cpp; do
+            cppcheck --enable=warning,performance,portability --std=c++17 --max-configs=1 \
+              --inline-suppr --suppress=missingIncludeSystem \
+              --template='{file}:{line}: {severity}: {message} [{id}]' \
+              "$src" 2>> cppcheck.txt || true
+          done
 
       - name: Summarize
         shell: bash
@@ -139,7 +145,16 @@ jobs:
             exit 1
           fi
           [ "$rc" = "0" ] || { tail -20 san-route.log; exit 1; }
-          gr/gr_verify.san synth.gr synth.route | tee verify.txt
+          # gr_verify exits 1 whenever the routes overflow (the synthetic design keeps a
+          # small residue), so its status is not the test here: a sanitizer report or
+          # a crash is, and then the legality counts below.
+          set +e
+          gr/gr_verify.san synth.gr synth.route > verify.txt 2>&1
+          vrc=$?
+          set -e
+          cat verify.txt
+          if grep -q -E 'ERROR: (Address|Leak)Sanitizer|runtime error:' verify.txt; then exit 1; fi
+          [ "$vrc" -le 1 ] || { echo "gr_verify exited $vrc"; exit 1; }
           for k in 'malformed segments' 'out of bounds' 'disconnected nets' 'incomplete nets' 'unrouted nets'; do
             v=$(grep "$k" verify.txt | awk '{print $NF}')
             [ "$v" = "0" ] || { echo "illegal output: $k = $v"; exit 1; }
