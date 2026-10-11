@@ -5598,6 +5598,131 @@ std::vector<std::vector<int>> patternColorBatches(const std::vector<PatternCellB
   return batches;
 }
 
+// pd38route: PD38ROUTE_FRAMES=<dir> -- frames for a video trace of the run
+// (read only: routes are unchanged). Each frame is the 2D congestion map,
+// the router's own 2D view: per GCell, the worst of its four 2D edges by
+// usage / capacity (layers summed), mean-pooled into blocks so the longer
+// side has at most PD38ROUTE_FRAME_SIDE (640) tiles, and the share of each
+// block's GCells whose usage changed since the previous frame. File:
+// "GRMAP2\0\0", int32 nx, ny, nx*ny float ratio, nx*ny uint8 class (grmap's
+// classes), nx*ny float activity in [0, 1]. frames.tsv lists each frame:
+// index, file, stage, label, seconds since the start, 2D overflow, changed
+// GCells. PD38ROUTE_FRAME_SPLIT (12): pieces of the pattern stage's first
+// round per frame (its dependency graph runs in that many consecutive
+// slices: a prefix of the order holds every dependency of its positions,
+// so the routes are the same).
+struct FrameDumper {
+  bool on = false;
+  std::string dir;
+  int side = 640, split = 12, idx = 0;
+  int bs = 1, pnx = 0, pny = 0;
+  std::chrono::steady_clock::time_point t0;
+  std::vector<int64_t> prevSum;
+  std::ofstream index;
+  void init(const RoutingGrid &g) {
+    if (!on || pnx)
+      return;
+    bs = std::max(1, (std::max(g.nx, g.ny) + side - 1) / side);
+    pnx = (g.nx + bs - 1) / bs;
+    pny = (g.ny + bs - 1) / bs;
+    index.open(dir + "/frames.tsv");
+    if (!index)
+      fail("PD38ROUTE_FRAMES: cannot write " + dir + "/frames.tsv");
+    index << "index\tfile\tstage\tlabel\tseconds\toverflow2d\tchanged\n";
+  }
+  // uh(i), ch(i): usage and capacity of 2D horizontal edge i (= hIndex(x, y, 0)); uv, cv likewise.
+  template <class UH, class CH, class UV, class CV>
+  void frame(const RoutingGrid &g, const std::string &stage, const std::string &label, UH uh, CH ch, UV uv, CV cv) {
+    if (!on)
+      return;
+    init(g);
+    const size_t n = static_cast<size_t>(g.nx) * g.ny, pn = static_cast<size_t>(pnx) * pny;
+    std::vector<double> sum(pn, 0.0);
+    std::vector<int> cnt(pn, 0), changed(pn, 0);
+    long long overflow = 0, nChanged = 0;
+    const bool first = prevSum.empty();
+    if (first)
+      prevSum.assign(n, 0);
+    for (int y = 0; y < g.ny; ++y)
+      for (int x = 0; x < g.nx; ++x) {
+        double worst = 0;
+        int64_t usum = 0;
+        bool blocked = true;
+        auto edge = [&](long long u, long long c) {
+          usum += u;
+          if (c > 0) {
+            blocked = false;
+            worst = std::max(worst, static_cast<double>(u) / static_cast<double>(c));
+          } else if (u > 0) {
+            blocked = false;
+            worst = 3.0;
+          }
+        };
+        if (x + 1 < g.nx) {
+          size_t i = static_cast<size_t>(y) * (g.nx - 1) + x;
+          edge(uh(i), ch(i));
+          overflow += std::max(0LL, static_cast<long long>(uh(i)) - static_cast<long long>(ch(i)));
+        }
+        if (x > 0)
+          edge(uh(static_cast<size_t>(y) * (g.nx - 1) + x - 1), ch(static_cast<size_t>(y) * (g.nx - 1) + x - 1));
+        if (y + 1 < g.ny) {
+          size_t i = static_cast<size_t>(y) * g.nx + x;
+          edge(uv(i), cv(i));
+          overflow += std::max(0LL, static_cast<long long>(uv(i)) - static_cast<long long>(cv(i)));
+        }
+        if (y > 0)
+          edge(uv(static_cast<size_t>(y - 1) * g.nx + x), cv(static_cast<size_t>(y - 1) * g.nx + x));
+        const size_t gi = static_cast<size_t>(y) * g.nx + x;
+        const size_t o = static_cast<size_t>(y / bs) * pnx + x / bs;
+        if (!blocked) {
+          sum[o] += std::min(3.0, worst);
+          ++cnt[o];
+        }
+        if (!first && usum != prevSum[gi]) {
+          ++changed[o];
+          ++nChanged;
+        }
+        prevSum[gi] = usum;
+      }
+    std::vector<float> ratio(pn, 0.0f), act(pn, 0.0f);
+    std::vector<uint8_t> cls(pn, 6);
+    for (size_t o = 0; o < pn; ++o) {
+      int bx = static_cast<int>(o % pnx), by = static_cast<int>(o / pnx);
+      int gw = std::min(bs, g.nx - bx * bs), gh = std::min(bs, g.ny - by * bs);
+      act[o] = static_cast<float>(changed[o]) / static_cast<float>(std::max(1, gw * gh));
+      if (!cnt[o])
+        continue;
+      double q = sum[o] / cnt[o];
+      ratio[o] = static_cast<float>(q);
+      cls[o] = q > 1 + 1e-9 ? 5 : q > 1 - 1e-9 ? 4 : q >= 0.9 ? 3 : q > 0.75 ? 2 : q > 0.5 ? 1 : 0;
+    }
+    char name[32];
+    std::snprintf(name, sizeof name, "f%04d.grid", idx);
+    std::ofstream f(dir + "/" + name, std::ios::binary);
+    if (!f)
+      fail("PD38ROUTE_FRAMES: cannot write " + dir + "/" + name);
+    const char magic[8] = {'G', 'R', 'M', 'A', 'P', '2', 0, 0};
+    f.write(magic, 8);
+    int32_t dims[2] = {pnx, pny};
+    f.write(reinterpret_cast<const char *>(dims), sizeof dims);
+    f.write(reinterpret_cast<const char *>(ratio.data()), static_cast<std::streamsize>(pn * sizeof(float)));
+    f.write(reinterpret_cast<const char *>(cls.data()), static_cast<std::streamsize>(pn));
+    f.write(reinterpret_cast<const char *>(act.data()), static_cast<std::streamsize>(pn * sizeof(float)));
+    index << idx << "\t" << name << "\t" << stage << "\t" << label << "\t"
+          << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() << "\t" << overflow << "\t"
+          << nChanged << "\n";
+    index.flush();
+    ++idx;
+  }
+  void frame2D(const RoutingGrid &g, const Usage &u, const std::string &stage, const std::string &label) {
+    frame(g, stage, label, [&](size_t i) { return static_cast<long long>(u.h[i]); },
+          [&](size_t i) { return static_cast<long long>(u.capH[i]); },
+          [&](size_t i) { return static_cast<long long>(u.v[i]); },
+          [&](size_t i) { return static_cast<long long>(u.capV[i]); });
+  }
+};
+FrameDumper gFrames;
+
 // pd36route, self-tests only: 0 = the incremental refresh, 1 = a full
 // refresh before every batch (pd35route), 2 = no refresh after the round's
 // first batch (stale costs: proves the fixture depends on the refresh).
@@ -5637,6 +5762,7 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
   }
   rep.pieces = pieces.size();
   const int amount = 1 + g.minSpacing[0];
+  gFrames.frame2D(g, usage, "start", "nets read, trees built: " + std::to_string(pieces.size()) + " pieces to route");
   // pd36route: the edges whose usage changed since the batch costs were
   // last refreshed (codes as in Piece::edges).
   std::vector<int> dirty;
@@ -5762,15 +5888,22 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
       for (const std::vector<int> &bt : pos)
         for (int j : bt)
           seq.push_back(static_cast<uint32_t>(j));
+      // pd38route: with frames on, the first round runs in consecutive
+      // slices of the order, a frame after each (same routes).
+      const size_t slices = (gFrames.on && round == 0) ? static_cast<size_t>(std::max(1, gFrames.split)) : 1;
+      for (size_t sl = 0; sl < slices; ++sl) {
+      const size_t lo = seq.size() * sl / slices, hi = seq.size() * (sl + 1) / slices;
       runCommutingDagFn(
-          seq.size(), static_cast<size_t>(cw) * ch,
-          [&](size_t k, std::vector<uint32_t> &out) {
+          hi - lo, static_cast<size_t>(cw) * ch,
+          [&](size_t kk, std::vector<uint32_t> &out) {
+            const size_t k = lo + kk;
             const PatternCellBox &b = cellBoxes[seq[k]];
             for (int cy = b.cy0; cy <= b.cy1; ++cy)
               for (int cx = b.cx0; cx <= b.cx1; ++cx)
                 out.push_back(static_cast<uint32_t>(cy * cw + cx));
           },
-          gThreads, [&](size_t k) {
+          gThreads, [&](size_t kk) {
+            const size_t k = lo + kk;
             const int pk = todo[seq[k]];
             Piece &p = pieces[pk];
             auto change = [&](int code, int sign) {
@@ -5802,6 +5935,10 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
               change(code, +1);
             changedSinceBest[pk] = 1;
           });
+      if (slices > 1)
+        gFrames.frame2D(g, usage, "pattern stage",
+                        "round 0: " + std::to_string(hi) + " of " + std::to_string(seq.size()) + " pieces");
+      }
       tSolve += secs(d1, now());
     }
     static const std::vector<std::vector<int>> kNoBatches;
@@ -5896,6 +6033,9 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
     if (trace)
       std::cerr << "pattern round " << round << ": " << todo.size() << " pieces in " << batches.size()
                 << " batches, 2D overflow " << ov << " (per-piece count)\n";
+    if (round > 0 || !gFrames.on || !dagDone)
+      gFrames.frame2D(g, usage, "pattern stage",
+                      "round " + std::to_string(round) + ": " + std::to_string(todo.size()) + " pieces rerouted");
     auto r1 = now();
     tRound += secs(r0, r1);
     if (ov < best) {
@@ -6554,6 +6694,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     advancePresentDemand(prices, usage);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun += 1;
+    gFrames.frame2D(g, usage, "slow tier", // pd38route: video trace
+                    "round " + std::to_string(round) + ": " + std::to_string(accepted) + " reroutes kept");
     if (trace) {
       std::cerr << "slow round " << round << " overflow " << overflow << " (accepted "
                 << accepted << ", rejected " << rejected;
@@ -10102,6 +10244,23 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   if (gStages.on)
     gStages.mark("layer assignment, round 0", &nets, -1, stageObjective(),
                  std::to_string(nets.size()) + " nets" + round0Work);
+  // pd38route: video trace frames from the 3D usage, layers summed per 2D edge
+  auto frame3D = [&](const std::string &stage, const std::string &label) {
+    if (!gFrames.on)
+      return;
+    const size_t planeH = static_cast<size_t>(g.ny) * (g.nx - 1), planeV = static_cast<size_t>(g.ny - 1) * g.nx;
+    auto sumL = [&](const auto &arr, size_t i, size_t plane) {
+      long long t = 0;
+      for (int l = 0; l < g.nLayers; ++l)
+        t += arr[static_cast<size_t>(l) * plane + i];
+      return t;
+    };
+    gFrames.frame(g, stage, label, [&](size_t i) { return sumL(ru.h, i, planeH); },
+                  [&](size_t i) { return sumL(g.hcap, i, planeH); }, [&](size_t i) { return sumL(ru.v, i, planeV); },
+                  [&](size_t i) { return sumL(g.vcap, i, planeV); });
+  };
+  gFrames.prevSum.clear(); // the 3D view counts usage differently: this frame is a new baseline, not a change
+  frame3D("layer assignment", "every net on its layers (from here: all layers, via demand included)");
   // The best-round snapshot feeds only the restore at the end, which the
   // score cost skips (pd33route): not kept then (pd35route, memory).
   const bool keepBest = !gScore.on;
@@ -10130,6 +10289,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
                      std::to_string(st.accepted) + " of " + std::to_string(st.nets) + " nets rerouted");
       std::cerr << "pattern 3D pass " << pass << ": " << st.accepted << " of " << st.nets << " nets rerouted, score -"
                 << st.gain << ", real overflow " << totalRealOverflow(g, ru, rvu, viaCap, false) << "\n";
+      frame3D("3D pass", "pass " + std::to_string(pass) + ": " + std::to_string(st.accepted) + " nets reshaped");
       if (st.accepted == 0)
         break;
     }
@@ -17021,6 +17181,15 @@ int main(int argc, char **argv) {
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_SLOW_DAG must be 0 or 1 (got '" + sv + "')");
     gSlowDag = sv == "1";
+  }
+  if (const char *v = std::getenv("PD38ROUTE_FRAMES"); v && *v) {
+    gFrames.on = true;
+    gFrames.dir = v;
+    gFrames.t0 = std::chrono::steady_clock::now();
+    if (const char *w = std::getenv("PD38ROUTE_FRAME_SIDE"); w)
+      gFrames.side = std::max(16, std::atoi(w));
+    if (const char *w = std::getenv("PD38ROUTE_FRAME_SPLIT"); w)
+      gFrames.split = std::max(1, std::atoi(w));
   }
   if (const char *v = std::getenv("PD38ROUTE_P3D_REUSE"); v) {
     std::string sv(v);

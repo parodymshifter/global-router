@@ -9798,3 +9798,22 @@ What remains on mempool_cluster (576 s): pattern stage 167 s (work-bound
 in the later rounds), slow tier 140 s (each batch waits on its longest
 search), layer assignment round 0 129 s (4x on 8 threads), 3D passes
 103 s, I/O 35 s.
+
+## Part 121 -- video trace, tier 1 (frames, renderer, player)
+
+- **pd38route `PD38ROUTE_FRAMES=<dir>`** (read only): a frame at the run's start, after each of
+  `PD38ROUTE_FRAME_SPLIT` (12) slices of the pattern stage's first round (the dependency graph runs in
+  consecutive slices of its order; a prefix holds all its positions' dependencies, so the routes are
+  the same), after every later pattern round, every slow-tier round, layer assignment and each 3D
+  pass. A frame (GRMAP2) is the router's 2D congestion map -- per GCell the worst of its four 2D
+  edges, layers summed in the 3D stages -- mean-pooled to at most `PD38ROUTE_FRAME_SIDE` (640) tiles
+  a side, plus the share of each block's GCells whose usage changed since the last frame;
+  `frames.tsv` lists stage, label, seconds, 2D overflow and changed GCells. bsg_chip_rank with frames:
+  byte-identical to Part 119, 47 frames, 14.5 s.
+- **grview**: GRMAP2 (activity drawn as a cyan lightening that keeps the congestion color),
+  `--sequence frames.tsv --out-dir DIR [--video out.mp4 --fps --hold]` (one camera, JPEG frames, an
+  H.264 movie through AVFoundation; no new dependency). Self-tests for the new format.
+- **Player**: an HTML page (crossfade, play/pause, 0.25x-8x, scrub, step, stage timeline, live
+  counters): https://claude.ai/artifact/GZGTDddhMTt73SZNhxXF7R (`recaps/router-replay.html`).
+- Lesson repeated: `cp` over an existing signed binary makes macOS kill it at launch ("signal:
+  Invalid argument"); remove the file first.

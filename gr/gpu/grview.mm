@@ -11,7 +11,12 @@
 //          [--zoom f] [--focus x y] [--size WxH] [--hide-below c] [--hscale f]
 //          [--red-lift f]
 //                                                   render once, no window
+//   grview --sequence frames.tsv --out-dir DIR [--video out.mp4] [--fps n] [--hold s] [camera options]
+//          render every frame a router's video trace lists (pd38route PD38ROUTE_FRAMES) with one camera, to
+//          DIR/fNNNN.jpg, and optionally an H.264 movie holding each frame --hold seconds (0.5) at --fps (30)
 //   grview --selftest
+// A GRMAP2 grid adds a per-tile activity in [0, 1] (the share of the tile's
+// GCells whose routes changed since the previous frame), drawn as a glow.
 // (GRVIEW_DEBUG=1 prints the snapshot camera.)
 //
 // Window controls: drag to rotate, scroll to zoom, Shift+drag to pan,
@@ -26,7 +31,8 @@
 // pattern_metal.mm, since there is no offline Metal compiler here):
 //   clang++ -std=c++17 -O2 -Wall -Wextra -fobjc-arc gpu/grview.mm -o grview \
 //     -framework Cocoa -framework Metal -framework MetalKit -framework ImageIO \
-//     -framework CoreGraphics -framework UniformTypeIdentifiers
+//     -framework CoreGraphics -framework UniformTypeIdentifiers -framework AVFoundation \
+//     -framework CoreMedia -framework CoreVideo
 //
 // Optional by construction: nothing in the routers depends on it, and
 // grmap's PPM output stays the dependency-free 2D view (CLAUDE.md,
@@ -38,6 +44,8 @@
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <AVFoundation/AVFoundation.h>
+#import <CoreVideo/CoreVideo.h>
 #include <simd/simd.h>
 
 #include <cmath>
@@ -55,6 +63,7 @@ struct Grid {
   int nx = 0, ny = 0;
   std::vector<float> ratio;
   std::vector<uint8_t> cls;
+  std::vector<float> act; // GRMAP2 only: activity in [0, 1]
 };
 
 bool readGrid(const std::string &path, Grid &g, std::string &err) {
@@ -65,10 +74,11 @@ bool readGrid(const std::string &path, Grid &g, std::string &err) {
   }
   char magic[8];
   int32_t dims[2];
-  if (!f.read(magic, 8) || std::memcmp(magic, "GRMAP1\0\0", 8) != 0) {
+  if (!f.read(magic, 8) || (std::memcmp(magic, "GRMAP1\0\0", 8) != 0 && std::memcmp(magic, "GRMAP2\0\0", 8) != 0)) {
     err = path + " is not a grmap .grid file";
     return false;
   }
+  const bool v2 = magic[5] == '2';
   if (!f.read(reinterpret_cast<char *>(dims), sizeof dims) || dims[0] <= 0 || dims[1] <= 0 || dims[0] > 100000 ||
       dims[1] > 100000) {
     err = path + ": bad dimensions";
@@ -83,6 +93,14 @@ bool readGrid(const std::string &path, Grid &g, std::string &err) {
       !f.read(reinterpret_cast<char *>(g.cls.data()), static_cast<std::streamsize>(n))) {
     err = path + ": truncated";
     return false;
+  }
+  g.act.clear();
+  if (v2) {
+    g.act.resize(n);
+    if (!f.read(reinterpret_cast<char *>(g.act.data()), static_cast<std::streamsize>(n * sizeof(float)))) {
+      err = path + ": truncated activity";
+      return false;
+    }
   }
   for (uint8_t c : g.cls)
     if (c > 6) {
@@ -108,8 +126,9 @@ std::vector<Instance> instances(const Grid &g) {
     for (int x = 0; x < g.nx; ++x) {
       size_t i = static_cast<size_t>(y) * g.nx + x;
       const float *c = kColor[g.cls[i]];
+      float a = g.act.empty() ? 0.0f : std::min(1.0f, std::max(0.0f, g.act[i]));
       out[i] = {static_cast<float>(x), static_cast<float>(y), std::min(g.ratio[i], 3.0f),
-                static_cast<float>(g.cls[i]), c[0], c[1], c[2], 0};
+                static_cast<float>(g.cls[i]), c[0], c[1], c[2], a};
     }
   return out;
 }
@@ -182,6 +201,9 @@ vertex Out vmain(uint vid [[vertex_id]], uint iid [[instance_id]],
   float d = 0.42 + 0.58 * max(dot(v.n.xyz, normalize(u.light.xyz)), 0.0);
   if (v.n.z > 0.5) d = max(d, 0.85); // tops stay bright, so the color reads from any angle
   o.col = float3(t.r, t.g, t.b) * d;
+  // activity: routes changed here since the last frame -- a bright glow
+  // (lightened toward cyan, in proportion; the congestion color stays readable underneath)
+  if (t.pad > 0.0) o.col = min(mix(o.col, float3(1.0), 0.30 * t.pad) + float3(0.0, 0.32, 0.40) * t.pad, float3(1.0));
   return o;
 }
 fragment float4 fmain(Out i [[stage_in]]) { return float4(i.col, 1); }
@@ -243,6 +265,15 @@ struct Renderer {
     inst = [dev newBufferWithBytes:in.data() length:in.size() * sizeof(Instance) options:MTLResourceStorageModeShared];
     return true;
   }
+  void setGrid(const Grid &g) {
+    std::vector<Instance> in = instances(g);
+    if (in.size() != instCount || !inst) {
+      instCount = in.size();
+      inst = [dev newBufferWithBytes:in.data() length:in.size() * sizeof(Instance) options:MTLResourceStorageModeShared];
+    } else {
+      std::memcpy([inst contents], in.data(), in.size() * sizeof(Instance));
+    }
+  }
   void encode(id<MTLRenderCommandEncoder> enc, const Camera &cam, float aspect) {
     Uniforms u;
     u.mvp = cam.mvp(aspect);
@@ -264,51 +295,67 @@ struct Renderer {
 
 const MTLClearColor kBackground = {0.93, 0.94, 0.95, 1};
 
-bool snapshot(const Grid &g, const Camera &cam, int W, int H, const std::string &path, std::string &err) {
-  id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
-  if (!dev) {
-    err = "no Metal device";
-    return false;
-  }
+// Offscreen rendering into a BGRA texture, read back as pixels.
+struct Offscreen {
+  id<MTLDevice> dev;
   Renderer r;
-  if (!r.init(dev, MTLPixelFormatRGBA8Unorm, g, err))
-    return false;
-  MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                                                                 width:W height:H mipmapped:NO];
-  cd.usage = MTLTextureUsageRenderTarget;
-  cd.storageMode = MTLStorageModeShared;
-  id<MTLTexture> color = [dev newTextureWithDescriptor:cd];
-  MTLTextureDescriptor *zd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-                                                                                 width:W height:H mipmapped:NO];
-  zd.usage = MTLTextureUsageRenderTarget;
-  zd.storageMode = MTLStorageModePrivate;
-  id<MTLTexture> dtex = [dev newTextureWithDescriptor:zd];
-  MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-  rp.colorAttachments[0].texture = color;
-  rp.colorAttachments[0].loadAction = MTLLoadActionClear;
-  rp.colorAttachments[0].clearColor = kBackground;
-  rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-  rp.depthAttachment.texture = dtex;
-  rp.depthAttachment.loadAction = MTLLoadActionClear;
-  rp.depthAttachment.clearDepth = 1.0;
-  id<MTLCommandBuffer> cb = [r.queue commandBuffer];
-  id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
-  r.encode(enc, cam, static_cast<float>(W) / H);
-  [enc endEncoding];
-  [cb commit];
-  [cb waitUntilCompleted];
-  std::vector<uint8_t> px(static_cast<size_t>(W) * H * 4);
-  [color getBytes:px.data() bytesPerRow:W * 4 fromRegion:MTLRegionMake2D(0, 0, W, H) mipmapLevel:0];
+  id<MTLTexture> color, dtex;
+  int W = 0, H = 0;
+  bool init(const Grid &g, int w, int h, std::string &err) {
+    W = w;
+    H = h;
+    dev = MTLCreateSystemDefaultDevice();
+    if (!dev) {
+      err = "no Metal device";
+      return false;
+    }
+    if (!r.init(dev, MTLPixelFormatBGRA8Unorm, g, err))
+      return false;
+    MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                   width:W height:H mipmapped:NO];
+    cd.usage = MTLTextureUsageRenderTarget;
+    cd.storageMode = MTLStorageModeShared;
+    color = [dev newTextureWithDescriptor:cd];
+    MTLTextureDescriptor *zd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+                                                                                   width:W height:H mipmapped:NO];
+    zd.usage = MTLTextureUsageRenderTarget;
+    zd.storageMode = MTLStorageModePrivate;
+    dtex = [dev newTextureWithDescriptor:zd];
+    return true;
+  }
+  void render(const Camera &cam, std::vector<uint8_t> &px) {
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = color;
+    rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rp.colorAttachments[0].clearColor = kBackground;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.depthAttachment.texture = dtex;
+    rp.depthAttachment.loadAction = MTLLoadActionClear;
+    rp.depthAttachment.clearDepth = 1.0;
+    id<MTLCommandBuffer> cb = [r.queue commandBuffer];
+    id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+    r.encode(enc, cam, static_cast<float>(W) / H);
+    [enc endEncoding];
+    [cb commit];
+    [cb waitUntilCompleted];
+    px.resize(static_cast<size_t>(W) * H * 4);
+    [color getBytes:px.data() bytesPerRow:W * 4 fromRegion:MTLRegionMake2D(0, 0, W, H) mipmapLevel:0];
+  }
+};
+
+// BGRA pixels to a PNG or JPEG file.
+bool writeImage(std::vector<uint8_t> &px, int W, int H, const std::string &path, bool jpeg, std::string &err) {
   CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
   CGContextRef ctx = CGBitmapContextCreate(px.data(), W, H, 8, W * 4, cs,
-                                           kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+                                           kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
   CGImageRef img = CGBitmapContextCreateImage(ctx);
   NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
-  CGImageDestinationRef dst =
-      CGImageDestinationCreateWithURL((__bridge CFURLRef)url, (__bridge CFStringRef)UTTypePNG.identifier, 1, nullptr);
+  CFStringRef type = (__bridge CFStringRef)(jpeg ? UTTypeJPEG.identifier : UTTypePNG.identifier);
+  CGImageDestinationRef dst = CGImageDestinationCreateWithURL((__bridge CFURLRef)url, type, 1, nullptr);
   bool ok = dst != nullptr;
   if (dst) {
-    CGImageDestinationAddImage(dst, img, nullptr);
+    NSDictionary *props = jpeg ? @{(__bridge NSString *)kCGImageDestinationLossyCompressionQuality : @0.82} : @{};
+    CGImageDestinationAddImage(dst, img, (__bridge CFDictionaryRef)props);
     ok = CGImageDestinationFinalize(dst);
     CFRelease(dst);
   }
@@ -319,6 +366,96 @@ bool snapshot(const Grid &g, const Camera &cam, int W, int H, const std::string 
     err = "could not write " + path;
   return ok;
 }
+
+bool snapshot(const Grid &g, const Camera &cam, int W, int H, const std::string &path, std::string &err) {
+  Offscreen off;
+  if (!off.init(g, W, H, err))
+    return false;
+  std::vector<uint8_t> px;
+  off.render(cam, px);
+  return writeImage(px, W, H, path, false, err);
+}
+
+// An H.264 movie from BGRA frames, each held `repeat` video frames.
+struct MovieWriter {
+  AVAssetWriter *writer = nil;
+  AVAssetWriterInput *input = nil;
+  AVAssetWriterInputPixelBufferAdaptor *adaptor = nil;
+  int W = 0, H = 0, fps = 30;
+  long long frame = 0;
+  bool open(const std::string &path, int w, int h, int f, std::string &err) {
+    W = w;
+    H = h;
+    fps = f;
+    NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
+    [[NSFileManager defaultManager] removeItemAtURL:url error:nil];
+    NSError *e = nil;
+    writer = [[AVAssetWriter alloc] initWithURL:url fileType:AVFileTypeMPEG4 error:&e];
+    if (!writer) {
+      err = std::string("cannot create movie: ") + (e ? e.localizedDescription.UTF8String : "?");
+      return false;
+    }
+    NSDictionary *settings = @{
+      AVVideoCodecKey : AVVideoCodecTypeH264,
+      AVVideoWidthKey : @(W),
+      AVVideoHeightKey : @(H),
+      AVVideoCompressionPropertiesKey : @{AVVideoAverageBitRateKey : @(8000000)}
+    };
+    input = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:settings];
+    input.expectsMediaDataInRealTime = NO;
+    adaptor = [AVAssetWriterInputPixelBufferAdaptor
+        assetWriterInputPixelBufferAdaptorWithAssetWriterInput:input
+                                   sourcePixelBufferAttributes:@{
+                                     (NSString *)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA),
+                                     (NSString *)kCVPixelBufferWidthKey : @(W),
+                                     (NSString *)kCVPixelBufferHeightKey : @(H)
+                                   }];
+    [writer addInput:input];
+    if (![writer startWriting]) {
+      err = "cannot start the movie";
+      return false;
+    }
+    [writer startSessionAtSourceTime:kCMTimeZero];
+    return true;
+  }
+  bool add(const std::vector<uint8_t> &px, int repeat, std::string &err) {
+    for (int r = 0; r < repeat; ++r) {
+      while (!input.readyForMoreMediaData)
+        [NSThread sleepForTimeInterval:0.002];
+      CVPixelBufferRef pb = nullptr;
+      if (CVPixelBufferPoolCreatePixelBuffer(nullptr, adaptor.pixelBufferPool, &pb) != kCVReturnSuccess || !pb) {
+        err = "no pixel buffer";
+        return false;
+      }
+      CVPixelBufferLockBaseAddress(pb, 0);
+      uint8_t *dst = static_cast<uint8_t *>(CVPixelBufferGetBaseAddress(pb));
+      size_t stride = CVPixelBufferGetBytesPerRow(pb);
+      for (int y = 0; y < H; ++y)
+        std::memcpy(dst + y * stride, px.data() + static_cast<size_t>(y) * W * 4, static_cast<size_t>(W) * 4);
+      CVPixelBufferUnlockBaseAddress(pb, 0);
+      bool ok = [adaptor appendPixelBuffer:pb withPresentationTime:CMTimeMake(frame++, fps)];
+      CVPixelBufferRelease(pb);
+      if (!ok) {
+        err = "could not append a movie frame";
+        return false;
+      }
+    }
+    return true;
+  }
+  bool close(std::string &err) {
+    [input markAsFinished];
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    [writer finishWritingWithCompletionHandler:^{
+      dispatch_semaphore_signal(done);
+    }];
+    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+    if (writer.status != AVAssetWriterStatusCompleted) {
+      err = "the movie did not finish";
+      return false;
+    }
+    return true;
+  }
+};
 
 } // namespace gv
 
@@ -442,6 +579,34 @@ static int selftest() {
     f.write("NOTAGRID", 8);
   }
   check(!gv::readGrid(tmp, t, err), "a file with the wrong magic is rejected");
+  {
+    std::ofstream f(tmp, std::ios::binary);
+    f.write("GRMAP2\0\0", 8);
+    int32_t d[2] = {2, 1};
+    f.write(reinterpret_cast<const char *>(d), sizeof d);
+    float r[2] = {0.2f, 1.2f};
+    f.write(reinterpret_cast<const char *>(r), sizeof r);
+    uint8_t c[2] = {0, 5};
+    f.write(reinterpret_cast<const char *>(c), sizeof c);
+    float a[2] = {0.0f, 0.75f};
+    f.write(reinterpret_cast<const char *>(a), sizeof a);
+  }
+  gv::Grid g2;
+  check(gv::readGrid(tmp, g2, err) && g2.act.size() == 2 && g2.act[1] == 0.75f,
+        "a GRMAP2 grid reads back with its activity");
+  std::vector<gv::Instance> in2 = gv::instances(g2);
+  check(in2[0].pad == 0.0f && in2[1].pad == 0.75f, "activity reaches the instances (the glow channel)");
+  {
+    std::ofstream f(tmp, std::ios::binary);
+    f.write("GRMAP2\0\0", 8);
+    int32_t d[2] = {2, 1};
+    f.write(reinterpret_cast<const char *>(d), sizeof d);
+    float r[2] = {0.2f, 1.2f};
+    f.write(reinterpret_cast<const char *>(r), sizeof r);
+    uint8_t c[2] = {0, 5};
+    f.write(reinterpret_cast<const char *>(c), sizeof c);
+  }
+  check(!gv::readGrid(tmp, t, err), "a GRMAP2 grid without its activity is rejected");
   std::remove(tmp);
   gv::Camera cam;
   cam.reset(g);
@@ -460,8 +625,119 @@ int main(int argc, char **argv) {
       return selftest();
     if (argc < 2) {
       std::cerr << "usage: grview <file.grid> [title] | grview <file.grid> --snapshot out.png [options] | grview "
-                   "--selftest\n";
+                   "--sequence frames.tsv --out-dir DIR [--video out.mp4] [options] | grview --selftest\n";
       return 2;
+    }
+    if (std::string(argv[1]) == "--sequence") {
+      if (argc < 3) {
+        std::cerr << "grview: --sequence frames.tsv\n";
+        return 2;
+      }
+      std::string tsv = argv[2], outDir, video, err;
+      int W = 1600, H = 900, fps = 30;
+      double hold = 0.5;
+      std::vector<std::string> files;
+      {
+        std::ifstream f(tsv);
+        if (!f) {
+          std::cerr << "grview: cannot read " << tsv << "\n";
+          return 1;
+        }
+        std::string line;
+        std::getline(f, line); // header
+        while (std::getline(f, line)) {
+          size_t a = line.find('\t'), b = a == std::string::npos ? a : line.find('\t', a + 1);
+          if (b != std::string::npos)
+            files.push_back(line.substr(a + 1, b - a - 1));
+        }
+      }
+      if (files.empty()) {
+        std::cerr << "grview: no frames listed in " << tsv << "\n";
+        return 1;
+      }
+      std::string dir = tsv.find('/') == std::string::npos ? "." : tsv.substr(0, tsv.rfind('/'));
+      gv::Grid g;
+      if (!gv::readGrid(dir + "/" + files[0], g, err)) {
+        std::cerr << "grview: " << err << "\n";
+        return 1;
+      }
+      gv::Camera cam;
+      cam.reset(g);
+      for (int i = 3; i < argc; ++i) {
+        std::string a = argv[i];
+        auto next = [&]() -> double {
+          if (i + 1 >= argc) {
+            std::cerr << "grview: " << a << " needs a value\n";
+            std::exit(2);
+          }
+          return std::atof(argv[++i]);
+        };
+        if (a == "--out-dir" && i + 1 < argc)
+          outDir = argv[++i];
+        else if (a == "--video" && i + 1 < argc)
+          video = argv[++i];
+        else if (a == "--fps")
+          fps = std::max(1, static_cast<int>(next()));
+        else if (a == "--hold")
+          hold = next();
+        else if (a == "--yaw")
+          cam.yaw = static_cast<float>(next() * M_PI / 180);
+        else if (a == "--pitch")
+          cam.pitch = static_cast<float>(next() * M_PI / 180);
+        else if (a == "--zoom")
+          cam.dist /= static_cast<float>(next());
+        else if (a == "--hscale")
+          cam.hscale *= static_cast<float>(next());
+        else if (a == "--red-lift")
+          cam.redLift = static_cast<float>(next());
+        else if (a == "--size" && i + 1 < argc) {
+          if (std::sscanf(argv[++i], "%dx%d", &W, &H) != 2 || W < 16 || H < 16 || W > 8192 || H > 8192) {
+            std::cerr << "grview: --size WxH\n";
+            return 2;
+          }
+          W &= ~1; // the movie wants even sizes
+          H &= ~1;
+        }
+      }
+      if (outDir.empty()) {
+        std::cerr << "grview: --sequence needs --out-dir\n";
+        return 2;
+      }
+      gv::Offscreen off;
+      if (!off.init(g, W, H, err)) {
+        std::cerr << "grview: " << err << "\n";
+        return 1;
+      }
+      gv::MovieWriter mw;
+      if (!video.empty() && !mw.open(video, W, H, fps, err)) {
+        std::cerr << "grview: " << err << "\n";
+        return 1;
+      }
+      std::vector<uint8_t> px;
+      const int repeat = std::max(1, static_cast<int>(std::lround(hold * fps)));
+      for (size_t k = 0; k < files.size(); ++k) {
+        @autoreleasepool {
+          if (k > 0 && !gv::readGrid(dir + "/" + files[k], g, err)) {
+            std::cerr << "grview: " << err << "\n";
+            return 1;
+          }
+          off.r.setGrid(g);
+          off.render(cam, px);
+          char name[32];
+          std::snprintf(name, sizeof name, "/f%04zu.jpg", k);
+          if (!gv::writeImage(px, W, H, outDir + name, true, err) || (!video.empty() && !mw.add(px, repeat, err))) {
+            std::cerr << "grview: " << err << "\n";
+            return 1;
+          }
+        }
+      }
+      if (!video.empty() && !mw.close(err)) {
+        std::cerr << "grview: " << err << "\n";
+        return 1;
+      }
+      std::printf("%zu frames rendered to %s%s\n", files.size(), outDir.c_str(),
+                  video.empty() ? "" : (", movie " + video).c_str());
+      return 0;
     }
     gv::Grid grid;
     std::string err;
