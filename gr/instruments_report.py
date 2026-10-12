@@ -94,6 +94,9 @@ def text_int(e):
         return 0
 
 
+BINARIES = {}  # name -> (path, load address), from the frames' binary elements
+
+
 def frames(bt):
     out = []
     for f in bt:
@@ -104,8 +107,34 @@ def frames(bt):
         b = f.find('binary')
         if b is not None:
             b = resolve(b)
-        out.append((name, b.get('name') if b is not None and b.get('name') else ''))
+            if b.get('name') and b.get('path') and b.get('load-addr'):
+                BINARIES.setdefault(b.get('name'), (b.get('path'), b.get('load-addr')))
+        out.append((name, b.get('name') if b is not None and b.get('name') else '', f.get('addr') or ''))
     return out
+
+
+def line_profile(samples, binary, substr, top):
+    """Self time by source line inside functions whose name contains `substr` (the leaf frame's
+    address, symbolicated with atos; needs a binary built with -g and its .dSYM beside it)."""
+    if binary not in BINARIES:
+        return None
+    path, load = BINARIES[binary]
+    weights = collections.Counter()
+    for t, thread, pcore, w, fr, _ in samples:
+        name, b, addr = fr[0]
+        if b == binary and substr in name and addr:
+            weights[addr] += w
+    if not weights:
+        return []
+    addrs = list(weights)
+    lines = collections.Counter()
+    for i in range(0, len(addrs), 500):
+        chunk = addrs[i:i + 500]
+        out = subprocess.run(['atos', '-o', path, '-l', load] + chunk, capture_output=True, text=True).stdout
+        for addr, sym in zip(chunk, out.splitlines()):
+            m = re.search(r'\(([^()]+:\d+)\)\s*$', sym)
+            lines[m.group(1) if m else '(no line info)'] += weights[addr]
+    return lines.most_common(top)
 
 
 def main():
@@ -113,6 +142,8 @@ def main():
     ap.add_argument('trace')
     ap.add_argument('--top', type=int, default=8)
     ap.add_argument('--process', default='', help='process name prefix (default: the busiest process)')
+    ap.add_argument('--lines', default='', help='also break down self time by source line inside functions '
+                    'whose name contains this text (build with -g and run dsymutil)')
     a = ap.parse_args()
 
     # Samples: (time ns, thread, P core?, weight ns, frames leaf first, process)
@@ -130,7 +161,7 @@ def main():
             continue
         fr = frames(bt)
         if not fr:  # no backtrace recorded for this tick
-            fr = [('(no backtrace)', '')]
+            fr = [('(no backtrace)', '', '')]
         samples.append((t, thread, 'P Core' in core, w, fr, proc))
         procs[proc] += w
     if not samples:
@@ -188,10 +219,10 @@ def main():
             d['cpu'] += w
             d['p'] += w if pcore else 0
             d['threads'].add(thread)
-            leaf, lb = fr[0]
+            leaf, lb, _ = fr[0]
             d['self'][short(leaf) if lb == binary else f'{short(leaf)}  [{lb}]'] += w
             seen = set()
-            for name, b in fr:
+            for name, b, _ in fr:
                 n = short(name)
                 if b == binary and n not in seen:
                     seen.add(n)
@@ -264,6 +295,18 @@ def main():
     print('## Whole run\n')
     table('Self time (where the CPU was)', total['self'], total['cpu'])
     table('Inclusive time, router functions', total['incl'], total['cpu'])
+    if a.lines:
+        lp = line_profile(samples, binary, a.lines, max(a.top, 25))
+        print(f'## Self time by source line in functions matching `{a.lines}`\n')
+        if lp is None:
+            print('(binary not found in the trace)\n')
+        else:
+            tot = sum(w for _, w in lp) or 1
+            print('| line | s | share of these |')
+            print('|---|---|---|')
+            for ln, w in lp:
+                print(f'| {ln} | {ms(w):.2f} | {100 * w / tot:.1f}% |')
+            print()
     print('## By stage\n')
     for k, (b, e, name) in enumerate(stages):
         d = per[k]

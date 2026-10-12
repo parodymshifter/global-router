@@ -10051,3 +10051,29 @@ single-thread 2008 runs): mempool_group_rank 72.4 / 75.9 s -> 71.7 / 73.7 s, ada
 with its slow tier 53.7 -> 53.8 s, nvdla_rank and bsg_chip_rank within +-0.7 s. Creating a thread
 costs tens of microseconds; even 57 a second is well under 1% of a run. Kept for what it does
 remove -- thread churn in every profile, and a data race -- not for speed.
+
+## Part 128 -- layer assignment's front-end stalls: a code-layout problem, not an arithmetic one
+
+Part 126 found layer assignment and the 3D passes front-end bound (39-48% of cycles stalled on
+instruction delivery). `instruments_report.py --lines` (new: self time by source line, via `atos` on a
+`-g` build with a dSYM) put layer assignment's time in `resolveNode` (the only one of
+`layerAssignDP`'s lambdas left out of line): the call that builds a node's stack-range table (23%) and
+the via-demand coverage loop (~45%). All timings below on a quiet machine (the three background router
+runs paused with SIGSTOP and resumed; every comparison alternates builds), 8 threads, ISPD 2024
+standard; **every output byte-identical** to the committed pd39route.
+
+| change (each exact) | layer assignment | whole run | verdict |
+|---|---|---|---|
+| incremental per-child minimum + coverage bit mask (O(L) less work per range) | bsg_chip_rank 3.875 -> 4.0 s (4 runs each) | 13.4-13.8 s both | no gain; reverted |
+| `-O3` | bsg_chip_rank -6%; mempool_group_rank 18.2 -> 17.4 / 18.9 -> 18.1 s | -5% / +1% | noise-level |
+| PGO, trained on nvdla_rank, bsg_chip_rank, newblue2 | -14 to -16% | -3.5% / -1.5% | pattern stage +10% |
+| out-of-line `vdFill` and `fillRanges` (what PGO split out) | mempool_group_rank 18.5/17.6 vs 18.5/18.4 s | +1% | no gain; reverted |
+| PGO, broader training (7 designs), measured on held-out bsg_chip and mempool_group | **-9%** (4.15 -> 3.75 s; 17.7 -> 16.05 s) | -2% / -0.5% | pattern stage **+8 to +12%** |
+
+Reading: the stall is code layout -- profile-driven block placement and inlining remove a tenth of
+layer assignment's time while the arithmetic it executes is unchanged -- and halving the DP's
+inner-loop work does nothing. But whole-program PGO moves the pattern stage the other way by about
+as much, so a run gains 0-3%, inside the run-to-run spread; with a profile file to keep in step with
+the code, not adopted. Simple hand layout (noinline on the per-node helpers) does not reproduce it.
+What remains open: layer assignment keeps only 5.6 of 8 threads busy (Part 126) -- load balance is a
+larger lever than layout here.

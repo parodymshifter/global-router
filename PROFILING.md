@@ -37,6 +37,20 @@ cd gr && ./instruments_profile.sh -a "$(pgrep -f '^\./pd39route' | head -1)" -l 
 Open `OUT.trace` in Instruments for the timeline. Traces are large (about 1 MB per second of an
 8-thread run); keep windows short and the traces in the run archive, not the repository.
 
+## Source lines
+
+`instruments_report.py --lines NAME` adds self time by source line inside functions whose name
+contains NAME. It needs line tables: build in two steps so `dsymutil` can read the object file, and
+profile that binary:
+
+```bash
+cd gr && g++ -std=c++17 -O2 -g -ffp-contract=off -c -o pd39route.dbg.o pd39route.cpp && g++ -pthread -o pd39route.dbg pd39route.dbg.o && dsymutil pd39route.dbg
+```
+
+Caution from Part 128: in code that stalls on instruction fetch, samples pile up on call sites and
+loop heads, so a hot line is where time is charged, not necessarily what costs it. Check a fix by
+timing it on a quiet machine (pause the background runs), not by the profile alone.
+
 ## Reading it
 
 - Busy threads well under the thread count in a parallel stage: the stage is waiting (batch
