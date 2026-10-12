@@ -39,7 +39,16 @@
 //     commits as searched against its batch-start snapshot (nothing is
 //     carried); present-demand history polices what that lets through.
 //
-// RESULTS: see HISTORY_COST_SWEEP.md Part 118.
+//   PD38ROUTE_REGION_COST_REL=F (default 0 = off, byte for byte): the
+//     region stage's work-gated stop (pd14route) is scaled to the design.
+//     Its threshold becomes min(PD14ROUTE_REGION_COST_POPS, F x the search
+//     expansions the run made before the region stage) -- 150 flat rounds
+//     that cost F times everything searched so far end the stage even when
+//     they are cheap in absolute terms (a small design, Part 122). Counted
+//     in expansions, so the stop stays deterministic. No search before the
+//     region stage gives a threshold of 0: the plain plateau rule.
+//
+// RESULTS: see HISTORY_COST_SWEEP.md Parts 118-122.
 //
 // --- pd37route.cpp's own header, inherited unchanged: ---
 //
@@ -3817,6 +3826,34 @@ bool parseCostPlateau(const char *window, const char *pops, int &windowOut, long
   return true;
 }
 
+// pd38route: PD38ROUTE_REGION_COST_REL. The work-gated stop's threshold,
+// scaled to the design: min(absPops, rel x before), where `before` is the
+// search expansions made before the region stage. rel <= 0 leaves absPops;
+// absPops 0 (no absolute threshold) gives rel x before alone; the product
+// saturates instead of overflowing.
+long long relativeCostPops(long long absPops, double rel, long long before) {
+  if (!(rel > 0.0))
+    return absPops;
+  double t = rel * static_cast<double>(std::max(0LL, before));
+  long long scaled = t >= 9.0e18 ? std::numeric_limits<long long>::max() : static_cast<long long>(t);
+  return absPops > 0 ? std::min(absPops, scaled) : scaled;
+}
+
+// pd38route: PD38ROUTE_REGION_COST_REL, a number >= 0 (0 = off). Unset
+// leaves the value as it is.
+bool parseCostRel(const char *v, double &out, std::string &err) {
+  if (!v)
+    return true;
+  char *end = nullptr;
+  double x = std::strtod(v, &end);
+  if (end == v || *end != '\0' || !(x >= 0.0) || x > 1.0e6) {
+    err = std::string("PD38ROUTE_REGION_COST_REL must be a number from 0 to 1e6 (got '") + v + "')";
+    return false;
+  }
+  out = x;
+  return true;
+}
+
 struct RegionSettings {
   bool enabled = false; // PD5ROUTE_REGION
   int expand = 5;       // PD5ROUTE_REGION_EXPAND: tiles added around the overflow's bbox
@@ -4104,6 +4141,45 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   rep.pops = gSearchPops - popsAtStart;
   rep.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - stageStart).count();
   return rep;
+}
+
+// pd38route (test hook, Part 122): when non-null, the slow tier appends one
+// record per round -- its overflow, reroute counts and a hash of every net's
+// route at the round's end -- so a test can compare the slow tier's own
+// trajectory across thread counts and batch settings, whichever state the
+// run finally keeps. Null in every real run: no cost, no effect on routes.
+struct SlowRoundRecord {
+  long long overflow = 0;
+  int accepted = 0, rejected = 0;
+  uint64_t routeHash = 0;
+  bool operator==(const SlowRoundRecord &o) const {
+    return overflow == o.overflow && accepted == o.accepted && rejected == o.rejected && routeHash == o.routeHash;
+  }
+  bool operator!=(const SlowRoundRecord &o) const { return !(*this == o); }
+};
+std::vector<SlowRoundRecord> *gSlowHistory = nullptr;
+
+// FNV-1a over every net's segments, in net order.
+template <class Nets> uint64_t routeHashOf(const Nets &nets) {
+  uint64_t h = 1469598103934665603ULL;
+  auto mix = [&](long long v) {
+    for (int k = 0; k < 8; ++k) {
+      h ^= static_cast<uint64_t>(v >> (8 * k)) & 0xffu;
+      h *= 1099511628211ULL;
+    }
+  };
+  for (const auto &rn : nets) {
+    mix(static_cast<long long>(rn.segs.size()));
+    for (const auto &sg : rn.segs) {
+      mix(sg.x1);
+      mix(sg.y1);
+      mix(sg.l1);
+      mix(sg.x2);
+      mix(sg.y2);
+      mix(sg.l2);
+    }
+  }
+  return h;
 }
 
 struct RunReport {
@@ -6800,6 +6876,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     advancePresentDemand(prices, usage);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun += 1;
+    if (gSlowHistory) // pd38route: test hook (Part 122)
+      gSlowHistory->push_back({overflow, accepted, rejected, routeHashOf(nets)});
     gFrames.frame2D(g, usage, "slow tier", // pd38route: video trace
                     "round " + std::to_string(round) + ": " + std::to_string(accepted) + " reroutes kept");
     if (trace) {
@@ -15123,6 +15201,31 @@ void testWorkGatedPlateau() {
   std::string err;
   check(parseCostPlateau("100", "2000000000", w, p, err) && w == 100 && p == 2000000000LL,
         "work-gated settings parse exactly");
+  // pd38route: the threshold scaled to the design (PD38ROUTE_REGION_COST_REL).
+  check(relativeCostPops(32000000000LL, 0.0, 5) == 32000000000LL, "relative scale off: the absolute threshold");
+  check(relativeCostPops(32000000000LL, 10.0, 150000) == 1500000,
+        "small design: 10 x 150000 expansions before = 1.5M, below the absolute threshold");
+  check(relativeCostPops(32000000000LL, 10.0, 8000000000LL) == 32000000000LL,
+        "large design: 10 x 8e9 is above the absolute threshold, which stays");
+  check(relativeCostPops(32000000000LL, 10.0, 0) == 0, "no search before the region stage: threshold 0");
+  check(relativeCostPops(0, 4.0, 25) == 100, "no absolute threshold: the scaled one alone");
+  check(relativeCostPops(0, 1.0e6, 9000000000000000000LL) == std::numeric_limits<long long>::max(),
+        "a huge product saturates instead of overflowing");
+  check(relativeCostPops(500, 2.0, -7) == 0, "a negative count is treated as 0");
+  {
+    // The scaled threshold drives the same stop: the stuck fixture's 40 rounds
+    // with `before` = a quarter of a window's work and F = 4 stop after 5.
+    RegionReport rel = runRegion(5, relativeCostPops(full.pops + 1, 4.0, perWindow / 4));
+    check(rel.roundsRun == 5 && rel.costStopped && rel.after == full.after,
+          "scaled threshold (4 x a quarter window) stops the stuck fixture after 5 rounds, same best");
+  }
+  double rel = 3.0;
+  check(parseCostRel(nullptr, rel, err) && rel == 3.0, "unset relative scale leaves the value");
+  check(parseCostRel("10", rel, err) && rel == 10.0 && parseCostRel("0.5", rel, err) && rel == 0.5,
+        "relative scale parses");
+  check(!parseCostRel("-1", rel, err) && !parseCostRel("x", rel, err) && !parseCostRel("nan", rel, err) &&
+            !parseCostRel("1e7", rel, err),
+        "negative, non-numeric, NaN or huge relative scale rejected");
   check(parseCostPlateau(nullptr, nullptr, w, p, err) && w == 100, "unset settings leave values alone");
   check(!parseCostPlateau("-1", nullptr, w, p, err) && !parseCostPlateau(nullptr, "lots", w, p, err),
         "negative or non-numeric settings rejected");
@@ -16710,8 +16813,11 @@ void testSlowDagSameAtAnyThreadCount() {
     }
   }
   gr += "0\n";
-  auto run = [&](int threads, long long &overflow, int &escalated, int batch = 0) {
+  auto run = [&](int threads, long long &overflow, int &escalated, int batch = 0,
+                 std::vector<SlowRoundRecord> *history = nullptr) {
     Design d = parse("pd38route_selftest_slow.gr", gr.c_str());
+    std::vector<SlowRoundRecord> h;
+    gSlowHistory = &h;
     CostSettings cs;
     cs.model = CostModel::kPresentDemand;
     PatternStageSettings ps;
@@ -16730,6 +16836,9 @@ void testSlowDagSameAtAnyThreadCount() {
     bx.cap = 20;
     RunReport rep = route(d, 60, 40, 0.02, 0.05, HistMode::kAdditive, 1.1, 1, false, true, 1.0, 0.0, true, true, true,
                           8, bx, cs, AcceptMode::kKeep, true, -1, &ps);
+    gSlowHistory = nullptr;
+    if (history)
+      *history = std::move(h);
     gThreads = savedT;
     gSlowDag = savedD;
     gSlowBatch = savedB;
@@ -16743,7 +16852,8 @@ void testSlowDagSameAtAnyThreadCount() {
   };
   long long o1 = 0, o4 = 0;
   int e1 = 0, e4 = 0;
-  auto a = run(1, o1, e1), b = run(4, o4, e4);
+  std::vector<SlowRoundRecord> h1, h4;
+  auto a = run(1, o1, e1, 0, &h1), b = run(4, o4, e4, 0, &h4);
   bool same = a.size() == b.size();
   for (size_t i = 0; same && i < a.size(); ++i) {
     same = a[i].size() == b[i].size();
@@ -16751,9 +16861,23 @@ void testSlowDagSameAtAnyThreadCount() {
       same = a[i][j].x1 == b[i][j].x1 && a[i][j].y1 == b[i][j].y1 && a[i][j].x2 == b[i][j].x2 &&
              a[i][j].y2 == b[i][j].y2 && a[i][j].l1 == b[i][j].l1 && a[i][j].l2 == b[i][j].l2;
   }
-  check(e1 > 20 && o1 >= 0, "slow DAG fixture: the slow tier's routes are the ones kept (" + std::to_string(e1) +
-                                " nets escalated, 2D overflow " + std::to_string(o1) + ")");
-  check(same && o1 == o4 && e1 == e4, "slow tier on the dependency graph: 4 threads = 1 thread, route for route");
+  // Part 122 (option C): the slow tier's own rounds are compared, whichever
+  // state the run keeps. Whether the slow tier beats the pattern stage here
+  // depends on the platform's floating point (the Mac's slow tier wins by
+  // 12 of 1830; Linux's never wins, and the final routes are then the
+  // pattern stage's on both thread counts), so it is reported, not required.
+  long long slowBest = std::numeric_limits<long long>::max();
+  int kept = 0;
+  for (const SlowRoundRecord &r : h1) {
+    slowBest = std::min(slowBest, r.overflow);
+    kept += r.accepted;
+  }
+  check(h1.size() >= 10 && kept > 20,
+        "slow DAG fixture: the slow tier ran (" + std::to_string(h1.size()) + " rounds, " + std::to_string(kept) +
+            " reroutes kept, its best 2D overflow " + std::to_string(slowBest) + "; kept state " +
+            std::to_string(o1) + ", " + std::to_string(e1) + " nets escalated)");
+  check(same && o1 == o4 && e1 == e4 && h1 == h4,
+        "slow tier on the dependency graph: 4 threads = 1 thread, round for round and route for route");
 
   // pd38route: PD38ROUTE_SLOW_BATCH. Batches of 16 at 1 and 4 threads: the
   // same routes, every replica equal to the live state after every batch
@@ -16771,45 +16895,48 @@ void testSlowDagSameAtAnyThreadCount() {
   long long ob1 = 0, ob4 = 0, os1 = 0;
   int eb1 = 0, eb4 = 0, es1 = 0;
   gSlowBatchCarried = 0;
-  auto c1 = run(1, ob1, eb1, 16);
+  std::vector<SlowRoundRecord> hc1, hc4, hs1, hc4n, hp1, hp4, hq1, hq4;
+  auto c1 = run(1, ob1, eb1, 16, &hc1);
   long long carried1 = gSlowBatchCarried;
-  auto c4 = run(4, ob4, eb4, 16);
-  auto s1 = run(1, os1, es1, 1);
+  auto c4 = run(4, ob4, eb4, 16, &hc4);
+  auto s1 = run(1, os1, es1, 1, &hs1);
   gSlowBatchLpt = false;
   long long ob4n = 0;
   int eb4n = 0;
-  auto c4n = run(4, ob4n, eb4n, 16);
+  auto c4n = run(4, ob4n, eb4n, 16, &hc4n);
   gSlowBatchLpt = true;
-  check(sameRoutes(c4, c4n) && ob4 == ob4n, "batched slow tier: biggest-first work order = plain order, route for route");
+  check(sameRoutes(c4, c4n) && ob4 == ob4n && hc4 == hc4n,
+        "batched slow tier: biggest-first work order = plain order, round for round");
   gSlowSpread = 8;
   long long sp1 = 0, sp4 = 0;
   int esp1 = 0, esp4 = 0;
   gSlowBatchCarried = 0;
-  auto p1 = run(1, sp1, esp1, 16);
+  auto p1 = run(1, sp1, esp1, 16, &hp1);
   long long carriedSpread = gSlowBatchCarried;
-  auto p4 = run(4, sp4, esp4, 16);
+  auto p4 = run(4, sp4, esp4, 16, &hp4);
   gSlowSpread = 0;
   gSlowConflict = false;
   long long nc1 = 0, nc4 = 0;
   int enc1 = 0, enc4 = 0;
   gSlowBatchCarried = 0;
-  auto q1 = run(1, nc1, enc1, 16);
+  auto q1 = run(1, nc1, enc1, 16, &hq1);
   long long carriedNone = gSlowBatchCarried;
-  auto q4 = run(4, nc4, enc4, 16);
+  auto q4 = run(4, nc4, enc4, 16, &hq4);
   gSlowConflict = true;
-  check(carriedNone == 0 && sameRoutes(q1, q4) && nc1 == nc4,
+  check(carriedNone == 0 && sameRoutes(q1, q4) && nc1 == nc4 && hq1 == hq4,
         "batched slow tier, no conflict rule: nothing carried, 4 threads = 1 thread");
-  check(sameRoutes(p1, p4) && sp1 == sp4, "batched slow tier, spread over 8x8 tiles: 4 threads = 1 thread, route for route");
-  check(!sameRoutes(p1, c1), "batched slow tier: spreading changes the order (control)");
+  check(sameRoutes(p1, p4) && sp1 == sp4 && hp1 == hp4,
+        "batched slow tier, spread over 8x8 tiles: 4 threads = 1 thread, round for round");
+  check(hp1 != hc1, "batched slow tier: spreading changes the slow rounds (control)");
   check(carriedSpread < carried1, "batched slow tier: spread batches collide less (" + std::to_string(carriedSpread) +
                                       " carried vs " + std::to_string(carried1) + ")");
   check(sp1 <= std::max(os1 * 3 / 2, os1 + 10), "batched slow tier, spread: ends near batch 1 (2D overflow " +
                                                     std::to_string(sp1) + " vs " + std::to_string(os1) + ")");
   check(carried1 > 0, "batched slow tier: the conflict rule carried nets to the next batch (" +
                           std::to_string(carried1) + ")");
-  check(sameRoutes(c1, c4) && ob1 == ob4 && eb1 == eb4,
-        "batched slow tier (batch 16): 4 threads = 1 thread, route for route");
-  check(!sameRoutes(c1, s1), "batched slow tier: batch 16 differs from batch 1 (control: batching takes effect)");
+  check(sameRoutes(c1, c4) && ob1 == ob4 && eb1 == eb4 && hc1 == hc4,
+        "batched slow tier (batch 16): 4 threads = 1 thread, round for round");
+  check(hc1 != hs1, "batched slow tier: batch 16 differs from batch 1 (control: batching takes effect)");
   check(ob1 <= std::max(os1 * 3 / 2, os1 + 10), "batched slow tier: batch 16 ends near batch 1 (2D overflow " +
                                                     std::to_string(ob1) + " vs " + std::to_string(os1) + ")");
 }
@@ -17891,6 +18018,20 @@ int main(int argc, char **argv) {
     if (sv != "0" && sv != "1")
       fail("PD19ROUTE_RECLAIM_FALLBACK must be 0 or 1 (got '" + sv + "')");
     reclaimFallback = sv == "1";
+  }
+  // pd38route's own mechanism: the work-gated stop scaled to the design.
+  {
+    double rel = 0.0;
+    std::string err;
+    if (!parseCostRel(std::getenv("PD38ROUTE_REGION_COST_REL"), rel, err))
+      fail(err);
+    if (rel > 0.0 && region.enabled && region.costWindow > 0) {
+      long long before = gSearchPops; // this thread's count: every search so far
+      long long scaled = relativeCostPops(region.costPops, rel, before);
+      std::cerr << "region work gate: " << before << " search expansions before the region stage, threshold "
+                << region.costPops << " -> " << scaled << " (PD38ROUTE_REGION_COST_REL " << rel << ")\n";
+      region.costPops = scaled;
+    }
   }
   RegionReport regRep;
   RefineReport refRep;
