@@ -147,7 +147,7 @@ D4. Compare with the published winners' visible-set numbers (leaderboard in
 4. D1 -> D2 -> D3 (D2 can start in parallel with 2, since it is setup).
 5. C and E as time allows.
 
-## Decisions for the user
+## Decisions (made 2026-10-12: all three as recommended)
 
 1. **One setting or per-benchmark best for 2008?** The contest required one
    router for all; per-benchmark tuning finds lower numbers but is not
@@ -158,3 +158,7 @@ D4. Compare with the published winners' visible-set numbers (leaderboard in
    fastest-turnaround settings for every test run.
 3. **The ISPD 2025 evaluation environment**: native OpenROAD build on this
    Mac (time, no cost), a cloud machine (cost), or skip timing for now.
+
+Chosen: (1) both tables, single setting as the headline; (2) no time cap on
+final best-results runs, fastest-turnaround settings for every test run;
+(3) build OpenROAD natively on this Mac.
