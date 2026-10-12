@@ -9938,6 +9938,12 @@ each beside a running 2008 job. mempool_cluster_ranking's +12% sits in layer ass
 faster (133.0 vs 132.5 s; 189 vs 192 s) on the same code path: contention is the likelier cause; a
 rerun on a quiet machine is owed before calling it.
 
+**Quiet-machine rerun** (every other router paused with SIGSTOP, 08:51:07-09:47:54, 3407 s -- the
+Part 122 newblue7 run's wall time includes that pause): mempool_cluster_ranking alternately, twice
+each, scores unchanged (1771988786 / 1771989624). pd38route **448.8 / 440.2 s**, pd39route
+**440.5 / 439.0 s** (stage totals 439.7 / 431.2 vs 431.4 / 429.6; layer assignment round 0 155.7 /
+154.6 vs 159.6 / 156.5 s). pd39route is no slower; the +12% was contention.
+
 Phase 2 (`p123b.jobs`): the 16 ISPD 2008 benchmarks on pd39route against the recorded standard results.
 
 Queued (`p123.sh`): phase 1, the 13 ISPD 2024 designs on pd38route and pd39route alternately (the
