@@ -9912,6 +9912,34 @@ exactly its best round's, escalation flags included. **CI (quality-checks.yml) b
 Linux and macOS and fails unless the self-test output and both synthetic routes are identical: they
 are** (run on c3a2e66). nvdla_rank: overflow 25745 -> 25720, 6.0 -> 6.1 s (loaded machine).
 
+**Phase 1, ISPD 2024** (Part 120 standard, 8 threads, one job at a time beside one 2008 run; every
+run `status=OK`, official evaluator = our score; pd38route reproduces Part 119's scores exactly):
+
+| design | pd38route | pd39route | score | time pd38 -> pd39 |
+|---|---|---|---|---|
+| mempool_tile_rank | 13699356 | 13699409 | +0.0004% | 3.1 -> 2.6 s |
+| mempool_tile | 15106426 | 15106426 | +0.0000% | 2.9 -> 2.9 s |
+| ariane133_68 | 19682122 | 19682336 | +0.0011% | 2.9 -> 2.9 s |
+| ariane133_51 | 22386812 | 22386813 | +0.0000% | 3.1 -> 3.1 s |
+| ariane_68_rank | 22499080 | 22499096 | +0.0001% | 4.2 -> 4.3 s |
+| nvdla | 48026876 | 48027559 | +0.0014% | 6.0 -> 5.8 s |
+| nvdla_rank | 42949425 | 42950544 | +0.0026% | 5.9 -> 5.7 s |
+| bsg_chip_rank | 109400633 | 109400663 | +0.0000% | 15.9 -> 16.6 s |
+| bsg_chip | 111835518 | 111837415 | +0.0017% | 18.4 -> 18.3 s |
+| mempool_group_rank | 381375035 | 381374576 | -0.0001% | 70.8 -> 66.0 s |
+| mempool_group | 396208769 | 396208042 | -0.0002% | 62.1 -> 65.5 s |
+| mempool_cluster_ranking | 1771988786 | 1771989624 | +0.0000% | 438.1 -> 490.3 s |
+| mempool_cluster | 1615294385 | 1615288061 | -0.0004% | 632.4 -> 604.5 s |
+
+Scores: every difference within +-0.003%, inside the +-0.02% spread of Part 119's quality-neutral
+variants -- tie order and arithmetic change nothing measurable. Times: mixed both ways, one sample
+each beside a running 2008 job. mempool_cluster_ranking's +12% sits in layer assignment round 0
+(149 -> 186 s) and the pattern stage (102 -> 117 s), while mempool_cluster's same stages are equal or
+faster (133.0 vs 132.5 s; 189 vs 192 s) on the same code path: contention is the likelier cause; a
+rerun on a quiet machine is owed before calling it.
+
+Phase 2 (`p123b.jobs`): the 16 ISPD 2008 benchmarks on pd39route against the recorded standard results.
+
 Queued (`p123.sh`): phase 1, the 13 ISPD 2024 designs on pd38route and pd39route alternately (the
 Part 120 standard, 8 threads, one job at a time); phase 2, the 16 ISPD 2008 benchmarks on pd39route
 against the recorded standard results.
