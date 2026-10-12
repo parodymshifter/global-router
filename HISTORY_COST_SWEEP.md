@@ -9949,3 +9949,49 @@ Phase 2 (`p123b.jobs`): the 16 ISPD 2008 benchmarks on pd39route against the rec
 Queued (`p123.sh`): phase 1, the 13 ISPD 2024 designs on pd38route and pd39route alternately (the
 Part 120 standard, 8 threads, one job at a time); phase 2, the 16 ISPD 2008 benchmarks on pd39route
 against the recorded standard results.
+
+## Part 124 -- the 2024 runtime mechanisms on the 2008 standard (fast08.env) -- in progress
+
+`gr/fast08.env` on `@standard.env`: threads 8 and the pattern-stage graph (exact), and the batched,
+tile-spread slow tier (Parts 118-119; not exact). Exactness check, newblue2: standard vs standard +
+threads + graph **byte-identical** (7617661). First results (fast08, `status=OK`, `gr_verify` =
+`eval2008.pl`; against the recorded standard runs, which ran under different load): adaptec2 0 /
+5242781, 414 s (1382); adaptec4 0 / 12204261, 362 s (676); bigblue3 0 / 13165027, 690 s (1730);
+adaptec1 0 / 5407378, 1495 s (2181); newblue2 0 / 7618810, 113 s (102). Wirelength within
++-0.04% of the recorded standard. Remaining benchmarks running (`p124.jobs`).
+
+## Part 125 -- the ISPD 2025 format, and the evaluation flow on this Mac
+
+ISPD 2025 (performance-driven global routing, NVIDIA; `BEST_RESULTS_PLAN.md` track D) gives each
+design as the 2024 `.cap`/`.net` plus LEF/DEF/LIB/SDC. Differences from 2024, now in `g24_io.h`:
+- **`.cap`**: the second line ends with the score's four PPA weights (w1 WNS, w2 TNS, w3 power, w4
+  overflow). Read as a line by both readers: nothing after the overflow costs = 2024, four values =
+  2025, anything else an error. GCells are 4200-unit squares (the pitches).
+- **`.net`**: a pin line starts `pin_name, value, ` before its access points (the value looks like
+  the pin's slack, seconds); kept per pin in `Net::timing` (2024 nets: empty).
+- **Solution**: DEF units -- GCell centres (x * 4200 + 2100), the `.cap`'s layer names (`metalN`),
+  each via one layer at a time (the evaluator asserts otherwise), no wires on metal1. Chosen
+  automatically when the `.cap` has the weights; 2024 output is unchanged.
+
+Self-tests (8 new checks, each failing on the old code): both readers on 2024/2025 `.cap` files with
+the same capacities, the weights, a bad cost line rejected; 2025 pin lines (escaped brackets in
+names) give 2024's access points and keep the timing values; both writers' 2025 text; 2024 text
+unchanged; bottom-layer wires counted. **2024 output byte-identical** to the frozen pd39route
+(mempool_tile_rank, nvdla_rank).
+
+**Evaluation environment** (decision 3 of the plan): the contest scores with its own OpenROAD fork
+(`liangrj2014/OpenROAD_ISPD25`, per its Dockerfile); upstream OpenROAD rejects both our solution and
+the contest's sample (`GRT-0263`, pins "not covered": its pin positions differ from the ones the
+fork generated the `.net` from). The fork, built on this Mac with six local compatibility patches
+(SWIG 4.5, fmt 12, Boost 1.87, no tclreadline; `~/Code/OpenROAD_ISPD25/logs/PATCHES.txt`), takes our
+solution. The contest's congestion evaluator (`evaluation/evaluator.cpp`, built as the contest
+builds it, assertions on) accepts it too (it aborts on metal1 wires, which the sample has).
+
+**First result, ariane (visible), pd39route with the 2024 standard (`@standard.env @standard24.env
+@fast24.env`, 8 threads), 4.9 s:** 0 open nets; evaluator cost 18426011 (wirelength 9615849, vias
+3043616, overflow 5766546); OpenROAD WNS -0.5075, TNS -1463.13, power 0.646084 W (30 s). Contest
+1st place on the same design: WNS -0.4324, TNS -1325.8, power 0.646092, congestion 5846461. With
+the beta-round medians as references (WNS -0.485, TNS -1398.39, power 0.646) and ariane's weights
+(-10, -100, 300, 3e-7; 20218 endpoints): ours ~2.30, 1st place ~0.90 (lower is better) --
+congestion already better than 1st place, the gap is timing (WNS +0.75, TNS +0.32 of score).
+Next: timing-driven routing (track D3) from the per-pin timing values the `.net` already carries.

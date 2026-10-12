@@ -17008,6 +17008,98 @@ void testFastReadersMatchIostream() {
   std::remove(net.c_str());
 }
 
+// Part 125: the ISPD 2025 additions to the 2024 format (g24_io.h). The
+// .cap's second line ends with the four PPA weights; a pin line starts
+// with the pin's name and a timing value; a 2025 solution is in DEF units
+// with layer names and one-layer vias. A 2024 file reads as before.
+void testIspd25Format() {
+  const std::string body = "4200 4200 4200\n4200 4200\n"
+                           "Metal1 0 0\n1 2 3 4\n0 0 0 0\n9.5 .5 5. 2e-1\n"
+                           "Metal2 1 100\n2 2 2 2\n1.25 1.5 1.75 2\n3 3 3 3\n"
+                           "Metal3 0 0.25\n6.15 9.78571 10 0\n1E2 0.001 12.5 -0\n7 7 7 7\n";
+  const std::string c24 = "pd39route_selftest_24.cap", c25 = "pd39route_selftest_25.cap", cBad = "pd39route_selftest_bad.cap";
+  {
+    std::ofstream(c24) << "3 4 3\n0.5 4 5 1e1 2.25\n" << body;
+    std::ofstream(c25) << "3 4 3 \n0.5 4 5 1e1 2.25 -10 -100 300 0.0000003\n" << body;
+    std::ofstream(cBad) << "3 4 3\n0.5 4 5 1e1 2.25 -10 -100\n" << body;
+  }
+  auto both = [](const std::string &f, g24::Resources &a, g24::Resources &b, std::string &ea, std::string &eb) {
+    std::ifstream in(f);
+    bool okA = g24::readResources(in, a, ea);
+    g24::FastText t;
+    bool okB = t.open(f) && g24::readResourcesFast(t, b, eb);
+    return std::make_pair(okA, okB);
+  };
+  g24::Resources a24, b24, a25, b25, aBad, bBad;
+  std::string e1, e2, e3, e4, e5, e6;
+  auto r24 = both(c24, a24, b24, e1, e2), r25 = both(c25, a25, b25, e3, e4), rBad = both(cBad, aBad, bBad, e5, e6);
+  bool sameCaps = r24.first && r24.second && r25.first && r25.second && a24.cap == a25.cap && b24.cap == b25.cap &&
+                  a25.cap == b25.cap && a24.overflowCost == a25.overflowCost && a25.xPitch == a24.xPitch;
+  check(sameCaps && !a24.ppa && !b24.ppa && a24.gcellDbu == 0,
+        "2025 .cap: the same capacities as the 2024 file; the 2024 file has no weights");
+  check(a25.ppa && b25.ppa && a25.ppaWeight[0] == -10 && a25.ppaWeight[1] == -100 && a25.ppaWeight[2] == 300 &&
+            a25.ppaWeight[3] == 0.0000003 && b25.ppaWeight[3] == a25.ppaWeight[3] && a25.gcellDbu == 4200 &&
+            b25.gcellDbu == 4200,
+        "2025 .cap: the four PPA weights (both readers), GCells of 4200 units");
+  check(!rBad.first && !rBad.second && e5.find("4 PPA weights") != std::string::npos && e5 == e6,
+        "2025 .cap: two extra values on the cost line rejected by both readers (" + e5 + ")");
+  const std::string net = "pd39route_selftest_25.net";
+  std::ofstream(net) << "n_alpha\n( \nu1/Z, -2.91964e-10, [(0, 1, 2), (1,2,2)]\n"
+                        "bus\\[3\\]/A, 7.26732e-10, [( 0 ,3 ,1 ) ]\n) \nb2\n(\n[(2, 0, 0), (1, 1, 1)]\n)\n";
+  std::ifstream ni(net);
+  g24::NetStream sa(ni);
+  g24::FastText nf;
+  nf.open(net);
+  g24::FastNetStream sb(nf);
+  g24::Net na, nb, ma, mb;
+  std::string ea, eb;
+  bool okNets = sa.next(na, ea) && sb.next(nb, eb) && sa.next(ma, ea) && sb.next(mb, eb);
+  auto pinsAre = [](const g24::Net &n, const std::vector<std::vector<int>> &want) {
+    if (n.pins.size() != want.size())
+      return false;
+    for (size_t p = 0; p < want.size(); ++p) {
+      if (n.pins[p].size() * 3 != want[p].size())
+        return false;
+      for (size_t q = 0; q < n.pins[p].size(); ++q)
+        if (n.pins[p][q].z != want[p][3 * q] || n.pins[p][q].x != want[p][3 * q + 1] ||
+            n.pins[p][q].y != want[p][3 * q + 2])
+          return false;
+    }
+    return true;
+  };
+  std::vector<std::vector<int>> alpha = {{0, 1, 2, 1, 2, 2}, {0, 3, 1}}, beta = {{2, 0, 0, 1, 1, 1}};
+  check(okNets && na.name == "n_alpha" && nb.name == "n_alpha" && pinsAre(na, alpha) && pinsAre(nb, alpha) &&
+            ma.name == "b2" && pinsAre(ma, beta) && pinsAre(mb, beta),
+        "2025 .net: pin names and timing values skipped, access points as in 2024 (both readers; escaped brackets)");
+  check(na.timing.size() == 2 && nb.timing == na.timing && na.timing[0] == -2.91964e-10f &&
+            na.timing[1] == 7.26732e-10f && ma.timing.empty() && mb.timing.empty(),
+        "2025 .net: each pin's timing value kept; a 2024 pin line gives none");
+  // The writer: a wire on Metal2 from GCell 0 to 2, a via Metal1 -> Metal3 at GCell 1.
+  g24::Net w;
+  w.name = "w";
+  w.pins = {{{0, 0, 1}}, {{1, 0, 0}}};
+  std::vector<g24::Seg> segs = {{0, 0, 1, 2, 0, 1}, {1, 0, 0, 1, 0, 2}};
+  g24::SolutionReport fr, sr;
+  std::string fast;
+  g24::emitNetSolutionFast(a25, w, segs, fast, fr);
+  std::ostringstream slow;
+  g24::emitNetSolution(a25, w, segs, slow, sr);
+  const std::string want = "w\n(\n2100 2100 Metal2 10500 2100 Metal2\n6300 2100 Metal1 6300 2100 Metal2\n"
+                           "6300 2100 Metal2 6300 2100 Metal3\n)\n";
+  check(fast == want && slow.str() == want && fr.wires == 1 && fr.vias == 2 && sr.vias == 2 && fr.layer0Wires == 0,
+        "2025 solution: GCell centres in DEF units, layer names, the via split into one-layer steps (both writers)");
+  std::string f24;
+  g24::SolutionReport r24rep;
+  g24::emitNetSolutionFast(a24, w, segs, f24, r24rep);
+  check(f24 == "w\n(\n0 0 1 2 0 1\n1 0 0 1 0 2\n)\n", "2024 solution text unchanged (GCell indices, one via line)");
+  std::string l0;
+  g24::SolutionReport l0rep;
+  g24::emitNetSolutionFast(a25, w, {{0, 0, 0, 1, 0, 0}, {0, 0, 0, 0, 0, 1}, {1, 0, 0, 1, 0, 1}}, l0, l0rep);
+  check(l0rep.layer0Wires == 1, "2025 solution: a wire on the bottom layer is counted (the evaluator rejects it)");
+  for (const std::string &f : {c24, c25, cBad, net})
+    std::remove(f.c_str());
+}
+
 // pd38route: the slow tier on the dependency graph is the same at 1 and 4
 // threads, on a congested 40 x 40 fixture (one track per edge, 250 random
 // nets) where 40 slow rounds beat the pattern stage's best, so the routes
@@ -17640,6 +17732,7 @@ int run() {
   testCommutingBatches();
   testSlowDagSameAtAnyThreadCount();
   testFastReadersMatchIostream();
+  testIspd25Format();
   testEmitNetSolutionFastMatches();
   testPatternColorBatchesMatchesFirstFit();
   testCommutingDagOrder();
@@ -18392,9 +18485,14 @@ int main(int argc, char **argv) {
   memTrace("layer assignment", &rep.nets);
   if (g24Mode) {
     g24::SolutionReport sr = writeG24Solution(argv[3], g24In, d.grid, rep.nets);
-    std::cerr << "ISPD 2024 solution: " << sr.nets << " nets, " << sr.wires << " wires, " << sr.vias << " vias, "
-              << sr.pinFixes << " pins given a via, " << sr.unroutedNets << " single-GCell nets given a via stack, "
-              << sr.droppedZero << " zero-length pieces dropped\n";
+    std::cerr << (g24In.res.ppa ? "ISPD 2025 solution (DEF units): " : "ISPD 2024 solution: ") << sr.nets
+              << " nets, " << sr.wires << " wires, " << sr.vias << " vias, " << sr.pinFixes << " pins given a via, "
+              << sr.unroutedNets << " single-GCell nets given a via stack, " << sr.droppedZero
+              << " zero-length pieces dropped";
+    if (g24In.res.ppa) // Part 125: the evaluator rejects bottom-layer wires
+      std::cerr << ", " << sr.layer0Wires << " bottom-layer wires; PPA weights " << g24In.res.ppaWeight[0] << " "
+                << g24In.res.ppaWeight[1] << " " << g24In.res.ppaWeight[2] << " " << g24In.res.ppaWeight[3];
+    std::cerr << "\n";
   } else {
     writeSolution(argv[2], d.grid, rep.nets);
   }

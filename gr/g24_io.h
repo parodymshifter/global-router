@@ -28,6 +28,13 @@
 //   on ariane's M2-M4 -- whose most common value is 0 must still get its
 //   open value, or it is never a routing layer);
 //   each pin at its first access point;
+//   ISPD 2025 (HISTORY_COST_SWEEP.md Part 125): the same files with two
+//   additions -- the .cap's second line ends with the score's four PPA
+//   weights (WNS, TNS, power, overflow), and a pin line starts with the
+//   pin's name and a timing value before its access points -- and a
+//   solution in DEF units: GCell centres, layer names, vias one layer at a
+//   time. A .cap with the weights is read as 2025 and written as 2025;
+//   without them everything is as before;
 //   optional reservation (Part 102, retired -- every setting was worse):
 //   lower a layer-z edge by `reserve` half tracks per pin below z in each of
 //   its two GCells, for z in 1..reserveLayers.
@@ -41,6 +48,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <istream>
+#include <limits>
 #include <map>
 #include <ostream>
 #include <set>
@@ -67,6 +75,12 @@ struct Resources {
   std::vector<long long> xPitch, yPitch; // xSize-1, ySize-1
   std::vector<Layer> layers;
   std::vector<double> cap; // (z * ySize + y) * xSize + x
+  // ISPD 2025 (Part 125): the .cap's PPA weights w1..w4 (WNS, TNS, power,
+  // overflow) when its second line has them; then solutions are written in
+  // DEF units, GCell (x, y) at (x * gcellDbu + gcellDbu / 2, ...).
+  bool ppa = false;
+  double ppaWeight[4] = {0, 0, 0, 0};
+  long long gcellDbu = 0;
   double capacity(int z, int x, int y) const {
     return cap[(static_cast<size_t>(z) * ySize + y) * xSize + x];
   }
@@ -78,12 +92,100 @@ struct Access {
 struct Net {
   std::string name;
   std::vector<std::vector<Access>> pins;
+  // ISPD 2025 (Part 125): timing[i] is the value a 2025 .net gives after
+  // pin i's name (NaN for a pin without one); empty for ISPD 2024 nets.
+  std::vector<float> timing;
 };
 
 inline std::string trimEnd(std::string s) {
   while (!s.empty() && (s.back() == '\r' || s.back() == '\n' || s.back() == ' ' || s.back() == '\t'))
     s.pop_back();
   return s;
+}
+
+// ISPD 2025 (Part 125): the rest of the .cap's second line after the
+// overflow costs -- nothing (2024) or the four PPA weights (2025).
+inline bool parsePpaWeights(const std::string &rest, Resources &r, std::string &err) {
+  std::istringstream ss(rest);
+  std::vector<double> w;
+  double v;
+  while (ss >> v)
+    w.push_back(v);
+  ss.clear();
+  std::string junk;
+  if (ss >> junk) {
+    err = "bad .cap cost line (unexpected '" + junk + "' after the overflow costs)";
+    return false;
+  }
+  if (w.empty())
+    return true;
+  if (w.size() != 4) {
+    err = "bad .cap cost line: " + std::to_string(w.size()) +
+          " values after the overflow costs (an ISPD 2025 .cap has the 4 PPA weights)";
+    return false;
+  }
+  r.ppa = true;
+  for (int k = 0; k < 4; ++k)
+    r.ppaWeight[k] = w[static_cast<size_t>(k)];
+  return true;
+}
+
+// ISPD 2025: solutions are in DEF units, so the GCells must be uniform
+// squares; their size is the pitch.
+inline bool setGcellDbu(Resources &r, std::string &err) {
+  if (!r.ppa)
+    return true;
+  long long p = r.xPitch.empty() ? (r.yPitch.empty() ? 0 : r.yPitch[0]) : r.xPitch[0];
+  for (long long q : r.xPitch)
+    if (q != p)
+      p = -1;
+  for (long long q : r.yPitch)
+    if (q != p)
+      p = -1;
+  if (p <= 0) {
+    err = "ISPD 2025 .cap: GCell pitches are not one uniform size (needed for DEF-unit output)";
+    return false;
+  }
+  r.gcellDbu = p;
+  return true;
+}
+
+// ISPD 2025: a pin line may start "pin_name, value, " before its access
+// list "[(z, x, y), ...]"; a 2024 line starts at "[(". Returns where the
+// access list starts (0 without a prefix) and, if the prefix holds a value
+// after its last comma, that value. (Pin names escape brackets as "\[",
+// so "[(" first appears where the list starts.)
+inline size_t pinLinePrefix(const std::string &line, bool &hasValue, double &value) {
+  hasValue = false;
+  size_t p = line.find("[(");
+  if (p == std::string::npos || p == 0)
+    return 0;
+  std::string pre = line.substr(0, p);
+  while (!pre.empty() && (pre.back() == ' ' || pre.back() == '\t' || pre.back() == ','))
+    pre.pop_back();
+  size_t c = pre.rfind(',');
+  if (c != std::string::npos) {
+    const char *b = pre.c_str() + c + 1;
+    char *e = nullptr;
+    double v = std::strtod(b, &e);
+    if (e != b) {
+      while (*e == ' ' || *e == '\t')
+        ++e;
+      if (*e == '\0') {
+        value = v;
+        hasValue = true;
+      }
+    }
+  }
+  return p;
+}
+
+// ISPD 2025: keep net.timing aligned with net.pins once any pin has a value.
+inline void notePinTiming(Net &n, bool hasValue, double value) {
+  if (!hasValue && n.timing.empty())
+    return;
+  n.timing.resize(n.pins.size() - 1, std::numeric_limits<float>::quiet_NaN());
+  n.timing.push_back(hasValue ? static_cast<float>(value) : std::numeric_limits<float>::quiet_NaN());
 }
 
 inline bool readResources(std::istream &in, Resources &r, std::string &err) {
@@ -101,6 +203,12 @@ inline bool readResources(std::istream &in, Resources &r, std::string &err) {
       err = "bad .cap overflow costs";
       return false;
     }
+  {
+    std::string rest;
+    std::getline(in, rest);
+    if (!parsePpaWeights(rest, r, err))
+      return false;
+  }
   r.xPitch.resize(r.xSize - 1);
   r.yPitch.resize(r.ySize - 1);
   for (long long &p : r.xPitch)
@@ -113,6 +221,8 @@ inline bool readResources(std::istream &in, Resources &r, std::string &err) {
       err = "bad .cap vertical pitch";
       return false;
     }
+  if (!setGcellDbu(r, err))
+    return false;
   r.layers.resize(r.nLayers);
   r.cap.assign(static_cast<size_t>(r.nLayers) * r.ySize * r.xSize, 0.0);
   for (int z = 0; z < r.nLayers; ++z) {
@@ -167,6 +277,11 @@ public:
           err = "pin line before any net name";
           return false;
         }
+        bool hasValue = false;
+        double value = 0;
+        size_t from = pinLinePrefix(line, hasValue, value); // ISPD 2025: skip "name, value, "
+        if (from > 0)
+          line.erase(0, from);
         for (char &c : line)
           if (c == '(' || c == ')' || c == ',' || c == '[' || c == ']')
             c = ' ';
@@ -180,6 +295,7 @@ public:
           return false;
         }
         out.pins.push_back(pin);
+        notePinTiming(out, hasValue, value);
       }
     }
     return have;
@@ -336,6 +452,12 @@ inline bool readResourcesFast(FastText &in, Resources &r, std::string &err) {
       err = "bad .cap overflow costs";
       return false;
     }
+  {
+    std::string rest;
+    in.getline(rest);
+    if (!parsePpaWeights(rest, r, err))
+      return false;
+  }
   r.xPitch.resize(r.xSize - 1);
   r.yPitch.resize(r.ySize - 1);
   for (long long &p : r.xPitch)
@@ -348,6 +470,8 @@ inline bool readResourcesFast(FastText &in, Resources &r, std::string &err) {
       err = "bad .cap vertical pitch";
       return false;
     }
+  if (!setGcellDbu(r, err))
+    return false;
   r.layers.resize(r.nLayers);
   r.cap.assign(static_cast<size_t>(r.nLayers) * r.ySize * r.xSize, 0.0);
   for (int z = 0; z < r.nLayers; ++z) {
@@ -400,7 +524,9 @@ public:
           return false;
         }
         std::vector<Access> pin;
-        size_t i = 0;
+        bool hasValue = false;
+        double value = 0;
+        size_t i = pinLinePrefix(line_, hasValue, value); // ISPD 2025: skip "name, value, "
         const size_t n = line_.size();
         auto sep = [](char c) {
           return c == '(' || c == ')' || c == ',' || c == '[' || c == ']' || c == ' ' || c == '\t' || c == '\n' ||
@@ -432,6 +558,7 @@ public:
           return false;
         }
         out.pins.push_back(std::move(pin));
+        notePinTiming(out, hasValue, value);
       }
     }
     return have;
@@ -678,7 +805,41 @@ struct Seg {
 
 struct SolutionReport {
   long long nets = 0, wires = 0, vias = 0, droppedZero = 0, pinFixes = 0, unroutedNets = 0;
+  long long layer0Wires = 0; // ISPD 2025: wires on the bottom layer (the evaluator rejects them)
 };
+
+inline void appendInt(std::string &o, long long v);
+
+// ISPD 2025 (Part 125): one segment in DEF units -- GCell centres, the
+// .cap's layer names, a via one layer at a time (the evaluator takes a via
+// only between adjacent layers).
+inline void appendSeg25(const Resources &r, const Seg &g, std::string &o, SolutionReport &rep) {
+  const long long P = r.gcellDbu, h = r.gcellDbu / 2;
+  auto point = [&](int x, int y, int z) {
+    appendInt(o, x * P + h);
+    o.push_back(' ');
+    appendInt(o, y * P + h);
+    o.push_back(' ');
+    o += r.layers[static_cast<size_t>(z)].name;
+  };
+  if (g.zl == g.zh) {
+    point(g.xl, g.yl, g.zl);
+    o.push_back(' ');
+    point(g.xh, g.yh, g.zh);
+    o.push_back('\n');
+    ++rep.wires;
+    if (g.zl == 0)
+      ++rep.layer0Wires;
+    return;
+  }
+  for (int z = g.zl; z < g.zh; ++z) {
+    point(g.xl, g.yl, z);
+    o.push_back(' ');
+    point(g.xl, g.yl, z + 1);
+    o.push_back('\n');
+    ++rep.vias;
+  }
+}
 
 // A router solution in .gr text (real coordinates on toDesign's 10 x 10
 // tiles; net headers "name id", id = the net's index) as ISPD 2024 GCell
@@ -755,12 +916,19 @@ inline void emitNetSolution(const Resources &r, const Net &n, const std::vector<
     ++rep.pinFixes;
   }
   o << n.name << "\n(\n";
-  for (const Seg &g : out) {
-    o << g.xl << " " << g.yl << " " << g.zl << " " << g.xh << " " << g.yh << " " << g.zh << "\n";
-    if (g.zl == g.zh)
-      ++rep.wires;
-    else
-      ++rep.vias;
+  if (r.ppa) { // ISPD 2025
+    std::string t;
+    for (const Seg &g : out)
+      appendSeg25(r, g, t, rep);
+    o << t;
+  } else {
+    for (const Seg &g : out) {
+      o << g.xl << " " << g.yl << " " << g.zl << " " << g.xh << " " << g.yh << " " << g.zh << "\n";
+      if (g.zl == g.zh)
+        ++rep.wires;
+      else
+        ++rep.vias;
+    }
   }
   o << ")\n";
 }
@@ -876,6 +1044,12 @@ inline void emitNetSolutionFast(const Resources &r, const Net &n, const std::vec
   }
   o += n.name;
   o += "\n(\n";
+  if (r.ppa) { // ISPD 2025
+    for (const Seg &g : out)
+      appendSeg25(r, g, o, rep);
+    o += ")\n";
+    return;
+  }
   for (const Seg &g : out) {
     appendInt(o, g.xl);
     o.push_back(' ');
