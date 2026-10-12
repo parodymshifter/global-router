@@ -9995,3 +9995,36 @@ the beta-round medians as references (WNS -0.485, TNS -1398.39, power 0.646) and
 (-10, -100, 300, 3e-7; 20218 endpoints): ours ~2.30, 1st place ~0.90 (lower is better) --
 congestion already better than 1st place, the gap is timing (WNS +0.75, TNS +0.32 of score).
 Next: timing-driven routing (track D3) from the per-pin timing values the `.net` already carries.
+
+## Part 126 -- Apple Instruments in the analytics (stage markers, recording, per-stage reports)
+
+`gr/signpost.h` adds os_signpost stage intervals (opened at `StageLog::begin`, closed with the stage's
+name at each `mark`) and round events (slow tier, region stage) to pd39route, on with
+`GR_SIGNPOSTS=1` (now in `standard.env`), no-ops otherwise and off macOS. nvdla_rank recorded under
+Instruments with markers on: **routes byte-identical** to a plain run. `gr/instruments_profile.sh`
+records with `xcrun xctrace` (launch, or `-a PID -l SECONDS` to attach to a long run for a window;
+developer mode not needed); `gr/instruments_report.py` reads the trace via `xctrace export` and
+writes per-stage wall/CPU time, busy threads, performance-core share, threads seen, rounds, the
+CPU Counters top-down split of cycles, and top functions (self and inclusive). Guide: `PROFILING.md`.
+
+**First readings** (nvdla_rank, 8 threads, with Part 124 and the archive re-compression running --
+indicative, not settled):
+
+| stage | wall s | busy threads (of 8) | threads seen | cycles: useful / back end / front end / discarded |
+|---|---|---|---|---|
+| pattern stage | 1.58 | 5.3 | 217 | 30 / 42 / 15 / 13% |
+| escalation + slow tier | 0.48 | 5.2 | 194 | 34 / 25 / 15 / 27% |
+| layer assignment, round 0 | 2.27 | 5.7 | 8 | 20 / 23 / 44 / 14% |
+| 3D pattern passes | 0.6-0.7 each | 4.9-5.5 | 8 | 16-24 / 21-29 / 32-48 / 15-16% |
+
+Self time: `layerAssignDP`'s inner lambda 22%, `exactSteinerTree` 12%, `pattern3DNet` 10%.
+Attached for 20 s to a live fast08 newblue5 run: `multiSourceDijkstra` 83% of CPU, 5.0 threads
+busy, **1147 distinct threads** in 20 s.
+
+Leads (not acted on): (1) the batched slow tier (`runSlowBatched`) starts T new threads per batch
+twice (search, sync) and `runCommutingDagPlan` per call, though a persistent `WorkerPool` exists --
+thousands of thread creations per round on the cluster designs; (2) layer assignment and the 3D
+passes are front-end-bound (39-48% of cycles), which points at code layout and indirect calls
+(`std::function`, lambdas) more than memory; (3) the slow tier loses 27% to bad speculation
+(branchy priority-queue comparisons in the search). Each needs a quiet-machine measurement before
+work.

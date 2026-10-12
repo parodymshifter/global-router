@@ -1412,6 +1412,7 @@
 #include "gr_io.h"
 #include "g24_io.h"
 #include "gpu/pattern_kernel.h"
+#include "signpost.h"
 
 using gr_io::Design;
 using gr_io::fail;
@@ -4226,6 +4227,7 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     advancePresentDemand(prices, usage);
     long long total = totalOverflow(g, usage);
     rep.roundsRun = r + 1;
+    grprof::event("region round", r); // Part 126: Instruments marker
     if (trace)
       std::cerr << "region round " << r << ": 2D overflow " << total << " (rerouted " << rerouted << ", pops "
                 << gSearchPops - (popsAfter.empty() ? popsAtStart : popsAfter.back()) << ")\n";
@@ -4515,11 +4517,13 @@ struct StageLog {
     objectiveName = objName;
     rows.clear();
     last = std::chrono::steady_clock::now();
+    grprof::stageBegin(); // Part 126: Instruments marker (GR_SIGNPOSTS=1)
   }
   void mark(const std::string &name, const std::vector<RoutedNet> *nets, long long overflow2D = -1,
             double objective = std::numeric_limits<double>::quiet_NaN(), const std::string &work = "") {
     if (!on)
       return;
+    grprof::stageEnd(name.c_str()); // Part 126
     auto now = std::chrono::steady_clock::now();
     StageRow r;
     r.name = name;
@@ -4541,6 +4545,7 @@ struct StageLog {
     }
     rows.push_back(r);
     last = std::chrono::steady_clock::now();
+    grprof::stageBegin(); // Part 126: the next stage's interval
   }
   void print(std::ostream &out) const {
     if (!on || rows.empty())
@@ -6989,6 +6994,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     advancePresentDemand(prices, usage);
     long long overflow = totalOverflow(g, usage);
     rep.roundsRun += 1;
+    grprof::event("slow round", round); // Part 126: Instruments marker
     if (gSlowHistory) // pd38route: test hook (Part 122)
       gSlowHistory->push_back({overflow, accepted, rejected, routeHashOf(nets)});
     gFrames.frame2D(g, usage, "slow tier", // pd38route: video trace

@@ -694,6 +694,14 @@ agent knew from scratch just to keep going. Two rules follow from that:
   `codeql.yml`.
 - Run `./<router> --selftest` on the Mac before each commit.
 
+## Profiling (2026-10-12)
+
+`PROFILING.md`: Apple Instruments on any run -- `gr/instruments_profile.sh` (launch, or attach to a
+running router for a window) and `gr/instruments_report.py` (per stage: CPU time, busy threads,
+core types, cycle breakdown with CPU Counters, top functions). Stage markers are on in
+`standard.env` (`GR_SIGNPOSTS=1`, pd39route on; routes unchanged). Profile before tuning runtime,
+and on a quiet machine before comparing times.
+
 ## Memory tracking
 
 Every run recorded as a measured result -- not just overflow, max
