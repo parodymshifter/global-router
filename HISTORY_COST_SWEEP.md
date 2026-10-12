@@ -9836,3 +9836,75 @@ refer to the old history: the old-to-new map is `~/Code/GlobalRouterBackups/comm
 (old hash, new hash per line), and the old history is kept in the same folder as a bundle and a
 mirror clone. Verified: each rewritten commit differs from its original only by the evaluator
 files, and a fresh clone of GitHub holds no copy of it by path or content.
+
+## Part 122 -- the region stop scaled to the design (PD38ROUTE_REGION_COST_REL)
+
+Why: on the timing canary's synthetic design (90 x 90 x 4, 3500 nets) the region stage ran all 500
+rounds at 2D overflow 28 -- 10 of 11 s -- with its best from round 0. Neither stop could fire: the
+floor-gated plateau (Part 74) applies only at >= 1000, and the work gate (Part 80) needs 3.2e10
+expansions per 150 rounds, sized for bigblue4; this design does 2.4e7.
+
+Scaling by grid size cannot separate the cases (expansions per tile in a flat 150-round window:
+synthetic ~3200, newblue4 ~72000, bigblue4 ~810000 -- a threshold low enough for the first strips
+the protection Part 80 gave the second). Scaling by the run's own earlier search can: the synthetic
+flat window costs ~160x everything searched before the region stage (149725 expansions); the 2008
+designs look nearer 1x. `PD38ROUTE_REGION_COST_REL=F` (pd38route, off by default, byte-identical):
+the work gate's threshold becomes min(PD14ROUTE_REGION_COST_POPS, F x expansions before the region
+stage), counted on the main thread before the fallback starts, so both paths use the same value.
+
+**Synthetic design:** off 500 region rounds, 11.2 s; F = 10 or 1: 151 rounds, 4.0 s; route files
+byte-identical to off.
+
+**Replay on the standard-configuration 2008 traces** (W150, gain 1%, no work gate -- the most the
+rule could ever do): no flat 150-round window on adaptec1-5, bigblue1-3, newblue2, newblue5-6 (both
+fallback paths end within 154 rounds), newblue1 (three runs), newblue3 (stopped at 59 by the floor
+rule); bigblue2's reclaim path runs 359 rounds but its longest stretch without improvement is 144
+rounds; bigblue4's first flat window (232) is where it already stops. Only **newblue4** (flat at
+round 448, best 170 reached at 298) and **newblue7** (no current-standard trace) can change.
+Queued (`part122.jobs`): newblue4 off and F = 10, newblue7 F = 10.
+
+## Part 123 -- the same routes on every platform (pd39route)
+
+The Linux self-test failure (Part 121's CI) came from a fixture whose slow tier beat the pattern
+stage by 12 of 1830 on the Mac and never on Linux. Two things followed.
+
+**Option C (pd38route, committed):** a test-only hook records each slow round (overflow, reroute
+counts, a hash of every route); the fixture now requires that the slow tier ran and compares its own
+rounds at 1 and 4 threads, whichever state is kept. Linux CI passes (its slow tier's best is 1832 vs
+the pattern stage's 1830 -- before, its "4 threads = 1 thread" check had been comparing pattern-stage
+routes).
+
+**Why the platforms differ, measured.** Branch `experiment/fp-determinism`: six builds of pd38route
+on Linux GCC 13, Linux Clang and macOS Clang (GitHub runners; the macOS runner matches this Mac
+exactly), each fingerprinted by its full self-test output (730 lines) and the synthetic design's
+routes (4/4 rounds and full budget). Raw summaries: `~/Code/GlobalRouterRuns/diag/fp-determinism/`.
+
+| build | synthetic routes Mac = Linux | self-test lines differing |
+|---|---|---|
+| V0 as shipped | no | many (fixture 1818 vs 1830) |
+| V1 -ffp-contract=off | no | many (Mac fixture 1808) |
+| V2 V1 + own exp/log/pow | no | many (= V1 on each platform) |
+| V4 total order in the A* queues | **yes** | 6 |
+| V5 V4 + -ffp-contract=off | **yes** | 1 |
+| V3 V5 + own exp/log/pow | **yes** | 1 |
+
+Linux GCC = Linux Clang in every build. The one line left is the test that measures detmath against
+each platform's libm. Causes: (1) the two A* queues compared priority only, so ties left the heap in
+an order set by each standard library (libc++ vs libstdc++) -- the whole synthetic-design difference;
+(2) Apple Clang fuses a*b+c by default (x86-64 builds cannot) -- six self-test lines. The platform
+libm made no measured difference (V1 = V2 on both), but no standard pins its last bits.
+
+**pd39route** (forked from pd38route): both A* queues ordered by (priority, node index, distance);
+`#pragma STDC FP_CONTRACT OFF` (Clang; GCC in ISO mode does not contract) plus a self-test that
+fails if a build contracts anyway (confirmed: -ffp-contract=fast fails it); exp/log/pow from IEEE
+basic operations (within 2.2/3.1/4.7e-16 relative of libm; 3.2 ns vs libm's 1.9 ns per exp); the
+score-mode `localScore` sum over sorted distinct edges; its own Fisher-Yates for the refinement
+shuffle. Not byte-identical to pd38route on any platform. New self-test (option A's margin check):
+with one pattern round the slow tier wins clearly (1794 vs 1954), and the routes returned hash to
+exactly its best round's, escalation flags included. **CI (quality-checks.yml) builds pd39route on
+Linux and macOS and fails unless the self-test output and both synthetic routes are identical: they
+are** (run on c3a2e66). nvdla_rank: overflow 25745 -> 25720, 6.0 -> 6.1 s (loaded machine).
+
+Queued (`p123.sh`): phase 1, the 13 ISPD 2024 designs on pd38route and pd39route alternately (the
+Part 120 standard, 8 threads, one job at a time); phase 2, the 16 ISPD 2008 benchmarks on pd39route
+against the recorded standard results.
