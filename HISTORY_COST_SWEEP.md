@@ -10028,3 +10028,26 @@ passes are front-end-bound (39-48% of cycles), which points at code layout and i
 (`std::function`, lambdas) more than memory; (3) the slow tier loses 27% to bad speculation
 (branchy priority-queue comparisons in the search). Each needs a quiet-machine measurement before
 work.
+
+## Part 127 -- concurrent work on the persistent worker pool
+
+Part 126's lead 1: the batched slow tier started T threads per batch twice (search, sync) and the
+dependency-graph runner T per call, beside the persistent `WorkerPool`. pd39route now runs all three
+through `runOnThreads(T, f)`: the pool when it has T workers and is free (every production call), fresh
+threads otherwise (self-tests that pick their own count, or the pool busy on another thread). The pool
+gained a chunk size (these calls hand out one index at a time; with the old fixed chunk of 8, one
+worker would have taken all of a batch's T tasks) and a busy guard: a second caller runs inline
+(`run`) or gets `false` (`tryRun`). New self-test (each index once; nested and concurrent calls never
+deadlock; the pool is free afterwards).
+
+ThreadSanitizer on the self-test also found a race that predates this change (18 reports on the old
+code): the dependency-graph runner read its sleeping-worker count after releasing the lock. It now
+reads it under the lock -- 0 reports. It only ever decided how many sleepers to wake, never results.
+
+**Byte-identical** to the previous pd39route: nvdla_rank, bsg_chip_rank, mempool_group_rank (fast24,
+8 threads), newblue2 and adaptec4 (fast08). Instruments, nvdla_rank: threads seen per stage 217 /
+194 (pattern stage / slow tier) -> **8 / 8**. **Runtime: no measurable change** (beside three
+single-thread 2008 runs): mempool_group_rank 72.4 / 75.9 s -> 71.7 / 73.7 s, adaptec4 318.1 -> 314.6 s
+with its slow tier 53.7 -> 53.8 s, nvdla_rank and bsg_chip_rank within +-0.7 s. Creating a thread
+costs tens of microseconds; even 57 a second is well under 1% of a run. Kept for what it does
+remove -- thread churn in every profile, and a data race -- not for speed.

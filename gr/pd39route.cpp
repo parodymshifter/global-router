@@ -5122,6 +5122,8 @@ bool sameCharges2D(const std::vector<ChargeRecord> &a, const std::vector<ChargeR
 // and commits in net order, so the order workers take them in changes
 // nothing; `weight[pos]` (the caller's work estimate) puts the biggest
 // first, so a long search does not start last and hold the batch.
+void runOnThreads(int T, const std::function<void(size_t)> &f); // pd39route (Part 127), defined below
+
 template <class Out, class Task, class Save>
 SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &order,
                                Usage &live, int threads, size_t B, std::vector<Out> &outs, Task task, Save save,
@@ -5189,15 +5191,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
         dur[k] = std::chrono::duration<double>(std::chrono::steady_clock::now() - tT0).count();
       }
     };
-    if (T == 1) {
-      work(0);
-    } else {
-      std::vector<std::thread> th;
-      for (int t = 0; t < T; ++t)
-        th.emplace_back(work, t);
-      for (std::thread &x : th)
-        x.join();
-    }
+    runOnThreads(T, [&](size_t t) { work(static_cast<int>(t)); }); // pd39route: the pool, not new threads
     const auto tC0 = std::chrono::steady_clock::now();
     br.searchS += std::chrono::duration<double>(tC0 - tS0).count();
     {
@@ -5316,11 +5310,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
       for (int t = 0; t < T; ++t)
         sync(t);
     } else {
-      std::vector<std::thread> th;
-      for (int t = 0; t < T; ++t)
-        th.emplace_back(sync, t);
-      for (std::thread &x : th)
-        x.join();
+      runOnThreads(T, [&](size_t t) { sync(static_cast<int>(t)); }); // pd39route: the pool
     }
     br.syncS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tY0).count();
     if (gSlowBatchCheck)
@@ -5355,35 +5345,55 @@ public:
       w.join();
   }
   int size() const { return n_; }
+  // pd39route (Part 127): one caller at a time. A second caller (another
+  // thread, or a task already running on the pool) runs its calls inline
+  // instead -- results never depend on which thread runs what.
   void run(size_t n, const std::function<void(size_t)> &f) {
+    if (!tryRun(n, f, kChunk))
+      for (size_t i = 0; i < n; ++i)
+        f(i);
+  }
+  // Calls f(i) for every i in [0, n), handing out `chunk` indices at a
+  // time; false (nothing run) if the pool is already in use.
+  bool tryRun(size_t n, const std::function<void(size_t)> &f, size_t chunk) {
+    bool idle = false;
+    if (!busy_.compare_exchange_strong(idle, true))
+      return false;
     if (n_ <= 1 || n < 2) {
       for (size_t i = 0; i < n; ++i)
         f(i);
-      return;
+      busy_.store(false);
+      return true;
     }
     {
       std::lock_guard<std::mutex> lk(m_);
       f_ = &f;
       total_ = n;
+      chunk_ = std::max<size_t>(1, chunk);
       next_.store(0);
       active_ = n_ - 1;
       ++gen_;
     }
     cv_.notify_all();
     work();
-    std::unique_lock<std::mutex> lk(m_);
-    done_.wait(lk, [&] { return active_ == 0; });
-    f_ = nullptr;
+    {
+      std::unique_lock<std::mutex> lk(m_);
+      done_.wait(lk, [&] { return active_ == 0; });
+      f_ = nullptr;
+    }
+    busy_.store(false);
+    return true;
   }
 
 private:
   static constexpr size_t kChunk = 8;
   void work() {
+    const size_t chunk = chunk_;
     while (true) {
-      size_t b = next_.fetch_add(kChunk);
+      size_t b = next_.fetch_add(chunk);
       if (b >= total_)
         return;
-      size_t e = std::min(total_, b + kChunk);
+      size_t e = std::min(total_, b + chunk);
       for (size_t i = b; i < e; ++i)
         (*f_)(i);
     }
@@ -5412,6 +5422,8 @@ private:
   std::condition_variable cv_, done_;
   const std::function<void(size_t)> *f_ = nullptr;
   size_t total_ = 0;
+  size_t chunk_ = kChunk;
+  std::atomic<bool> busy_{false};
   std::atomic<size_t> next_{0};
   int active_ = 0;
   unsigned long gen_ = 0;
@@ -5423,6 +5435,28 @@ WorkerPool &workerPool() {
   if (!pool || pool->size() != std::max(1, gThreads))
     pool = std::make_unique<WorkerPool>(gThreads);
   return *pool;
+}
+
+// pd39route (Part 127): f(t) for t in [0, T), all T at once -- on the
+// persistent pool when it has T workers and is free (every production call:
+// T = PD37ROUTE_THREADS), else on T fresh threads as before (self-tests that
+// choose their own count; a pool already busy on another thread). Instruments
+// (Part 126) counted 1147 thread creations in 20 s of a fast08 run when every
+// batch started its own.
+void runOnThreads(int T, const std::function<void(size_t)> &f) {
+  if (T <= 1) {
+    if (T == 1)
+      f(0);
+    return;
+  }
+  if (gThreads == T && workerPool().tryRun(static_cast<size_t>(T), f, 1))
+    return;
+  std::vector<std::thread> th;
+  for (int t = 1; t < T; ++t)
+    th.emplace_back(f, static_cast<size_t>(t));
+  f(0);
+  for (std::thread &x : th)
+    x.join();
 }
 
 // pd37route, self-tests only: every net in one batch, run sequentially in
@@ -5690,7 +5724,7 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
         freed.pop_back();
         have = true;
       }
-      int wake = 0;
+      int wake = 0, asleep = 0;
       // pd38route: a task that frees nothing beyond the one this thread
       // keeps needs no lock (most do); sleepers recheck `done` under the
       // lock, and the last task takes it to wake them.
@@ -5702,11 +5736,12 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
         readyN.fetch_add(freed.size(), std::memory_order_release);
         if (last)
           finished.store(true, std::memory_order_release);
-        wake = std::min<int>(sleepers, static_cast<int>(freed.size()));
+        asleep = sleepers; // pd39route (Part 127): read under the lock (ThreadSanitizer: it was read after)
+        wake = std::min<int>(asleep, static_cast<int>(freed.size()));
         if (last)
-          wake = sleepers;
+          wake = asleep;
       }
-      if (wake >= sleepers && wake > 0)
+      if (wake >= asleep && wake > 0)
         cv.notify_all();
       else
         for (int w = 0; w < wake; ++w)
@@ -5714,12 +5749,7 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
     }
   };
   const auto tRun0 = std::chrono::steady_clock::now();
-  std::vector<std::thread> pool;
-  for (int t = 1; t < threads; ++t)
-    pool.emplace_back(worker);
-  worker();
-  for (std::thread &t : pool)
-    t.join();
+  runOnThreads(std::max(1, threads), [&](size_t) { worker(); }); // pd39route (Part 127): the pool
   if (std::getenv("PD37ROUTE_BATCH_TRACE"))
     std::cerr << "dependency graph: run " << std::chrono::duration<double>(std::chrono::steady_clock::now() - tRun0).count()
               << " s\n";
@@ -17014,6 +17044,34 @@ void testFastReadersMatchIostream() {
   std::remove(net.c_str());
 }
 
+// Part 127: concurrent work runs on the persistent pool. runOnThreads calls
+// every index exactly once; a call made while the pool is busy (from one of
+// its own tasks) runs inline rather than deadlocking; tryRun reports busy.
+void testWorkerPoolReuse() {
+  int saved = gThreads;
+  gThreads = 4;
+  std::vector<std::atomic<int>> hits(4);
+  for (auto &h : hits)
+    h.store(0);
+  runOnThreads(4, [&](size_t t) { hits[t].fetch_add(1); });
+  bool once = true;
+  for (auto &h : hits)
+    once = once && h.load() == 1;
+  std::atomic<int> inner{0}, refused{0};
+  workerPool().run(4, [&](size_t) {
+    if (!workerPool().tryRun(2, [](size_t) {}, 1))
+      refused.fetch_add(1);
+    workerPool().run(3, [&](size_t) { inner.fetch_add(1); }); // nested: inline
+    runOnThreads(2, [&](size_t) { inner.fetch_add(1); });      // busy pool: fresh threads
+  });
+  std::atomic<int> after{0};
+  runOnThreads(4, [&](size_t) { after.fetch_add(1); });
+  gThreads = saved;
+  check(once, "worker pool: runOnThreads(4) calls each of the 4 indices exactly once");
+  check(refused.load() == 4 && inner.load() == 4 * (3 + 2) && after.load() == 4,
+        "worker pool: busy pool refuses tryRun, nested calls run inline or on fresh threads, then it is free again");
+}
+
 // Part 125: the ISPD 2025 additions to the 2024 format (g24_io.h). The
 // .cap's second line ends with the four PPA weights; a pin line starts
 // with the pin's name and a timing value; a 2025 solution is in DEF units
@@ -17739,6 +17797,7 @@ int run() {
   testSlowDagSameAtAnyThreadCount();
   testFastReadersMatchIostream();
   testIspd25Format();
+  testWorkerPoolReuse();
   testEmitNetSolutionFastMatches();
   testPatternColorBatchesMatchesFirstFit();
   testCommutingDagOrder();
