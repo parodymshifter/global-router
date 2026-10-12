@@ -105,6 +105,7 @@ jobs:
           - pd36route
           - pd37route
           - pd38route
+          - pd39route
           - g24_verify
           - g24_lroute
           - g24_bridge

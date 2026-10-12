@@ -18,6 +18,10 @@ on:
 
 env:
   ROUTER: pd38route
+  # The router whose results must be the same on Linux and macOS (pd39route
+  # and later; HISTORY_COST_SWEEP.md Part 123). The "same on every platform"
+  # jobs below build it on both and compare.
+  PORTABLE_ROUTER: pd39route
   # Set to "true" once the static-analysis findings are cleaned up, to make
   # cppcheck errors fail the job. Until then the job reports and never fails.
   STATIC_GATE: "false"
@@ -167,6 +171,65 @@ jobs:
           path: |
             san-selftest-*.log
             san-route.log
+
+  portable-fingerprint:
+    name: Same routes on every platform (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, self-test, route the synthetic design
+        shell: bash
+        run: |
+          mkdir -p fp
+          c++ --version | head -1
+          # The router's own build line (its header): no contraction.
+          c++ -std=c++17 -O2 -Wall -Wextra -ffp-contract=off -pthread -o fp/router "gr/$PORTABLE_ROUTER.cpp"
+          set +e
+          fp/router --selftest > fp/selftest.txt 2>&1
+          echo "self-test exited $?"
+          set -e
+          tail -1 fp/selftest.txt
+          python3 perf/gen_synth.py > fp/synth.gr
+          ( set -a; . gr/standard.env; set +a; export VROUTE_FAST_ROUNDS=4 VROUTE_SLOW_ROUNDS=4
+            fp/router fp/synth.gr fp/short.route > /dev/null 2> fp/short.err )
+          ( set -a; . gr/standard.env; set +a; fp/router fp/synth.gr fp/full.route > /dev/null 2> fp/full.err )
+          rm -f fp/router fp/synth.gr
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-${{ matrix.os }}
+          path: fp/
+
+  portable-compare:
+    name: Same routes on every platform (compare)
+    needs: portable-fingerprint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: portable-*
+      - name: Compare Linux with macOS
+        shell: bash
+        run: |
+          status=0
+          for f in selftest.txt short.route full.route; do
+            if cmp -s "portable-ubuntu-latest/$f" "portable-macos-latest/$f"; then
+              echo "same: $f"
+            else
+              echo "DIFFERENT: $f"; status=1
+              [ "$f" = selftest.txt ] && diff "portable-ubuntu-latest/$f" "portable-macos-latest/$f" | head -40
+            fi
+          done
+          {
+            echo "### Same routes on every platform ($PORTABLE_ROUTER)"
+            [ $status = 0 ] && echo "Linux and macOS: identical self-test output and synthetic-design routes." \
+                            || echo "Linux and macOS differ -- see the job log."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
   valgrind:
     name: Valgrind (nightly)
