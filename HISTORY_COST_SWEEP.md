@@ -9863,6 +9863,13 @@ rounds; bigblue4's first flat window (232) is where it already stops. Only **new
 round 448, best 170 reached at 298) and **newblue7** (no current-standard trace) can change.
 Queued (`part122.jobs`): newblue4 off and F = 10, newblue7 F = 10.
 
+**newblue4** (pd38route, standard configuration; `status=OK`, `gr_verify` = `eval2008.pl`): off and
+F = 10 both **144 (max 2) / 13711471**, 9505 / 9511 s, route files byte-identical (md5 c46fadfe...),
+and equal to the recorded standard (Part 90, pd23route: 144 / 13711471) -- so pd38route reproduces the
+2008 standard here. 2.04e10 expansions came before the region stage, so F = 10 leaves the threshold at
+3.2e10: on newblue4 the scaled rule could only bind below F ~ 0.74 (its flat window costs 1.51e10),
+while the synthetic design stops for any F up to ~160.
+
 ## Part 123 -- the same routes on every platform (pd39route)
 
 The Linux self-test failure (Part 121's CI) came from a fixture whose slow tier beat the pattern
