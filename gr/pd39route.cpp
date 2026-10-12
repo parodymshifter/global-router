@@ -7385,22 +7385,24 @@ inline double edgeLoss(bool h, size_t idx, long long dh) {
 
 // The score over every edge either charge touches, at the current usage.
 double localScore(const RoutingGrid &g, const RealUsage &ru, const NetCharge &a, const NetCharge &b) {
-  std::unordered_set<size_t> hs, vs;
+  // pd39route: the distinct edges in index order (sorted vectors, not hash
+  // sets): a hash set's order differs between standard libraries, and
+  // floating-point addition is not associative.
+  std::vector<size_t> hs, vs;
   for (const NetCharge *c : {&a, &b}) {
     for (const ChargeEntry &e : c->ruH)
-      hs.insert(e.idx);
+      hs.push_back(e.idx);
     for (const ChargeEntry &e : c->ruV)
-      vs.insert(e.idx);
+      vs.push_back(e.idx);
   }
-  // pd39route: summed in index order -- a hash set's order differs between
-  // standard libraries, and floating-point addition is not associative.
-  std::vector<size_t> hsv(hs.begin(), hs.end()), vsv(vs.begin(), vs.end());
-  std::sort(hsv.begin(), hsv.end());
-  std::sort(vsv.begin(), vsv.end());
+  for (std::vector<size_t> *v : {&hs, &vs}) {
+    std::sort(v->begin(), v->end());
+    v->erase(std::unique(v->begin(), v->end()), v->end());
+  }
   double total = 0;
-  for (size_t idx : hsv)
+  for (size_t idx : hs)
     total += gScore.w[edgeLayerOf(g, true, idx)] * edgeLoss(true, idx, ru.h[idx]);
-  for (size_t idx : vsv)
+  for (size_t idx : vs)
     total += gScore.w[edgeLayerOf(g, false, idx)] * edgeLoss(false, idx, ru.v[idx]);
   return total;
 }
