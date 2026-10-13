@@ -219,6 +219,7 @@ const M = [
 const O = [
   ['o:detour', 'Detour ratio (routed / Steiner)', '', 'Wire length the router used over the Steiner total; 1.00 = no detour'],
   ['o:runtime_knet', 'Runtime per 1000 nets (s)', 'log', 'Within a contest only: each contest runs different settings'],
+  ['o:runtime_mstep', 'Runtime per million Steiner steps (s)', 'log', 'Wall time over the total Steiner tree length of all nets, in millions of GCell steps; within a contest only'],
   ['o:over_share', 'Share over capacity', 'log1p', 'ISPD 2008: overflowed edges; ISPD 2024: GCells over capacity'],
   ['o:overflow', 'Total overflow (ISPD 2008)', 'log1p', 'The 2008 contest\'s first ranking key'],
   ['o:of_knet', 'Overflow cost per 1000 nets (2024, 2025)', 'log', 'The contest score\'s overflow term per 1000 nets: the cleaner congestion outcome'],

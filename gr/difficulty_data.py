@@ -9,6 +9,7 @@ Outcomes, per design (None where a set has no such measure):
   detour        routed 2D wire length (GCell steps) / total Steiner tree length of every net -- comparable
                 across the three contests
   runtime_knet  router wall time per 1000 nets, seconds (each contest's own standard settings)
+  runtime_mstep router wall time per million GCell steps of Steiner tree length (all nets), seconds
   over_share    ISPD 2008: overflowed edges / all 2D edges; ISPD 2024: GCells over capacity / all GCells
   overflow      ISPD 2008 total overflow (the contest's first ranking key)
   of_share      ISPD 2024 / 2025: the overflow term's share of the contest score (falls as wire length grows, so
@@ -90,7 +91,7 @@ def main():
             r25[(d['set'], d['design'])] = d
     for r in rows:
         s, n = r['set'], r['design']
-        o = dict(detour=None, runtime_knet=None, over_share=None, overflow=None, of_share=None, of_knet=None, score_knet=None)
+        o = dict(detour=None, runtime_knet=None, runtime_mstep=None, over_share=None, overflow=None, of_share=None, of_knet=None, score_knet=None)
         rsmt_total = r['rsmt_total']
         if s == 'ispd08':
             base = os.path.join(RUNS, 'p124', f'p124_fast_{n}')
@@ -105,6 +106,7 @@ def main():
             o['over_share'] = oe / edges if oe is not None and edges else None
             t = num(r'real_s=([\d.]+)', summ)
             o['runtime_knet'] = t / r['nets_all'] * 1000 if t else None
+            o['runtime_mstep'] = t / rsmt_total * 1e6 if t and rsmt_total else None
             o['source'] = os.path.basename(base)
         elif s == 'ispd24':
             base = os.path.join(RUNS, 'p123', f'p123_pd39_{n}')
@@ -119,6 +121,7 @@ def main():
             o['score_knet'] = cost / r['nets_all'] * 1000 if cost else None
             t = num(r'real_s=([\d.]+)', summ)
             o['runtime_knet'] = t / r['nets_all'] * 1000 if t else None
+            o['runtime_mstep'] = t / rsmt_total * 1e6 if t and rsmt_total else None
             o['source'] = os.path.basename(base)
         else:
             d = r25.get((s, n))
@@ -132,6 +135,7 @@ def main():
                 o['score_knet'] = d['cost'] / r['nets_all'] * 1000 if d.get('cost') else None
                 t = num(r'^real ([\d.]+)$', read_text(os.path.expanduser(f'~/Code/GlobalRouterRuns/p130/{which}.{n}.err')))
                 o['runtime_knet'] = t / r['nets_all'] * 1000 if t else None
+                o['runtime_mstep'] = t / rsmt_total * 1e6 if t and rsmt_total else None
                 o['opens'] = d.get('opens')
                 o['source'] = 'p130 route25'
         r['outcome'] = o
