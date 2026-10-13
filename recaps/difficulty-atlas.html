@@ -1,0 +1,558 @@
+<title>Routing Difficulty Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a single working column of instrument panels -- controls on top, chart below -- with the
+   contests coloured consistently everywhere; the copper accent marks what is interactive. */
+:root {
+  --bg: #F2F4F6; --surface: #FFFFFF; --ink: #17202A; --muted: #5A6672; --rule: #D5DCE3; --faint: #E8ECF0;
+  --accent: #A8571B; --accent-ink: #FFFFFF;
+  --c08: #2D69B0; --c24: #8549B0; --c25: #1C8662;
+  --pos: #B4621E; --neg: #2A78A4;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #10151B; --surface: #18202A; --ink: #E3E8ED; --muted: #98A4B1; --rule: #2B3642; --faint: #202A35;
+  --accent: #E28B4C; --accent-ink: #10151B; --c08: #6EA4E8; --c24: #B98BE2; --c25: #4BC49A;
+  --pos: #E39250; --neg: #5BAED8; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #10151B; --surface: #18202A; --ink: #E3E8ED; --muted: #98A4B1; --rule: #2B3642; --faint: #202A35;
+  --accent: #E28B4C; --accent-ink: #10151B; --c08: #6EA4E8; --c24: #B98BE2; --c25: #4BC49A;
+  --pos: #E39250; --neg: #5BAED8; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.5; margin: 0; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+header h1 { font-family: var(--display); font-weight: 600; font-size: clamp(28px, 4.2vw, 40px); line-height: 1.1; margin: 0 0 8px; text-wrap: balance; letter-spacing: -0.01em; }
+header p { margin: 0; max-width: 70ch; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 2px solid currentColor; }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.panel h2 { font-family: var(--display); font-weight: 600; font-size: 21px; margin: 0; text-wrap: balance; }
+.panel .lede { margin: -6px 0 0; color: var(--muted); max-width: 75ch; font-size: 14px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
+.controls label { display: grid; gap: 3px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); min-width: 0; }
+select, input[type=range] { font-family: var(--body); font-size: 14px; color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 6px; max-width: 100%; }
+select { max-width: min(340px, 100%); }
+select:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chk { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; text-transform: none; letter-spacing: 0; color: var(--ink); }
+.chart { width: 100%; min-width: 0; overflow-x: auto; }
+.chart svg { display: block; width: 100%; height: auto; max-width: 100%; }
+.stat { font-family: var(--mono); font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; font-variant-numeric: tabular-nums; }
+.stat b { color: var(--ink); font-weight: 500; }
+.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 14px; max-height: 260px; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; padding: 10px; background: var(--bg); }
+.picker .grp { grid-column: 1 / -1; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 6px; }
+.picker .grp:first-child { margin-top: 0; }
+.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+button { font-family: var(--body); font-size: 13px; border: 1px solid var(--rule); background: var(--bg); color: var(--ink); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); color: var(--accent); }
+.two { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+@media (max-width: 760px) { .two { grid-template-columns: minmax(0, 1fr); } }
+table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 8px; border-bottom: 1px solid var(--faint); text-align: right; white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); position: sticky; top: 0; background: var(--surface); }
+td:first-child, th:first-child { text-align: left; }
+.scroll { overflow: auto; max-height: 460px; min-width: 0; }
+.note { font-size: 13px; color: var(--muted); max-width: 80ch; }
+.warn { font-size: 13px; color: var(--pos); }
+.tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12.5px; padding: 6px 8px; border-radius: 4px; max-width: 280px; z-index: 5; font-family: var(--mono); }
+details summary { cursor: pointer; font-family: var(--display); font-weight: 600; font-size: 18px; }
+dl { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 6px 16px; margin: 12px 0 0; font-size: 14px; }
+dt { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+dd { margin: 0; }
+@media (max-width: 600px) { dl { grid-template-columns: minmax(0, 1fr); } dd { margin-bottom: 8px; } }
+.axis text, .lbl { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.axis line, .axis path { stroke: var(--rule); }
+.grid line { stroke: var(--faint); }
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Routing Difficulty Atlas</h1>
+  <p>Pre-routing measurements of every global-routing benchmark this project routes, next to how hard each one
+  turned out to be. Pick measures, see whether the designs cluster, and fit outcomes by least squares.
+  Areas are in GCells (the routing grid's cells); "Steiner" is the rectilinear Steiner minimal tree (RSMT), the
+  shortest right-angle tree joining a net's pins.</p>
+  <div class="legend" id="legend"></div>
+</header>
+
+<section class="panel" id="p-scatter">
+  <h2>Any two measures</h2>
+  <p class="lede">Each point is one design. The numbers under the chart are Spearman rank correlations (from -1 to 1;
+  0 means no ordering relation), for all designs and within each contest.</p>
+  <div class="controls">
+    <label>Horizontal axis <select id="sx"></select></label>
+    <label>Vertical axis <select id="sy"></select></label>
+    <label>Colour <select id="sc"></select></label>
+    <label class="chk"><input type="checkbox" id="slog" checked> log scale where marked (log)</label>
+  </div>
+  <div class="chart" id="scatter"></div>
+  <div class="stat" id="scatter-stat"></div>
+</section>
+
+<section class="panel" id="p-pca">
+  <h2>Do the designs cluster?</h2>
+  <p class="lede">The selected measures are standardized (each to mean 0, standard deviation 1) and projected onto
+  their two principal components: the two directions along which the designs differ most. Shaded outlines are
+  k-means clusters, computed on all selected measures, not just the two plotted.</p>
+  <div class="btns" id="presets"></div>
+  <div class="picker" id="picker"></div>
+  <div class="controls">
+    <label>Contests <select id="pset"></select></label>
+    <label>Clusters (k) <select id="pk"></select></label>
+  </div>
+  <div class="two">
+    <div class="chart" id="pca"></div>
+    <div class="scroll" id="loadings"></div>
+  </div>
+  <div class="stat" id="pca-stat"></div>
+</section>
+
+<section class="panel" id="p-heat">
+  <h2>Which measures track which outcomes</h2>
+  <p class="lede">Spearman rank correlation between each pre-routing measure and each routing outcome. Outcomes from
+  different contests are not on one scale, so the contest filter matters: "All" pools ranks across contests, which
+  mixes different scoring rules.</p>
+  <div class="controls"><label>Contests <select id="hset"></select></label></div>
+  <div class="scroll" id="heat"></div>
+</section>
+
+<section class="panel" id="p-fit">
+  <h2>Least-squares fit</h2>
+  <p class="lede">Ridge regression (least squares with a penalty that shrinks coefficients toward zero; penalty 0 is
+  ordinary least squares) on standardized measures. The leave-one-out score refits the model once per design without
+  it and predicts it: with this few designs, that number is the honest one. Keep the measures few.</p>
+  <div class="controls">
+    <label>Outcome <select id="fy"></select></label>
+    <label>Contests <select id="fset"></select></label>
+    <label>Penalty <input type="range" id="flam" min="0" max="40" step="1" value="2"></label>
+    <span class="stat" id="flam-v"></span>
+  </div>
+  <div class="picker" id="fpicker"></div>
+  <div class="two">
+    <div class="chart" id="fitplot"></div>
+    <div class="scroll" id="fittable"></div>
+  </div>
+  <div class="stat" id="fit-stat"></div>
+</section>
+
+<section class="panel" id="p-data">
+  <h2>All values</h2>
+  <div class="scroll" id="table"></div>
+</section>
+
+<section class="panel">
+  <details>
+    <summary>What each measure means</summary>
+    <dl id="glossary"></dl>
+    <p class="note">Sources: measures from <code>gr/routability.cpp</code> (HISTORY_COST_SWEEP.md Parts 101 and 130).
+    Outcomes: ISPD 2008 (International Symposium on Physical Design contest) from the fast08 runs of Part 124, with
+    bigblue4 and newblue7 from earlier standard runs; ISPD 2024 from Part 123's pd39route runs; ISPD 2025 from pd39route
+    with the 2024 settings, scored by the contest's congestion evaluator (timing not run). Runtimes come from each
+    contest's own settings, so compare them within a contest.</p>
+  </details>
+</section>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const DATA = [{"set":"ispd08","design":"adaptec1","nets":176715.0,"tiles":104976.0,"util":0.4513,"rudy_p99":1.368,"rudy_p999":1.803,"rudy_over":0.07809,"rudy_excess":96090.0,"esc_max":0.35,"esc_p999":0.276,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.474,"cut3_over1":0.0,"long_share":0.0714,"pins":942705.0,"pin_density":8.9802,"pin_per_htrack":0.28285,"pin_per_vtrack":0.28451,"row_cv":0.4847,"col_cv":0.4224,"ppn_mean":4.289,"ppn_median":2.0,"ppn_p90":8.0,"ppn_p99":36.0,"ppn_max":2271.0,"ppn_skew":135.86,"ppn_share2":0.5328,"ppn_share10":0.0795,"big_nets":145.0,"big_share":0.000821,"regions":1.0,"region_top":1.0,"reg4_cv":0.3916,"reg4_maxmean":1.685,"reg4_gini":0.2243,"reg4_span2":0.0156,"reg8_cv":0.503,"reg8_maxmean":1.957,"reg8_gini":0.2889,"reg8_span2":0.0501,"reg16_cv":0.6143,"reg16_maxmean":2.367,"reg16_gini":0.3525,"reg16_span2":0.1031,"rsmt_per_net":18.862,"rsmt_per_gcell":31.7255,"rsmt_per_track":0.50109,"rsmt_per_net_all":19.322,"pv_mean":15.891,"pv_p99":38.0,"pv_max":57.0,"nets_all":176716.0,"rsmt_total":3414517.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":31.748,"tracks_v":31.564,"outcome":{"detour":1.0460111927982787,"runtime_knet":8.457185540641483,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_adaptec1"}},{"set":"ispd08","design":"adaptec2","nets":207972.0,"tiles":179776.0,"util":0.2132,"rudy_p99":1.158,"rudy_p999":1.948,"rudy_over":0.02043,"rudy_excess":74243.0,"esc_max":0.394,"esc_p999":0.319,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.642,"cut3_over1":0.0,"long_share":0.0278,"pins":1063632.0,"pin_density":5.91643,"pin_per_htrack":0.15738,"pin_per_vtrack":0.15747,"row_cv":0.6275,"col_cv":0.6762,"ppn_mean":4.0884,"ppn_median":2.0,"ppn_p90":7.0,"ppn_p99":38.0,"ppn_max":1935.0,"ppn_skew":100.303,"ppn_share2":0.6026,"ppn_share10":0.0682,"big_nets":24.0,"big_share":0.000115,"regions":1.0,"region_top":1.0,"reg4_cv":0.7941,"reg4_maxmean":2.868,"reg4_gini":0.4408,"reg4_span2":0.0091,"reg8_cv":1.0813,"reg8_maxmean":4.156,"reg8_gini":0.5825,"reg8_span2":0.0231,"reg16_cv":1.3261,"reg16_maxmean":5.565,"reg16_gini":0.6663,"reg16_span2":0.0578,"rsmt_per_net":15.393,"rsmt_per_gcell":17.8056,"rsmt_per_track":0.23689,"rsmt_per_net_all":15.519,"pv_mean":18.891,"pv_p99":59.0,"pv_max":76.0,"nets_all":207974.0,"rsmt_total":3227550.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":37.592,"tracks_v":37.571,"outcome":{"detour":1.021809422007405,"runtime_knet":1.992075932568494,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_adaptec2"}},{"set":"ispd08","design":"adaptec3","nets":368494.0,"tiles":602946.0,"util":0.2702,"rudy_p99":1.27,"rudy_p999":1.763,"rudy_over":0.0334,"rudy_excess":235493.0,"esc_max":0.339,"esc_p999":0.274,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.505,"cut3_over1":0.0,"long_share":0.035,"pins":1874576.0,"pin_density":3.10903,"pin_per_htrack":0.11773,"pin_per_vtrack":0.1174,"row_cv":0.7525,"col_cv":0.7875,"ppn_mean":4.0202,"ppn_median":2.0,"ppn_p90":6.0,"ppn_p99":36.0,"ppn_max":3713.0,"ppn_skew":199.597,"ppn_share2":0.6143,"ppn_share10":0.0543,"big_nets":34.0,"big_share":9.2e-05,"regions":1.0,"region_top":1.0,"reg4_cv":0.504,"reg4_maxmean":1.847,"reg4_gini":0.288,"reg4_span2":0.0084,"reg8_cv":1.1607,"reg8_maxmean":3.378,"reg8_gini":0.6166,"reg8_span2":0.0194,"reg16_cv":1.2912,"reg16_maxmean":4.645,"reg16_gini":0.6635,"reg16_span2":0.0472,"rsmt_per_net":25.367,"rsmt_per_gcell":15.5018,"rsmt_per_track":0.29308,"rsmt_per_net_all":25.505,"pv_mean":13.983,"pv_p99":38.0,"pv_max":53.0,"nets_all":368496.0,"rsmt_total":9398620.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":26.409,"tracks_v":26.483,"outcome":{"detour":1.0194956280815695,"runtime_knet":3.4237006643220007,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_adaptec3"}},{"set":"ispd08","design":"adaptec4","nets":401060.0,"tiles":602946.0,"util":0.2485,"rudy_p99":0.963,"rudy_p999":1.469,"rudy_over":0.00826,"rudy_excess":56945.0,"esc_max":0.323,"esc_p999":0.236,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.478,"cut3_over1":0.0,"long_share":0.0263,"pins":1911773.0,"pin_density":3.17072,"pin_per_htrack":0.11656,"pin_per_vtrack":0.11598,"row_cv":0.5398,"col_cv":0.5389,"ppn_mean":3.71,"ppn_median":2.0,"ppn_p90":6.0,"ppn_p99":39.0,"ppn_max":3974.0,"ppn_skew":246.137,"ppn_share2":0.6465,"ppn_share10":0.0441,"big_nets":16.0,"big_share":4e-05,"regions":1.0,"region_top":1.0,"reg4_cv":0.5014,"reg4_maxmean":2.056,"reg4_gini":0.2781,"reg4_span2":0.0052,"reg8_cv":0.6497,"reg8_maxmean":2.522,"reg8_gini":0.3699,"reg8_span2":0.0178,"reg16_cv":0.8223,"reg16_maxmean":3.623,"reg16_gini":0.4588,"reg16_span2":0.0412,"rsmt_per_net":22.184,"rsmt_per_gcell":14.7556,"rsmt_per_track":0.27055,"rsmt_per_net_all":22.283,"pv_mean":10.34,"pv_p99":33.0,"pv_max":53.0,"nets_all":401062.0,"rsmt_total":8936813.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":27.201,"tracks_v":27.339,"outcome":{"detour":1.002546769189419,"runtime_knet":0.9023542494676633,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_adaptec4"}},{"set":"ispd08","design":"adaptec5","nets":548073.0,"tiles":217620.0,"util":0.3947,"rudy_p99":1.304,"rudy_p999":1.649,"rudy_over":0.05444,"rudy_excess":231865.0,"esc_max":0.4,"esc_p999":0.318,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.559,"cut3_over1":0.0,"long_share":0.0365,"pins":3492790.0,"pin_density":16.04995,"pin_per_htrack":0.31027,"pin_per_vtrack":0.3097,"row_cv":0.4554,"col_cv":0.5424,"ppn_mean":4.0265,"ppn_median":2.0,"ppn_p90":7.0,"ppn_p99":40.0,"ppn_max":9863.0,"ppn_skew":500.76,"ppn_share2":0.6382,"ppn_share10":0.0595,"big_nets":3.0,"big_share":5e-06,"regions":1.0,"region_top":1.0,"reg4_cv":0.4459,"reg4_maxmean":1.729,"reg4_gini":0.2532,"reg4_span2":0.007,"reg8_cv":0.6218,"reg8_maxmean":2.188,"reg8_gini":0.3572,"reg8_span2":0.0294,"reg16_cv":0.7742,"reg16_maxmean":2.896,"reg16_gini":0.4426,"reg16_span2":0.0724,"rsmt_per_net":17.946,"rsmt_per_gcell":45.1956,"rsmt_per_track":0.43646,"rsmt_per_net_all":17.983,"pv_mean":35.737,"pv_p99":94.0,"pv_max":123.0,"nets_all":548075.0,"rsmt_total":9856156.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":51.728,"tracks_v":51.823,"outcome":{"detour":1.043743017054519,"runtime_knet":4.157314236190302,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_adaptec5"}},{"set":"ispd08","design":"bigblue1","nets":196885.0,"tiles":51529.0,"util":0.5324,"rudy_p99":1.45,"rudy_p999":1.751,"rudy_over":0.1063,"rudy_excess":111257.0,"esc_max":0.323,"esc_p999":0.232,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.386,"cut3_over1":0.0,"long_share":0.0989,"pins":1143186.0,"pin_density":22.18529,"pin_per_htrack":0.40752,"pin_per_vtrack":0.40778,"row_cv":0.4138,"col_cv":0.2983,"ppn_mean":4.0399,"ppn_median":2.0,"ppn_p90":7.0,"ppn_p99":34.0,"ppn_max":2621.0,"ppn_skew":166.661,"ppn_share2":0.5906,"ppn_share10":0.0624,"big_nets":178.0,"big_share":0.000904,"regions":1.0,"region_top":1.0,"reg4_cv":0.378,"reg4_maxmean":1.459,"reg4_gini":0.2053,"reg4_span2":0.03,"reg8_cv":0.4452,"reg8_maxmean":1.57,"reg8_gini":0.2494,"reg8_span2":0.0703,"reg16_cv":0.5147,"reg16_maxmean":1.807,"reg16_gini":0.2852,"reg16_span2":0.1322,"rsmt_per_net":17.278,"rsmt_per_gcell":65.958,"rsmt_per_track":0.60598,"rsmt_per_net_all":17.571,"pv_mean":28.744,"pv_p99":59.0,"pv_max":100.0,"nets_all":196887.0,"rsmt_total":3459591.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":54.44,"tracks_v":54.405,"outcome":{"detour":1.076932215397716,"runtime_knet":8.280384179757933,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_bigblue1"}},{"set":"ispd08","design":"bigblue2","nets":428968.0,"tiles":220428.0,"util":0.4058,"rudy_p99":1.336,"rudy_p999":1.829,"rudy_over":0.05173,"rudy_excess":95059.0,"esc_max":0.819,"esc_p999":0.452,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.796,"cut3_over1":0.0,"long_share":0.0124,"pins":2121863.0,"pin_density":9.6261,"pin_per_htrack":0.42999,"pin_per_vtrack":0.4211,"row_cv":0.3213,"col_cv":0.6281,"ppn_mean":3.6786,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":32.0,"ppn_max":11869.0,"ppn_skew":495.423,"ppn_share2":0.6424,"ppn_share10":0.0438,"big_nets":12.0,"big_share":2.8e-05,"regions":2.0,"region_top":1.0,"reg4_cv":0.3186,"reg4_maxmean":1.394,"reg4_gini":0.1802,"reg4_span2":0.0043,"reg8_cv":0.4473,"reg8_maxmean":1.809,"reg8_gini":0.2542,"reg8_span2":0.0164,"reg16_cv":0.6227,"reg16_maxmean":2.48,"reg16_gini":0.3573,"reg16_span2":0.0337,"rsmt_per_net":10.727,"rsmt_per_gcell":20.8748,"rsmt_per_track":0.46136,"rsmt_per_net_all":10.846,"pv_mean":18.868,"pv_p99":60.0,"pv_max":97.0,"nets_all":428970.0,"rsmt_total":4652659.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":22.387,"tracks_v":22.859,"outcome":{"detour":1.0498562220012255,"runtime_knet":3.5552369629577822,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_bigblue2"}},{"set":"ispd08","design":"bigblue3","nets":665629.0,"tiles":309135.0,"util":0.1601,"rudy_p99":0.997,"rudy_p999":1.499,"rudy_over":0.00986,"rudy_excess":104053.0,"esc_max":0.338,"esc_p999":0.274,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.602,"cut3_over1":0.0,"long_share":0.0178,"pins":3832388.0,"pin_density":12.39713,"pin_per_htrack":0.17135,"pin_per_vtrack":0.17112,"row_cv":0.9621,"col_cv":0.7602,"ppn_mean":3.4146,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":31.0,"ppn_max":7623.0,"ppn_skew":537.519,"ppn_share2":0.7359,"ppn_share10":0.0395,"big_nets":15.0,"big_share":2.3e-05,"regions":1.0,"region_top":1.0,"reg4_cv":1.0445,"reg4_maxmean":3.83,"reg4_gini":0.5423,"reg4_span2":0.0021,"reg8_cv":1.2954,"reg8_maxmean":5.791,"reg8_gini":0.6472,"reg8_span2":0.01,"reg16_cv":1.5401,"reg16_maxmean":6.271,"reg16_gini":0.7257,"reg16_span2":0.028,"rsmt_per_net":11.571,"rsmt_per_gcell":24.9139,"rsmt_per_track":0.17206,"rsmt_per_net_all":11.615,"pv_mean":47.548,"pv_p99":112.0,"pv_max":148.0,"nets_all":665631.0,"rsmt_total":7731159.0,"layers":8.0,"layers_h":4.0,"layers_v":4.0,"tracks_h":72.349,"tracks_v":72.447,"outcome":{"detour":1.0149674841766934,"runtime_knet":1.0360394873435883,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_bigblue3"}},{"set":"ispd08","design":"bigblue4","nets":1133535.0,"tiles":163215.0,"util":0.3246,"rudy_p99":1.172,"rudy_p999":1.568,"rudy_over":0.02621,"rudy_excess":153235.0,"esc_max":0.522,"esc_p999":0.422,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.817,"cut3_over1":0.0,"long_share":0.0173,"pins":8899095.0,"pin_density":54.52376,"pin_per_htrack":0.55198,"pin_per_vtrack":0.5498,"row_cv":0.5908,"col_cv":0.398,"ppn_mean":3.9926,"ppn_median":2.0,"ppn_p90":6.0,"ppn_p99":41.0,"ppn_max":20766.0,"ppn_skew":870.926,"ppn_share2":0.6951,"ppn_share10":0.0587,"big_nets":34.0,"big_share":3e-05,"regions":1.0,"region_top":1.0,"reg4_cv":0.5433,"reg4_maxmean":1.823,"reg4_gini":0.3068,"reg4_span2":0.0031,"reg8_cv":0.7273,"reg8_maxmean":2.416,"reg8_gini":0.417,"reg8_span2":0.0129,"reg16_cv":0.9051,"reg16_maxmean":2.995,"reg16_gini":0.5088,"reg16_span2":0.0355,"rsmt_per_net":10.224,"rsmt_per_gcell":71.0037,"rsmt_per_track":0.3587,"rsmt_per_net_all":10.29,"pv_mean":89.142,"pv_p99":254.0,"pv_max":313.0,"nets_all":1133537.0,"rsmt_total":11663794.0,"layers":8.0,"layers_h":4.0,"layers_v":4.0,"tracks_h":98.779,"tracks_v":99.17,"outcome":{"detour":1.1503295582895239,"runtime_knet":34.0822663927159,"over_share":6.833076389187463e-05,"overflow":356.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"s23_bigblue4"}},{"set":"ispd08","design":"newblue1","nets":270713.0,"tiles":159201.0,"util":0.2293,"rudy_p99":1.074,"rudy_p999":1.41,"rudy_over":0.01602,"rudy_excess":23329.0,"esc_max":0.419,"esc_p999":0.35,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.68,"cut3_over1":0.0,"long_share":0.0115,"pins":1237104.0,"pin_density":7.7707,"pin_per_htrack":0.27293,"pin_per_vtrack":0.27301,"row_cv":0.8683,"col_cv":0.6435,"ppn_mean":3.73,"ppn_median":2.0,"ppn_p90":6.0,"ppn_p99":23.0,"ppn_max":12335.0,"ppn_skew":464.934,"ppn_share2":0.5894,"ppn_share10":0.0524,"big_nets":4.0,"big_share":1.5e-05,"regions":1.0,"region_top":1.0,"reg4_cv":0.9511,"reg4_maxmean":3.029,"reg4_gini":0.5247,"reg4_span2":0.0024,"reg8_cv":1.1544,"reg8_maxmean":3.571,"reg8_gini":0.6149,"reg8_span2":0.0094,"reg16_cv":1.2945,"reg16_maxmean":4.098,"reg16_gini":0.666,"reg16_span2":0.0288,"rsmt_per_net":8.619,"rsmt_per_gcell":14.6567,"rsmt_per_track":0.25743,"rsmt_per_net_all":8.685,"pv_mean":20.068,"pv_p99":50.0,"pv_max":66.0,"nets_all":270715.0,"rsmt_total":2351264.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":28.472,"tracks_v":28.463,"outcome":{"detour":1.0959734849000367,"runtime_knet":18.933232366141514,"over_share":7.871437387438445e-06,"overflow":30.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_newblue1"}},{"set":"ispd08","design":"newblue2","nets":373790.0,"tiles":257891.0,"util":0.1649,"rudy_p99":0.955,"rudy_p999":1.319,"rudy_over":0.00758,"rudy_excess":23047.0,"esc_max":0.269,"esc_p999":0.227,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.409,"cut3_over1":0.0,"long_share":0.0093,"pins":1771849.0,"pin_density":6.87053,"pin_per_htrack":0.14187,"pin_per_vtrack":0.13712,"row_cv":0.4579,"col_cv":1.2168,"ppn_mean":3.8251,"ppn_median":2.0,"ppn_p90":6.0,"ppn_p99":36.0,"ppn_max":8089.0,"ppn_skew":465.455,"ppn_share2":0.5616,"ppn_share10":0.0478,"big_nets":14.0,"big_share":3.7e-05,"regions":2.0,"region_top":1.0,"reg4_cv":1.0121,"reg4_maxmean":2.584,"reg4_gini":0.5506,"reg4_span2":0.0028,"reg8_cv":1.0547,"reg8_maxmean":3.007,"reg8_gini":0.5767,"reg8_span2":0.0126,"reg16_cv":1.1027,"reg16_maxmean":3.503,"reg16_gini":0.5968,"reg16_span2":0.0423,"rsmt_per_net":12.318,"rsmt_per_gcell":17.8528,"rsmt_per_track":0.18118,"rsmt_per_net_all":12.399,"pv_mean":20.519,"pv_p99":51.0,"pv_max":74.0,"nets_all":373792.0,"rsmt_total":4634537.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":48.429,"tracks_v":50.106,"outcome":{"detour":1.0032928855676413,"runtime_knet":0.3028957281054704,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_newblue2"}},{"set":"ispd08","design":"newblue3","nets":442005.0,"tiles":1222088.0,"util":0.0882,"rudy_p99":1.05,"rudy_p999":1.771,"rudy_over":0.0118,"rudy_excess":290485.0,"esc_max":18.54,"esc_p999":0.25,"esc_over1":5.0,"esc_over09":6.0,"cut3_max":5.657,"cut3_over1":9.0,"long_share":0.005,"pins":1929360.0,"pin_density":1.57874,"pin_per_htrack":0.04885,"pin_per_vtrack":0.04849,"row_cv":0.601,"col_cv":2.0153,"ppn_mean":3.4973,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":31.0,"ppn_max":16008.0,"ppn_skew":510.995,"ppn_share2":0.6351,"ppn_share10":0.033,"big_nets":3.0,"big_share":7e-06,"regions":1.0,"region_top":1.0,"reg4_cv":1.0659,"reg4_maxmean":2.638,"reg4_gini":0.5727,"reg4_span2":0.0017,"reg8_cv":1.8857,"reg8_maxmean":6.764,"reg8_gini":0.8015,"reg8_span2":0.0049,"reg16_cv":2.1034,"reg16_maxmean":9.853,"reg16_gini":0.8329,"reg16_span2":0.015,"rsmt_per_net":16.719,"rsmt_per_gcell":6.0469,"rsmt_per_track":0.09321,"rsmt_per_net_all":16.828,"pv_mean":13.105,"pv_p99":44.0,"pv_max":14009.0,"nets_all":442007.0,"rsmt_total":7438092.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":32.315,"tracks_v":32.558,"outcome":{"detour":1.0236576799534074,"runtime_knet":32.92936537204162,"over_share":0.0001814126187013887,"overflow":38948.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_newblue3"}},{"set":"ispd08","design":"newblue4","nets":531292.0,"tiles":208390.0,"util":0.4307,"rudy_p99":1.308,"rudy_p999":1.674,"rudy_over":0.05094,"rudy_excess":168931.0,"esc_max":0.5,"esc_p999":0.369,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.806,"cut3_over1":0.0,"long_share":0.0187,"pins":2498322.0,"pin_density":11.98868,"pin_per_htrack":0.29284,"pin_per_vtrack":0.29232,"row_cv":0.3864,"col_cv":0.3837,"ppn_mean":3.927,"ppn_median":2.0,"ppn_p90":7.0,"ppn_p99":28.0,"ppn_max":13518.0,"ppn_skew":676.63,"ppn_share2":0.5584,"ppn_share10":0.0564,"big_nets":41.0,"big_share":7.7e-05,"regions":1.0,"region_top":1.0,"reg4_cv":0.3214,"reg4_maxmean":1.597,"reg4_gini":0.1761,"reg4_span2":0.0053,"reg8_cv":0.5165,"reg8_maxmean":2.222,"reg8_gini":0.2951,"reg8_span2":0.018,"reg16_cv":0.6145,"reg16_maxmean":3.276,"reg16_gini":0.3504,"reg16_span2":0.0523,"rsmt_per_net":14.953,"rsmt_per_gcell":38.1203,"rsmt_per_track":0.46516,"rsmt_per_net_all":15.054,"pv_mean":17.561,"pv_p99":68.0,"pv_max":101.0,"nets_all":531294.0,"rsmt_total":7998010.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":40.94,"tracks_v":41.012,"outcome":{"detour":1.0980337608980233,"runtime_knet":17.7380696939924,"over_share":3.085922502466734e-05,"overflow":154.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_newblue4"}},{"set":"ispd08","design":"newblue5","nets":891920.0,"tiles":407680.0,"util":0.3541,"rudy_p99":1.257,"rudy_p999":1.858,"rudy_over":0.02683,"rudy_excess":246928.0,"esc_max":0.518,"esc_p999":0.33,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.725,"cut3_over1":0.0,"long_share":0.0166,"pins":4931147.0,"pin_density":12.09563,"pin_per_htrack":0.28303,"pin_per_vtrack":0.28229,"row_cv":0.4518,"col_cv":0.3166,"ppn_mean":3.9212,"ppn_median":2.0,"ppn_p90":6.0,"ppn_p99":34.0,"ppn_max":17913.0,"ppn_skew":707.608,"ppn_share2":0.7017,"ppn_share10":0.0637,"big_nets":8.0,"big_share":9e-06,"regions":1.0,"region_top":1.0,"reg4_cv":0.2799,"reg4_maxmean":1.395,"reg4_gini":0.1589,"reg4_span2":0.0032,"reg8_cv":0.4569,"reg8_maxmean":1.707,"reg8_gini":0.2513,"reg8_span2":0.0168,"reg16_cv":0.5455,"reg16_maxmean":2.397,"reg16_gini":0.3102,"reg16_span2":0.0442,"rsmt_per_net":16.006,"rsmt_per_gcell":35.0168,"rsmt_per_track":0.40915,"rsmt_per_net_all":16.066,"pv_mean":21.959,"pv_p99":62.0,"pv_max":113.0,"nets_all":891922.0,"rsmt_total":14330026.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":42.737,"tracks_v":42.848,"outcome":{"detour":1.0279113240966904,"runtime_knet":3.1341866217001035,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_newblue5"}},{"set":"ispd08","design":"newblue6","nets":835267.0,"tiles":214832.0,"util":0.318,"rudy_p99":1.316,"rudy_p999":1.662,"rudy_over":0.0494,"rudy_excess":264979.0,"esc_max":0.436,"esc_p999":0.352,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.663,"cut3_over1":0.0,"long_share":0.0138,"pins":5305603.0,"pin_density":24.69652,"pin_per_htrack":0.38317,"pin_per_vtrack":0.38196,"row_cv":0.6493,"col_cv":0.6468,"ppn_mean":4.1242,"ppn_median":2.0,"ppn_p90":7.0,"ppn_p99":36.0,"ppn_max":19862.0,"ppn_skew":729.869,"ppn_share2":0.617,"ppn_share10":0.0623,"big_nets":2.0,"big_share":2e-06,"regions":1.0,"region_top":1.0,"reg4_cv":0.7561,"reg4_maxmean":2.638,"reg4_gini":0.4181,"reg4_span2":0.0034,"reg8_cv":0.8794,"reg8_maxmean":3.172,"reg8_gini":0.4951,"reg8_span2":0.0138,"reg16_cv":1.0143,"reg16_maxmean":3.449,"reg16_gini":0.5594,"reg16_span2":0.0391,"rsmt_per_net":11.715,"rsmt_per_gcell":45.5467,"rsmt_per_track":0.35277,"rsmt_per_net_all":11.757,"pv_mean":52.134,"pv_p99":137.0,"pv_max":178.0,"nets_all":835269.0,"rsmt_total":9820036.0,"layers":6.0,"layers_h":3.0,"layers_v":3.0,"tracks_h":64.453,"tracks_v":64.658,"outcome":{"detour":1.0445247858561821,"runtime_knet":2.763516902937856,"over_share":0.0,"overflow":0.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"p124_fast_newblue6"}},{"set":"ispd08","design":"newblue7","nets":1647410.0,"tiles":239120.0,"util":0.3365,"rudy_p99":1.22,"rudy_p999":1.741,"rudy_over":0.03333,"rudy_excess":314885.0,"esc_max":0.571,"esc_p999":0.411,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.78,"cut3_over1":0.0,"long_share":0.0038,"pins":10103725.0,"pin_density":42.25378,"pin_per_htrack":0.41896,"pin_per_vtrack":0.41642,"row_cv":0.3856,"col_cv":0.6674,"ppn_mean":3.8335,"ppn_median":2.0,"ppn_p90":7.0,"ppn_p99":29.0,"ppn_max":17324.0,"ppn_skew":939.299,"ppn_share2":0.6919,"ppn_share10":0.0647,"big_nets":23.0,"big_share":1.4e-05,"regions":1.0,"region_top":1.0,"reg4_cv":0.6826,"reg4_maxmean":2.29,"reg4_gini":0.3792,"reg4_span2":0.0017,"reg8_cv":0.745,"reg8_maxmean":2.706,"reg8_gini":0.4221,"reg8_span2":0.0082,"reg16_cv":0.8529,"reg16_maxmean":3.436,"reg16_gini":0.4809,"reg16_span2":0.031,"rsmt_per_net":10.807,"rsmt_per_gcell":74.4557,"rsmt_per_track":0.368,"rsmt_per_net_all":10.846,"pv_mean":84.134,"pv_p99":225.0,"pv_max":337.0,"nets_all":1647412.0,"rsmt_total":17868332.0,"layers":8.0,"layers_h":4.0,"layers_v":4.0,"tracks_h":100.855,"tracks_v":101.469,"outcome":{"detour":1.0741969088105146,"runtime_knet":42.910874753856355,"over_share":1.4143175027553e-05,"overflow":108.0,"of_share":null,"of_knet":null,"score_knet":null,"source":"c200_newblue7"}},{"set":"ispd24","design":"ariane133_51","nets":117448.0,"tiles":965536.0,"util":0.0609,"rudy_p99":0.396,"rudy_p999":0.569,"rudy_over":0.0,"rudy_excess":0.0,"esc_max":0.134,"esc_p999":0.11,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.193,"cut3_over1":0.0,"long_share":0.0155,"pins":436127.0,"pin_density":0.45169,"pin_per_htrack":0.03349,"pin_per_vtrack":0.02238,"row_cv":1.1454,"col_cv":1.1889,"ppn_mean":3.3894,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":29.0,"ppn_max":76.0,"ppn_skew":8.103,"ppn_share2":0.6088,"ppn_share10":0.0355,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":1.6362,"reg4_maxmean":5.149,"reg4_gini":0.7427,"reg4_span2":0.0049,"reg8_cv":2.0236,"reg8_maxmean":7.774,"reg8_gini":0.8121,"reg8_span2":0.0125,"reg16_cv":2.1903,"reg16_maxmean":11.316,"reg16_gini":0.8373,"reg16_span2":0.0288,"rsmt_per_net":18.479,"rsmt_per_gcell":2.2478,"rsmt_per_track":0.06676,"rsmt_per_net_all":18.479,"pv_mean":3.408,"pv_p99":9.0,"pv_max":12.0,"nets_all":117448.0,"rsmt_total":2170309.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":13.487,"tracks_v":20.181,"outcome":{"detour":1.0014813558806603,"runtime_knet":0.026139227573053606,"over_share":0.0029475855897656846,"overflow":null,"of_share":0.45517209485873666,"of_knet":86760.54702506642,"score_knet":190610.4262652408,"source":"p123_pd39_ariane133_51"}},{"set":"ispd24","design":"ariane133_68","nets":100180.0,"tiles":695236.0,"util":0.0962,"rudy_p99":0.443,"rudy_p999":0.661,"rudy_over":0.00013,"rudy_excess":76.0,"esc_max":0.163,"esc_p999":0.125,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.199,"cut3_over1":0.0,"long_share":0.0272,"pins":432790.0,"pin_density":0.62251,"pin_per_htrack":0.05231,"pin_per_vtrack":0.03548,"row_cv":0.9516,"col_cv":0.9847,"ppn_mean":3.4071,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":29.0,"ppn_max":76.0,"ppn_skew":7.886,"ppn_share2":0.6087,"ppn_share10":0.0355,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":1.4625,"reg4_maxmean":4.865,"reg4_gini":0.679,"reg4_span2":0.0061,"reg8_cv":1.6159,"reg8_maxmean":6.119,"reg8_gini":0.7305,"reg8_span2":0.02,"reg16_cv":1.7598,"reg16_maxmean":7.474,"reg16_gini":0.7714,"reg16_span2":0.0432,"rsmt_per_net":21.689,"rsmt_per_gcell":3.1253,"rsmt_per_track":0.10614,"rsmt_per_net_all":21.689,"pv_mean":3.389,"pv_p99":12.0,"pv_max":22.0,"nets_all":100180.0,"rsmt_total":2172811.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":11.901,"tracks_v":17.544,"outcome":{"detour":1.0021847275257718,"runtime_knet":0.029147534438011578,"over_share":0.006343169801333648,"overflow":null,"of_share":0.38030071880263255,"of_knet":74717.57179776402,"score_knet":196469.709636654,"source":"p123_pd39_ariane133_68"}},{"set":"ispd24","design":"ariane_68_rank","nets":101952.0,"tiles":695236.0,"util":0.1245,"rudy_p99":0.546,"rudy_p999":0.916,"rudy_over":0.00072,"rudy_excess":3414.0,"esc_max":0.179,"esc_p999":0.122,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.218,"cut3_over1":0.0,"long_share":0.0388,"pins":434683.0,"pin_density":0.62523,"pin_per_htrack":0.05254,"pin_per_vtrack":0.03561,"row_cv":1.3566,"col_cv":0.8083,"ppn_mean":3.3885,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":28.0,"ppn_max":76.0,"ppn_skew":8.272,"ppn_share2":0.606,"ppn_share10":0.0348,"big_nets":16.0,"big_share":0.000157,"regions":1.0,"region_top":1.0,"reg4_cv":1.3899,"reg4_maxmean":3.955,"reg4_gini":0.6826,"reg4_span2":0.01,"reg8_cv":1.6468,"reg8_maxmean":6.235,"reg8_gini":0.7497,"reg8_span2":0.0244,"reg16_cv":1.7892,"reg16_maxmean":7.277,"reg16_gini":0.779,"reg16_span2":0.0457,"rsmt_per_net":26.843,"rsmt_per_gcell":3.9357,"rsmt_per_track":0.13361,"rsmt_per_net_all":26.987,"pv_mean":3.265,"pv_p99":11.0,"pv_max":22.0,"nets_all":101952.0,"rsmt_total":2751423.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":11.9,"tracks_v":17.556,"outcome":{"detour":1.001021289710815,"runtime_knet":0.0420786252354049,"over_share":0.008914958373847153,"overflow":null,"of_share":0.34156688590619266,"of_knet":75378.08164920747,"score_knet":220683.22416333173,"source":"p123_pd39_ariane_68_rank"}},{"set":"ispd24","design":"bsg_chip","nets":743582.0,"tiles":3181964.0,"util":0.1167,"rudy_p99":0.541,"rudy_p999":1.019,"rudy_over":0.00106,"rudy_excess":31014.0,"esc_max":0.177,"esc_p999":0.098,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.206,"cut3_over1":0.0,"long_share":0.0051,"pins":2717779.0,"pin_density":0.85412,"pin_per_htrack":0.06644,"pin_per_vtrack":0.04467,"row_cv":0.4538,"col_cv":0.6541,"ppn_mean":3.5377,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":21.0,"ppn_max":2236.0,"ppn_skew":43.026,"ppn_share2":0.5783,"ppn_share10":0.0204,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.6733,"reg4_maxmean":2.23,"reg4_gini":0.382,"reg4_span2":0.0013,"reg8_cv":0.8982,"reg8_maxmean":2.892,"reg8_gini":0.5026,"reg8_span2":0.0039,"reg16_cv":1.0564,"reg16_maxmean":3.354,"reg16_gini":0.5771,"reg16_span2":0.01,"rsmt_per_net":18.365,"rsmt_per_gcell":4.2918,"rsmt_per_track":0.13422,"rsmt_per_net_all":18.365,"pv_mean":2.786,"pv_p99":6.0,"pv_max":12.0,"nets_all":743597.0,"rsmt_total":13656252.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":12.855,"tracks_v":19.121,"outcome":{"detour":1.0036184159460444,"runtime_knet":0.02458320837765618,"over_share":0.004311173853632537,"overflow":null,"of_share":0.3095248532621641,"of_knet":46552.71553126223,"score_knet":150400.5737847248,"source":"p123_pd39_bsg_chip"}},{"set":"ispd24","design":"bsg_chip_rank","nets":761620.0,"tiles":3181964.0,"util":0.1175,"rudy_p99":0.497,"rudy_p999":0.827,"rudy_over":0.00052,"rudy_excess":13586.0,"esc_max":0.187,"esc_p999":0.111,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.289,"cut3_over1":0.0,"long_share":0.0039,"pins":2837132.0,"pin_density":0.89163,"pin_per_htrack":0.06935,"pin_per_vtrack":0.04663,"row_cv":0.6644,"col_cv":0.5322,"ppn_mean":3.44,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":36.0,"ppn_max":76.0,"ppn_skew":7.946,"ppn_share2":0.579,"ppn_share10":0.03,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.6703,"reg4_maxmean":2.229,"reg4_gini":0.3811,"reg4_span2":0.0004,"reg8_cv":0.877,"reg8_maxmean":2.641,"reg8_gini":0.494,"reg8_span2":0.0031,"reg16_cv":1.0736,"reg16_maxmean":3.581,"reg16_gini":0.5834,"reg16_span2":0.0098,"rsmt_per_net":17.207,"rsmt_per_gcell":4.1186,"rsmt_per_track":0.1288,"rsmt_per_net_all":17.207,"pv_mean":3.092,"pv_p99":9.0,"pv_max":13.0,"nets_all":761620.0,"rsmt_total":13105109.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":12.856,"tracks_v":19.12,"outcome":{"detour":1.0018247845172443,"runtime_knet":0.02180877603004123,"over_share":0.0044689380520961264,"overflow":null,"of_share":0.31544962851715896,"of_knet":45311.83315551062,"score_knet":143642.05584425305,"source":"p123_pd39_bsg_chip_rank"}},{"set":"ispd24","design":"mempool_cluster","nets":9594125.0,"tiles":16726404.0,"util":0.3755,"rudy_p99":1.273,"rudy_p999":1.968,"rudy_over":0.0263,"rudy_excess":2367867.0,"esc_max":0.353,"esc_p999":0.125,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.324,"cut3_over1":0.0,"long_share":0.0048,"pins":37976174.0,"pin_density":2.27043,"pin_per_htrack":0.15413,"pin_per_vtrack":0.10193,"row_cv":0.1886,"col_cv":0.2226,"ppn_mean":3.5784,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":33.0,"ppn_max":512.0,"ppn_skew":18.596,"ppn_share2":0.6348,"ppn_share10":0.0435,"big_nets":904.0,"big_share":9.4e-05,"regions":1.0,"region_top":1.0,"reg4_cv":0.1118,"reg4_maxmean":1.163,"reg4_gini":0.0634,"reg4_span2":0.0006,"reg8_cv":0.2222,"reg8_maxmean":1.539,"reg8_gini":0.1264,"reg8_span2":0.0017,"reg16_cv":0.4089,"reg16_maxmean":2.078,"reg16_gini":0.2333,"reg16_span2":0.0043,"rsmt_per_net":25.977,"rsmt_per_gcell":14.8991,"rsmt_per_track":0.40262,"rsmt_per_net_all":26.849,"pv_mean":4.489,"pv_p99":11.0,"pv_max":17.0,"nets_all":9594125.0,"rsmt_total":257589634.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":14.731,"tracks_v":22.274,"outcome":{"detour":1.0036507292059742,"runtime_knet":0.06300626685601866,"over_share":0.06354952325676218,"overflow":null,"of_share":0.1623143306696874,"of_knet":27327.598962750642,"score_knet":168362.20714462237,"source":"p123_pd39_mempool_cluster"}},{"set":"ispd24","design":"mempool_cluster_ranking","nets":10099212.0,"tiles":22950540.0,"util":0.2795,"rudy_p99":1.111,"rudy_p999":1.746,"rudy_over":0.01461,"rudy_excess":1766738.0,"esc_max":0.353,"esc_p999":0.1,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.313,"cut3_over1":0.0,"long_share":0.0038,"pins":37976174.0,"pin_density":1.6547,"pin_per_htrack":0.10681,"pin_per_vtrack":0.07028,"row_cv":0.1985,"col_cv":0.2105,"ppn_mean":3.5784,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":33.0,"ppn_max":512.0,"ppn_skew":18.596,"ppn_share2":0.6348,"ppn_share10":0.0435,"big_nets":648.0,"big_share":6.4e-05,"regions":1.0,"region_top":1.0,"reg4_cv":0.075,"reg4_maxmean":1.095,"reg4_gini":0.0413,"reg4_span2":0.0004,"reg8_cv":0.1965,"reg8_maxmean":1.407,"reg8_gini":0.1121,"reg8_span2":0.0014,"reg16_cv":0.3474,"reg16_maxmean":2.166,"reg16_gini":0.196,"reg16_span2":0.004,"rsmt_per_net":27.104,"rsmt_per_gcell":11.9259,"rsmt_per_track":0.3055,"rsmt_per_net_all":27.741,"pv_mean":3.362,"pv_p99":8.0,"pv_max":19.0,"nets_all":10099212.0,"rsmt_total":280163044.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":15.493,"tracks_v":23.545,"outcome":{"detour":1.0030387412552528,"runtime_knet":0.04854636183496296,"over_share":0.01643033235819288,"overflow":null,"of_share":0.17443114603740903,"of_knet":30605.376032833054,"score_knet":175458.20645052308,"source":"p123_pd39_mempool_cluster_ranking"}},{"set":"ispd24","design":"mempool_group","nets":2491299.0,"tiles":4307094.0,"util":0.3543,"rudy_p99":1.14,"rudy_p999":1.66,"rudy_over":0.0199,"rudy_excess":297928.0,"esc_max":0.257,"esc_p999":0.156,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.293,"cut3_over1":0.0,"long_share":0.0081,"pins":11016750.0,"pin_density":2.55782,"pin_per_htrack":0.172,"pin_per_vtrack":0.11365,"row_cv":0.5093,"col_cv":0.2829,"ppn_mean":3.3871,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":31.0,"ppn_max":133.0,"ppn_skew":6.686,"ppn_share2":0.6454,"ppn_share10":0.0417,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.3017,"reg4_maxmean":1.551,"reg4_gini":0.1702,"reg4_span2":0.0008,"reg8_cv":0.4147,"reg8_maxmean":1.722,"reg8_gini":0.2365,"reg8_span2":0.0037,"reg16_cv":0.5242,"reg16_maxmean":2.251,"reg16_gini":0.3012,"reg16_span2":0.0121,"rsmt_per_net":24.506,"rsmt_per_gcell":14.1749,"rsmt_per_track":0.37923,"rsmt_per_net_all":24.506,"pv_mean":4.347,"pv_p99":15.0,"pv_max":22.0,"nets_all":2491299.0,"rsmt_total":61052568.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":14.871,"tracks_v":22.507,"outcome":{"detour":1.0019408684004905,"runtime_knet":0.026295518924063312,"over_share":0.05247714584357806,"overflow":null,"of_share":0.16132352553435475,"of_knet":25656.365680113064,"score_knet":159036.72818413208,"source":"p123_pd39_mempool_group"}},{"set":"ispd24","design":"mempool_group_rank","nets":2487978.0,"tiles":4307094.0,"util":0.3365,"rudy_p99":1.024,"rudy_p999":1.513,"rudy_over":0.01132,"rudy_excess":180306.0,"esc_max":0.257,"esc_p999":0.156,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.286,"cut3_over1":0.0,"long_share":0.0093,"pins":10924718.0,"pin_density":2.53645,"pin_per_htrack":0.17056,"pin_per_vtrack":0.1127,"row_cv":0.4699,"col_cv":0.2751,"ppn_mean":3.4129,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":31.0,"ppn_max":121.0,"ppn_skew":6.751,"ppn_share2":0.6424,"ppn_share10":0.0427,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.2769,"reg4_maxmean":1.403,"reg4_gini":0.1568,"reg4_span2":0.0005,"reg8_cv":0.3857,"reg8_maxmean":1.983,"reg8_gini":0.22,"reg8_span2":0.0034,"reg16_cv":0.511,"reg16_maxmean":2.296,"reg16_gini":0.2931,"reg16_span2":0.0093,"rsmt_per_net":23.519,"rsmt_per_gcell":13.5855,"rsmt_per_track":0.36345,"rsmt_per_net_all":23.519,"pv_mean":4.304,"pv_p99":14.0,"pv_max":22.0,"nets_all":2487978.0,"rsmt_total":58513853.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":14.872,"tracks_v":22.507,"outcome":{"detour":1.0015943574934298,"runtime_knet":0.02652354643007293,"over_share":0.044125575155777884,"overflow":null,"of_share":0.16245853508630184,"of_knet":24902.774423527862,"score_knet":153286.95663972912,"source":"p123_pd39_mempool_group_rank"}},{"set":"ispd24","design":"mempool_tile","nets":129467.0,"tiles":305900.0,"util":0.1472,"rudy_p99":0.61,"rudy_p999":0.974,"rudy_over":0.00093,"rudy_excess":594.0,"esc_max":0.556,"esc_p999":0.116,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.199,"cut3_over1":0.0,"long_share":0.0244,"pins":483305.0,"pin_density":1.57994,"pin_per_htrack":0.1043,"pin_per_vtrack":0.06881,"row_cv":0.5281,"col_cv":0.4172,"ppn_mean":3.5558,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":33.0,"ppn_max":76.0,"ppn_skew":5.886,"ppn_share2":0.6567,"ppn_share10":0.0512,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.5586,"reg4_maxmean":1.622,"reg4_gini":0.3107,"reg4_span2":0.0074,"reg8_cv":0.6682,"reg8_maxmean":2.013,"reg8_gini":0.3816,"reg8_span2":0.024,"reg16_cv":0.7715,"reg16_maxmean":2.503,"reg16_gini":0.4407,"reg16_span2":0.0516,"rsmt_per_net":15.007,"rsmt_per_gcell":6.3516,"rsmt_per_track":0.16667,"rsmt_per_net_all":15.007,"pv_mean":3.385,"pv_p99":8.0,"pv_max":12.0,"nets_all":129467.0,"rsmt_total":1942957.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":15.148,"tracks_v":22.961,"outcome":{"detour":1.0018034367204216,"runtime_knet":0.02201333158256544,"over_share":0.00522066034651847,"overflow":null,"of_share":0.2287830809544794,"of_knet":26694.793009029327,"score_knet":116681.6746136081,"source":"p123_pd39_mempool_tile"}},{"set":"ispd24","design":"mempool_tile_rank","nets":125054.0,"tiles":249249.0,"util":0.173,"rudy_p99":0.592,"rudy_p999":0.938,"rudy_over":0.00064,"rudy_excess":278.0,"esc_max":0.611,"esc_p999":0.278,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.199,"cut3_over1":0.0,"long_share":0.0255,"pins":482811.0,"pin_density":1.93706,"pin_per_htrack":0.13258,"pin_per_vtrack":0.08788,"row_cv":0.6183,"col_cv":0.4031,"ppn_mean":3.5588,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":33.0,"ppn_max":76.0,"ppn_skew":5.932,"ppn_share2":0.6594,"ppn_share10":0.0504,"big_nets":1.0,"big_share":8e-06,"regions":1.0,"region_top":1.0,"reg4_cv":0.6666,"reg4_maxmean":2.064,"reg4_gini":0.379,"reg4_span2":0.0055,"reg8_cv":0.7508,"reg8_maxmean":2.138,"reg8_gini":0.4282,"reg8_span2":0.0236,"reg16_cv":0.8399,"reg16_maxmean":2.485,"reg16_gini":0.4768,"reg16_span2":0.0511,"rsmt_per_net":14.115,"rsmt_per_gcell":7.0817,"rsmt_per_track":0.19321,"rsmt_per_net_all":14.119,"pv_mean":3.963,"pv_p99":9.0,"pv_max":12.0,"nets_all":125054.0,"rsmt_total":1765675.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":14.61,"tracks_v":22.043,"outcome":{"detour":1.0017098276862957,"runtime_knet":0.02119084555472036,"over_share":0.01100104714562546,"overflow":null,"of_share":0.21136753521664,"of_knet":23154.878967486045,"score_knet":109547.94426567722,"source":"p123_pd39_mempool_tile_rank"}},{"set":"ispd24","design":"nvdla","nets":161620.0,"tiles":2085680.0,"util":0.0674,"rudy_p99":0.578,"rudy_p999":1.109,"rudy_over":0.00141,"rudy_excess":32818.0,"esc_max":0.143,"esc_p999":0.102,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.303,"cut3_over1":0.0,"long_share":0.0114,"pins":613684.0,"pin_density":0.29424,"pin_per_htrack":0.02216,"pin_per_vtrack":0.01482,"row_cv":0.8798,"col_cv":1.3676,"ppn_mean":3.4718,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":23.0,"ppn_max":76.0,"ppn_skew":8.391,"ppn_share2":0.5663,"ppn_share10":0.0359,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":1.7159,"reg4_maxmean":6.88,"reg4_gini":0.6976,"reg4_span2":0.0033,"reg8_cv":2.042,"reg8_maxmean":8.996,"reg8_gini":0.7663,"reg8_span2":0.0132,"reg16_cv":2.2407,"reg16_maxmean":13.303,"reg16_gini":0.8049,"reg16_span2":0.0336,"rsmt_per_net":31.019,"rsmt_per_gcell":2.4037,"rsmt_per_track":0.07254,"rsmt_per_net_all":31.019,"pv_mean":2.847,"pv_p99":9.0,"pv_max":14.0,"nets_all":161620.0,"rsmt_total":5013316.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":13.28,"tracks_v":19.853,"outcome":{"detour":1.0027073896798047,"runtime_knet":0.03594852122262096,"over_share":0.005236181964635035,"overflow":null,"of_share":0.46572183706194303,"of_knet":138395.51334117065,"score_knet":297163.46180856327,"source":"p123_pd39_nvdla"}},{"set":"ispd24","design":"nvdla_rank","nets":160035.0,"tiles":1527256.0,"util":0.1059,"rudy_p99":0.64,"rudy_p999":1.205,"rudy_over":0.00192,"rudy_excess":22832.0,"esc_max":0.136,"esc_p999":0.1,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.203,"cut3_over1":0.0,"long_share":0.018,"pins":610314.0,"pin_density":0.39961,"pin_per_htrack":0.03407,"pin_per_vtrack":0.02318,"row_cv":0.7761,"col_cv":1.1607,"ppn_mean":3.4929,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":25.0,"ppn_max":76.0,"ppn_skew":8.325,"ppn_share2":0.571,"ppn_share10":0.0363,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":1.3758,"reg4_maxmean":4.965,"reg4_gini":0.6028,"reg4_span2":0.0054,"reg8_cv":1.5719,"reg8_maxmean":6.061,"reg8_gini":0.6849,"reg8_span2":0.0187,"reg16_cv":1.8052,"reg16_maxmean":8.539,"reg16_gini":0.7483,"reg16_span2":0.0374,"rsmt_per_net":31.928,"rsmt_per_gcell":3.3456,"rsmt_per_track":0.1155,"rsmt_per_net_all":31.928,"pv_mean":2.856,"pv_p99":9.0,"pv_max":14.0,"nets_all":160035.0,"rsmt_total":5109638.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":11.73,"tracks_v":17.237,"outcome":{"detour":1.0030963054525586,"runtime_knet":0.03542974974224388,"over_share":0.009073789855793659,"overflow":null,"of_share":0.39212758113495666,"of_knet":105240.05932952167,"score_knet":268382.1908801199,"source":"p123_pd39_nvdla_rank"}},{"set":"ispd25visible","design":"NV_NVDLA_partition_c","nets":180018.0,"tiles":1254400.0,"util":0.082,"rudy_p99":0.822,"rudy_p999":1.813,"rudy_over":0.00584,"rudy_excess":46855.0,"esc_max":0.214,"esc_p999":0.151,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.242,"cut3_over1":0.0,"long_share":0.0092,"pins":680021.0,"pin_density":0.54211,"pin_per_htrack":0.03107,"pin_per_vtrack":0.02876,"row_cv":0.9662,"col_cv":1.5075,"ppn_mean":3.409,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":19.0,"ppn_max":10110.0,"ppn_skew":420.775,"ppn_share2":0.5829,"ppn_share10":0.0329,"big_nets":1.0,"big_share":6e-06,"regions":1.0,"region_top":1.0,"reg4_cv":1.7263,"reg4_maxmean":6.795,"reg4_gini":0.7019,"reg4_span2":0.0023,"reg8_cv":1.9762,"reg8_maxmean":8.75,"reg8_gini":0.7682,"reg8_span2":0.0109,"reg16_cv":2.3365,"reg16_maxmean":13.583,"reg16_gini":0.8141,"reg16_span2":0.0306,"rsmt_per_net":22.198,"rsmt_per_gcell":3.1857,"rsmt_per_track":0.08776,"rsmt_per_net_all":22.327,"pv_mean":4.444,"pv_p99":16.0,"pv_max":23.0,"nets_all":180019.0,"rsmt_total":4019241.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":17.448,"tracks_v":18.851,"outcome":{"detour":1.0064574381083393,"runtime_knet":0.039662480071548,"over_share":null,"overflow":null,"of_share":0.32375572543459374,"of_knet":72141.38933279265,"score_knet":222826.60557107863,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25visible","design":"ariane","nets":112820.0,"tiles":579121.0,"util":0.0736,"rudy_p99":0.47,"rudy_p999":0.793,"rudy_over":0.0004,"rudy_excess":411.0,"esc_max":0.216,"esc_p999":0.147,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.249,"cut3_over1":0.0,"long_share":0.0163,"pins":443513.0,"pin_density":0.76584,"pin_per_htrack":0.04317,"pin_per_vtrack":0.04052,"row_cv":1.1489,"col_cv":1.1844,"ppn_mean":3.5796,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":33.0,"ppn_max":76.0,"ppn_skew":7.466,"ppn_share2":0.6092,"ppn_share10":0.0404,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":1.6285,"reg4_maxmean":5.356,"reg4_gini":0.7412,"reg4_span2":0.005,"reg8_cv":2.0018,"reg8_maxmean":7.285,"reg8_gini":0.8087,"reg8_span2":0.0134,"reg16_cv":2.1522,"reg16_maxmean":10.185,"reg16_gini":0.8336,"reg16_span2":0.0313,"rsmt_per_net":15.399,"rsmt_per_gcell":2.9998,"rsmt_per_track":0.08188,"rsmt_per_net_all":15.399,"pv_mean":4.772,"pv_p99":14.0,"pv_max":22.0,"nets_all":112820.0,"rsmt_total":1737274.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":17.739,"tracks_v":18.899,"outcome":{"detour":1.0015748811068375,"runtime_knet":0.021804644566566212,"over_share":null,"overflow":null,"of_share":0.31295684656994915,"of_knet":51112.80130296046,"score_knet":163322.20196862257,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25visible","design":"bsg_chip","nets":681190.0,"tiles":1915456.0,"util":0.1409,"rudy_p99":0.734,"rudy_p999":1.514,"rudy_over":0.00381,"rudy_excess":38033.0,"esc_max":0.303,"esc_p999":0.192,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.312,"cut3_over1":0.0,"long_share":0.0048,"pins":2637080.0,"pin_density":1.37674,"pin_per_htrack":0.08223,"pin_per_vtrack":0.07701,"row_cv":0.4922,"col_cv":0.6943,"ppn_mean":3.5787,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":40.0,"ppn_max":76.0,"ppn_skew":7.709,"ppn_share2":0.5112,"ppn_share10":0.0313,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.6372,"reg4_maxmean":2.04,"reg4_gini":0.3648,"reg4_span2":0.0006,"reg8_cv":0.9232,"reg8_maxmean":2.729,"reg8_gini":0.5167,"reg8_span2":0.0036,"reg16_cv":1.1007,"reg16_maxmean":3.549,"reg16_gini":0.5944,"reg16_span2":0.01,"rsmt_per_net":14.95,"rsmt_per_gcell":5.3168,"rsmt_per_track":0.15357,"rsmt_per_net_all":14.95,"pv_mean":4.197,"pv_p99":13.0,"pv_max":23.0,"nets_all":681190.0,"rsmt_total":10184113.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":16.743,"tracks_v":17.878,"outcome":{"detour":1.0019989958870252,"runtime_knet":0.018805325973663734,"over_share":null,"overflow":null,"of_share":0.21830297110659622,"of_knet":30497.186277250104,"score_knet":139701.19656483506,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25visible","design":"mempool_group","nets":2847645.0,"tiles":2593710.0,"util":0.4218,"rudy_p99":1.886,"rudy_p999":3.293,"rudy_over":0.07384,"rudy_excess":991968.0,"esc_max":0.284,"esc_p999":0.18,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.379,"cut3_over1":0.0,"long_share":0.0068,"pins":11372421.0,"pin_density":4.38462,"pin_per_htrack":0.21833,"pin_per_vtrack":0.20122,"row_cv":0.3957,"col_cv":0.2747,"ppn_mean":3.4729,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":33.0,"ppn_max":167.0,"ppn_skew":6.769,"ppn_share2":0.6437,"ppn_share10":0.0435,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.2897,"reg4_maxmean":1.558,"reg4_gini":0.163,"reg4_span2":0.0007,"reg8_cv":0.3997,"reg8_maxmean":1.695,"reg8_gini":0.2281,"reg8_span2":0.0033,"reg16_cv":0.5102,"reg16_maxmean":2.193,"reg16_gini":0.2934,"reg16_span2":0.0109,"rsmt_per_net":17.343,"rsmt_per_gcell":19.0412,"rsmt_per_track":0.45474,"rsmt_per_net_all":17.343,"pv_mean":6.763,"pv_p99":19.0,"pv_max":24.0,"nets_all":2847645.0,"rsmt_total":49387320.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":20.083,"tracks_v":21.79,"outcome":{"detour":1.006632572895229,"runtime_knet":0.08998663808164291,"over_share":null,"overflow":null,"of_share":0.11158507673963682,"of_knet":15559.633155958694,"score_knet":139441.88246842567,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25visible","design":"mempool_tile_wrap","nets":125070.0,"tiles":183184.0,"util":0.1748,"rudy_p99":0.73,"rudy_p999":1.443,"rudy_over":0.00355,"rudy_excess":2972.0,"esc_max":0.25,"esc_p999":0.14,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.196,"cut3_over1":0.0,"long_share":0.0261,"pins":493713.0,"pin_density":2.69518,"pin_per_htrack":0.13093,"pin_per_vtrack":0.12039,"row_cv":0.5949,"col_cv":0.4003,"ppn_mean":3.627,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":33.0,"ppn_max":76.0,"ppn_skew":6.054,"ppn_share2":0.6557,"ppn_share10":0.0531,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.5471,"reg4_maxmean":1.591,"reg4_gini":0.3037,"reg4_span2":0.0079,"reg8_cv":0.6539,"reg8_maxmean":1.975,"reg8_gini":0.3725,"reg8_span2":0.0253,"reg16_cv":0.7558,"reg16_maxmean":2.466,"reg16_gini":0.4314,"reg16_span2":0.0545,"rsmt_per_net":12.513,"rsmt_per_gcell":8.5431,"rsmt_per_track":0.1988,"rsmt_per_net_all":12.513,"pv_mean":5.084,"pv_p99":13.0,"pv_max":19.0,"nets_all":125070.0,"rsmt_total":1564967.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":20.586,"tracks_v":22.388,"outcome":{"detour":1.0018434893515327,"runtime_knet":0.01990885104341569,"over_share":null,"overflow":null,"of_share":0.13939221504947194,"of_knet":15549.622307507796,"score_knet":111553.01823698728,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25blind","design":"NV_NVDLA_partition_c","nets":152725.0,"tiles":1254400.0,"util":0.0716,"rudy_p99":0.793,"rudy_p999":1.841,"rudy_over":0.00576,"rudy_excess":45543.0,"esc_max":0.2,"esc_p999":0.108,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.208,"cut3_over1":0.0,"long_share":0.0146,"pins":580059.0,"pin_density":0.46242,"pin_per_htrack":0.0265,"pin_per_vtrack":0.02452,"row_cv":0.9421,"col_cv":1.3978,"ppn_mean":3.6772,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":20.0,"ppn_max":10110.0,"ppn_skew":322.121,"ppn_share2":0.5854,"ppn_share10":0.0332,"big_nets":147.0,"big_share":0.000963,"regions":1.0,"region_top":1.0,"reg4_cv":1.7585,"reg4_maxmean":6.496,"reg4_gini":0.7054,"reg4_span2":0.0015,"reg8_cv":1.9319,"reg8_maxmean":7.887,"reg8_gini":0.7644,"reg8_span2":0.0098,"reg16_cv":2.1098,"reg16_maxmean":8.715,"reg16_gini":0.8012,"reg16_span2":0.0234,"rsmt_per_net":23.531,"rsmt_per_gcell":2.8622,"rsmt_per_track":0.07884,"rsmt_per_net_all":26.426,"pv_mean":3.565,"pv_p99":10.0,"pv_max":22.0,"nets_all":152726.0,"rsmt_total":4035952.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":17.449,"tracks_v":18.857,"outcome":{"detour":1.0114305125531722,"runtime_knet":0.061548131948718623,"over_share":null,"overflow":null,"of_share":0.32789178563237864,"of_knet":85983.146332648,"score_knet":262230.2543103335,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25blind","design":"ariane","nets":99775.0,"tiles":417316.0,"util":0.1156,"rudy_p99":0.564,"rudy_p999":1.113,"rudy_over":0.00173,"rudy_excess":1332.0,"esc_max":0.16,"esc_p999":0.11,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.215,"cut3_over1":0.0,"long_share":0.0293,"pins":401318.0,"pin_density":0.96166,"pin_per_htrack":0.06371,"pin_per_vtrack":0.05985,"row_cv":0.8496,"col_cv":0.9526,"ppn_mean":3.7887,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":35.0,"ppn_max":19808.0,"ppn_skew":316.92,"ppn_share2":0.6141,"ppn_share10":0.031,"big_nets":78.0,"big_share":0.000782,"regions":1.0,"region_top":1.0,"reg4_cv":1.3945,"reg4_maxmean":4.324,"reg4_gini":0.6668,"reg4_span2":0.0057,"reg8_cv":1.5142,"reg8_maxmean":4.698,"reg8_gini":0.7114,"reg8_span2":0.0204,"reg16_cv":1.6175,"reg16_maxmean":5.191,"reg16_gini":0.7453,"reg16_span2":0.0368,"rsmt_per_net":16.843,"rsmt_per_gcell":4.0238,"rsmt_per_track":0.12913,"rsmt_per_net_all":18.095,"pv_mean":4.124,"pv_p99":10.0,"pv_max":22.0,"nets_all":99776.0,"rsmt_total":1805448.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":15.094,"tracks_v":16.067,"outcome":{"detour":1.0025400897727323,"runtime_knet":0.10082584990378449,"over_share":null,"overflow":null,"of_share":0.2494885734583117,"of_knet":42924.917168457345,"score_knet":172051.63576611612,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25blind","design":"bsg_chip","nets":713542.0,"tiles":1915456.0,"util":0.1386,"rudy_p99":0.775,"rudy_p999":1.769,"rudy_over":0.00495,"rudy_excess":63055.0,"esc_max":0.312,"esc_p999":0.182,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.312,"cut3_over1":0.0,"long_share":0.0049,"pins":2717779.0,"pin_density":1.41887,"pin_per_htrack":0.08472,"pin_per_vtrack":0.07936,"row_cv":0.5031,"col_cv":0.6521,"ppn_mean":3.5377,"ppn_median":2.0,"ppn_p90":4.0,"ppn_p99":21.0,"ppn_max":2236.0,"ppn_skew":43.026,"ppn_share2":0.5783,"ppn_share10":0.0204,"big_nets":0.0,"big_share":0.0,"regions":1.0,"region_top":1.0,"reg4_cv":0.6721,"reg4_maxmean":2.226,"reg4_gini":0.3813,"reg4_span2":0.0013,"reg8_cv":0.8962,"reg8_maxmean":2.891,"reg8_gini":0.5016,"reg8_span2":0.0041,"reg16_cv":1.0546,"reg16_maxmean":3.364,"reg16_gini":0.5763,"reg16_span2":0.0104,"rsmt_per_net":14.845,"rsmt_per_gcell":5.5301,"rsmt_per_track":0.15971,"rsmt_per_net_all":14.845,"pv_mean":4.103,"pv_p99":10.0,"pv_max":21.0,"nets_all":713557.0,"rsmt_total":10592693.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":16.747,"tracks_v":17.879,"outcome":{"detour":1.0028863292837809,"runtime_knet":0.02023664542566326,"over_share":null,"overflow":null,"of_share":0.21333117430905046,"of_knet":29400.423427841084,"score_knet":137815.87957346084,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25blind","design":"mempool_group","nets":2812067.0,"tiles":2593710.0,"util":0.4124,"rudy_p99":1.691,"rudy_p999":2.912,"rudy_over":0.05367,"rudy_excess":696317.0,"esc_max":0.241,"esc_p999":0.179,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.358,"cut3_over1":0.0,"long_share":0.0083,"pins":11256712.0,"pin_density":4.34,"pin_per_htrack":0.21609,"pin_per_vtrack":0.19918,"row_cv":0.3542,"col_cv":0.2484,"ppn_mean":3.4975,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":33.0,"ppn_max":139.0,"ppn_skew":6.851,"ppn_share2":0.6431,"ppn_share10":0.0443,"big_nets":2.0,"big_share":1e-06,"regions":1.0,"region_top":1.0,"reg4_cv":0.2208,"reg4_maxmean":1.299,"reg4_gini":0.1261,"reg4_span2":0.0004,"reg8_cv":0.3422,"reg8_maxmean":1.829,"reg8_gini":0.1964,"reg8_span2":0.0033,"reg16_cv":0.475,"reg16_maxmean":2.034,"reg16_gini":0.2732,"reg16_span2":0.0097,"rsmt_per_net":17.298,"rsmt_per_gcell":18.7542,"rsmt_per_track":0.44788,"rsmt_per_net_all":17.299,"pv_mean":6.697,"pv_p99":19.0,"pv_max":24.0,"nets_all":2812067.0,"rsmt_total":48646425.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":20.084,"tracks_v":21.789,"outcome":{"detour":1.0028429221674562,"runtime_knet":0.024497993824471466,"over_share":null,"overflow":null,"of_share":0.10789581372895603,"of_knet":14919.420165522373,"score_knet":138276.1726326222,"opens":0.0,"source":"p130 route25"}},{"set":"ispd25blind","design":"mempool_tile_wrap","nets":121090.0,"tiles":148996.0,"util":0.2063,"rudy_p99":0.735,"rudy_p999":1.381,"rudy_over":0.00373,"rudy_excess":1948.0,"esc_max":0.25,"esc_p999":0.16,"esc_over1":0.0,"esc_over09":0.0,"cut3_max":0.224,"cut3_over1":0.0,"long_share":0.0282,"pins":493098.0,"pin_density":3.30947,"pin_per_htrack":0.16791,"pin_per_vtrack":0.15523,"row_cv":0.6772,"col_cv":0.383,"ppn_mean":3.6307,"ppn_median":2.0,"ppn_p90":5.0,"ppn_p99":33.0,"ppn_max":76.0,"ppn_skew":6.066,"ppn_share2":0.658,"ppn_share10":0.0526,"big_nets":1.0,"big_share":8e-06,"regions":1.0,"region_top":1.0,"reg4_cv":0.6607,"reg4_maxmean":2.051,"reg4_gini":0.3753,"reg4_span2":0.0058,"reg8_cv":0.737,"reg8_maxmean":2.112,"reg8_gini":0.4206,"reg8_span2":0.0247,"reg16_cv":0.8233,"reg16_maxmean":2.424,"reg16_gini":0.4674,"reg16_span2":0.0542,"rsmt_per_net":11.653,"rsmt_per_gcell":9.4708,"rsmt_per_track":0.23083,"rsmt_per_net_all":11.657,"pv_mean":6.127,"pv_p99":15.0,"pv_max":21.0,"nets_all":121090.0,"rsmt_total":1411547.0,"layers":9.0,"layers_h":4.0,"layers_v":5.0,"tracks_h":19.709,"tracks_v":21.32,"outcome":{"detour":1.0019092527560187,"runtime_knet":0.01808572136427451,"over_share":null,"overflow":null,"of_share":0.13038405251238014,"of_knet":13736.171550912544,"score_knet":105351.62304153935,"opens":0.0,"source":"p130 route25"}}];
+
+const SETS = {
+  ispd08: { name: 'ISPD 2008', color: 'var(--c08)', hollow: false },
+  ispd24: { name: 'ISPD 2024', color: 'var(--c24)', hollow: false },
+  ispd25visible: { name: 'ISPD 2025 visible', color: 'var(--c25)', hollow: false },
+  ispd25blind: { name: 'ISPD 2025 blind', color: 'var(--c25)', hollow: true },
+};
+// key, label, group, transform ('log' | 'log1p' | ''), whose list ('you' | 'std' | 'size')
+const M = [
+  ['nets_all', 'Nets (pins in 2+ GCells)', 'Size and routing supply', 'log', 'size'],
+  ['pins', 'Pins', 'Size and routing supply', 'log', 'size'],
+  ['tiles', 'Die area (GCells)', 'Size and routing supply', 'log', 'size'],
+  ['layers', 'Routing layers', 'Size and routing supply', '', 'you'],
+  ['layers_h', 'Horizontal routing layers', 'Size and routing supply', '', 'you'],
+  ['layers_v', 'Vertical routing layers', 'Size and routing supply', '', 'you'],
+  ['tracks_h', 'Horizontal tracks per GCell', 'Size and routing supply', '', 'you'],
+  ['tracks_v', 'Vertical tracks per GCell', 'Size and routing supply', '', 'you'],
+  ['pin_density', 'Pins per GCell (die)', 'Pin density', '', 'you'],
+  ['pin_per_htrack', 'Pins per horizontal track', 'Pin density', '', 'you'],
+  ['pin_per_vtrack', 'Pins per vertical track', 'Pin density', '', 'you'],
+  ['row_cv', 'Pin unevenness across rows (CV)', 'Pin density', '', 'you'],
+  ['col_cv', 'Pin unevenness across columns (CV)', 'Pin density', '', 'you'],
+  ['pv_mean', 'Pins per occupied GCell, mean', 'Pin density', '', 'you'],
+  ['pv_p99', 'Pins per occupied GCell, 99th pct', 'Pin density', '', 'you'],
+  ['pv_max', 'Pins per occupied GCell, max', 'Pin density', 'log', 'you'],
+  ['ppn_mean', 'Pins per net, mean', 'Pins per net', '', 'you'],
+  ['ppn_median', 'Pins per net, median', 'Pins per net', '', 'you'],
+  ['ppn_p90', 'Pins per net, 90th pct', 'Pins per net', '', 'you'],
+  ['ppn_p99', 'Pins per net, 99th pct', 'Pins per net', '', 'you'],
+  ['ppn_max', 'Pins per net, max', 'Pins per net', 'log', 'you'],
+  ['ppn_skew', 'Pins per net, skewness', 'Pins per net', 'log', 'you'],
+  ['ppn_share2', 'Share of 2-pin nets', 'Pins per net', '', 'you'],
+  ['ppn_share10', 'Share of nets with 10+ pins', 'Pins per net', '', 'you'],
+  ['big_share', 'Share of nets covering > 25% of die', 'Large nets and regions', '', 'you'],
+  ['regions', 'Separate regions of net boxes', 'Large nets and regions', 'log1p', 'you'],
+  ['region_top', 'Largest region\'s share of pins', 'Large nets and regions', '', 'you'],
+  ['reg4_cv', 'Region pin density CV, 4 x 4', 'Large nets and regions', '', 'you'],
+  ['reg8_cv', 'Region pin density CV, 8 x 8', 'Large nets and regions', '', 'you'],
+  ['reg16_cv', 'Region pin density CV, 16 x 16', 'Large nets and regions', '', 'you'],
+  ['reg16_maxmean', 'Densest region / mean, 16 x 16', 'Large nets and regions', '', 'you'],
+  ['reg16_gini', 'Region pin density Gini, 16 x 16', 'Large nets and regions', '', 'you'],
+  ['reg4_span2', 'Nets spanning > 2 regions, 4 x 4', 'Large nets and regions', '', 'you'],
+  ['reg8_span2', 'Nets spanning > 2 regions, 8 x 8', 'Large nets and regions', '', 'you'],
+  ['reg16_span2', 'Nets spanning > 2 regions, 16 x 16', 'Large nets and regions', '', 'you'],
+  ['rsmt_per_net', 'Steiner length per net (GCells)', 'Steiner trees', '', 'you'],
+  ['rsmt_per_gcell', 'Steiner length per GCell', 'Steiner trees', '', 'you'],
+  ['rsmt_per_track', 'Steiner length per track (demand / supply)', 'Steiner trees', '', 'you'],
+  ['util', 'Box demand / capacity', 'Standard estimates', '', 'std'],
+  ['rudy_p99', 'RUDY, 99th pct edge', 'Standard estimates', '', 'std'],
+  ['rudy_over', 'RUDY share of edges over capacity', 'Standard estimates', '', 'std'],
+  ['rudy_excess', 'RUDY excess over capacity', 'Standard estimates', 'log1p', 'std'],
+  ['esc_max', 'Worst pin escape, 1 GCell', 'Standard estimates', '', 'std'],
+  ['esc_p999', 'Pin escape, 99.9th pct', 'Standard estimates', '', 'std'],
+  ['cut3_max', 'Worst local cut, 3 x 3 GCells', 'Standard estimates', '', 'std'],
+  ['cut3_over1', '3 x 3 windows over capacity', 'Standard estimates', 'log1p', 'std'],
+  ['long_share', 'Share of long nets', 'Standard estimates', '', 'std'],
+];
+const O = [
+  ['o:detour', 'Detour ratio (routed / Steiner)', '', 'Wire length the router used over the Steiner total; 1.00 = no detour'],
+  ['o:runtime_knet', 'Runtime per 1000 nets (s)', 'log', 'Within a contest only: each contest runs different settings'],
+  ['o:over_share', 'Share over capacity', 'log1p', 'ISPD 2008: overflowed edges; ISPD 2024: GCells over capacity'],
+  ['o:overflow', 'Total overflow (ISPD 2008)', 'log1p', 'The 2008 contest\'s first ranking key'],
+  ['o:of_knet', 'Overflow cost per 1000 nets (2024, 2025)', 'log', 'The contest score\'s overflow term per 1000 nets: the cleaner congestion outcome'],
+  ['o:of_share', 'Overflow share of score (2024, 2025)', '', 'The overflow term over the whole score; falls as wire length grows, so it tracks density as much as congestion'],
+  ['o:score_knet', 'Contest score per 1000 nets (2024, 2025)', 'log', 'Lower is better'],
+];
+const GLOSS = {
+  nets_all: 'Nets whose pins fall in at least two GCells.', tiles: 'Die area in GCells (grid cells of the routing graph).',
+  layers: 'Metal layers with any routing capacity; layers_h / layers_v by preferred direction.',
+  tracks_h: 'Horizontal routing tracks per GCell, summed over layers: the supply a GCell offers. tracks_v likewise.',
+  pin_density: 'All pins / die GCells.', pin_per_htrack: 'All pins / total horizontal tracks (vertical likewise): pins against the routing supply in each direction.',
+  row_cv: 'Coefficient of variation (standard deviation / mean) of pins per GCell row; col_cv per column.',
+  pv_mean: 'Pins per GCell that holds at least one pin (mean, 99th percentile, maximum).',
+  ppn_mean: 'Pins per net over nets with 2+ pins: mean, median, percentiles, maximum, sample skewness, share of 2-pin nets, share with 10+ pins.',
+  big_share: 'Nets whose pin bounding box covers more than 25% of the die; left out of the region and Steiner measures.',
+  regions: 'Connected regions of the union of the remaining nets\' bounding boxes (GCells joined edge to edge); region_top: the largest region\'s share of their pins.',
+  reg4_cv: 'The die cut into k x k equal regions (k = 4, 8, 16): spread of region pin densities as CV, densest / mean, and Gini coefficient (0 = even, near 1 = concentrated); span2: share of nets with pins in more than 2 regions.',
+  rsmt_per_net: 'Rectilinear Steiner minimal tree (RSMT) length per remaining net, in GCell steps; per GCell of die; per track of capacity (a demand / supply ratio). Exact for 2-3 pin GCells, otherwise a spanning tree improved with Steiner points.',
+  util: 'Half-perimeter demand / capacity (Part 101).', rudy_p99: 'RUDY (Rectangular Uniform wire DensitY): each net spread evenly over its bounding box; the edge ratio at the 99th percentile, the share of edges over capacity, the total excess.',
+  esc_max: 'Pin escape: demand of nets leaving a GCell over its edge capacity (worst, 99.9th percentile).',
+  cut3_max: 'The same for 3 x 3-GCell windows (Part 101\'s best predictor on ISPD 2008): worst ratio and windows over capacity.',
+  long_share: 'Nets whose half-perimeter exceeds 10% of the die\'s.',
+};
+
+// ---------- data access ----------
+function rawVal(r, key) {
+  const v = key.startsWith('o:') ? r.outcome[key.slice(2)] : r[key];
+  return typeof v === 'number' && isFinite(v) ? v : null;
+}
+const META = Object.fromEntries([...M.map(m => [m[0], { label: m[1], tf: m[3] }]), ...O.map(o => [o[0], { label: o[1], tf: o[2] }])]);
+function val(r, key, useTf) {
+  const v = rawVal(r, key);
+  if (v == null) return null;
+  const tf = META[key].tf;
+  if (!useTf || !tf) return v;
+  if (tf === 'log') return v > 0 ? Math.log10(v) : null;
+  return Math.log10(1 + Math.max(0, v));
+}
+const label = k => META[k].label + (META[k].tf ? ' (log)' : '');
+
+// ---------- statistics ----------
+function ranks(a) {
+  const idx = a.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]);
+  const r = new Array(a.length);
+  for (let i = 0; i < idx.length;) {
+    let j = i; while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++;
+    for (let k = i; k <= j; k++) r[idx[k][1]] = (i + j) / 2 + 1;
+    i = j + 1;
+  }
+  return r;
+}
+function pearson(x, y) {
+  const n = x.length; if (n < 3) return null;
+  const mx = x.reduce((a, b) => a + b) / n, my = y.reduce((a, b) => a + b) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2; syy += (y[i] - my) ** 2; }
+  return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
+}
+function spearman(rows, kx, ky) {
+  const xs = [], ys = [];
+  for (const r of rows) { const x = rawVal(r, kx), y = rawVal(r, ky); if (x != null && y != null) { xs.push(x); ys.push(y); } }
+  return { rho: pearson(ranks(xs), ranks(ys)), n: xs.length };
+}
+function standardize(cols) { // cols: arrays (same length); returns z-scored copies, dropping constant ones
+  return cols.map(c => { const n = c.length, m = c.reduce((a, b) => a + b, 0) / n;
+    const s = Math.sqrt(c.reduce((a, b) => a + (b - m) ** 2, 0) / n); return s > 0 ? c.map(v => (v - m) / s) : null; });
+}
+function jacobi(A) { // symmetric eigen-decomposition
+  const n = A.length, a = A.map(r => r.slice()), V = a.map((r, i) => r.map((_, j) => (i === j ? 1 : 0)));
+  for (let sweep = 0; sweep < 100; sweep++) {
+    let off = 0; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += a[i][j] ** 2;
+    if (off < 1e-20) break;
+    for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+      if (Math.abs(a[p][q]) < 1e-15) continue;
+      const th = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+      const t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1)), c = 1 / Math.sqrt(t * t + 1), s = t * c;
+      for (let k = 0; k < n; k++) { const akp = a[k][p], akq = a[k][q]; a[k][p] = c * akp - s * akq; a[k][q] = s * akp + c * akq; }
+      for (let k = 0; k < n; k++) { const apk = a[p][k], aqk = a[q][k]; a[p][k] = c * apk - s * aqk; a[q][k] = s * apk + c * aqk; }
+      for (let k = 0; k < n; k++) { const vkp = V[k][p], vkq = V[k][q]; V[k][p] = c * vkp - s * vkq; V[k][q] = s * vkp + c * vkq; }
+    }
+  }
+  const ev = a.map((r, i) => r[i]), order = ev.map((v, i) => i).sort((i, j) => ev[j] - ev[i]);
+  return { values: order.map(i => ev[i]), vectors: order.map(i => V.map(r => r[i])) };
+}
+function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+function kmeans(X, k) {
+  const n = X.length, d = X[0].length; let best = null;
+  const dist = (a, b) => a.reduce((s, v, i) => s + (v - b[i]) ** 2, 0);
+  for (let seed = 1; seed <= 12; seed++) {
+    const rand = rng(seed * 7919), C = [X[Math.floor(rand() * n)].slice()];
+    while (C.length < k) { // k-means++ start
+      const w = X.map(x => Math.min(...C.map(c => dist(x, c)))), tot = w.reduce((a, b) => a + b, 0);
+      let t = rand() * tot, i = 0; while (i < n - 1 && (t -= w[i]) > 0) i++; C.push(X[i].slice());
+    }
+    let lab = new Array(n).fill(0);
+    for (let it = 0; it < 60; it++) {
+      lab = X.map(x => { let b = 0; for (let c = 1; c < k; c++) if (dist(x, C[c]) < dist(x, C[b])) b = c; return b; });
+      for (let c = 0; c < k; c++) { const m = X.filter((_, i) => lab[i] === c); if (m.length) for (let j = 0; j < d; j++) C[c][j] = m.reduce((s, x) => s + x[j], 0) / m.length; }
+    }
+    const sse = X.reduce((s, x, i) => s + dist(x, C[lab[i]]), 0);
+    if (!best || sse < best.sse) best = { lab, sse };
+  }
+  return best.lab;
+}
+function solve(A, b) { // Gaussian elimination, partial pivoting
+  const n = b.length, M2 = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M2[r][c]) > Math.abs(M2[p][c])) p = r;
+    [M2[c], M2[p]] = [M2[p], M2[c]]; if (Math.abs(M2[c][c]) < 1e-12) return null;
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M2[r][c] / M2[c][c]; for (let k = c; k <= n; k++) M2[r][k] -= f * M2[c][k]; }
+  }
+  return M2.map((r, i) => r[n] / r[i]);
+}
+function ridge(X, y, lam) { // X standardized columns, y raw; returns intercept and coefficients
+  const n = X.length, p = X[0].length, my = y.reduce((a, b) => a + b) / n;
+  const A = Array.from({ length: p }, (_, i) => Array.from({ length: p }, (_, j) => X.reduce((s, x) => s + x[i] * x[j], 0) + (i === j ? lam : 0)));
+  const b = Array.from({ length: p }, (_, i) => X.reduce((s, x, r) => s + x[i] * (y[r] - my), 0));
+  const beta = solve(A, b); return beta ? { b0: my, beta } : null;
+}
+
+// ---------- drawing helpers ----------
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function nice(lo, hi, count) {
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  const span = hi - lo, step0 = Math.pow(10, Math.floor(Math.log10(span / count))), err = span / count / step0;
+  const step = step0 * (err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1);
+  const t = []; for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) t.push(+v.toFixed(10));
+  return t;
+}
+const fmt = v => { const a = Math.abs(v); return a === 0 ? '0' : a >= 1e5 || a < 1e-3 ? v.toExponential(2) : a >= 100 ? v.toFixed(0) : a >= 1 ? v.toFixed(2) : v.toFixed(3); };
+const tip = document.getElementById('tip');
+function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; const x = Math.min(ev.clientX + 12, window.innerWidth - 290); tip.style.left = x + 'px'; tip.style.top = (ev.clientY + 12) + 'px'; }
+function hideTip() { tip.hidden = true; }
+function axisLabel(useLog, key, v) { // tick text: show the value, not its logarithm
+  const tf = META[key] ? META[key].tf : '';
+  if (!useLog || !tf) return fmt(v);
+  return fmt(tf === 'log' ? Math.pow(10, v) : Math.pow(10, v) - 1);
+}
+function scatterSVG(pts, opt) {
+  const W = 720, H = 430, L = 64, R = 16, T = 14, B = 52;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': opt.aria });
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const xt = nice(Math.min(...xs), Math.max(...xs), 6), yt = nice(Math.min(...ys), Math.max(...ys), 6);
+  const x0 = Math.min(xt[0], ...xs), x1 = Math.max(xt[xt.length - 1], ...xs), y0 = Math.min(yt[0], ...ys), y1 = Math.max(yt[yt.length - 1], ...ys);
+  const sx = v => L + (v - x0) / (x1 - x0 || 1) * (W - L - R), sy = v => H - B - (v - y0) / (y1 - y0 || 1) * (H - T - B);
+  const g = el('g', { class: 'grid' }, svg);
+  for (const t of xt) el('line', { x1: sx(t), x2: sx(t), y1: T, y2: H - B }, g);
+  for (const t of yt) el('line', { y1: sy(t), y2: sy(t), x1: L, x2: W - R }, g);
+  const ax = el('g', { class: 'axis' }, svg);
+  for (const t of xt) { const tx = el('text', { x: sx(t), y: H - B + 16, 'text-anchor': 'middle' }, ax); tx.textContent = opt.xtick ? opt.xtick(t) : fmt(t); }
+  for (const t of yt) { const tx = el('text', { x: L - 6, y: sy(t) + 4, 'text-anchor': 'end' }, ax); tx.textContent = opt.ytick ? opt.ytick(t) : fmt(t); }
+  const xl = el('text', { x: L + (W - L - R) / 2, y: H - 10, 'text-anchor': 'middle', class: 'lbl' }, svg); xl.textContent = opt.xlabel;
+  const yl = el('text', { x: 14, y: T + (H - T - B) / 2, 'text-anchor': 'middle', class: 'lbl', transform: `rotate(-90 14 ${T + (H - T - B) / 2})` }, svg); yl.textContent = opt.ylabel;
+  if (opt.under) opt.under(svg, sx, sy);
+  for (const p of pts) {
+    const c = el('circle', { cx: sx(p.x), cy: sy(p.y), r: 6, fill: p.hollow ? 'var(--surface)' : p.color, stroke: p.color, 'stroke-width': 2.2, tabindex: 0 }, svg);
+    c.addEventListener('mousemove', e => showTip(e, p.tip)); c.addEventListener('mouseleave', hideTip);
+    c.addEventListener('focus', e => { const b = c.getBoundingClientRect(); showTip({ clientX: b.right, clientY: b.bottom }, p.tip); }); c.addEventListener('blur', hideTip);
+  }
+  return svg;
+}
+function rampColor(t) { // 0..1 -> blue to copper via the neutral
+  t = Math.max(0, Math.min(1, t));
+  return t < 0.5 ? `color-mix(in oklab, var(--neg) ${Math.round((1 - t * 2) * 100)}%, var(--muted))`
+                 : `color-mix(in oklab, var(--pos) ${Math.round((t * 2 - 1) * 100)}%, var(--muted))`;
+}
+
+// ---------- controls ----------
+const setsOpt = [['all', 'All contests'], ['ispd08', 'ISPD 2008'], ['ispd24', 'ISPD 2024'], ['ispd25', 'ISPD 2025']];
+function filterSet(s) { return DATA.filter(r => s === 'all' || r.set === s || (s === 'ispd25' && r.set.startsWith('ispd25'))); }
+function fillSelect(id, items, value) { const s = document.getElementById(id); s.innerHTML = items.map(([k, t]) => `<option value="${k}">${t}</option>`).join(''); if (value) s.value = value; return s; }
+const allKeys = [...M.map(m => [m[0], label(m[0])]), ...O.map(o => [o[0], 'Outcome: ' + label(o[0])])];
+document.getElementById('legend').innerHTML = Object.values(SETS).map(s => `<span><i class="dot" style="color:${s.color};background:${s.hollow ? 'transparent' : s.color}"></i>${s.name}</span>`).join('');
+
+// ---------- panel 1 ----------
+fillSelect('sx', allKeys, 'rsmt_per_track'); fillSelect('sy', allKeys, 'o:detour');
+fillSelect('sc', [['set', 'Contest'], ...allKeys], 'set');
+function drawScatter() {
+  const kx = sx.value, ky = sy.value, kc = sc.value, useLog = slog.checked;
+  const rows = DATA.filter(r => val(r, kx, useLog) != null && val(r, ky, useLog) != null);
+  const cv = kc === 'set' ? null : rows.map(r => val(r, kc, useLog)).filter(v => v != null);
+  const cmin = cv && cv.length ? Math.min(...cv) : 0, cmax = cv && cv.length ? Math.max(...cv) : 1;
+  const pts = rows.map(r => {
+    const s = SETS[r.set]; let color = s.color;
+    if (kc !== 'set') { const c = val(r, kc, useLog); color = c == null ? 'var(--rule)' : rampColor((c - cmin) / (cmax - cmin || 1)); }
+    return { x: val(r, kx, useLog), y: val(r, ky, useLog), color, hollow: s.hollow,
+      tip: `<b>${r.design}</b><br>${s.name}<br>${META[kx].label}: ${fmt(rawVal(r, kx))}<br>${META[ky].label}: ${fmt(rawVal(r, ky))}` + (kc !== 'set' ? `<br>${META[kc].label}: ${rawVal(r, kc) == null ? 'n/a' : fmt(rawVal(r, kc))}` : '') };
+  });
+  const box = document.getElementById('scatter'); box.innerHTML = '';
+  if (pts.length < 2) { box.textContent = 'Fewer than two designs have both measures.'; scatterStat(kx, ky); return; }
+  box.appendChild(scatterSVG(pts, { aria: `${META[ky].label} against ${META[kx].label}`, xlabel: label(kx), ylabel: label(ky),
+    xtick: t => axisLabel(useLog, kx, t), ytick: t => axisLabel(useLog, ky, t) }));
+  scatterStat(kx, ky);
+}
+function scatterStat(kx, ky) {
+  const parts = setsOpt.map(([k, n]) => { const { rho, n: c } = spearman(filterSet(k), kx, ky); return rho == null ? `${n}: <b>n/a</b>` : `${n}: <b>${rho.toFixed(2)}</b> (n ${c})`; });
+  document.getElementById('scatter-stat').innerHTML = 'Spearman &rho; &mdash; ' + parts.join(' &middot; ');
+}
+for (const id of ['sx', 'sy', 'sc', 'slog']) document.getElementById(id).addEventListener('change', drawScatter);
+
+// ---------- panel 2 ----------
+function buildPicker(boxId, selected, onChange, keys) {
+  const box = document.getElementById(boxId); box.innerHTML = '';
+  let grp = '';
+  for (const m of keys) {
+    if (m[2] !== grp) { grp = m[2]; const g = document.createElement('div'); g.className = 'grp'; g.textContent = grp; box.appendChild(g); }
+    const l = document.createElement('label'); l.className = 'chk';
+    l.innerHTML = `<input type="checkbox" id="${boxId}-${m[0].replace(':', '_')}" ${selected.has(m[0]) ? 'checked' : ''}> ${m[1]}`;
+    l.querySelector('input').addEventListener('change', e => { e.target.checked ? selected.add(m[0]) : selected.delete(m[0]); onChange(); });
+    box.appendChild(l);
+  }
+}
+const pcaSel = new Set(M.filter(m => m[4] === 'you').map(m => m[0]));
+const presets = [['Your measures', m => m[4] === 'you'], ['Standard estimates', m => m[4] === 'std'],
+  ['Both, without raw size', m => m[4] !== 'size'], ['Everything', () => true]];
+document.getElementById('presets').innerHTML = presets.map((p, i) => `<button data-i="${i}">${p[0]}</button>`).join('');
+document.getElementById('presets').addEventListener('click', e => { const i = e.target.dataset.i; if (i == null) return;
+  pcaSel.clear(); M.filter(presets[i][1]).forEach(m => pcaSel.add(m[0])); buildPicker('picker', pcaSel, drawPCA, M); drawPCA(); });
+fillSelect('pset', setsOpt, 'all'); fillSelect('pk', [[0, 'None'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']], '3');
+function hull(points) { // Andrew's monotone chain
+  const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]); if (p.length < 3) return p;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const q of p) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.slice().reverse()) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+function drawPCA() {
+  const keys = M.map(m => m[0]).filter(k => pcaSel.has(k));
+  const rows = filterSet(pset.value).filter(r => keys.every(k => val(r, k, true) != null));
+  const box = document.getElementById('pca'), lbox = document.getElementById('loadings'), stat = document.getElementById('pca-stat');
+  box.innerHTML = ''; lbox.innerHTML = ''; stat.innerHTML = '';
+  if (keys.length < 2 || rows.length < 4) { box.textContent = 'Pick at least two measures, with at least four designs having all of them.'; return; }
+  const z = standardize(keys.map(k => rows.map(r => val(r, k, true))));
+  const kk = keys.filter((_, i) => z[i]), cols = z.filter(Boolean);
+  if (cols.length < 2) { box.textContent = 'The selected measures do not vary across these designs.'; return; }
+  const n = rows.length, p = cols.length, X = rows.map((_, i) => cols.map(c => c[i]));
+  const C = Array.from({ length: p }, (_, a) => Array.from({ length: p }, (_, b) => cols[a].reduce((s, v, i) => s + v * cols[b][i], 0) / n));
+  const { values, vectors } = jacobi(C), tot = values.reduce((a, b) => a + Math.max(0, b), 0);
+  const pc = X.map(x => [0, 1].map(j => x.reduce((s, v, i) => s + v * vectors[j][i], 0)));
+  const k = +pk.value, lab = k ? kmeans(X, Math.min(k, n)) : null;
+  const pts = rows.map((r, i) => { const s = SETS[r.set];
+    return { x: pc[i][0], y: pc[i][1], color: s.color, hollow: s.hollow,
+      tip: `<b>${r.design}</b><br>${s.name}` + (lab ? `<br>cluster ${lab[i] + 1}` : '') + `<br>PC1 ${pc[i][0].toFixed(2)}, PC2 ${pc[i][1].toFixed(2)}` }; });
+  box.appendChild(scatterSVG(pts, { aria: 'Designs on their first two principal components',
+    xlabel: `Principal component 1 (${(100 * values[0] / tot).toFixed(0)}% of variance)`, ylabel: `PC 2 (${(100 * values[1] / tot).toFixed(0)}%)`,
+    under: (svg, sx, sy) => { if (!lab) return;
+      for (let c = 0; c < k; c++) { const hp = hull(pc.filter((_, i) => lab[i] === c)); if (!hp.length) continue;
+        const d = hp.length === 1 ? null : hp.map((q, j) => (j ? 'L' : 'M') + sx(q[0]) + ' ' + sy(q[1])).join(' ') + ' Z';
+        if (d) el('path', { d, fill: 'var(--accent)', 'fill-opacity': 0.08, stroke: 'var(--accent)', 'stroke-opacity': 0.55, 'stroke-width': 1.2, 'stroke-dasharray': '4 3' }, svg);
+        const cx = hp.reduce((s, q) => s + q[0], 0) / hp.length, cy = Math.max(...hp.map(q => q[1]));
+        const t = el('text', { x: sx(cx), y: sy(cy) - 10, 'text-anchor': 'middle', class: 'lbl', fill: 'var(--accent)' }, svg); t.textContent = 'cluster ' + (c + 1); } } }));
+  const top = j => kk.map((key, i) => [key, vectors[j][i]]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 7);
+  lbox.innerHTML = '<table><thead><tr><th>Measures that define each axis</th><th>weight</th></tr></thead><tbody>' +
+    [0, 1].map(j => `<tr><td colspan="2" style="padding-top:10px;color:var(--muted)">Principal component ${j + 1}</td></tr>` +
+      top(j).map(([key, w]) => `<tr><td>${META[key].label}</td><td style="color:${w > 0 ? 'var(--pos)' : 'var(--neg)'}">${w > 0 ? '+' : ''}${w.toFixed(2)}</td></tr>`).join('')).join('') + '</tbody></table>';
+  let s = `<span>designs <b>${n}</b></span><span>measures <b>${p}</b></span><span>first two components explain <b>${(100 * (values[0] + values[1]) / tot).toFixed(0)}%</b></span>`;
+  if (lab) for (let c = 0; c < k; c++) { const m = rows.filter((_, i) => lab[i] === c); if (!m.length) continue;
+    const by = Object.entries(m.reduce((a, r) => (a[SETS[r.set].name] = (a[SETS[r.set].name] || 0) + 1, a), {})).map(([nm, c2]) => `${c2} ${nm}`).join(', ');
+    s += `<span>cluster ${c + 1}: <b>${m.length}</b> (${by})</span>`; }
+  stat.innerHTML = s;
+}
+buildPicker('picker', pcaSel, drawPCA, M);
+for (const id of ['pset', 'pk']) document.getElementById(id).addEventListener('change', drawPCA);
+
+// ---------- panel 3 ----------
+fillSelect('hset', setsOpt, 'all');
+function drawHeat() {
+  const rows = filterSet(hset.value);
+  let h = '<table><thead><tr><th>Measure</th>' + O.map(o => `<th title="${o[3]}">${o[1]}</th>`).join('') + '</tr></thead><tbody>';
+  let grp = '';
+  for (const m of M) {
+    if (m[2] !== grp) { grp = m[2]; h += `<tr><td colspan="${O.length + 1}" style="padding-top:10px;color:var(--muted)">${grp}</td></tr>`; }
+    h += `<tr><td>${m[1]}</td>` + O.map(o => { const { rho, n } = spearman(rows, m[0], o[0]);
+      if (rho == null || n < 5) return '<td style="color:var(--rule)">&middot;</td>';
+      const a = Math.min(1, Math.abs(rho)), bg = `color-mix(in oklab, ${rho > 0 ? 'var(--pos)' : 'var(--neg)'} ${Math.round(a * 70)}%, transparent)`;
+      return `<td title="n = ${n}" style="background:${bg};${a > 0.55 ? 'color:var(--bg);' : ''}">${rho.toFixed(2)}</td>`; }).join('') + '</tr>';
+  }
+  document.getElementById('heat').innerHTML = h + '</tbody></table>';
+}
+hset.addEventListener('change', drawHeat);
+
+// ---------- panel 4 ----------
+const fitSel = new Set(['rsmt_per_track', 'cut3_max', 'layers']);
+fillSelect('fy', O.map(o => [o[0], o[1]]), 'o:detour'); fillSelect('fset', setsOpt, 'all');
+function drawFit() {
+  const ky = fy.value, keys = M.map(m => m[0]).filter(k => fitSel.has(k)), lam = +flam.value;
+  document.getElementById('flam-v').innerHTML = `penalty <b>${lam}</b>`;
+  const rows = filterSet(fset.value).filter(r => val(r, ky, true) != null && keys.every(k => val(r, k, true) != null));
+  const plot = document.getElementById('fitplot'), tab = document.getElementById('fittable'), stat = document.getElementById('fit-stat');
+  plot.innerHTML = ''; tab.innerHTML = ''; stat.innerHTML = '';
+  if (!keys.length || rows.length < keys.length + 3) { plot.textContent = `Need more designs than measures plus three (have ${rows.length} designs, ${keys.length} measures).`; return; }
+  const z = standardize(keys.map(k => rows.map(r => val(r, k, true))));
+  const kk = keys.filter((_, i) => z[i]), cols = z.filter(Boolean);
+  if (!cols.length) { plot.textContent = 'The selected measures do not vary across these designs.'; return; }
+  const X = rows.map((_, i) => cols.map(c => c[i])), y = rows.map(r => val(r, ky, true)), n = rows.length;
+  const fit = ridge(X, y, lam); if (!fit) { plot.textContent = 'The measures are collinear; raise the penalty or drop one.'; return; }
+  const pred = X.map(x => fit.b0 + x.reduce((s, v, i) => s + v * fit.beta[i], 0));
+  const my = y.reduce((a, b) => a + b) / n, sst = y.reduce((s, v) => s + (v - my) ** 2, 0);
+  const sse = y.reduce((s, v, i) => s + (v - pred[i]) ** 2, 0);
+  let press = 0; const loo = [];
+  for (let i = 0; i < n; i++) { // leave-one-out: standardize and fit without row i
+    const keep = rows.map((_, j) => j).filter(j => j !== i);
+    const means = cols.map(c => keep.reduce((s, j) => s + c[j], 0) / keep.length);
+    const sds = cols.map((c, a) => Math.sqrt(keep.reduce((s, j) => s + (c[j] - means[a]) ** 2, 0) / keep.length) || 1);
+    const Xi = keep.map(j => cols.map((c, a) => (c[j] - means[a]) / sds[a])), f = ridge(Xi, keep.map(j => y[j]), lam);
+    const p = f ? f.b0 + cols.reduce((s, c, a) => s + (c[i] - means[a]) / sds[a] * f.beta[a], 0) : my;
+    loo.push(p); press += (y[i] - p) ** 2;
+  }
+  const r2 = sst > 0 ? 1 - sse / sst : 0, q2 = sst > 0 ? 1 - press / sst : 0;
+  const pts = rows.map((r, i) => { const s = SETS[r.set]; return { x: loo[i], y: y[i], color: s.color, hollow: s.hollow,
+    tip: `<b>${r.design}</b><br>${s.name}<br>actual ${fmt(y[i])}<br>predicted without it ${fmt(loo[i])}` }; });
+  plot.appendChild(scatterSVG(pts, { aria: 'Leave-one-out prediction against the actual outcome', xlabel: 'Predicted with this design left out',
+    ylabel: label(ky), under: (svg, sx, sy) => { const lo = Math.min(...y, ...loo), hi = Math.max(...y, ...loo);
+      el('line', { x1: sx(lo), y1: sy(lo), x2: sx(hi), y2: sy(hi), stroke: 'var(--accent)', 'stroke-dasharray': '5 4', 'stroke-width': 1.2 }, svg); } }));
+  tab.innerHTML = '<table><thead><tr><th>Measure (standardized)</th><th>coefficient</th></tr></thead><tbody>' +
+    kk.map((k, i) => [k, fit.beta[i]]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+      .map(([k, b]) => `<tr><td>${label(k)}</td><td style="color:${b > 0 ? 'var(--pos)' : 'var(--neg)'}">${b > 0 ? '+' : ''}${fmt(b)}</td></tr>`).join('') +
+    `<tr><td>intercept</td><td>${fmt(fit.b0)}</td></tr></tbody></table>`;
+  stat.innerHTML = `<span>designs <b>${n}</b></span><span>measures <b>${kk.length}</b></span><span>R&sup2; in sample <b>${r2.toFixed(2)}</b></span>` +
+    `<span>leave-one-out R&sup2; <b>${q2.toFixed(2)}</b></span>` + (kk.length > n / 5 ? '<span class="warn">many measures for this few designs: trust the leave-one-out number</span>' : '');
+}
+buildPicker('fpicker', fitSel, drawFit, M);
+for (const id of ['fy', 'fset', 'flam']) document.getElementById(id).addEventListener('input', drawFit);
+
+// ---------- table and glossary ----------
+(function () {
+  const keys = [...M.map(m => m[0]), ...O.map(o => o[0])];
+  document.getElementById('table').innerHTML = '<table><thead><tr><th>Design</th><th>Contest</th>' + keys.map(k => `<th>${META[k].label}</th>`).join('') +
+    '</tr></thead><tbody>' + DATA.map(r => `<tr><td>${r.design}</td><td style="color:${SETS[r.set].color}">${SETS[r.set].name}</td>` +
+      keys.map(k => { const v = rawVal(r, k); return `<td>${v == null ? '' : fmt(v)}</td>`; }).join('') + '</tr>').join('') + '</tbody></table>';
+  document.getElementById('glossary').innerHTML = Object.entries(GLOSS).map(([k, d]) => `<dt>${k}</dt><dd>${d}</dd>`).join('') +
+    O.map(o => `<dt>${o[0].slice(2)}</dt><dd>${o[1]}. ${o[3]}.</dd>`).join('');
+})();
+drawScatter(); drawPCA(); drawHeat(); drawFit();
+</script>

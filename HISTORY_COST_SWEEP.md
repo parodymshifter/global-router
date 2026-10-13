@@ -10103,3 +10103,27 @@ on mempool_cluster_ranking. All timings with the background router runs paused.
   positions lowest first, a freed successor handed on directly) loses ~45 s beyond the critical path.
   Next: critical-path-first scheduling (ready positions ordered by their estimated remaining path,
   from per-net cost estimates) -- exact, since any order that respects the graph gives the same routes.
+
+## Part 130 -- difficulty predictors across the three contests (the user's measures)
+
+`gr/routability.cpp` now reads ISPD 2024 / 2025 `.cap` / `.net` as well as `.gr` and adds the user's
+proposed predictors (areas in GCells): pins and pin density; pins per horizontal and per vertical track;
+row and column pin unevenness (coefficient of variation); pins per net (mean, median, 90th / 99th
+percentile, maximum, skewness, share of 2-pin and 10+-pin nets); nets whose box covers > 25% of the die
+(counted, then left out); connected regions of the remaining nets' boxes; the die cut into 4 x 4, 8 x 8,
+16 x 16 regions (pin-density CV, densest / mean, Gini; share of nets spanning > 2 regions); Steiner tree
+length per net, per GCell and per track (exact for 2-3 pin GCells, else a spanning tree improved with
+Steiner points); pins per occupied GCell; and (the user's later addition) routing layers per direction
+and tracks per GCell. New self-tests (plus shape 4 vs spanning tree 6; 3-point half perimeter; Gini; the
+large-net filter; layers and tracks). `gr/difficulty_data.py` joins them with each design's outcomes:
+39 designs (16 ISPD 2008, 13 ISPD 2024, 10 ISPD 2025 -- both 2025 mempool_cluster designs are still in
+the zip). The ten 2025 designs were routed for this (pd39route, the 2024 settings): 0 open nets on all,
+contest evaluator. Raw: `~/Code/GlobalRouterRuns/p130/`. Explorer page (scatter, principal components with
+k-means clusters, Spearman heat map, ridge least squares with leave-one-out): `recaps/difficulty-atlas.html`,
+https://claude.ai/artifact/NhWAbyFKkxv2RVXZndpweX.
+
+First reading (Spearman, within a contest; small samples): ISPD 2008 total overflow -- cut3_max +0.75,
+worst pin escape +0.63, largest net +0.58; runtime -- worst pin escape +0.65; detour ratio -- pins per
+track +0.76 / +0.77, die area -0.70. ISPD 2024+2025: the overflow share of the score falls with pin
+density (-0.98) mostly because denser designs carry more wire cost; the overflow cost per 1000 nets
+(added as `of_knet`) is the cleaner congestion outcome.
