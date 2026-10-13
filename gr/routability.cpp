@@ -5,6 +5,8 @@
 //   routability <benchmark.gr>                (ISPD 2008)
 //   routability <design.cap> <design.net>     (ISPD 2024 / 2025; each pin at
 //                                              its first access point)
+//   either, preceded by --net-times FILE      (Part 131: per-net routing time
+//                                              from pd39route's PD39ROUTE_NET_TIMES)
 //   routability --selftest
 //
 // Prints one line of key=value features:
@@ -53,6 +55,15 @@
 //     minimum spanning tree improved by Steiner points (each node's best
 //     median point, repeated until nothing improves; within a few percent).
 //   pv_mean, pv_p99, pv_max: pins per GCell that holds at least one pin.
+// Part 131, with --net-times (nets with pins in >= 2 GCells; a net's time is
+// its total over every stage that worked on it, on whichever thread):
+//   nt_mean_us, nt_cv, nt_p50_us, nt_p90_us, nt_p99_us, nt_max_ms: per-net
+//     time -- mean, coefficient of variation, percentiles, maximum;
+//   nt_top1_share: the slowest 1% of nets' share of all net time;
+//   nt_step_mean_us, nt_step_cv: each net's time per GCell step of its own
+//     Steiner tree -- mean and coefficient of variation;
+//   nt_loglen_corr: Pearson correlation of log time with log Steiner length;
+//   nt_share_pattern, _maze, _layer, _3d: each kind's share of net time.
 //   layers, layers_h, layers_v: routing layers with any capacity (in each
 //     direction); tracks_h, tracks_v: 2D routing tracks per GCell, summed
 //     over layers (the supply each GCell offers in each direction).
@@ -67,6 +78,7 @@
 #include <vector>
 
 #include <cmath>
+#include <cstring>
 #include <numeric>
 
 #include "g24_io.h"
@@ -396,7 +408,7 @@ long long rsmtLength(std::vector<std::pair<int, int>> pts) {
   return len;
 }
 
-Extra analyzeExtra(const Design &d) {
+Extra analyzeExtra(const Design &d, std::vector<std::pair<size_t, long long>> *perNet = nullptr) {
   const RoutingGrid &g = d.grid;
   Extra e;
   const size_t nT = static_cast<size_t>(g.nx) * static_cast<size_t>(g.ny);
@@ -434,7 +446,8 @@ Extra analyzeExtra(const Design &d) {
   std::vector<Kept> kept;
   long long rsmtAll = 0, nAll = 0;
   double keptRsmt = 0;
-  for (const gr_io::Net &n : d.nets) {
+  for (size_t ni = 0; ni < d.nets.size(); ++ni) {
+    const gr_io::Net &n = d.nets[ni];
     if (n.pins.size() < 2)
       continue;
     ppn.push_back(static_cast<double>(n.pins.size()));
@@ -456,6 +469,8 @@ Extra analyzeExtra(const Design &d) {
       continue;
     ++e.nets;
     long long len = rsmtLength(k.tiles);
+    if (perNet)
+      perNet->push_back({ni, len});
     rsmtAll += len;
     ++nAll;
     double boxArea = static_cast<double>(k.x1 - k.x0 + 1) * static_cast<double>(k.y1 - k.y0 + 1);
@@ -604,6 +619,63 @@ Extra analyzeExtra(const Design &d) {
   return e;
 }
 
+// Part 131: per-net routing time against each net's Steiner length.
+bool netTimeStats(const char *path, size_t nNets, const std::vector<std::pair<size_t, long long>> &perNet, std::string &out) {
+  std::FILE *f = std::fopen(path, "rb");
+  if (!f)
+    return false;
+  char magic[6];
+  uint64_t n = 0;
+  bool ok = std::fread(magic, 1, 6, f) == 6 && std::memcmp(magic, "GRNT1\n", 6) == 0 && std::fread(&n, sizeof n, 1, f) == 1 && n == nNets;
+  std::vector<float> t;
+  if (ok) {
+    t.resize(static_cast<size_t>(n) * 4);
+    ok = std::fread(t.data(), sizeof(float), t.size(), f) == t.size();
+  }
+  std::fclose(f);
+  if (!ok)
+    return false;
+  std::vector<double> tt, step;
+  double kind[4] = {0, 0, 0, 0}, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+  long long m = 0;
+  for (const auto &pl : perNet) {
+    const float *r = &t[pl.first * 4];
+    double v = static_cast<double>(r[0]) + r[1] + r[2] + r[3];
+    for (int k = 0; k < 4; ++k)
+      kind[k] += r[k];
+    tt.push_back(v);
+    step.push_back(pl.second > 0 ? v / static_cast<double>(pl.second) : 0);
+    if (v > 0 && pl.second > 0) {
+      double x = std::log(static_cast<double>(pl.second)), y = std::log(v);
+      sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; ++m;
+    }
+  }
+  if (tt.empty())
+    return false;
+  double total = std::accumulate(tt.begin(), tt.end(), 0.0), mean = total / static_cast<double>(tt.size());
+  double stepMean = std::accumulate(step.begin(), step.end(), 0.0) / static_cast<double>(step.size());
+  std::vector<double> sorted = tt;
+  std::sort(sorted.begin(), sorted.end());
+  size_t top = std::max<size_t>(1, sorted.size() / 100);
+  double topSum = std::accumulate(sorted.end() - static_cast<long>(top), sorted.end(), 0.0);
+  double corr = 0;
+  if (m > 2) {
+    double mm = static_cast<double>(m), vx = sxx - sx * sx / mm, vy = syy - sy * sy / mm;
+    corr = vx > 0 && vy > 0 ? (sxy - sx * sy / mm) / std::sqrt(vx * vy) : 0;
+  }
+  char buf[640];
+  std::snprintf(buf, sizeof buf,
+                " nt_nets=%zu nt_total_s=%.3f nt_mean_us=%.3f nt_cv=%.4f nt_p50_us=%.3f nt_p90_us=%.3f nt_p99_us=%.3f "
+                "nt_max_ms=%.3f nt_top1_share=%.4f nt_step_mean_us=%.4f nt_step_cv=%.4f nt_loglen_corr=%.4f "
+                "nt_share_pattern=%.4f nt_share_maze=%.4f nt_share_layer=%.4f nt_share_3d=%.4f",
+                tt.size(), total, mean * 1e6, cv(tt), pct(tt, 0.5) * 1e6, pct(tt, 0.9) * 1e6, pct(tt, 0.99) * 1e6,
+                sorted.back() * 1e3, total > 0 ? topSum / total : 0, stepMean * 1e6, cv(step), corr,
+                total > 0 ? kind[0] / total : 0, total > 0 ? kind[1] / total : 0, total > 0 ? kind[2] / total : 0,
+                total > 0 ? kind[3] / total : 0);
+  out = buf;
+  return true;
+}
+
 } // namespace rt
 
 namespace selftest {
@@ -664,8 +736,14 @@ int run() {
 int main(int argc, char **argv) {
   if (argc == 2 && std::string(argv[1]) == "--selftest")
     return selftest::run();
+  const char *netTimes = nullptr;
+  if (argc >= 3 && std::string(argv[1]) == "--net-times") { // Part 131
+    netTimes = argv[2];
+    argv += 2;
+    argc -= 2;
+  }
   if (argc != 2 && argc != 3) {
-    std::cerr << "usage: " << argv[0] << " <benchmark.gr> | <design.cap> <design.net>\n";
+    std::cerr << "usage: " << argv[0] << " [--net-times FILE] <benchmark.gr> | <design.cap> <design.net>\n";
     return 2;
   }
   Design d;
@@ -700,7 +778,13 @@ int main(int argc, char **argv) {
     d = g24::toDesign(r, nets);
   }
   rt::Features f = rt::analyze(d);
-  rt::Extra x = rt::analyzeExtra(d);
+  std::vector<std::pair<size_t, long long>> perNet;
+  rt::Extra x = rt::analyzeExtra(d, netTimes ? &perNet : nullptr);
+  std::string nt;
+  if (netTimes && !rt::netTimeStats(netTimes, d.nets.size(), perNet, nt)) {
+    std::cerr << "cannot use " << netTimes << " (missing, malformed, or not this design's net count)\n";
+    return 1;
+  }
   std::printf("nets=%lld tiles=%lld util=%.4f rudy_p99=%.3f rudy_p999=%.3f rudy_over=%.5f rudy_excess=%.0f "
               "esc_max=%.3f esc_p999=%.3f esc_over1=%lld esc_over09=%lld cut3_max=%.3f cut3_over1=%lld "
               "long_share=%.4f\n",
@@ -721,5 +805,7 @@ int main(int argc, char **argv) {
               "tracks_v=%.3f\n",
               x.rsmtPerNet, x.rsmtPerGcell, x.rsmtPerTrack, x.rsmtPerNetAll, x.pvMean, x.pvP99, x.pvMax, x.nets,
               x.rsmtPerNetAll * static_cast<double>(x.nets), x.layers, x.layersH, x.layersV, x.tracksH, x.tracksV);
+  if (!nt.empty())
+    std::printf("%s\n", nt.c_str());
   return 0;
 }

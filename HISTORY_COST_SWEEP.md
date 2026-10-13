@@ -10127,3 +10127,27 @@ worst pin escape +0.63, largest net +0.58; runtime -- worst pin escape +0.65; de
 track +0.76 / +0.77, die area -0.70. ISPD 2024+2025: the overflow share of the score falls with pin
 density (-0.98) mostly because denser designs carry more wire cost; the overflow cost per 1000 nets
 (added as `of_knet`) is the cleaner congestion outcome.
+
+## Part 131 -- per-net routing time (mean, spread, per Steiner step)
+
+`PD39ROUTE_NET_TIMES=<file>` (pd39route; off by default, routes byte-identical -- nvdla_rank): each
+stage's per-net work runs inside a `NetClock` that adds its time to the net's total in one of four kinds
+(pattern, maze search, layer assignment, 3D passes); nested clocks count once; the pattern stage's
+batched round-0 solve is split evenly over its pieces (its per-round overhead is charged to no net, so its
+share is understated). Self-test (nesting, off state, explicit shares). `routability --net-times FILE`
+joins the file with each net's Steiner length: mean, CV, percentiles, slowest 1%'s share, time per
+Steiner step (mean, CV), log time-length correlation, kind shares. Raw: `~/Code/GlobalRouterRuns/p131/nt.txt`.
+
+All 23 ISPD 2024 / 2025 designs (2024 standard, 8 threads; per-net times are CPU time on the net's thread):
+time per Steiner step 6.3-9.2 us per net on every design, log time-length correlation 0.94-0.97 -- a
+near-constant cost per unit of wire. Per-net CV 2-5 and the slowest 1% at 13-20% of time on most designs;
+on mempool_cluster (CV 30.8, slowest 1% 62%), mempool_cluster_ranking (18.9, 45%), 2025 visible
+mempool_group (14.4, 87%, maze search 85% of net time), 2025 blind ariane (16.6) and NVDLA (8.3) the
+spread comes from a few nets that need the maze search; there the per-step CV also rises from ~0.55 to
+3-5. Added to the Routing Difficulty Atlas as outcomes.
+
+**Part 122 closes**: newblue7 with `PD38ROUTE_REGION_COST_REL=10` (pd38route, standard): **100 (max 2) /
+36123951**, legal, `eval2008.pl` agrees. 2.17e11 expansions came before its region stage, so F = 10 left the
+threshold unchanged and the rule did not fire -- the run is the current standard's first newblue7 result
+(earlier: 106 / 108 on older routers; best published 68). On both 2008 designs it could touch, F = 10
+leaves the standard unchanged; it stops the synthetic design early (11.2 -> 4.0 s).

@@ -2416,6 +2416,49 @@ struct RoutedNet {
   int boxMargin = -1;
 };
 
+// pd39route (Part 131): per-net routing time, for the difficulty analysis
+// (PD39ROUTE_NET_TIMES=<file>; off by default, routes unchanged). Each
+// stage's per-net work runs inside a NetClock, which adds its wall time to
+// that net's total in one of four kinds; a NetClock inside another on the
+// same thread counts nothing (the outer one already does). The pattern
+// stage's batched round-0 solve is split evenly over its batch's pieces.
+// The file: "GRNT1\n", uint64 net count, then per net (the input's order)
+// four float seconds: pattern, maze search, layer assignment, 3D passes.
+enum NetTimeKind { kNtPattern = 0, kNtMaze = 1, kNtLayer = 2, kNt3D = 3 };
+const Net *gNetBase = nullptr;
+std::vector<std::array<float, 4>> gNetTime;
+thread_local int tNetClockDepth = 0;
+inline void addNetTime(const Net *net, int kind, double secs) {
+  if (gNetTime.empty() || !net)
+    return;
+  size_t k = static_cast<size_t>(net - gNetBase);
+  if (k < gNetTime.size())
+    gNetTime[k][static_cast<size_t>(kind)] += static_cast<float>(secs);
+}
+struct NetClock {
+  const Net *net = nullptr;
+  int kind = 0;
+  bool counted = false, outer = false;
+  std::chrono::steady_clock::time_point t0;
+  NetClock(const Net *n, int k) : net(n), kind(k) {
+    if (gNetTime.empty() || !n)
+      return;
+    counted = true;
+    outer = tNetClockDepth++ == 0;
+    if (outer)
+      t0 = std::chrono::steady_clock::now();
+  }
+  ~NetClock() {
+    if (!counted)
+      return;
+    --tNetClockDepth;
+    if (outer)
+      addNetTime(net, kind, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+  }
+  NetClock(const NetClock &) = delete;
+  NetClock &operator=(const NetClock &) = delete;
+};
+
 // This file's own mechanism: how the slow tier's search-box margin is
 // chosen. Fixed reproduces nv4route (VROUTE_MAX_MARGIN for every search).
 // Round mirrors NTHU-Route 2.0's main stage: every net's margin in slow
@@ -3289,6 +3332,7 @@ std::vector<PathNode> netFootprint(const std::vector<Seg> &segs) {
 // equal-cost trees comes out; pts[0] is as good a start as any.
 void routeNetSlowMSMV(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPlan &lp,
                        SearchRegion &region, double epsilon, RoutedNet &rn) {
+  NetClock netClock(rn.net, kNtMaze); // Part 131
   for (const ChargeRecord &c : rn.charges)
     undoCharge(g, usage, c);
   rn.segs.clear();
@@ -6285,6 +6329,7 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
             const size_t k = lo + kk;
             const int pk = todo[seq[k]];
             Piece &p = pieces[pk];
+            NetClock netClock(nets[static_cast<size_t>(p.net)].net, kNtPattern); // Part 131
             auto change = [&](int code, int sign) {
               size_t idx = static_cast<size_t>(code >> 1);
               if (code & 1) {
@@ -6390,6 +6435,11 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
       }
       auto b3 = now();
       tSolve += secs(b2, b3);
+      if (!gNetTime.empty() && nb > 0) { // Part 131: the batch's solve, split evenly over its pieces
+        const double share = secs(b2, b3) / static_cast<double>(nb);
+        for (size_t j = 0; j < static_cast<size_t>(nb); ++j)
+          addNetTime(nets[static_cast<size_t>(pieces[batch[j]].net)].net, kNtPattern, share);
+      }
       // pd37route: each piece's new edge list on its own (the pool when
       // threaded), then its usage added in batch order as before.
       workerPool().run(nb, [&](size_t j) {
@@ -8815,6 +8865,7 @@ bool tileInBox(const TileBox *box, int x, int y);
 PieceStats rerouteNetPieces(const RoutingGrid &g, Usage &usage, const Prices &prices, const LayerPlan &lp,
                             SearchRegion &region, RoutedNet &rn, int margin, AcceptMode accept,
                             const TileBox *box) {
+  NetClock netClock(rn.net, kNtMaze); // Part 131
   PieceStats st;
   std::vector<Point> pinTiles;
   for (const Pin &p : rn.net->pins)
@@ -9730,6 +9781,7 @@ double viaDemandCost(const RoutingGrid &g, const RealUsage &ru, int x, int y, in
 // Reroutes one net; returns true (and the new charge) if the score fell.
 bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const RealLayerPlan &lp, RoutedNet &rn,
                   NetCharge &charge, double &gainOut) {
+  NetClock netClock(rn.net, kNt3D); // Part 131
   using namespace p3d;
   const int L = g.nLayers;
   const double kInf = std::numeric_limits<double>::max() / 4;
@@ -10555,6 +10607,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   // pd37route: one net's round-0 assignment (the loop body before),
   // touching nothing outside netBoxOf(net) but its own entries.
   auto assignRound0 = [&](size_t i) {
+    NetClock netClock(nets[i].net, kNtLayer); // Part 131
     RoutedNet &rn = nets[i];
     dropDegenerateSegs(rn);
     if (!viaAware) {
@@ -17126,6 +17179,35 @@ void testFastReadersMatchIostream() {
   std::remove(net.c_str());
 }
 
+// Part 131: per-net time. A clock inside another on the same thread counts
+// nothing; the outer one counts the whole span in its own kind; a net
+// outside the table and a null net are ignored; with the table off, clocks
+// do nothing at all.
+void testNetClock() {
+  std::vector<Net> fake(3);
+  const Net *savedBase = gNetBase;
+  std::vector<std::array<float, 4>> saved;
+  saved.swap(gNetTime);
+  auto spin = [] { auto t = std::chrono::steady_clock::now(); while (std::chrono::steady_clock::now() - t < std::chrono::milliseconds(2)) {} };
+  { NetClock off(&fake[0], kNtMaze); spin(); }
+  bool offOk = gNetTime.empty();
+  gNetBase = fake.data();
+  gNetTime.assign(fake.size(), std::array<float, 4>{0, 0, 0, 0});
+  {
+    NetClock outer(&fake[1], kNtLayer);
+    spin();
+    { NetClock inner(&fake[2], kNtMaze); spin(); }
+  }
+  { NetClock none(nullptr, kNt3D); spin(); }
+  addNetTime(&fake[0], kNtPattern, 0.5);
+  bool ok = gNetTime[1][kNtLayer] >= 0.004f && gNetTime[2][kNtMaze] == 0.0f && gNetTime[0][kNtPattern] == 0.5f &&
+            gNetTime[0][kNtMaze] == 0.0f && tNetClockDepth == 0;
+  gNetTime.swap(saved);
+  gNetBase = savedBase;
+  check(offOk, "per-net time: with the table off a clock records nothing");
+  check(ok, "per-net time: the outer clock counts both spans in its kind, the nested one nothing; explicit shares add");
+}
+
 // Part 127: concurrent work runs on the persistent pool. runOnThreads calls
 // every index exactly once; a call made while the pool is busy (from one of
 // its own tasks) runs inline rather than deadlocking; tryRun reports busy.
@@ -17880,6 +17962,7 @@ int run() {
   testFastReadersMatchIostream();
   testIspd25Format();
   testWorkerPoolReuse();
+  testNetClock();
   testEmitNetSolutionFastMatches();
   testPatternColorBatchesMatchesFirstFit();
   testCommutingDagOrder();
@@ -18388,6 +18471,10 @@ int main(int argc, char **argv) {
     rep.nets = readRouteAs2D(d, laFrom);
     prepareFor2DRefine(d, rep.nets);
   } else {
+    if (std::getenv("PD39ROUTE_NET_TIMES")) { // Part 131: per-net time, by the input's net order
+      gNetBase = d.nets.data();
+      gNetTime.assign(d.nets.size(), std::array<float, 4>{0, 0, 0, 0});
+    }
     rep = route(d, maxFastRounds, maxSlowRounds, epsilon, histStep, histMode, histFactor,
                 streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent, exponentEscalation,
                 useMSMV, useSteinerize, useExactSteiner, maxExactPins, box, cost, accept, slowPieces, stopAt,
@@ -18651,6 +18738,17 @@ int main(int argc, char **argv) {
     writeSolution(argv[2], d.grid, rep.nets);
   }
   gStages.mark("write solution", nullptr);
+  if (const char *path = std::getenv("PD39ROUTE_NET_TIMES"); path && !gNetTime.empty()) { // Part 131
+    std::FILE *f = std::fopen(path, "wb");
+    if (!f)
+      fail(std::string("PD39ROUTE_NET_TIMES: cannot write ") + path);
+    const uint64_t n = gNetTime.size();
+    bool ok = std::fwrite("GRNT1\n", 1, 6, f) == 6 && std::fwrite(&n, sizeof n, 1, f) == 1 &&
+              std::fwrite(gNetTime.data(), sizeof(std::array<float, 4>), gNetTime.size(), f) == gNetTime.size();
+    if (std::fclose(f) != 0 || !ok)
+      fail(std::string("PD39ROUTE_NET_TIMES: write failed: ") + path);
+    std::cerr << "per-net times: " << n << " nets written to " << path << "\n";
+  }
   gStages.print(std::cerr);
   auto t1 = std::chrono::steady_clock::now();
 

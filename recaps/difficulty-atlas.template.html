@@ -149,7 +149,8 @@ dd { margin: 0; }
     <dl id="glossary"></dl>
     <p class="note">Sources: measures from <code>gr/routability.cpp</code> (HISTORY_COST_SWEEP.md Parts 101 and 130).
     Outcomes: ISPD 2008 (International Symposium on Physical Design contest) from the fast08 runs of Part 124, with
-    bigblue4 and newblue7 from earlier standard runs; ISPD 2024 from Part 123's pd39route runs; ISPD 2025 from pd39route
+    bigblue4 and newblue7 from earlier standard runs; ISPD 2024 from Part 123's pd39route runs; per-net route times
+    (2024 and 2025 only) from Part 131's timed runs; ISPD 2025 from pd39route
     with the 2024 settings, scored by the contest's congestion evaluator (timing not run). Runtimes come from each
     contest's own settings, so compare them within a contest.</p>
   </details>
@@ -225,6 +226,13 @@ const O = [
   ['o:of_knet', 'Overflow cost per 1000 nets (2024, 2025)', 'log', 'The contest score\'s overflow term per 1000 nets: the cleaner congestion outcome'],
   ['o:of_share', 'Overflow share of score (2024, 2025)', '', 'The overflow term over the whole score; falls as wire length grows, so it tracks density as much as congestion'],
   ['o:score_knet', 'Contest score per 1000 nets (2024, 2025)', 'log', 'Lower is better'],
+  ['o:nt_mean_us', 'Per-net route time, mean (us)', 'log', 'Each net\'s total time over every stage that worked on it (CPU time on its thread)'],
+  ['o:nt_cv', 'Per-net route time, CV', '', 'Coefficient of variation of per-net time: standard deviation over mean'],
+  ['o:nt_p99_us', 'Per-net route time, 99th pct (us)', 'log', ''],
+  ['o:nt_top1_share', 'Slowest 1% of nets\' share of time', '', ''],
+  ['o:nt_step_mean_us', 'Route time per Steiner step, mean (us)', 'log', 'Each net\'s time over its own Steiner tree length, averaged over nets'],
+  ['o:nt_step_cv', 'Route time per Steiner step, CV', '', 'How unevenly nets cost per unit length'],
+  ['o:nt_loglen_corr', 'Correlation of log time with log length', '', 'How much of per-net time length explains'],
 ];
 const GLOSS = {
   nets_all: 'Nets whose pins fall in at least two GCells.', tiles: 'Die area in GCells (grid cells of the routing graph).',

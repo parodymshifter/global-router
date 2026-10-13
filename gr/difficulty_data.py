@@ -3,7 +3,7 @@
 routing outcomes recorded for each design, into one JSON file for the difficulty explorer page
 (HISTORY_COST_SWEEP.md Part 130). Standard library only.
 
-  python3 gr/difficulty_data.py FEATURES.txt ROUTE25.txt OUT.json
+  python3 gr/difficulty_data.py FEATURES.txt ROUTE25.txt OUT.json [NETTIMES.txt]
 
 Outcomes, per design (None where a set has no such measure):
   detour        routed 2D wire length (GCell steps) / total Steiner tree length of every net -- comparable
@@ -16,6 +16,8 @@ Outcomes, per design (None where a set has no such measure):
                 it tracks density as much as congestion)
   of_knet       ISPD 2024 / 2025: the overflow term per 1000 nets -- the cleaner congestion outcome
   score_knet    ISPD 2024 / 2025: contest score per 1000 nets
+  nt_*          (with NETTIMES.txt, Part 131) per-net routing time: mean, coefficient of variation, percentiles,
+                slowest 1%'s share, time per Steiner step (mean, CV), log time-length correlation, stage shares
 Sources: ISPD 2008 -- Part 124's fast08 runs (pd39route), and for bigblue4 and newblue7 (still running there)
 the standard-configuration records s23_bigblue4 (pd23route) and c200_newblue7 (pd13route); ISPD 2024 -- Part
 123's pd39route runs; ISPD 2025 -- ROUTE25.txt (pd39route, the 2024 standard, scored by the contest evaluator).
@@ -89,6 +91,12 @@ def main():
         if rec.startswith('set='):
             d = kv(rec.replace('\n', ' '))
             r25[(d['set'], d['design'])] = d
+    nt = {}
+    if len(sys.argv) > 4 and os.path.exists(sys.argv[4]):
+        for line in open(sys.argv[4]):
+            if line.startswith('set='):
+                d = kv(line)
+                nt[(d['set'], d['design'])] = d
     for r in rows:
         s, n = r['set'], r['design']
         o = dict(detour=None, runtime_knet=None, runtime_mstep=None, over_share=None, overflow=None, of_share=None, of_knet=None, score_knet=None)
@@ -138,6 +146,8 @@ def main():
                 o['runtime_mstep'] = t / rsmt_total * 1e6 if t and rsmt_total else None
                 o['opens'] = d.get('opens')
                 o['source'] = 'p130 route25'
+        if (s, n) in nt:
+            o.update({k: v for k, v in nt[(s, n)].items() if k.startswith('nt_')})
         r['outcome'] = o
     json.dump(rows, open(sys.argv[3], 'w'), indent=1)
     print(f'{len(rows)} designs -> {sys.argv[3]}')
