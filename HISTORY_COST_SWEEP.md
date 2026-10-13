@@ -10077,3 +10077,29 @@ as much, so a run gains 0-3%, inside the run-to-run spread; with a profile file 
 the code, not adopted. Simple hand layout (noinline on the per-node helpers) does not reproduce it.
 What remains open: layer assignment keeps only 5.6 of 8 threads busy (Part 126) -- load balance is a
 larger lever than layout here.
+
+## Part 129 -- layer assignment's thread use, measured (in progress)
+
+Trace-only additions (`PD37ROUTE_BATCH_TRACE=1`; routes unchanged): layer assignment's round-0 phases
+(setup, graph build and run, overflow count, stage score); per worker, time in tasks vs waiting
+(spinning or asleep) and how tasks arrived (shared queue or direct hand-off); per task, its time, and
+the graph's time-weighted critical path (no schedule on any thread count can finish sooner). New
+setting `PD39ROUTE_LA_CELL` (0 = `PD37ROUTE_CELL`, default): the cell size of layer assignment's
+graph only -- a schedule setting, byte-identical at 4 / 8 / 16 / 32 on mempool_group_rank and 4 / 16
+on mempool_cluster_ranking. All timings with the background router runs paused.
+
+- Part 126's "5.6 of 8 threads busy" was distorted by background load: on a quiet machine
+  mempool_group_rank's layer assignment keeps 6.75 busy, and its graph run is work-bound (task time
+  110.5 s, waiting 2.1 s; critical path 4.2 s vs work / threads 13.9 s; run 14.4 s). Its idle time is
+  the serial parts: setup 0.46 s, graph build 1.43 s, stage score 0.62 s of 17.0 s.
+- A parallel graph build (three passes over the 175 M cell occurrences, cut by position) was exact
+  (self-tested against the serial walk) but slower -- 2.43 vs 1.45 s: the serial walk's 2 MB
+  last-writer table stays in cache, the parallel passes scattered 700 MB. Reverted.
+- Coarser cells cut the build: mempool_group_rank cell 8 / 16: build 1.41 -> 0.97 / 0.79 s, stage
+  17.0 -> 16.3 s; mempool_cluster_ranking cell 16: build 7.4 -> 4.3 s, stage 155.1 -> 153.1 s, run
+  432.0 -> 427.7 s. Small; default unchanged for now.
+- **mempool_cluster_ranking is scheduling-bound**: 10.1 M nets, task time 650.7 s (81.3 s per thread),
+  time-weighted critical path **95.5 s**, run **140.2 s**, workers waiting 462 s. The scheduler (ready
+  positions lowest first, a freed successor handed on directly) loses ~45 s beyond the critical path.
+  Next: critical-path-first scheduling (ready positions ordered by their estimated remaining path,
+  from per-net cost estimates) -- exact, since any order that respects the graph gives the same routes.

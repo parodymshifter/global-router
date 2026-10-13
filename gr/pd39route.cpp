@@ -5466,6 +5466,11 @@ bool gCommuteTestIgnoreOverlap = false;
 // pd37route: a net's box, in tiles (inclusive), and the commuting batches.
 // gCommuteCell: the coarse cell, in tiles, overlap is tested on.
 int gCommuteCell = 4; // PD37ROUTE_CELL
+// pd39route (Part 129): PD39ROUTE_LA_CELL, the cell (tiles) of layer
+// assignment's round-0 dependency graph only; 0 = PD37ROUTE_CELL. A pure
+// schedule setting -- a coarser cell only adds dependencies, and the routes
+// are the same under any graph that orders every overlapping pair.
+int gLaCell = 0;
 struct NetBox {
   int x0 = 0, y0 = 0, x1 = -1, y1 = -1;
 };
@@ -5684,12 +5689,36 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
   int sleepers = 0;          // under m
   std::atomic<size_t> readyN{ready.size()};
   std::atomic<bool> finished{n == 0};
+  // pd39route (Part 129), PD37ROUTE_BATCH_TRACE only: where each worker's
+  // time goes -- running tasks, or waiting for one (spinning or asleep) --
+  // and how tasks reached it (from the shared queue, or handed on directly).
+  const bool dagTrace = std::getenv("PD37ROUTE_BATCH_TRACE") != nullptr;
+  std::mutex statM;
+  std::vector<float> taskTime(dagTrace ? n : 0); // per position, for the critical path
+  double sWork = 0, sWait = 0;
+  size_t sQueued = 0, sDirect = 0, sSleeps = 0;
   auto worker = [&]() {
     bool have = false;
     uint32_t k = 0;
     std::vector<uint32_t> freed;
+    double tWork = 0, tWait = 0;
+    size_t nQueued = 0, nDirect = 0, nSleeps = 0;
+    auto statNow = [&]() { return dagTrace ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point(); };
+    struct Flush { std::function<void()> f; ~Flush() { f(); } } flush{[&]() {
+      if (!dagTrace)
+        return;
+      std::lock_guard<std::mutex> lk(statM);
+      sWork += tWork;
+      sWait += tWait;
+      sQueued += nQueued;
+      sDirect += nDirect;
+      sSleeps += nSleeps;
+    }};
     while (true) {
+      if (have && dagTrace)
+        ++nDirect;
       if (!have) {
+        const auto w0 = statNow();
         for (int spin = 0; spin < 4000 && readyN.load(std::memory_order_acquire) == 0 &&
                            !finished.load(std::memory_order_acquire);
              ++spin)
@@ -5697,17 +5726,29 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
         std::unique_lock<std::mutex> lk(m);
         while (ready.empty() && done.load(std::memory_order_acquire) < n) {
           ++sleepers;
+          if (dagTrace)
+            ++nSleeps;
           cv.wait(lk);
           --sleepers;
         }
+        if (dagTrace)
+          tWait += std::chrono::duration<double>(std::chrono::steady_clock::now() - w0).count();
         if (ready.empty())
           return; // done == n
         k = ready.top();
         ready.pop();
         readyN.fetch_sub(1, std::memory_order_release);
         have = true;
+        if (dagTrace)
+          ++nQueued;
       }
+      const auto f0 = statNow();
       f(k);
+      if (dagTrace) {
+        double d = std::chrono::duration<double>(std::chrono::steady_clock::now() - f0).count();
+        tWork += d;
+        taskTime[k] = static_cast<float>(d);
+      }
       have = false;
       freed.clear();
       for (uint32_t e = succStart[k]; e < succStart[k + 1]; ++e)
@@ -5750,6 +5791,26 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
   };
   const auto tRun0 = std::chrono::steady_clock::now();
   runOnThreads(std::max(1, threads), [&](size_t) { worker(); }); // pd39route (Part 127): the pool
+  if (dagTrace) {
+    std::cerr << "dependency graph: workers' task time " << sWork << " s, waiting " << sWait << " s ("
+              << sSleeps << " sleeps); tasks from the queue " << sQueued << ", handed on directly " << sDirect << "\n";
+    // The time-weighted longest path: no schedule on any number of threads
+    // can finish sooner. Positions are already in dependency order.
+    std::vector<double> start(n, 0.0);
+    double cp = 0;
+    size_t cpEnd = 0;
+    for (size_t k = 0; k < n; ++k) {
+      double fin = start[k] + taskTime[k];
+      if (fin > cp) {
+        cp = fin;
+        cpEnd = k;
+      }
+      for (uint32_t e = succStart[k]; e < succStart[k + 1]; ++e)
+        start[succ[e]] = std::max(start[succ[e]], fin);
+    }
+    std::cerr << "dependency graph: time-weighted critical path " << cp << " s (ends at position " << cpEnd << " of " << n
+              << "); work / threads " << sWork / std::max(1, threads) << " s\n";
+  }
   if (std::getenv("PD37ROUTE_BATCH_TRACE"))
     std::cerr << "dependency graph: run " << std::chrono::duration<double>(std::chrono::steady_clock::now() - tRun0).count()
               << " s\n";
@@ -10336,6 +10397,19 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
                                              HistKnobs viaKnobs = HistKnobs(),
                                              HistKnobs wireKnobs = HistKnobs(),
                                              LaMode laMode = LaMode::kInherited, bool laPins = false) {
+  // pd39route (Part 129), PD37ROUTE_BATCH_TRACE only: where round 0's wall time goes.
+  const bool laTrace = std::getenv("PD37ROUTE_BATCH_TRACE") != nullptr;
+  auto laT = std::chrono::steady_clock::now();
+  auto laLap = [&](const char *what) {
+    if (!laTrace)
+      return;
+    auto now = std::chrono::steady_clock::now();
+    std::cerr << "layer assignment timing: " << what << " " << std::chrono::duration<double>(now - laT).count() << " s\n";
+    laT = now;
+  };
+  if (laTrace && gStages.on)
+    std::cerr << "layer assignment timing: from the last stage mark to entry "
+              << std::chrono::duration<double>(laT - gStages.last).count() << " s\n";
   ViaNegotiationReport rep;
   const bool nthu = laMode == LaMode::kNthu;
   // pd7route: per-net, per-tree-node pin layer ranges (kNthu with laPins).
@@ -10528,6 +10602,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     chargeViaDemand(g, ru, rn.segs, &charges[i]);
   };
   std::string round0Work;
+  laLap("setup (trees, order, tables)");
   if (gThreads <= 1) {
     for (size_t k = 0; k < nets.size(); ++k)
       assignRound0(order[k]);
@@ -10535,7 +10610,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     // pd37route: layer assignment touches only its 2D route's tiles (and
     // pins, on the route) and one GCell around them -- so a net's cells
     // are those of each segment's 3-tile-wide strip, not its whole box.
-    const int cell = gCommuteCell;
+    const int cell = gLaCell > 0 ? gLaCell : gCommuteCell; // pd39route (Part 129)
     const int cw = (g.nx + cell - 1) / cell, ch = (g.ny + cell - 1) / cell;
     CellsOfFn stripCells = [&](size_t k, std::vector<uint32_t> &out) {
       const RoutedNet &rn = nets[order[k]];
@@ -10565,6 +10640,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     }
   }
 
+  laLap("round 0 (graph build and run)");
   if (!viaAware) {
     rep.roundsRun = 1;
     return rep;
@@ -10581,6 +10657,12 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     return gScore.on ? routerScore(g, ru, nets)
                      : static_cast<double>(totalRealOverflow(g, ru, rvu, viaCap, /*includeVia=*/false));
   };
+  laLap("overflow count");
+  if (gStages.on && laTrace) {
+    double obj = stageObjective();
+    laLap("stage objective (score)");
+    (void)obj;
+  }
   if (gStages.on)
     gStages.mark("layer assignment, round 0", &nets, -1, stageObjective(),
                  std::to_string(nets.size()) + " nets" + round0Work);
@@ -17892,6 +17974,13 @@ int main(int argc, char **argv) {
     if (!*v || *end || c < 1 || c > 1024)
       fail(std::string("PD37ROUTE_CELL must be 1..1024 (got '") + v + "')");
     gCommuteCell = static_cast<int>(c);
+  }
+  if (const char *v = std::getenv("PD39ROUTE_LA_CELL"); v) { // Part 129
+    char *end = nullptr;
+    long c = std::strtol(v, &end, 10);
+    if (!*v || *end || c < 0 || c > 1024)
+      fail(std::string("PD39ROUTE_LA_CELL must be 0..1024 (got '") + v + "')");
+    gLaCell = static_cast<int>(c);
   }
   if (argc != 3 && argc != 4) {
     std::cerr << "usage: " << argv[0] << " <benchmark.gr> <solution.route>\n";
