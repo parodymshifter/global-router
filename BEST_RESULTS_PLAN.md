@@ -172,6 +172,8 @@ Order (runs: at most 3 at once; one long 2008 residue run plus short 2024 / 2025
    Directly attacks the +4 to +10 that fast08 cost the residues, using idle cores rather than
    splitting one search. Memory bounds K (newblue7 ~5.5 GB per state, 24 GB machine).
 4. **D3: timing-driven routing for 2025** (in parallel with 1-3: the 2025 runs are minutes).
+   *Status 2026-10-14: D3a done; D3b adopted as `gr/standard25.env` (timing + capacitance, Part 133);
+   in-loop timing refresh not needed so far (input slack predicts routed slack, r = 0.95).*
    D3a: from the evaluator's OpenSTA on our ariane route, the critical nets and how much of their
    delay is wire (vs. cell). D3b: those nets get a priority weight `w_i` (CLAUDE.md "Core cost
    model": priority divides the congestion price) and an upper-layer bias in layer assignment;

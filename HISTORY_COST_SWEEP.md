@@ -10389,3 +10389,10 @@ loop (the stale-entry and relaxation tests on `distAt`, region bounds). Both sea
 `SearchRegion` are back to their pre-Part-133 source, byte for byte. Lessons: a profile line's
 share is not the fix's ceiling -- the next attempt on the search needs a branch-level profile
 (which branches miss), not a rewrite of the line that holds the samples.
+
+**Decision (the user, 2026-10-14): timing plus capacitance becomes the ISPD 2025 standard** --
+`gr/standard25.env` on the 2024 standard (`./pd39route @standard.env @standard24.env @fast24.env
+@standard25.env`): k = 40, 80, 160, kp = 4, both scaled by the design's weights, NanGate45's R and C.
+The current build with it reproduces the measured ariane route byte for byte (score 2.30 -> 0.14).
+Not yet measured under it: mempool_group (visible), mempool_cluster (its .def / .net are still in the
+zip) and the six blind designs.

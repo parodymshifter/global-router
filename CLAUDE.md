@@ -248,6 +248,16 @@ dependency graph, and the slow tier batched (256, spread over 64 x 64 tiles). Al
 on Mac and Linux (Part 123). Most of a residue run is now the region stage (newblue7: 88%), which
 nothing threads yet -- BEST_RESULTS_PLAN.md track A.
 
+**2026-10-14: the ISPD 2025 standard is `./pd39route @standard.env @standard24.env @fast24.env
+@standard25.env`** (Part 133). `gr/standard25.env` adds timing plus capacitance to the 2024
+standard: nets with negative input pin slack pay resistance-weighted wirelength by class, every net
+pays capacitance-weighted wirelength, and both strengths scale with the design's own score weights
+(the R and C per layer are NanGate45's, from the contest's `setRC.tcl`). Against our own unbiased
+routes: ariane's contest score 2.30 -> 0.14 (1st place 0.90), bsg_chip -1.38, NV_NVDLA_partition_c
+-6.22, mempool_tile_wrap -0.51 (lower is better). Score timing with the contest's OpenROAD fork and
+its endpoint count, registers + outputs; mempool_group, mempool_cluster and the blind designs are not
+yet measured under it.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned
