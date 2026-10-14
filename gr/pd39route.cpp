@@ -2872,62 +2872,6 @@ void routeNetFast(const RoutingGrid &g, Prices &prices, Usage &usage, const Laye
 // and A* fixes that brought it from 105s to 20s per round on adaptec1).
 // ---------------------------------------------------------------------------
 
-// pd39route (Part 133): the maze searches' queue -- a binary heap whose pop
-// picks the smaller child without a branch (Floyd's pop: move the hole to a
-// leaf choosing children by a select, then sift the last entry up from
-// there). CPU counters on newblue7's region stage: 57% of cycles were
-// discarded to branch mispredictions, 4% memory stalls -- the sift-down's
-// data-dependent "which child" branch. Entries pop smallest (priority,
-// index, dist) first, the total order of the searches' comparator
-// (Part 123), so every pop matches std::priority_queue's (entries equal in
-// all three are indistinguishable) and no route changes. A 4-ary heap was
-// slower (newblue1 region stage +8.5%: more comparisons per level).
-template <class E> class SearchHeap {
-public:
-  explicit SearchHeap(std::vector<E> &buf) : v_(buf) { v_.clear(); }
-  bool empty() const { return v_.empty(); }
-  size_t size() const { return v_.size(); }
-  const E &top() const { return v_[0]; }
-  // a pops before b; the bitwise operators keep it free of branches
-  static bool before(const E &a, const E &b) {
-    return (a.priority < b.priority) |
-           ((a.priority == b.priority) & ((a.index < b.index) | ((a.index == b.index) & (a.dist < b.dist))));
-  }
-  void push(const E &x) {
-    size_t i = v_.size();
-    v_.push_back(x);
-    siftUp(i, x);
-  }
-  void pop() {
-    const E x = v_.back();
-    v_.pop_back();
-    const size_t n = v_.size();
-    if (n == 0)
-      return;
-    size_t i = 0;
-    for (size_t c = 1; c < n; c = 2 * i + 1) {
-      if (c + 1 < n)
-        c += static_cast<size_t>(before(v_[c + 1], v_[c]));
-      v_[i] = v_[c];
-      i = c;
-    }
-    siftUp(i, x);
-  }
-
-private:
-  void siftUp(size_t i, const E &x) {
-    while (i > 0) {
-      const size_t p = (i - 1) / 2;
-      if (!before(x, v_[p]))
-        break;
-      v_[i] = v_[p];
-      i = p;
-    }
-    v_[i] = x;
-  }
-  std::vector<E> &v_;
-};
-
 struct SearchRegion {
   int x0 = 0, y0 = 0, w = 0, h = 0, nLayers = 0;
   std::vector<double> dist;
@@ -2947,7 +2891,6 @@ struct SearchRegion {
       parent.resize(needed);
       stamp.resize(needed, -1);
     }
-
     ++generation;
   }
 
@@ -3014,9 +2957,7 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
       return a.dist > b.dist;
     }
   };
-  // pd39route (Part 133): the branch-free heap on a per-thread buffer (same pops)
-  static thread_local std::vector<QueueEntry> pqBuf;
-  SearchHeap<QueueEntry> pq(pqBuf);
+  std::priority_queue<QueueEntry, std::vector<QueueEntry>, Cmp> pq;
 
   // vroute's p1Layer<0 ("reachable at any layer") case collapses to a
   // single push at the one synthetic layer -- there is no "any layer" to
@@ -3277,9 +3218,7 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
       return a.dist > b.dist;
     }
   };
-  // pd39route (Part 133): the branch-free heap on a per-thread buffer (same pops)
-  static thread_local std::vector<QueueEntry> pqBuf;
-  SearchHeap<QueueEntry> pq(pqBuf);
+  std::priority_queue<QueueEntry, std::vector<QueueEntry>, Cmp> pq;
 
   for (const PathNode &s : sources) {
     if (!region.inRegion(s.x, s.y))
@@ -18168,62 +18107,6 @@ void testCommutingDagOrder() {
   check(ordered, "commuting DAG: each position starts after every earlier overlapping one finished");
 }
 
-// pd39route (Part 133): SearchHeap pops exactly what std::priority_queue pops
-// under the searches' total order -- 200 random runs of interleaved pushes
-// and pops, priorities from a small set (many ties, broken by index, then
-// distance; some entries repeated outright).
-void testQuadHeapMatchesPriorityQueue() {
-  struct E {
-    double priority, dist;
-    int index;
-  };
-  struct C {
-    bool operator()(const E &a, const E &b) const {
-      if (a.priority != b.priority)
-        return a.priority > b.priority;
-      if (a.index != b.index)
-        return a.index > b.index;
-      return a.dist > b.dist;
-    }
-  };
-  unsigned st = 133;
-  auto rnd = [&](int n) {
-    st = st * 1103515245u + 12345u;
-    return static_cast<int>((st >> 8) % static_cast<unsigned>(n));
-  };
-  bool same = true;
-  size_t pops = 0;
-  std::vector<E> buf;
-  for (int run = 0; run < 200 && same; ++run) {
-    std::priority_queue<E, std::vector<E>, C> ref;
-    SearchHeap<E> q(buf);
-    E last{0, 0, 0};
-    for (int step = 0; step < 3000 && same; ++step) {
-      if (rnd(3) != 0 || ref.empty()) {
-        E e = rnd(10) == 0 ? last : E{static_cast<double>(rnd(20)), static_cast<double>(rnd(4)), rnd(50)};
-        last = e;
-        ref.push(e);
-        q.push(e);
-      } else {
-        const E &a = ref.top(), &b = q.top();
-        same = a.priority == b.priority && a.index == b.index && a.dist == b.dist && ref.size() == q.size();
-        ref.pop();
-        q.pop();
-        ++pops;
-      }
-    }
-    while (same && !ref.empty()) {
-      const E &a = ref.top(), &b = q.top();
-      same = a.priority == b.priority && a.index == b.index && a.dist == b.dist;
-      ref.pop();
-      q.pop();
-      ++pops;
-    }
-    same = same && q.empty();
-  }
-  check(same, "branch-free heap: the same " + std::to_string(pops) + " pops as std::priority_queue (ties included)");
-}
-
 // pd39route (Part 133): the timing layer bias. Classes from slack (worst
 // -1: -0.8 -> 3, -0.5 -> 2, -0.2 -> 1, -0.05 and positive -> 0, NaN -> 0).
 // Then layer assignment under the 2024 score on an 8 x 1 grid, layers H V H V,
@@ -18920,7 +18803,6 @@ int run() {
   testCommutingDagOrder();
   testCriticalPathFirstDag();
   testBuildNetTreeMatchesReference();
-  testQuadHeapMatchesPriorityQueue();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
   testPatternIncrementalRefreshIsExact();

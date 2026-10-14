@@ -10377,3 +10377,15 @@ The sink lookup's array is reverted too (one change at a time). adaptec2 side by
 4-ary heap, which suggests a measurement bias (the second job of a pair starts 5 s later on a
 machine running 17 threads on 12 cores); the single-threaded region stage is the cleaner comparison,
 and newblue1 (81% region stage) side by side is running.
+
+**The search queue, settled: no change.** newblue1 side by side, `SearchHeap` vs std::priority_queue:
+region stage 3645 -> 4067 s (+11.6%), slow tier 540 -> 603 s, routes identical. A method check on
+adaptec2 cleared the measurement: old vs old ties (slow tier 333.2 / 333.1 s, region 26.6 / 25.7 s),
+and with the order swapped (new first) the new heap is still slower (slow tier 348.3 vs 319.4 s,
++9%; region 25.5 vs 26.5 s, inside the noise). So side-by-side pairs are fair, and both heap variants
+lose: libc++'s pop already uses Floyd's method, and evaluating every comparison branch-free does more
+work than it saves. The 57% of cycles discarded to mispredictions must come from the rest of the
+loop (the stale-entry and relaxation tests on `distAt`, region bounds). Both searches and
+`SearchRegion` are back to their pre-Part-133 source, byte for byte. Lessons: a profile line's
+share is not the fix's ceiling -- the next attempt on the search needs a branch-level profile
+(which branches miss), not a rewrite of the line that holds the samples.
