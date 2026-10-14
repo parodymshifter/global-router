@@ -2872,12 +2872,70 @@ void routeNetFast(const RoutingGrid &g, Prices &prices, Usage &usage, const Laye
 // and A* fixes that brought it from 105s to 20s per round on adaptec1).
 // ---------------------------------------------------------------------------
 
+// pd39route (Part 133): a 4-ary heap with std::priority_queue's interface
+// and comparator convention (cmp(a, b): a comes out after b), on a caller's
+// buffer so its storage is reused across searches. Under a strict total
+// order (the searches' (priority, index, distance), Part 123) every correct
+// priority queue pops the same sequence -- entries equal in all three are
+// indistinguishable -- so it changes no route. Four children per node halve
+// the depth of the sift-down that was ~70% of the maze search (Part 133).
+template <class T, class Cmp> class QuadHeap {
+public:
+  explicit QuadHeap(std::vector<T> &buf, Cmp c = Cmp()) : v_(buf), cmp_(c) { v_.clear(); }
+  bool empty() const { return v_.empty(); }
+  size_t size() const { return v_.size(); }
+  const T &top() const { return v_[0]; }
+  void push(const T &x) {
+    size_t i = v_.size();
+    v_.push_back(x);
+    while (i > 0) {
+      const size_t p = (i - 1) / 4;
+      if (!cmp_(v_[p], x))
+        break;
+      v_[i] = v_[p];
+      i = p;
+    }
+    v_[i] = x;
+  }
+  void pop() {
+    const T x = v_.back();
+    v_.pop_back();
+    const size_t n = v_.size();
+    if (n == 0)
+      return;
+    size_t i = 0;
+    while (true) {
+      const size_t c = 4 * i + 1;
+      if (c >= n)
+        break;
+      size_t best = c;
+      const size_t end = std::min(c + 4, n);
+      for (size_t j = c + 1; j < end; ++j)
+        if (cmp_(v_[best], v_[j]))
+          best = j;
+      if (!cmp_(x, v_[best]))
+        break;
+      v_[i] = v_[best];
+      i = best;
+    }
+    v_[i] = x;
+  }
+
+private:
+  std::vector<T> &v_;
+  Cmp cmp_;
+};
+
 struct SearchRegion {
   int x0 = 0, y0 = 0, w = 0, h = 0, nLayers = 0;
   std::vector<double> dist;
   std::vector<int> parent;
   std::vector<int> stamp;
   int generation = 0;
+  // pd39route (Part 133): per tile, the sink index for this search (when
+  // sinkStamp == generation) -- multiSourceDijkstra's lookup, in place of a
+  // hash map built per search.
+  std::vector<int> sinkStamp, sinkId;
 
   void reset(int x0_, int y0_, int w_, int h_, int nLayers_) {
     x0 = x0_;
@@ -2890,6 +2948,10 @@ struct SearchRegion {
       dist.resize(needed);
       parent.resize(needed);
       stamp.resize(needed, -1);
+    }
+    if (!sinkStamp.empty() && sinkStamp.size() < needed) {
+      sinkStamp.resize(needed, -1);
+      sinkId.resize(needed, -1);
     }
     ++generation;
   }
@@ -2957,7 +3019,9 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
       return a.dist > b.dist;
     }
   };
-  std::priority_queue<QueueEntry, std::vector<QueueEntry>, Cmp> pq;
+  // pd39route (Part 133): the 4-ary heap on a per-thread buffer (same pops)
+  static thread_local std::vector<QueueEntry> pqBuf;
+  QuadHeap<QueueEntry, Cmp> pq(pqBuf);
 
   // vroute's p1Layer<0 ("reachable at any layer") case collapses to a
   // single push at the one synthetic layer -- there is no "any layer" to
@@ -3177,10 +3241,19 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
   // O(1) "is this tile a sink, and which one" lookup, scoped to this call
   // only -- sinks can number in the hundreds for a large net, and a linear
   // scan per popped node would make this quadratic in the net's pin count.
-  std::unordered_map<long long, int> sinkAt;
-  auto key = [](int x, int y) { return static_cast<long long>(x) * 1000000 + y; };
+  // pd39route (Part 133): marks on the search region (a later sink on the
+  // same tile overwrites, as the map's assignment did); only tiles inside
+  // the region are ever popped, so sinks outside it need no mark.
+  if (region.sinkStamp.size() < region.dist.size()) {
+    region.sinkStamp.resize(region.dist.size(), -1);
+    region.sinkId.resize(region.dist.size(), -1);
+  }
   for (size_t i = 0; i < sinks.size(); ++i)
-    sinkAt[key(sinks[i].x, sinks[i].y)] = static_cast<int>(i);
+    if (region.inRegion(sinks[i].x, sinks[i].y)) {
+      const int si = region.idx(sinks[i].x, sinks[i].y, 0);
+      region.sinkStamp[static_cast<size_t>(si)] = region.generation;
+      region.sinkId[static_cast<size_t>(si)] = static_cast<int>(i);
+    }
 
   const double hScale = heuristicScale(prices);
   // pd6route: boxHeuristic uses the Manhattan distance to the sinks'
@@ -3218,7 +3291,9 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
       return a.dist > b.dist;
     }
   };
-  std::priority_queue<QueueEntry, std::vector<QueueEntry>, Cmp> pq;
+  // pd39route (Part 133): the 4-ary heap on a per-thread buffer (same pops)
+  static thread_local std::vector<QueueEntry> pqBuf;
+  QuadHeap<QueueEntry, Cmp> pq(pqBuf);
 
   for (const PathNode &s : sources) {
     if (!region.inRegion(s.x, s.y))
@@ -3245,9 +3320,9 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
     ++gSearchPops;
     int x, y, l;
     region.coordsOf(i, x, y, l);
-    if (auto it = sinkAt.find(key(x, y)); it != sinkAt.end()) {
+    if (region.sinkStamp[static_cast<size_t>(i)] == region.generation) {
       foundIdx = i;
-      result.sinkIndex = it->second;
+      result.sinkIndex = region.sinkId[static_cast<size_t>(i)];
       break;
     }
     int amount = width + g.minSpacing[l];
@@ -7689,10 +7764,18 @@ struct TimingLayerModel {
   std::vector<double> relR;                 // per layer: R_l / max R
   std::vector<std::vector<double>> bias;    // [class][layer] = k[class] * relR[layer]
   size_t counts[4] = {0, 0, 0, 0};
+  // PD39ROUTE_TIMING_GATE=1: a layer's lower resistance counts only on a
+  // GCell edge with room for the net; on a full one the wire pays k[class]
+  // (the highest resistance's term), so the bias never buys overflow.
+  bool gate = false;
   const double *biasFor(const Net *n) const {
     if (!on || !n || n->id < 0 || static_cast<size_t>(n->id) >= cls.size() || cls[static_cast<size_t>(n->id)] == 0)
       return nullptr;
     return bias[cls[static_cast<size_t>(n->id)]].data();
+  }
+  double biasMaxFor(const Net *n) const {
+    const double *b = biasFor(n);
+    return b ? k[cls[static_cast<size_t>(n->id)]] : 0.0;
   }
   // classes from slack (the thresholds above); returns the worst slack
   double classify() {
@@ -7723,11 +7806,26 @@ struct TimingLayerModel {
 TimingLayerModel gTiming;
 // the net being placed: its per-layer multipliers, or nullptr (no bias)
 thread_local const double *tLayerBias = nullptr;
+thread_local double tLayerBiasMax = 0; // that net's k[class] (the gate's full-edge term)
 struct LayerBiasScope {
   const double *prev;
-  explicit LayerBiasScope(const Net *n) : prev(tLayerBias) { tLayerBias = gTiming.biasFor(n); }
-  ~LayerBiasScope() { tLayerBias = prev; }
+  double prevMax;
+  explicit LayerBiasScope(const Net *n) : prev(tLayerBias), prevMax(tLayerBiasMax) {
+    tLayerBias = gTiming.biasFor(n);
+    tLayerBiasMax = gTiming.biasMaxFor(n);
+  }
+  ~LayerBiasScope() {
+    tLayerBias = prev;
+    tLayerBiasMax = prevMax;
+  }
 };
+// The bias multiplier on one GCell edge of layer l, `demand` the edge's
+// usage with the net on it (half tracks) and `cap` its capacity (tracks).
+inline double layerBiasAt(int l, long long demand, double cap) {
+  if (gTiming.gate && static_cast<double>(demand) > 2.0 * cap)
+    return tLayerBiasMax;
+  return tLayerBias[l];
+}
 
 // loss in half-track units (dh = demand in half tracks, c in tracks).
 inline double g24Loss(long long dh, double c) {
@@ -8485,7 +8583,7 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
           // pd33route: the exact marginal score (history still scales it).
           total += h * scoreMarginal(g, e.horizontal, idx, u - amount, amount);
           if (tLayerBias) // Part 133: delay-weighted wirelength for a critical net
-            total += tLayerBias[l] * gScore.unitLength *
+            total += layerBiasAt(l, u, gScore.capOf(e.horizontal, idx)) * gScore.unitLength *
                      static_cast<double>(e.horizontal ? gScore.xPitch[c] : gScore.yPitch[c]);
           continue;
         }
@@ -10185,7 +10283,7 @@ double runCost(const RoutingGrid &g, const RealUsage &ru, Point a, Point b, int 
       c += wlEdge(true, x, a.y) + (mode2008() ? overflowMarginal(ru.h[idx], amount, g.hcap[idx])
                                               : scoreMarginal(g, true, idx, ru.h[idx], amount));
       if (tLayerBias && !mode2008()) // Part 133
-        c += tLayerBias[l] * wlEdge(true, x, a.y);
+        c += layerBiasAt(l, ru.h[idx] + amount, gScore.capOf(true, idx)) * wlEdge(true, x, a.y);
     }
   } else {
     for (int y = std::min(a.y, b.y); y < std::max(a.y, b.y); ++y) {
@@ -10193,7 +10291,7 @@ double runCost(const RoutingGrid &g, const RealUsage &ru, Point a, Point b, int 
       c += wlEdge(false, a.x, y) + (mode2008() ? overflowMarginal(ru.v[idx], amount, g.vcap[idx])
                                                : scoreMarginal(g, false, idx, ru.v[idx], amount));
       if (tLayerBias && !mode2008()) // Part 133
-        c += tLayerBias[l] * wlEdge(false, a.x, y);
+        c += layerBiasAt(l, ru.v[idx] + amount, gScore.capOf(false, idx)) * wlEdge(false, a.x, y);
     }
   }
   return c;
@@ -10690,13 +10788,20 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
         continue;
       }
       // Part 133: a critical net's wire is weighed as the DP weighed it
-      const double mult = tLayerBias && !mode2008() ? 1.0 + tLayerBias[s.l1] : 1.0;
+      // (usage here already holds the net being judged)
+      const bool biased = tLayerBias && !mode2008();
       if (s.y1 == s.y2)
-        for (int x = std::min(s.x1, s.x2); x < std::max(s.x1, s.x2); ++x)
+        for (int x = std::min(s.x1, s.x2); x < std::max(s.x1, s.x2); ++x) {
+          const size_t idx = g.hIndex(x, s.y1, s.l1);
+          const double mult = biased ? 1.0 + layerBiasAt(s.l1, ru.h[idx], gScore.capOf(true, idx)) : 1.0;
           t += mult * wlEdge(true, x, s.y1);
+        }
       else
-        for (int y = std::min(s.y1, s.y2); y < std::max(s.y1, s.y2); ++y)
+        for (int y = std::min(s.y1, s.y2); y < std::max(s.y1, s.y2); ++y) {
+          const size_t idx = g.vIndex(s.x1, y, s.l1);
+          const double mult = biased ? 1.0 + layerBiasAt(s.l1, ru.v[idx], gScore.capOf(false, idx)) : 1.0;
           t += mult * wlEdge(false, s.x1, y);
+        }
     }
     return t;
   };
@@ -18043,6 +18148,62 @@ void testCommutingDagOrder() {
   check(ordered, "commuting DAG: each position starts after every earlier overlapping one finished");
 }
 
+// pd39route (Part 133): QuadHeap pops exactly what std::priority_queue pops
+// under the searches' total order -- 200 random runs of interleaved pushes
+// and pops, priorities from a small set (many ties, broken by index, then
+// distance; some entries repeated outright).
+void testQuadHeapMatchesPriorityQueue() {
+  struct E {
+    double priority, dist;
+    int index;
+  };
+  struct C {
+    bool operator()(const E &a, const E &b) const {
+      if (a.priority != b.priority)
+        return a.priority > b.priority;
+      if (a.index != b.index)
+        return a.index > b.index;
+      return a.dist > b.dist;
+    }
+  };
+  unsigned st = 133;
+  auto rnd = [&](int n) {
+    st = st * 1103515245u + 12345u;
+    return static_cast<int>((st >> 8) % static_cast<unsigned>(n));
+  };
+  bool same = true;
+  size_t pops = 0;
+  std::vector<E> buf;
+  for (int run = 0; run < 200 && same; ++run) {
+    std::priority_queue<E, std::vector<E>, C> ref;
+    QuadHeap<E, C> q(buf);
+    E last{0, 0, 0};
+    for (int step = 0; step < 3000 && same; ++step) {
+      if (rnd(3) != 0 || ref.empty()) {
+        E e = rnd(10) == 0 ? last : E{static_cast<double>(rnd(20)), static_cast<double>(rnd(4)), rnd(50)};
+        last = e;
+        ref.push(e);
+        q.push(e);
+      } else {
+        const E &a = ref.top(), &b = q.top();
+        same = a.priority == b.priority && a.index == b.index && a.dist == b.dist && ref.size() == q.size();
+        ref.pop();
+        q.pop();
+        ++pops;
+      }
+    }
+    while (same && !ref.empty()) {
+      const E &a = ref.top(), &b = q.top();
+      same = a.priority == b.priority && a.index == b.index && a.dist == b.dist;
+      ref.pop();
+      q.pop();
+      ++pops;
+    }
+    same = same && q.empty();
+  }
+  check(same, "4-ary heap: the same " + std::to_string(pops) + " pops as std::priority_queue (ties included)");
+}
+
 // pd39route (Part 133): the timing layer bias. Classes from slack (worst
 // -1: -0.8 -> 3, -0.5 -> 2, -0.2 -> 1, -0.05 and positive -> 0, NaN -> 0).
 // Then layer assignment under the 2024 score on an 8 x 1 grid, layers H V H V,
@@ -18109,6 +18270,20 @@ void testTimingLayerBiasPicksUpperMetal() {
         "timing bias, class 3: the net climbs to the low-resistance layer 2");
   check(assign(gTiming.bias[1].data()) == std::set<int>{0},
         "timing bias, class 1 (k = 1: 3.5 on layer 0 < 16 in vias): it stays on layer 0");
+  // the gate: layer 2 full (10 half tracks used of 2 x 5 on every tile)
+  for (int x = 0; x < 7; ++x)
+    ru.h[g.hIndex(x, 0, 2)] = 10;
+  tLayerBiasMax = gTiming.k[3];
+  check(assign(gTiming.bias[3].data()) == std::set<int>{2},
+        "timing bias, ungated: class 3 still climbs onto the full layer 2 (overflow)");
+  gTiming.gate = true;
+  tLayerBiasMax = gTiming.k[3];
+  check(assign(gTiming.bias[3].data()) == std::set<int>{0},
+        "timing bias, gated: no resistance advantage on a full edge, so it stays on layer 0");
+  for (int x = 0; x < 7; ++x)
+    ru.h[g.hIndex(x, 0, 2)] = 0;
+  check(assign(gTiming.bias[3].data()) == std::set<int>{2}, "timing bias, gated, layer 2 with room: it climbs");
+  tLayerBiasMax = 0;
   gTiming = saved;
   gScore = savedS;
 }
@@ -18695,6 +18870,7 @@ int run() {
   testCommutingDagOrder();
   testCriticalPathFirstDag();
   testBuildNetTreeMatchesReference();
+  testQuadHeapMatchesPriorityQueue();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
   testPatternIncrementalRefreshIsExact();
@@ -19019,6 +19195,11 @@ int main(int argc, char **argv) {
       if (!r || !parseDoubleList(r, layerR) || layerR.empty())
         fail("PD39ROUTE_TIMING_LAYERS needs PD39ROUTE_LAYER_R=r1,...,rL (one resistance per layer)");
       gTiming.on = true;
+      if (const char *gv = std::getenv("PD39ROUTE_TIMING_GATE"); gv) {
+        if (std::strcmp(gv, "0") && std::strcmp(gv, "1"))
+          fail(std::string("PD39ROUTE_TIMING_GATE must be 0 or 1 (got '") + gv + "')");
+        gTiming.gate = gv[0] == '1';
+      }
     }
     readG24Streaming(argv[1], argv[2], align, g24In, d);
     g24Input = &g24In;
@@ -19033,10 +19214,28 @@ int main(int argc, char **argv) {
         gTiming.relR.push_back(r / rMax);
       for (int c = 1; c <= 3; ++c)
         gTiming.k[c] = timingK[static_cast<size_t>(c - 1)];
-      const double worst = gTiming.classify();
+      double worst = gTiming.classify();
+      // PD39ROUTE_TIMING_SCALE=weights: k times how much this design's score
+      // values timing against overflow -- |w_TNS| / w_overflow x |worst
+      // slack| (ns) -- relative to ariane's (100 / 3e-7 x 0.4687), where
+      // 40, 80, 160 was tuned (Part 133). 1 (default): k as given.
+      const char *sc = std::getenv("PD39ROUTE_TIMING_SCALE");
+      std::string scale = sc ? sc : "1";
+      if (scale != "1" && scale != "weights")
+        fail("PD39ROUTE_TIMING_SCALE must be 1 or weights (got '" + scale + "')");
+      if (scale == "weights") {
+        if (!g24In.res.ppa || !(g24In.res.ppaWeight[3] > 0))
+          fail("PD39ROUTE_TIMING_SCALE=weights needs a 2025 .cap with a positive overflow weight");
+        const double ref = 100.0 / 3e-7 * 0.4687;
+        const double f = std::fabs(g24In.res.ppaWeight[1]) / g24In.res.ppaWeight[3] * std::fabs(worst) * 1e9 / ref;
+        for (int c = 1; c <= 3; ++c)
+          gTiming.k[c] *= f;
+        worst = gTiming.classify();
+        std::cerr << "ISPD 2025 timing layers: strength scaled by the design's weights x " << f << "\n";
+      }
       std::cerr << "ISPD 2025 timing layers: worst slack " << worst << " s; classes 1/2/3: " << gTiming.counts[1] << " / "
                 << gTiming.counts[2] << " / " << gTiming.counts[3] << " nets, k " << gTiming.k[1] << " / " << gTiming.k[2]
-                << " / " << gTiming.k[3] << "\n";
+                << " / " << gTiming.k[3] << (gTiming.gate ? ", gated (no bias on a full edge)" : "") << "\n";
     }
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {
       std::string sv(v);

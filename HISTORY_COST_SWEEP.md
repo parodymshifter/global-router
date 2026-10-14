@@ -10294,3 +10294,45 @@ every overflow unit dear: 1, 2, 4 +0.65; 5, 10, 20 +0.58; 10, 20, 40 +0.56; 0, 0
 thirds of its nets are in class 3). One strength does not fit every design: the next test is a bias
 that cannot buy new overflow (applied only where the edge has room), and a strength from each
 design's own weights (the router reads them from the `.cap`).
+
+**The two fixes for mempool_tile_wrap** (the user's request; both off by default, byte-identical off):
+`PD39ROUTE_TIMING_GATE=1` -- a layer's lower resistance counts only on a GCell edge with room for the
+net (on a full one the wire pays k[class], the highest resistance's term), in the DP, the 3D passes
+and their keep-if-better test; `PD39ROUTE_TIMING_SCALE=weights` -- k times |w_TNS| / w_overflow x
+|worst slack| (ns), relative to ariane's value. Score change against our own unbiased route, k =
+40, 80, 160 (lower is better):
+
+| design (scale factor) | fixed k | scaled | scaled + gate |
+|---|---|---|---|
+| ariane (x1.00) | -2.29 | -2.29 | -0.43 |
+| bsg_chip (x6.83) | -1.06 | **-1.60** | +0.12 |
+| NV_NVDLA_partition_c (x1.52) | -6.12 | **-6.28** | -5.92 |
+| mempool_tile_wrap (x0.061) | +1.17 | +0.49 | +0.44 |
+
+mempool_tile_wrap gated at fixed k: 1, 2, 4 +0.69; 5, 10, 20 +0.46; 10, 20, 40 +0.48; 40, 80, 160
++0.72. **Neither fix makes mempool_tile_wrap gain**; the scaling is the better of the two everywhere
+else, and the gate costs most of the timing gain wherever the bias works (ariane's TNS -1060 ungated
+vs -1399 gated). Why mempool_tile_wrap loses: its score weighs power at 300 on a 0.146 W design whose
+switching power is wire-sensitive, and the layers a mild bias reaches, metal4-8, have the highest
+capacitance per length (0.097-0.110 vs metal2's 0.067; metal9-10 0.028-0.037): switching power
+0.04295 W off, 0.04349 W at 5, 10, 20 (up), 0.03975 W at 40, 80, 160 (down 7.5%, but overflow 1.9M ->
+6.9M). A resistance-only bias is the wrong objective where power is weighted this heavily.
+
+Also found: NV_NVDLA_partition_c's worst input slack is -71 ns on 2 nets, so slack / worst put **only
+those 2 nets** in a class (0 / 0 / 2) -- its -6.3 came from 2 nets. A robust class scale (a
+percentile of the negative slacks, not the minimum) would reach its other critical nets.
+
+**The maze search's queue.** A line-level profile (debug-symbol build, newblue1, the 2008 standard;
+Time Profiler 90 s in the slow tier, 120 s in the region stage): `pq.pop()` -- the binary heap's
+sift-down -- is **69-72% of `multiSourceDijkstra`'s self time** in both; the sink lookup's hash table
+5%; pushes ~11%. Built (exact): a 4-ary heap (`QuadHeap`, std::priority_queue's interface; under the
+searches' strict total order every correct priority queue pops the same sequence -- self-tested pop
+for pop against std::priority_queue over 400203 pops with ties) on a reused per-thread buffer, and
+the sink lookup as stamped marks on the search region. Routes byte-identical (newblue2, adaptec2 vs
+fast08). Speed, adaptec2 side by side under the same load: slow tier (8 threads) 354.0 -> 376.9 s
+(+6.5%), region stage (1 thread) 30.6 -> 26.4 s (-14%); one run each, so newblue1 (81% region stage)
+side by side decides it.
+
+**The tree builder at scale**: mempool_cluster_ranking with it (traced): solution byte-identical to
+Part 123's (`status=OK`, evaluator agrees), 432 s (Part 123: 490 s); layer assignment round 0 122 s;
+per-net tree time 226 -> 80 s, on the nets >= 10 ms 62.6 -> 3.2 s; nets >= 10 ms 7872 -> 1280.
