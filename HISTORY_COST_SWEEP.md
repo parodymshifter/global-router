@@ -10336,3 +10336,44 @@ side by side decides it.
 **The tree builder at scale**: mempool_cluster_ranking with it (traced): solution byte-identical to
 Part 123's (`status=OK`, evaluator agrees), 432 s (Part 123: 490 s); layer assignment round 0 122 s;
 per-net tree time 226 -> 80 s, on the nets >= 10 ms 62.6 -> 3.2 s; nets >= 10 ms 7872 -> 1280.
+
+**Fixes 1 and 2 for mempool_tile_wrap** (the user's choice; both off by default, byte-identical off):
+1. `PD39ROUTE_POWER_LAYERS=kp` with `PD39ROUTE_LAYER_C=c1..cL`: every net's wire on layer l also pays
+   kp x C_l / max C per GCell step (with `PD39ROUTE_TIMING_SCALE=weights`, kp x (w_power / w_overflow)
+   / ariane's).
+2. `PD39ROUTE_TIMING_REF=q`: classes against the q-quantile of the negative net slacks instead of the
+   worst (the weight scaling keeps using the worst slack, so the reference changes which nets are
+   classed, not the strength). Self-tests: an outlier leaves every other net unclassed against the
+   worst and not against a quantile; kp = 10 moves an unclassed net to a low-capacitance layer, kp = 2
+   does not.
+
+Score change against our own unbiased route (lower is better; timing k = 40, 80, 160 and every
+strength scaled by the design's weights; NanGate45 R and C from `setRC.tcl`):
+
+| design | timing | timing + power (kp 4) | power only (kp 4) | timing, classes vs 1% quantile |
+|---|---|---|---|---|
+| ariane | -2.29 | -2.16 | -- | -2.28 |
+| bsg_chip | -1.60 | -1.38 | -- | -1.61 |
+| NV_NVDLA_partition_c | -6.28 | -6.22 | -- | -5.78 |
+| mempool_tile_wrap | +0.49 | -0.51 | **-1.08** | +0.45 |
+
+mempool_tile_wrap, power only: kp 1 -0.16, 2 -0.37, **4 -1.08**, 8 -1.03, 16 -0.42 (kp 4: WNS -0.690 ->
+-0.566, TNS -3560 -> -2617, power 0.1455 -> 0.1424 W, overflow 1.94M -> 2.63M) -- its first gain: the
+lowest-capacitance layers (metal9-10) are also the lowest-resistance ones, so the power term buys
+timing too. Robust classes gain nothing anywhere: NV_NVDLA's improvement comes almost entirely from
+its two -71 ns nets (their WNS and the paths through them), and classing 59000 more nets only adds
+overflow (13.0M -> 17.0M). Best single setting tested: timing + power (sum over the four -10.27, vs
+-9.68 timing only); best per design: -11.25.
+
+**CPU counters on the region stage** (newblue7, round ~310, 90 s, 1 thread): useful 20%, back-end
+(memory) 4%, front-end 19%, **discarded 57%** -- branch mispredictions: the heap's "which child" and
+comparison branches, data-dependent by nature. So the 4-ary heap (more comparisons per level) was
+the wrong fix: side by side on newblue1 it was slower (region stage 3721 -> 4039 s, slow tier 633 ->
+676 s, routes identical), and it is gone. In its place `SearchHeap`: a binary heap whose pop moves
+the hole to a leaf choosing children with a select (Floyd's pop) and compares (priority, index, dist)
+with bitwise operators; pop for pop equal to std::priority_queue (self-test, 400203 pops with ties).
+The sink lookup's array is reverted too (one change at a time). adaptec2 side by side: region stage
+32.3 -> 27.1 s (-16%), slow tier 379.9 -> 418.6 s (+10%), routes identical -- the same split as the
+4-ary heap, which suggests a measurement bias (the second job of a pair starts 5 s later on a
+machine running 17 threads on 12 cores); the single-threaded region stage is the cleaner comparison,
+and newblue1 (81% region stage) side by side is running.

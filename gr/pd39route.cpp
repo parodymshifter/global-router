@@ -2872,58 +2872,60 @@ void routeNetFast(const RoutingGrid &g, Prices &prices, Usage &usage, const Laye
 // and A* fixes that brought it from 105s to 20s per round on adaptec1).
 // ---------------------------------------------------------------------------
 
-// pd39route (Part 133): a 4-ary heap with std::priority_queue's interface
-// and comparator convention (cmp(a, b): a comes out after b), on a caller's
-// buffer so its storage is reused across searches. Under a strict total
-// order (the searches' (priority, index, distance), Part 123) every correct
-// priority queue pops the same sequence -- entries equal in all three are
-// indistinguishable -- so it changes no route. Four children per node halve
-// the depth of the sift-down that was ~70% of the maze search (Part 133).
-template <class T, class Cmp> class QuadHeap {
+// pd39route (Part 133): the maze searches' queue -- a binary heap whose pop
+// picks the smaller child without a branch (Floyd's pop: move the hole to a
+// leaf choosing children by a select, then sift the last entry up from
+// there). CPU counters on newblue7's region stage: 57% of cycles were
+// discarded to branch mispredictions, 4% memory stalls -- the sift-down's
+// data-dependent "which child" branch. Entries pop smallest (priority,
+// index, dist) first, the total order of the searches' comparator
+// (Part 123), so every pop matches std::priority_queue's (entries equal in
+// all three are indistinguishable) and no route changes. A 4-ary heap was
+// slower (newblue1 region stage +8.5%: more comparisons per level).
+template <class E> class SearchHeap {
 public:
-  explicit QuadHeap(std::vector<T> &buf, Cmp c = Cmp()) : v_(buf), cmp_(c) { v_.clear(); }
+  explicit SearchHeap(std::vector<E> &buf) : v_(buf) { v_.clear(); }
   bool empty() const { return v_.empty(); }
   size_t size() const { return v_.size(); }
-  const T &top() const { return v_[0]; }
-  void push(const T &x) {
+  const E &top() const { return v_[0]; }
+  // a pops before b; the bitwise operators keep it free of branches
+  static bool before(const E &a, const E &b) {
+    return (a.priority < b.priority) |
+           ((a.priority == b.priority) & ((a.index < b.index) | ((a.index == b.index) & (a.dist < b.dist))));
+  }
+  void push(const E &x) {
     size_t i = v_.size();
     v_.push_back(x);
+    siftUp(i, x);
+  }
+  void pop() {
+    const E x = v_.back();
+    v_.pop_back();
+    const size_t n = v_.size();
+    if (n == 0)
+      return;
+    size_t i = 0;
+    for (size_t c = 1; c < n; c = 2 * i + 1) {
+      if (c + 1 < n)
+        c += static_cast<size_t>(before(v_[c + 1], v_[c]));
+      v_[i] = v_[c];
+      i = c;
+    }
+    siftUp(i, x);
+  }
+
+private:
+  void siftUp(size_t i, const E &x) {
     while (i > 0) {
-      const size_t p = (i - 1) / 4;
-      if (!cmp_(v_[p], x))
+      const size_t p = (i - 1) / 2;
+      if (!before(x, v_[p]))
         break;
       v_[i] = v_[p];
       i = p;
     }
     v_[i] = x;
   }
-  void pop() {
-    const T x = v_.back();
-    v_.pop_back();
-    const size_t n = v_.size();
-    if (n == 0)
-      return;
-    size_t i = 0;
-    while (true) {
-      const size_t c = 4 * i + 1;
-      if (c >= n)
-        break;
-      size_t best = c;
-      const size_t end = std::min(c + 4, n);
-      for (size_t j = c + 1; j < end; ++j)
-        if (cmp_(v_[best], v_[j]))
-          best = j;
-      if (!cmp_(x, v_[best]))
-        break;
-      v_[i] = v_[best];
-      i = best;
-    }
-    v_[i] = x;
-  }
-
-private:
-  std::vector<T> &v_;
-  Cmp cmp_;
+  std::vector<E> &v_;
 };
 
 struct SearchRegion {
@@ -2932,10 +2934,6 @@ struct SearchRegion {
   std::vector<int> parent;
   std::vector<int> stamp;
   int generation = 0;
-  // pd39route (Part 133): per tile, the sink index for this search (when
-  // sinkStamp == generation) -- multiSourceDijkstra's lookup, in place of a
-  // hash map built per search.
-  std::vector<int> sinkStamp, sinkId;
 
   void reset(int x0_, int y0_, int w_, int h_, int nLayers_) {
     x0 = x0_;
@@ -2949,10 +2947,7 @@ struct SearchRegion {
       parent.resize(needed);
       stamp.resize(needed, -1);
     }
-    if (!sinkStamp.empty() && sinkStamp.size() < needed) {
-      sinkStamp.resize(needed, -1);
-      sinkId.resize(needed, -1);
-    }
+
     ++generation;
   }
 
@@ -3019,9 +3014,9 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
       return a.dist > b.dist;
     }
   };
-  // pd39route (Part 133): the 4-ary heap on a per-thread buffer (same pops)
+  // pd39route (Part 133): the branch-free heap on a per-thread buffer (same pops)
   static thread_local std::vector<QueueEntry> pqBuf;
-  QuadHeap<QueueEntry, Cmp> pq(pqBuf);
+  SearchHeap<QueueEntry> pq(pqBuf);
 
   // vroute's p1Layer<0 ("reachable at any layer") case collapses to a
   // single push at the one synthetic layer -- there is no "any layer" to
@@ -3241,19 +3236,10 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
   // O(1) "is this tile a sink, and which one" lookup, scoped to this call
   // only -- sinks can number in the hundreds for a large net, and a linear
   // scan per popped node would make this quadratic in the net's pin count.
-  // pd39route (Part 133): marks on the search region (a later sink on the
-  // same tile overwrites, as the map's assignment did); only tiles inside
-  // the region are ever popped, so sinks outside it need no mark.
-  if (region.sinkStamp.size() < region.dist.size()) {
-    region.sinkStamp.resize(region.dist.size(), -1);
-    region.sinkId.resize(region.dist.size(), -1);
-  }
+  std::unordered_map<long long, int> sinkAt;
+  auto key = [](int x, int y) { return static_cast<long long>(x) * 1000000 + y; };
   for (size_t i = 0; i < sinks.size(); ++i)
-    if (region.inRegion(sinks[i].x, sinks[i].y)) {
-      const int si = region.idx(sinks[i].x, sinks[i].y, 0);
-      region.sinkStamp[static_cast<size_t>(si)] = region.generation;
-      region.sinkId[static_cast<size_t>(si)] = static_cast<int>(i);
-    }
+    sinkAt[key(sinks[i].x, sinks[i].y)] = static_cast<int>(i);
 
   const double hScale = heuristicScale(prices);
   // pd6route: boxHeuristic uses the Manhattan distance to the sinks'
@@ -3291,9 +3277,9 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
       return a.dist > b.dist;
     }
   };
-  // pd39route (Part 133): the 4-ary heap on a per-thread buffer (same pops)
+  // pd39route (Part 133): the branch-free heap on a per-thread buffer (same pops)
   static thread_local std::vector<QueueEntry> pqBuf;
-  QuadHeap<QueueEntry, Cmp> pq(pqBuf);
+  SearchHeap<QueueEntry> pq(pqBuf);
 
   for (const PathNode &s : sources) {
     if (!region.inRegion(s.x, s.y))
@@ -3320,9 +3306,9 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
     ++gSearchPops;
     int x, y, l;
     region.coordsOf(i, x, y, l);
-    if (region.sinkStamp[static_cast<size_t>(i)] == region.generation) {
+    if (auto it = sinkAt.find(key(x, y)); it != sinkAt.end()) {
       foundIdx = i;
-      result.sinkIndex = region.sinkId[static_cast<size_t>(i)];
+      result.sinkIndex = it->second;
       break;
     }
     int amount = width + g.minSpacing[l];
@@ -7762,27 +7748,51 @@ struct TimingLayerModel {
   std::vector<uint8_t> cls;                 // per net: 0 (unclassed) .. 3 (most critical)
   double k[4] = {0, 0, 0, 0};               // per class
   std::vector<double> relR;                 // per layer: R_l / max R
-  std::vector<std::vector<double>> bias;    // [class][layer] = k[class] * relR[layer]
+  // Part 133: PD39ROUTE_POWER_LAYERS -- every net's wire on layer l also
+  // pays kp x C_l / max C (switching power grows with wire capacitance;
+  // NanGate45's metal4-8 have the most, metal9-10 the least).
+  double kp = 0;
+  std::vector<double> relC;                 // per layer: C_l / max C (empty: no power term)
+  // Part 133: PD39ROUTE_TIMING_REF -- the slack the classes are measured
+  // against: < 0, the worst; else the refQ-quantile of the negative slacks
+  // (one outlier net no longer leaves every other net unclassed).
+  double refQ = -1;
+  double worstSlack = 0; // the lowest net slack (classify sets it; the weight scaling's slack)
+  std::vector<std::vector<double>> bias;    // [class][layer] = k[class] * relR[layer] + kp * relC[layer]
+  bool rowOn[4] = {false, false, false, false};
+  double rowMax[4] = {0, 0, 0, 0};
   size_t counts[4] = {0, 0, 0, 0};
   // PD39ROUTE_TIMING_GATE=1: a layer's lower resistance counts only on a
   // GCell edge with room for the net; on a full one the wire pays k[class]
   // (the highest resistance's term), so the bias never buys overflow.
   bool gate = false;
   const double *biasFor(const Net *n) const {
-    if (!on || !n || n->id < 0 || static_cast<size_t>(n->id) >= cls.size() || cls[static_cast<size_t>(n->id)] == 0)
+    if (!on || !n || n->id < 0 || static_cast<size_t>(n->id) >= cls.size())
       return nullptr;
-    return bias[cls[static_cast<size_t>(n->id)]].data();
+    const uint8_t c = cls[static_cast<size_t>(n->id)];
+    return rowOn[c] ? bias[c].data() : nullptr;
   }
   double biasMaxFor(const Net *n) const {
-    const double *b = biasFor(n);
-    return b ? k[cls[static_cast<size_t>(n->id)]] : 0.0;
+    if (!biasFor(n))
+      return 0.0;
+    return rowMax[cls[static_cast<size_t>(n->id)]];
   }
-  // classes from slack (the thresholds above); returns the worst slack
+  // classes from slack (the thresholds above); returns the reference slack
+  // (the worst, or the refQ-quantile of the negative slacks)
   double classify() {
     double worst = 0;
+    std::vector<float> neg;
     for (float v : slack)
-      if (v == v && v < worst)
-        worst = v;
+      if (v == v && v < 0) {
+        worst = std::min(worst, static_cast<double>(v));
+        neg.push_back(v);
+      }
+    worstSlack = worst;
+    if (refQ >= 0 && !neg.empty()) {
+      const size_t at = std::min(neg.size() - 1, static_cast<size_t>(refQ * static_cast<double>(neg.size())));
+      std::nth_element(neg.begin(), neg.begin() + static_cast<std::ptrdiff_t>(at), neg.end());
+      worst = neg[at];
+    }
     cls.assign(slack.size(), 0);
     for (size_t c = 0; c < 4; ++c)
       counts[c] = 0;
@@ -7790,16 +7800,26 @@ struct TimingLayerModel {
       const float v = slack[i];
       uint8_t c = 0;
       if (worst < 0 && v == v && v < 0) {
-        const double r = v / worst;
+        const double r = std::min(1.0, v / worst);
         c = r >= 0.7 ? 3 : r >= 0.4 ? 2 : r >= 0.1 ? 1 : 0;
       }
       cls[i] = c;
       ++counts[c];
     }
-    bias.assign(4, std::vector<double>(relR.size(), 0.0));
-    for (int c = 1; c < 4; ++c)
-      for (size_t l = 0; l < relR.size(); ++l)
-        bias[c][l] = k[c] * relR[l];
+    const size_t L = std::max(relR.size(), relC.size());
+    bias.assign(4, std::vector<double>(L, 0.0));
+    for (int c = 0; c < 4; ++c) {
+      rowOn[c] = false;
+      rowMax[c] = 0;
+      for (size_t l = 0; l < L; ++l) {
+        if (c > 0 && l < relR.size())
+          bias[c][l] += k[c] * relR[l];
+        if (l < relC.size())
+          bias[c][l] += kp * relC[l];
+        rowOn[c] = rowOn[c] || bias[c][l] != 0.0;
+        rowMax[c] = std::max(rowMax[c], bias[c][l]);
+      }
+    }
     return worst;
   }
 };
@@ -18148,7 +18168,7 @@ void testCommutingDagOrder() {
   check(ordered, "commuting DAG: each position starts after every earlier overlapping one finished");
 }
 
-// pd39route (Part 133): QuadHeap pops exactly what std::priority_queue pops
+// pd39route (Part 133): SearchHeap pops exactly what std::priority_queue pops
 // under the searches' total order -- 200 random runs of interleaved pushes
 // and pops, priorities from a small set (many ties, broken by index, then
 // distance; some entries repeated outright).
@@ -18176,7 +18196,7 @@ void testQuadHeapMatchesPriorityQueue() {
   std::vector<E> buf;
   for (int run = 0; run < 200 && same; ++run) {
     std::priority_queue<E, std::vector<E>, C> ref;
-    QuadHeap<E, C> q(buf);
+    SearchHeap<E> q(buf);
     E last{0, 0, 0};
     for (int step = 0; step < 3000 && same; ++step) {
       if (rnd(3) != 0 || ref.empty()) {
@@ -18201,7 +18221,7 @@ void testQuadHeapMatchesPriorityQueue() {
     }
     same = same && q.empty();
   }
-  check(same, "4-ary heap: the same " + std::to_string(pops) + " pops as std::priority_queue (ties included)");
+  check(same, "branch-free heap: the same " + std::to_string(pops) + " pops as std::priority_queue (ties included)");
 }
 
 // pd39route (Part 133): the timing layer bias. Classes from slack (worst
@@ -18284,6 +18304,36 @@ void testTimingLayerBiasPicksUpperMetal() {
     ru.h[g.hIndex(x, 0, 2)] = 0;
   check(assign(gTiming.bias[3].data()) == std::set<int>{2}, "timing bias, gated, layer 2 with room: it climbs");
   tLayerBiasMax = 0;
+  gTiming.gate = false;
+  // robust classes: one -100 outlier among slacks -1 .. -0.1; against the
+  // worst every other net is unclassed (ratio <= 0.01); against the 0.1
+  // quantile (-1, after the outlier) they spread over the three classes
+  // (values kept off the 0.7 / 0.4 / 0.1 boundaries: slacks are floats)
+  gTiming.slack = {-100.0f, -1.0f, -0.95f, -0.85f, -0.75f, -0.65f, -0.5f, -0.45f, -0.35f, -0.25f, -0.15f, 0.5f};
+  gTiming.refQ = -1;
+  gTiming.classify();
+  check(gTiming.counts[1] + gTiming.counts[2] == 0 && gTiming.counts[3] == 1,
+        "timing classes against the worst: an outlier leaves every other net unclassed");
+  gTiming.refQ = 0.1;
+  double ref = gTiming.classify();
+  check(ref == -1.0 && gTiming.cls[0] == 3 && gTiming.cls[1] == 3 && gTiming.cls[4] == 3 && gTiming.cls[5] == 2 &&
+            gTiming.cls[7] == 2 && gTiming.cls[8] == 1 && gTiming.cls[10] == 1 && gTiming.cls[11] == 0,
+        "timing classes against the 0.1 quantile (-1): -0.75 and worse 3, -0.65 .. -0.45 2, -0.35 .. -0.15 1");
+  // the power term: an unclassed net, layer 2's capacitance 0.3 of the
+  // most; kp = 10 makes 7 tiles of layer 0 cost 35 more vs 10.5 more on
+  // layer 2, 24.5 > the vias' 16: it climbs; kp = 2 (4.9 < 16) it stays
+  gTiming.refQ = -1;
+  gTiming.relR.clear();
+  gTiming.relC = {1.0, 1.0, 0.3, 0.3};
+  gTiming.k[1] = gTiming.k[2] = gTiming.k[3] = 0;
+  gTiming.slack = {0.5f};
+  gTiming.kp = 10;
+  gTiming.classify();
+  check(gTiming.rowOn[0] && gTiming.bias[0][2] == 3.0, "power term: every net's row is k_p x C_l / max C");
+  check(assign(gTiming.bias[0].data()) == std::set<int>{2}, "power term, kp 10: an unclassed net moves to low-C layer 2");
+  gTiming.kp = 2;
+  gTiming.classify();
+  check(assign(gTiming.bias[0].data()) == std::set<int>{0}, "power term, kp 2: it stays on layer 0");
   gTiming = saved;
   gScore = savedS;
 }
@@ -19187,7 +19237,28 @@ int main(int argc, char **argv) {
     }
     // Part 133: PD39ROUTE_TIMING_LAYERS=k1,k2,k3 (per class) with
     // PD39ROUTE_LAYER_R=r1,...,rL (each layer's resistance, any unit).
-    std::vector<double> timingK, layerR;
+    std::vector<double> timingK, layerR, layerC;
+    double powerK = 0;
+    if (const char *v = std::getenv("PD39ROUTE_POWER_LAYERS"); v) { // Part 133
+      std::vector<double> pk;
+      if (!parseDoubleList(v, pk) || pk.size() != 1 || pk[0] < 0)
+        fail(std::string("PD39ROUTE_POWER_LAYERS must be one number kp >= 0 (got '") + v + "')");
+      powerK = pk[0];
+      const char *c = std::getenv("PD39ROUTE_LAYER_C");
+      if (!c || !parseDoubleList(c, layerC) || layerC.empty())
+        fail("PD39ROUTE_POWER_LAYERS needs PD39ROUTE_LAYER_C=c1,...,cL (one capacitance per layer)");
+      gTiming.on = true;
+    }
+    if (const char *v = std::getenv("PD39ROUTE_TIMING_REF"); v) { // Part 133
+      std::string sv(v);
+      std::vector<double> q;
+      if (sv == "worst")
+        gTiming.refQ = -1;
+      else if (parseDoubleList(v, q) && q.size() == 1 && q[0] >= 0 && q[0] < 1)
+        gTiming.refQ = q[0];
+      else
+        fail("PD39ROUTE_TIMING_REF must be worst or a fraction 0 <= q < 1 (got '" + sv + "')");
+    }
     if (const char *v = std::getenv("PD39ROUTE_TIMING_LAYERS"); v) {
       if (!parseDoubleList(v, timingK) || timingK.size() != 3)
         fail(std::string("PD39ROUTE_TIMING_LAYERS must be three numbers k1,k2,k3 (got '") + v + "')");
@@ -19204,15 +19275,22 @@ int main(int argc, char **argv) {
     readG24Streaming(argv[1], argv[2], align, g24In, d);
     g24Input = &g24In;
     if (gTiming.on) {
-      if (static_cast<int>(layerR.size()) != g24In.res.nLayers)
-        fail("PD39ROUTE_LAYER_R has " + std::to_string(layerR.size()) + " values; the design has " +
-             std::to_string(g24In.res.nLayers) + " layers");
-      const double rMax = *std::max_element(layerR.begin(), layerR.end());
-      if (!(rMax > 0))
-        fail("PD39ROUTE_LAYER_R: at least one resistance must be positive");
-      for (double r : layerR)
-        gTiming.relR.push_back(r / rMax);
-      for (int c = 1; c <= 3; ++c)
+      auto relative = [&](const std::vector<double> &vals, const char *name, std::vector<double> &out) {
+        if (vals.empty())
+          return;
+        if (static_cast<int>(vals.size()) != g24In.res.nLayers)
+          fail(std::string(name) + " has " + std::to_string(vals.size()) + " values; the design has " +
+               std::to_string(g24In.res.nLayers) + " layers");
+        const double mx = *std::max_element(vals.begin(), vals.end());
+        if (!(mx > 0))
+          fail(std::string(name) + ": at least one value must be positive");
+        for (double x : vals)
+          out.push_back(x / mx);
+      };
+      relative(layerR, "PD39ROUTE_LAYER_R", gTiming.relR);
+      relative(layerC, "PD39ROUTE_LAYER_C", gTiming.relC);
+      gTiming.kp = powerK;
+      for (int c = 1; c <= 3 && !timingK.empty(); ++c)
         gTiming.k[c] = timingK[static_cast<size_t>(c - 1)];
       double worst = gTiming.classify();
       // PD39ROUTE_TIMING_SCALE=weights: k times how much this design's score
@@ -19227,15 +19305,22 @@ int main(int argc, char **argv) {
         if (!g24In.res.ppa || !(g24In.res.ppaWeight[3] > 0))
           fail("PD39ROUTE_TIMING_SCALE=weights needs a 2025 .cap with a positive overflow weight");
         const double ref = 100.0 / 3e-7 * 0.4687;
-        const double f = std::fabs(g24In.res.ppaWeight[1]) / g24In.res.ppaWeight[3] * std::fabs(worst) * 1e9 / ref;
+        // the worst slack even under PD39ROUTE_TIMING_REF: the reference
+        // changes which nets are classed, not how strong the bias is
+        const double f =
+            std::fabs(g24In.res.ppaWeight[1]) / g24In.res.ppaWeight[3] * std::fabs(gTiming.worstSlack) * 1e9 / ref;
         for (int c = 1; c <= 3; ++c)
           gTiming.k[c] *= f;
+        // the power term: w_power / w_overflow relative to ariane's (300 / 3e-7)
+        const double fp = std::fabs(g24In.res.ppaWeight[2]) / g24In.res.ppaWeight[3] / (300.0 / 3e-7);
+        gTiming.kp *= fp;
         worst = gTiming.classify();
-        std::cerr << "ISPD 2025 timing layers: strength scaled by the design's weights x " << f << "\n";
+        std::cerr << "ISPD 2025 timing layers: strength scaled by the design's weights x " << f << " (timing), x " << fp
+                  << " (power)\n";
       }
-      std::cerr << "ISPD 2025 timing layers: worst slack " << worst << " s; classes 1/2/3: " << gTiming.counts[1] << " / "
-                << gTiming.counts[2] << " / " << gTiming.counts[3] << " nets, k " << gTiming.k[1] << " / " << gTiming.k[2]
-                << " / " << gTiming.k[3] << (gTiming.gate ? ", gated (no bias on a full edge)" : "") << "\n";
+      std::cerr << "ISPD 2025 timing layers: " << (gTiming.refQ < 0 ? "worst" : "reference") << " slack " << worst
+                << " s; classes 1/2/3: " << gTiming.counts[1] << " / " << gTiming.counts[2] << " / " << gTiming.counts[3]
+                << " nets, k " << gTiming.k[1] << " / " << gTiming.k[2] << " / " << gTiming.k[3] << ", kp " << gTiming.kp << (gTiming.gate ? ", gated (no bias on a full edge)" : "") << "\n";
     }
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {
       std::string sv(v);
