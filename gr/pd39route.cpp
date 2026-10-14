@@ -10776,8 +10776,29 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   }
   // pd37route: one net's round-0 assignment (the loop body before),
   // touching nothing outside netBoxOf(net) but its own entries.
+  // Part 132, PD37ROUTE_BATCH_TRACE only: each net's round-0 time in three
+  // phases -- tree build, the dynamic program, commit (wires, vias, pins).
+  std::vector<std::array<float, 3>> laPhase(laTrace ? nets.size() : 0);
   auto assignRound0 = [&](size_t i) {
     NetClock netClock(nets[i].net, kNtLayer); // Part 131
+    using PhClock = std::chrono::steady_clock;
+    const PhClock::time_point ph0 = laTrace ? PhClock::now() : PhClock::time_point();
+    PhClock::time_point ph1 = ph0, ph2 = ph0;
+    struct PhaseRec {
+      std::function<void()> f;
+      ~PhaseRec() { f(); }
+    } phaseRec{[&]() {
+      if (!laTrace)
+        return;
+      const PhClock::time_point ph3 = PhClock::now();
+      if (ph1 == ph0)
+        ph1 = ph2 = ph3; // no tree DP: all of it counts as commit
+      else if (ph2 == ph0)
+        ph2 = ph3;
+      laPhase[i] = {static_cast<float>(std::chrono::duration<double>(ph1 - ph0).count()),
+                    static_cast<float>(std::chrono::duration<double>(ph2 - ph1).count()),
+                    static_cast<float>(std::chrono::duration<double>(ph3 - ph2).count())};
+    }};
     RoutedNet &rn = nets[i];
     dropDegenerateSegs(rn);
     if (!viaAware) {
@@ -10805,10 +10826,14 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     }
     NetTree &tree = nthu ? laTree : trees[i];
     const std::vector<std::pair<int, int>> &pr0 = nthu ? laPr : pinRange[i];
-    if (built &&
-        layerAssignDP(g, ru, rvu, viaCap, lp, rn.net->minWidth, tree, edgeLayer, rootLayer,
-                      nodeStackRange, viaWeight, &vp.hist, wireHistH, wireHistV, nthu,
-                      pr0.empty() ? nullptr : &pr0)) {
+    if (laTrace)
+      ph1 = PhClock::now();
+    const bool dpOk = built && layerAssignDP(g, ru, rvu, viaCap, lp, rn.net->minWidth, tree, edgeLayer, rootLayer,
+                                             nodeStackRange, viaWeight, &vp.hist, wireHistH, wireHistV, nthu,
+                                             pr0.empty() ? nullptr : &pr0);
+    if (laTrace)
+      ph2 = PhClock::now();
+    if (dpOk) {
       commitNetTree(g, ru, rvu, rn.net->minWidth, tree, edgeLayer, nodeStackRange, rn,
                     &charges[i]);
       stitchPinAccessForNetChargingVias(g, rvu, rn, &charges[i]);
@@ -10874,6 +10899,23 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   }
 
   laLap("round 0 (graph build and run)");
+  if (laTrace) { // Part 132: where round 0's per-net time goes, all nets and nets >= 10 ms
+    double all[3] = {0, 0, 0}, big[3] = {0, 0, 0};
+    size_t nBig = 0;
+    for (const auto &ph : laPhase) {
+      const double tot = ph[0] + ph[1] + ph[2];
+      for (int k = 0; k < 3; ++k)
+        all[k] += ph[k];
+      if (tot >= 1e-2) {
+        ++nBig;
+        for (int k = 0; k < 3; ++k)
+          big[k] += ph[k];
+      }
+    }
+    std::cerr << "layer assignment timing: round 0 per net -- tree " << all[0] << " s, dynamic program " << all[1]
+              << " s, commit " << all[2] << " s; nets >= 10 ms (" << nBig << "): tree " << big[0] << " s, dynamic program "
+              << big[1] << " s, commit " << big[2] << " s\n";
+  }
   if (!viaAware) {
     rep.roundsRun = 1;
     return rep;

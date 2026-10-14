@@ -139,7 +139,53 @@ D4. Compare with the published winners' visible-set numbers (leaderboard in
   routers report on): needs a LEF/DEF front end -- the OpenROAD move
   CLAUDE.md's porting seam already plans for, and D2 brings closer.
 
-## Proposed order
+## Plan, 2026-10-14 (after Parts 124-132)
+
+What changed since the scope above: fast08 is the 2008 standard (Part 124: zero-overflow designs
+31-70% faster; residues newblue1 30, newblue4 154, newblue7 104, bigblue4 366, newblue3 38948);
+D1 and D2 are done (Part 125: the 2025 reader/writer, the contest's OpenROAD fork built on this Mac;
+ariane's congestion already beats 1st place, timing does not -- WNS +0.75, TNS +0.32 of score); the
+difficulty atlas (Parts 130-131); layer assignment's scheduling is not the 2024 limit (Part 132).
+
+**A2 was already tried.** Parts 92-99 batched the slow tier *and the region stage* (pd24-pd27route):
+newblue1 2.3-2.5x faster, but mean overflow 39.3 vs 32.7 over three cells (+20%, p ~ 0.3), and the
+"fresh" conflict rule was worse (50.0). pd37route and later descend from pd36route and do not carry
+that code. So the region stage needs a different parallel idea, or the cores spent another way.
+
+Order (runs: at most 3 at once; one long 2008 residue run plus short 2024 / 2025 runs at a time):
+
+0. **Housekeeping (small).** Timing that survives sleep: every summary also records CPU time, and
+   long batches ask for keep-awake (Part 124's newblue7 time was unreadable). Finish Part 132's
+   follow-up (one large net's layer-assignment program split over its subtrees) if the phase
+   breakdown shows the program is most of the large nets' time.
+1. **A1 + A4: profile the region stage, then exact savings** (newblue4, the shortest residue run,
+   2.6 h). Instruments with the stage markers (Part 126): where a region round's time goes --
+   searches, best-state copies (newblue7: 266k nets per improvement), whole-grid overflow scans.
+   A4's delta-kept best state and incremental overflow are byte-identical, so they need no quality
+   judgment. Decision point: if searches are < ~70% of region time, A4 alone is worth weeks of A2.
+2. **A3: independent hotspots in parallel (exact).** Overflow clusters more than two search
+   margins apart share no edge: run their region loops on separate threads, byte-identical per
+   cluster. Measure first how many such clusters newblue4 / bigblue4 / newblue7 have at the region
+   stage's start (a grdiag pass on the saved routes -- no router run).
+3. **A6: portfolio** -- with the faster runs, K variants of the post-slow-tier stages at once
+   (virtual capacity on / off, margins, seeds), keep the best by (overflow, max, wirelength).
+   Directly attacks the +4 to +10 that fast08 cost the residues, using idle cores rather than
+   splitting one search. Memory bounds K (newblue7 ~5.5 GB per state, 24 GB machine).
+4. **D3: timing-driven routing for 2025** (in parallel with 1-3: the 2025 runs are minutes).
+   D3a: from the evaluator's OpenSTA on our ariane route, the critical nets and how much of their
+   delay is wire (vs. cell). D3b: those nets get a priority weight `w_i` (CLAUDE.md "Core cost
+   model": priority divides the congestion price) and an upper-layer bias in layer assignment;
+   bucketed into 3-5 classes (CLAUDE.md "Net typing"), refreshed every few rounds, not every round.
+   D3c: all 6 visible designs vs the winners' published numbers (D4). Success = the score's timing
+   terms below the beta medians on ariane without giving back its congestion lead.
+5. **B: quality on the residues**, using 1-3's faster runs: B1 newblue3 (objective-matched cost
+   past capacity; the floor-gated stop at region round 59 rerun off), B3 newblue1 (Lagrangian
+   multipliers in the region stage -- this project's central idea), B2 / B4 bigblue4 / newblue7
+   (budgets, boxes, the portfolio), B5 wirelength on the eleven.
+6. **C and E as time allows**: re-test the region stage on 2024 once it is cheap (Part 115: 25 min
+   bought 11 units of 2D overflow on mempool_cluster_ranking); ISPD 2007's 2D designs.
+
+## Proposed order (2026-10-12; superseded by the plan above)
 
 1. Part 124: fast08 on all sixteen -- done; adopted as the 2008 standard (2026-10-14).
 2. A1 (ceiling) -> A4 (exact savings) -> A2 or A3 -> A6.
