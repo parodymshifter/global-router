@@ -1872,6 +1872,26 @@ void advancePresentDemand(Prices &pr, const Usage &u) {
 
 // Parses PD1ROUTE_COST (pd | lambda; unset = pd) and PD1ROUTE_WL_FLOOR (a
 // finite number >= 0; unset = 0). Fails loudly on anything else.
+// pd39route (Part 133): "a,b,c" -> {a, b, c}; every entry a finite number.
+bool parseDoubleList(const char *v, std::vector<double> &out) {
+  out.clear();
+  if (!v || !*v)
+    return false;
+  const char *p = v;
+  while (true) {
+    char *end = nullptr;
+    double x = std::strtod(p, &end);
+    if (end == p || !std::isfinite(x))
+      return false;
+    out.push_back(x);
+    if (*end == '\0')
+      return true;
+    if (*end != ',')
+      return false;
+    p = end + 1;
+  }
+}
+
 bool parseCostSettings(const char *model, const char *floor, CostSettings &out, std::string &err) {
   CostSettings c;
   c.model = CostModel::kPresentDemand;
@@ -7651,6 +7671,64 @@ struct ScoreModel {
 };
 ScoreModel gScore;
 
+// pd39route (Part 133): timing-driven layer choice, ISPD 2025 (off unless
+// PD39ROUTE_TIMING_LAYERS is set). A 2025 .net gives every pin a slack
+// (seconds); a net's is its lowest. Nets with negative slack fall in three
+// classes by slack / the design's worst (>= 0.1, >= 0.4, >= 0.7 -- near-zero
+// slack stays unclassed, CLAUDE.md "Net typing"), and a classed net's wire on
+// layer l costs, per GCell step, its wirelength term times k[class] x
+// R_l / max R in addition: delay-weighted wirelength, steering critical nets
+// to the upper metal (NanGate45: metal9-10 have ~1/95 of metal2's resistance).
+// Layer assignment's dynamic program and the 3D pattern passes both add it,
+// for the net they are placing (tLayerBias).
+struct TimingLayerModel {
+  bool on = false;
+  std::vector<float> slack;                 // per Design net (id order); NaN = no value
+  std::vector<uint8_t> cls;                 // per net: 0 (unclassed) .. 3 (most critical)
+  double k[4] = {0, 0, 0, 0};               // per class
+  std::vector<double> relR;                 // per layer: R_l / max R
+  std::vector<std::vector<double>> bias;    // [class][layer] = k[class] * relR[layer]
+  size_t counts[4] = {0, 0, 0, 0};
+  const double *biasFor(const Net *n) const {
+    if (!on || !n || n->id < 0 || static_cast<size_t>(n->id) >= cls.size() || cls[static_cast<size_t>(n->id)] == 0)
+      return nullptr;
+    return bias[cls[static_cast<size_t>(n->id)]].data();
+  }
+  // classes from slack (the thresholds above); returns the worst slack
+  double classify() {
+    double worst = 0;
+    for (float v : slack)
+      if (v == v && v < worst)
+        worst = v;
+    cls.assign(slack.size(), 0);
+    for (size_t c = 0; c < 4; ++c)
+      counts[c] = 0;
+    for (size_t i = 0; i < slack.size(); ++i) {
+      const float v = slack[i];
+      uint8_t c = 0;
+      if (worst < 0 && v == v && v < 0) {
+        const double r = v / worst;
+        c = r >= 0.7 ? 3 : r >= 0.4 ? 2 : r >= 0.1 ? 1 : 0;
+      }
+      cls[i] = c;
+      ++counts[c];
+    }
+    bias.assign(4, std::vector<double>(relR.size(), 0.0));
+    for (int c = 1; c < 4; ++c)
+      for (size_t l = 0; l < relR.size(); ++l)
+        bias[c][l] = k[c] * relR[l];
+    return worst;
+  }
+};
+TimingLayerModel gTiming;
+// the net being placed: its per-layer multipliers, or nullptr (no bias)
+thread_local const double *tLayerBias = nullptr;
+struct LayerBiasScope {
+  const double *prev;
+  explicit LayerBiasScope(const Net *n) : prev(tLayerBias) { tLayerBias = gTiming.biasFor(n); }
+  ~LayerBiasScope() { tLayerBias = prev; }
+};
+
 // loss in half-track units (dh = demand in half tracks, c in tracks).
 inline double g24Loss(long long dh, double c) {
   if (c > 0.001)
@@ -7921,8 +7999,205 @@ struct NetTree {
 // n7807 on zero-capacity layers (all 16 of its remaining overflow, Part
 // 62). `pinTiles`: pins lying on a wire become nodes too, so every edge is
 // split at pins and a dropped stretch can never contain one.
+// pd39route (Part 133): the same tree as buildNetTreeReference (below; kept
+// for the self-test), in O(n log n). The reference re-sorted its whole node
+// index every 16 new nodes and tested every pin against every leg -- both
+// quadratic, and 43% of layer assignment's time on the nets of 10 ms or
+// more (mempool_cluster_ranking, Part 132). Here: every node is known before
+// the first edge (leg endpoints, then pins lying on a leg, in that order),
+// so the first-seen order comes from one sort; pins are tested against legs
+// sorted by line with a running maximum of their far ends; a leg's interior
+// nodes are one range of nodes sorted by (line, position).
 bool buildNetTree(const std::vector<Seg> &segs, NetTree &t, bool dropCycles = false,
                   const std::vector<Point> *pinTiles = nullptr) {
+  t.nodes.clear();
+  t.edges.clear();
+  struct Cand {
+    long long key;
+    int seq, x, y;
+  };
+  struct Scratch {
+    std::vector<Cand> cand;
+    std::vector<std::pair<long long, int>> index; // (key, node), sorted by key
+    std::vector<std::pair<long long, int>> fresh; // nodes made after the index (defensive)
+    std::vector<std::pair<int, int>> first;       // (sequence, cand position) of each key's first sighting
+    std::vector<const Seg *> legs;
+    std::vector<std::array<int, 3>> hLegs, vLegs; // (line, lo, running max of hi within the line)
+    std::vector<std::array<int, 3>> byRow, byCol; // (y, x, node), (x, y, node)
+    std::vector<int> uf;
+    std::vector<std::pair<int, int>> onLine;
+  };
+  static thread_local Scratch sc;
+  sc.index.clear();
+  sc.fresh.clear();
+  auto keyOf = [](int x, int y) { return (static_cast<long long>(x) << 32) ^ static_cast<unsigned>(y); };
+  auto lookup = [&](long long k) -> int {
+    auto it = std::lower_bound(sc.index.begin(), sc.index.end(), std::make_pair(k, INT_MIN));
+    if (it != sc.index.end() && it->first == k)
+      return it->second;
+    for (const auto &f : sc.fresh)
+      if (f.first == k)
+        return f.second;
+    return -1;
+  };
+  auto nodeFor = [&](int x, int y) -> int {
+    long long k = keyOf(x, y);
+    int found = lookup(k);
+    if (found >= 0)
+      return found;
+    int idx = static_cast<int>(t.nodes.size());
+    t.nodes.push_back({x, y});
+    sc.fresh.push_back({k, idx});
+    sc.uf.push_back(idx); // only a malformed (diagonal) leg gets here; the reference wrote past its end
+    return idx;
+  };
+
+  std::vector<const Seg *> &legs = sc.legs;
+  legs.clear();
+  for (const Seg &s : segs)
+    if (s.l1 == s.l2 && (s.x1 != s.x2 || s.y1 != s.y2))
+      legs.push_back(&s);
+  if (legs.empty()) {
+    if (!segs.empty())
+      nodeFor(segs.front().x1, segs.front().y1);
+    t.adj.clear(); // as before: a single-tile tree has no adjacency
+    return true; // a single-tile net -- nothing to split or assign
+  }
+
+  // every node, in the order the reference creates them
+  std::vector<Cand> &cand = sc.cand;
+  cand.clear();
+  int seq = 0;
+  for (const Seg *s : legs) {
+    cand.push_back({keyOf(s->x1, s->y1), seq++, s->x1, s->y1});
+    cand.push_back({keyOf(s->x2, s->y2), seq++, s->x2, s->y2});
+  }
+  if (pinTiles && !pinTiles->empty()) {
+    sc.hLegs.clear();
+    sc.vLegs.clear();
+    for (const Seg *s : legs) {
+      if (s->y1 == s->y2)
+        sc.hLegs.push_back({s->y1, std::min(s->x1, s->x2), std::max(s->x1, s->x2)});
+      else if (s->x1 == s->x2)
+        sc.vLegs.push_back({s->x1, std::min(s->y1, s->y2), std::max(s->y1, s->y2)});
+    }
+    for (auto *list : {&sc.hLegs, &sc.vLegs}) {
+      std::sort(list->begin(), list->end());
+      for (size_t j = 1; j < list->size(); ++j)
+        if ((*list)[j][0] == (*list)[j - 1][0])
+          (*list)[j][2] = std::max((*list)[j][2], (*list)[j - 1][2]);
+    }
+    // a leg on `line` with lo <= c <= hi exists
+    auto covered = [](const std::vector<std::array<int, 3>> &list, int line, int c) {
+      auto it = std::upper_bound(list.begin(), list.end(), std::array<int, 3>{line, c, INT_MAX});
+      if (it == list.begin())
+        return false;
+      --it;
+      return (*it)[0] == line && (*it)[2] >= c;
+    };
+    for (const Point &p : *pinTiles)
+      if (covered(sc.hLegs, p.y, p.x) || covered(sc.vLegs, p.x, p.y))
+        cand.push_back({keyOf(p.x, p.y), seq++, p.x, p.y});
+  }
+  std::sort(cand.begin(), cand.end(), [](const Cand &a, const Cand &b) {
+    return a.key != b.key ? a.key < b.key : a.seq < b.seq;
+  });
+  sc.first.clear();
+  for (size_t j = 0; j < cand.size(); ++j)
+    if (j == 0 || cand[j].key != cand[j - 1].key)
+      sc.first.push_back({cand[j].seq, static_cast<int>(j)});
+  std::sort(sc.first.begin(), sc.first.end());
+  sc.index.resize(sc.first.size());
+  for (size_t nidx = 0; nidx < sc.first.size(); ++nidx) {
+    const Cand &c = cand[static_cast<size_t>(sc.first[nidx].second)];
+    t.nodes.push_back({c.x, c.y});
+    sc.index[nidx] = {c.key, static_cast<int>(nidx)};
+  }
+  std::sort(sc.index.begin(), sc.index.end());
+
+  sc.byRow.clear();
+  sc.byCol.clear();
+  for (int i = 0; i < static_cast<int>(t.nodes.size()); ++i) {
+    sc.byRow.push_back({t.nodes[i].y, t.nodes[i].x, i});
+    sc.byCol.push_back({t.nodes[i].x, t.nodes[i].y, i});
+  }
+  std::sort(sc.byRow.begin(), sc.byRow.end());
+  std::sort(sc.byCol.begin(), sc.byCol.end());
+
+  std::vector<int> &uf = sc.uf;
+  uf.resize(t.nodes.size());
+  for (size_t i = 0; i < uf.size(); ++i)
+    uf[i] = static_cast<int>(i);
+  auto find = [&](int a) {
+    while (uf[a] != a) {
+      uf[a] = uf[uf[a]];
+      a = uf[a];
+    }
+    return a;
+  };
+  auto addEdge = [&](int a, int b, bool horizontal, int cross, int lo, int hi) {
+    int ra = find(a), rb = find(b);
+    if (ra == rb)
+      return false; // a cycle -- two legs already connect these nodes
+    uf[ra] = rb;
+    t.edges.push_back({a, b, horizontal, cross, lo, hi});
+    return true;
+  };
+
+  for (const Seg *s : legs) {
+    bool horizontal = s->y1 == s->y2;
+    int lo = horizontal ? std::min(s->x1, s->x2) : std::min(s->y1, s->y2);
+    int hi = horizontal ? std::max(s->x1, s->x2) : std::max(s->y1, s->y2);
+    int cross = horizontal ? s->y1 : s->x1;
+
+    // the nodes strictly inside the leg, by position (one node per tile)
+    std::vector<std::pair<int, int>> &onLine = sc.onLine; // (coord along axis, node index)
+    onLine.clear();
+    const std::vector<std::array<int, 3>> &line = horizontal ? sc.byRow : sc.byCol;
+    for (auto it = std::upper_bound(line.begin(), line.end(), std::array<int, 3>{cross, lo, INT_MAX});
+         it != line.end() && (*it)[0] == cross && (*it)[1] < hi; ++it)
+      onLine.push_back({(*it)[1], (*it)[2]});
+
+    int prevNode = nodeFor(horizontal ? lo : cross, horizontal ? cross : lo);
+    int prevCoord = lo;
+    for (auto &pr : onLine) {
+      if (!addEdge(prevNode, pr.second, horizontal, cross, prevCoord, pr.first) && !dropCycles)
+        return false;
+      prevNode = pr.second;
+      prevCoord = pr.first;
+    }
+    int lastNode = nodeFor(horizontal ? hi : cross, horizontal ? cross : hi);
+    if (!addEdge(prevNode, lastNode, horizontal, cross, prevCoord, hi) && !dropCycles)
+      return false;
+  }
+
+  if (t.adj.size() > t.nodes.size())
+    t.adj.resize(t.nodes.size());
+  for (std::vector<int> &a : t.adj)
+    a.clear();
+  t.adj.resize(t.nodes.size());
+  for (int i = 0; i < static_cast<int>(t.edges.size()); ++i) {
+    t.adj[t.edges[i].a].push_back(i);
+    t.adj[t.edges[i].b].push_back(i);
+  }
+
+  // A genuine tree has exactly nodes-1 edges; addEdge already rejects
+  // any cycle, so an explicit connectivity check (rather than trusting
+  // the count alone) is what actually rules out a stray, disconnected
+  // node.
+  if (t.edges.size() != t.nodes.size() - 1)
+    return false;
+  int root = find(0);
+  for (size_t i = 1; i < t.nodes.size(); ++i)
+    if (find(static_cast<int>(i)) != root)
+      return false;
+  return true;
+}
+
+// pd39route (Part 133): the pre-Part-133 tree builder, unchanged, kept only
+// as the self-test's reference for buildNetTree above.
+bool buildNetTreeReference(const std::vector<Seg> &segs, NetTree &t, bool dropCycles = false,
+                           const std::vector<Point> *pinTiles = nullptr) {
   // pd37route: t is cleared, not reassigned (a reused tree keeps its
   // capacity); node lookups use a sorted index, not a std::map. Nodes keep
   // their first-seen indices, so the tree is the same.
@@ -8209,6 +8484,9 @@ bool layerAssignDP(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu,
         if (gScore.on) {
           // pd33route: the exact marginal score (history still scales it).
           total += h * scoreMarginal(g, e.horizontal, idx, u - amount, amount);
+          if (tLayerBias) // Part 133: delay-weighted wirelength for a critical net
+            total += tLayerBias[l] * gScore.unitLength *
+                     static_cast<double>(e.horizontal ? gScore.xPitch[c] : gScore.yPitch[c]);
           continue;
         }
         if (u > capT)
@@ -9906,12 +10184,16 @@ double runCost(const RoutingGrid &g, const RealUsage &ru, Point a, Point b, int 
       size_t idx = g.hIndex(x, a.y, l);
       c += wlEdge(true, x, a.y) + (mode2008() ? overflowMarginal(ru.h[idx], amount, g.hcap[idx])
                                               : scoreMarginal(g, true, idx, ru.h[idx], amount));
+      if (tLayerBias && !mode2008()) // Part 133
+        c += tLayerBias[l] * wlEdge(true, x, a.y);
     }
   } else {
     for (int y = std::min(a.y, b.y); y < std::max(a.y, b.y); ++y) {
       size_t idx = g.vIndex(a.x, y, l);
       c += wlEdge(false, a.x, y) + (mode2008() ? overflowMarginal(ru.v[idx], amount, g.vcap[idx])
                                                : scoreMarginal(g, false, idx, ru.v[idx], amount));
+      if (tLayerBias && !mode2008()) // Part 133
+        c += tLayerBias[l] * wlEdge(false, a.x, y);
     }
   }
   return c;
@@ -9952,6 +10234,7 @@ double viaDemandCost(const RoutingGrid &g, const RealUsage &ru, int x, int y, in
 bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const RealLayerPlan &lp, RoutedNet &rn,
                   NetCharge &charge, double &gainOut) {
   NetClock netClock(rn.net, kNt3D); // Part 131
+  LayerBiasScope layerBias(rn.net); // Part 133
   using namespace p3d;
   const int L = g.nLayers;
   const double kInf = std::numeric_limits<double>::max() / 4;
@@ -10406,12 +10689,14 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
         t += viaUnit() * std::abs(s.l2 - s.l1);
         continue;
       }
+      // Part 133: a critical net's wire is weighed as the DP weighed it
+      const double mult = tLayerBias && !mode2008() ? 1.0 + tLayerBias[s.l1] : 1.0;
       if (s.y1 == s.y2)
         for (int x = std::min(s.x1, s.x2); x < std::max(s.x1, s.x2); ++x)
-          t += wlEdge(true, x, s.y1);
+          t += mult * wlEdge(true, x, s.y1);
       else
         for (int y = std::min(s.y1, s.y2); y < std::max(s.y1, s.y2); ++y)
-          t += wlEdge(false, s.x1, y);
+          t += mult * wlEdge(false, s.x1, y);
     }
     return t;
   };
@@ -10781,6 +11066,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   std::vector<std::array<float, 3>> laPhase(laTrace ? nets.size() : 0);
   auto assignRound0 = [&](size_t i) {
     NetClock netClock(nets[i].net, kNtLayer); // Part 131
+    LayerBiasScope layerBias(nets[i].net);   // Part 133
     using PhClock = std::chrono::steady_clock;
     const PhClock::time_point ph0 = laTrace ? PhClock::now() : PhClock::time_point();
     PhClock::time_point ph1 = ph0, ph2 = ph0;
@@ -11065,6 +11351,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
         buildLaTree(i, laTree, laPr); // the same tree round 0 built (usesTreeDP[i] says it built)
       NetTree &tree = nthu ? laTree : trees[i];
       const std::vector<std::pair<int, int>> &pr0 = nthu ? laPr : pinRange[i];
+      LayerBiasScope layerBias(nets[i].net); // Part 133
       bool ok = layerAssignDP(g, ru, rvu, viaCap, lp, nets[i].net->minWidth, tree, edgeLayer,
                               rootLayer, nodeStackRange, viaWeight, &vp.hist, wireHistH, wireHistV,
                               nthu, pr0.empty() ? nullptr : &pr0);
@@ -11251,6 +11538,13 @@ void readG24Streaming(const std::string &capPath, const std::string &netPath, bo
       fail("ISPD 2024 input: " + err);
     if (align)
       g24::chooseAccessPointsNet(n);
+    if (gTiming.on) { // Part 133: the net's lowest pin slack
+      float lo = std::numeric_limits<float>::quiet_NaN();
+      for (float v : n.timing)
+        if (v == v && !(lo <= v))
+          lo = v;
+      gTiming.slack.push_back(lo);
+    }
     g24::appendDesignNet(d, n, i++, /*keepName=*/false);
   }
   if (!err.empty())
@@ -17749,6 +18043,157 @@ void testCommutingDagOrder() {
   check(ordered, "commuting DAG: each position starts after every earlier overlapping one finished");
 }
 
+// pd39route (Part 133): the timing layer bias. Classes from slack (worst
+// -1: -0.8 -> 3, -0.5 -> 2, -0.2 -> 1, -0.05 and positive -> 0, NaN -> 0).
+// Then layer assignment under the 2024 score on an 8 x 1 grid, layers H V H V,
+// one 2-pin net along the row with both pins on layer 0: unbiased it stays on
+// layer 0 (no vias); as a class-3 net with layer 2's resistance 1/100 of
+// layer 0's and k = 10, the 7 tiles' delay-weighted length (35 on layer 0)
+// outweighs two 2-via stacks (16), so it climbs to layer 2.
+void testTimingLayerBiasPicksUpperMetal() {
+  TimingLayerModel saved = gTiming;
+  ScoreModel savedS = gScore;
+  gTiming = TimingLayerModel{};
+  gTiming.on = true;
+  gTiming.slack = {-1.0f, -0.8f, -0.5f, -0.2f, -0.05f, 0.3f, std::numeric_limits<float>::quiet_NaN()};
+  gTiming.relR = {1.0, 1.0, 0.01, 0.01};
+  gTiming.k[1] = 1;
+  gTiming.k[2] = 5;
+  gTiming.k[3] = 10;
+  double worst = gTiming.classify();
+  check(worst == -1.0 && gTiming.cls == std::vector<uint8_t>({3, 3, 2, 1, 0, 0, 0}),
+        "timing classes: slack / worst >= 0.7, 0.4, 0.1 -> 3, 2, 1; near-zero, positive, none -> 0");
+  check(gTiming.bias[3][2] == 10 * 0.01 && gTiming.bias[1][0] == 1.0 && gTiming.bias[0][0] == 0.0,
+        "timing bias table: k[class] x R_l / R_max");
+
+  Design d = parse("pd39route_selftest_timing.gr", "grid 8 1 4\nvertical capacity 0 10 0 10\n"
+                                                    "horizontal capacity 10 0 10 0\nminimum width 1 1 1 1\n"
+                                                    "minimum spacing 0 0 0 0\nvia spacing 0 0 0 0\n0 0 10 10\n"
+                                                    "num net 1\nn0 0 2 1\n5 5 1\n75 5 1\n0\n");
+  const RoutingGrid &g = d.grid;
+  gScore = ScoreModel{};
+  gScore.on = true;
+  gScore.w = {1, 1, 1, 1};
+  gScore.unitVia = 4;
+  gScore.unitLength = 0.5;
+  gScore.capH.assign(g.hCount(), 5.0);
+  gScore.capV.assign(g.vCount(), 5.0);
+  gScore.xPitch.assign(g.nx - 1, 1);
+  gScore.yPitch.assign(std::max(1, g.ny - 1), 1);
+  RealLayerPlan lp(g);
+  RealUsage ru(g);
+  RealViaUsage rvu(g);
+  std::vector<int> viaCap = viaCapacityPerLayerPair(g);
+  std::vector<Seg> segs = {{0, 0, 0, 7, 0, 0}};
+  NetTree legs, t;
+  bool built = buildNetTree(segs, legs);
+  splitToUnitEdges(legs, t);
+  std::vector<std::pair<int, int>> pr(t.nodes.size(), {-1, -1});
+  for (size_t u = 0; u < t.nodes.size(); ++u)
+    if (t.nodes[u].x == 0 || t.nodes[u].x == 7)
+      pr[u] = {0, 0};
+  auto assign = [&](const double *bias) {
+    tLayerBias = bias;
+    std::vector<int> edgeLayer;
+    int rootLayer = 0;
+    std::vector<std::pair<int, int>> nsr;
+    bool ok = layerAssignDP(g, ru, rvu, viaCap, lp, 1, t, edgeLayer, rootLayer, nsr, 1.0, nullptr, nullptr, nullptr,
+                            /*nthuCost=*/true, &pr);
+    tLayerBias = nullptr;
+    std::set<int> layers(edgeLayer.begin(), edgeLayer.end());
+    return ok ? layers : std::set<int>{-1};
+  };
+  check(built && t.edges.size() == 7, "timing fixture: a 7-edge row (sanity)");
+  check(assign(nullptr) == std::set<int>{0}, "timing bias off: the net stays on its pins' layer 0");
+  check(assign(gTiming.bias[3].data()) == std::set<int>{2},
+        "timing bias, class 3: the net climbs to the low-resistance layer 2");
+  check(assign(gTiming.bias[1].data()) == std::set<int>{0},
+        "timing bias, class 1 (k = 1: 3.5 on layer 0 < 16 in vias): it stays on layer 0");
+  gTiming = saved;
+  gScore = savedS;
+}
+
+// pd39route (Part 133): buildNetTree equals buildNetTreeReference -- nodes
+// (order included), edges, adjacency and the return value -- on 3000 random
+// nets: rectilinear walks with repeated and overlapping legs (cycles), a few
+// layer-change segments, pins on and off the wire, with and
+// without dropCycles, from 1 to ~1500 legs.
+void testBuildNetTreeMatchesReference() {
+  unsigned st = 2026;
+  auto rnd = [&](int n) {
+    st = st * 1103515245u + 12345u;
+    return static_cast<int>((st >> 8) % static_cast<unsigned>(n));
+  };
+  bool same = true, sawCycleFail = false, sawPinNode = false;
+  int trials = 0;
+  for (int trial = 0; trial < 3000; ++trial) {
+    const int span = 8 + rnd(60);
+    const int legsN = trial % 100 == 0 ? 500 + rnd(1000) : 1 + rnd(40);
+    std::vector<Seg> segs;
+    int x = rnd(span), y = rnd(span);
+    for (int k = 0; k < legsN; ++k) {
+      const int kind = rnd(20);
+      if (kind == 0) { // a via (dropped as a leg)
+        segs.push_back({x, y, 0, x, y, 1});
+        continue;
+      }
+      if (kind == 1) { // a jump: a new start, maybe disconnected
+        x = rnd(span), y = rnd(span);
+        continue;
+      }
+      if (kind == 2 && !segs.empty()) { // repeat an earlier leg (a cycle)
+        segs.push_back(segs[static_cast<size_t>(rnd(static_cast<int>(segs.size())))]);
+        continue;
+      }
+      int nx = x, ny = y;
+      if (rnd(2))
+        nx = rnd(span);
+      else
+        ny = rnd(span);
+      segs.push_back({x, y, 0, nx, ny, 0});
+      x = nx, y = ny;
+    }
+    std::vector<Point> pins;
+    for (int k = rnd(12); k-- > 0;) {
+      if (!segs.empty() && rnd(2)) { // on a segment's end or interior
+        const Seg &sg = segs[static_cast<size_t>(rnd(static_cast<int>(segs.size())))];
+        if (sg.y1 == sg.y2)
+          pins.push_back({std::min(sg.x1, sg.x2) + rnd(std::abs(sg.x2 - sg.x1) + 1), sg.y1});
+        else
+          pins.push_back({sg.x1, std::min(sg.y1, sg.y2) + rnd(std::abs(sg.y2 - sg.y1) + 1)});
+      } else {
+        pins.push_back({rnd(span), rnd(span)});
+      }
+    }
+    for (int mode = 0; mode < 4; ++mode) {
+      const bool drop = mode & 1;
+      const std::vector<Point> *pp = (mode & 2) ? &pins : nullptr;
+      NetTree a, b;
+      bool ra = buildNetTree(segs, a, drop, pp), rb = buildNetTreeReference(segs, b, drop, pp);
+      bool eq = ra == rb && a.nodes.size() == b.nodes.size() && a.edges.size() == b.edges.size() &&
+                a.adj == b.adj;
+      for (size_t i = 0; eq && i < a.nodes.size(); ++i)
+        eq = a.nodes[i].x == b.nodes[i].x && a.nodes[i].y == b.nodes[i].y;
+      for (size_t i = 0; eq && i < a.edges.size(); ++i) {
+        const NetTree::Edge &e = a.edges[i], &f = b.edges[i];
+        eq = e.a == f.a && e.b == f.b && e.horizontal == f.horizontal && e.cross == f.cross && e.lo == f.lo &&
+             e.hi == f.hi;
+      }
+      same = same && eq;
+      sawCycleFail = sawCycleFail || (!drop && !rb);
+      if (pp) {
+        NetTree c;
+        buildNetTreeReference(segs, c, drop, nullptr);
+        sawPinNode = sawPinNode || c.nodes.size() < b.nodes.size();
+      }
+      ++trials;
+    }
+  }
+  check(same, "tree builder (O(n log n)) = the reference on " + std::to_string(trials) +
+                  " random nets: nodes in order, edges, adjacency, result");
+  check(sawCycleFail && sawPinNode, "tree builder fixtures cover a rejected cycle and a pin that adds a node");
+}
+
 // pd39route (Part 132): critical-path-first scheduling. A hand-checked
 // graph -- 0 -> 1 -> 3, 0 -> 2, weights 1, 5, 1, 2 -- has bottom levels
 // 8, 7, 1, 2; the replay on 1 thread runs every task (finish = total work);
@@ -18249,6 +18694,8 @@ int run() {
   testPatternColorBatchesMatchesFirstFit();
   testCommutingDagOrder();
   testCriticalPathFirstDag();
+  testBuildNetTreeMatchesReference();
+  testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
   testPatternIncrementalRefreshIsExact();
   testG24StreamingMatchesInMemory();
@@ -18562,8 +19009,35 @@ int main(int argc, char **argv) {
       align = sv == "align";
       std::cerr << "ISPD 2024 access points: " << sv << "\n";
     }
+    // Part 133: PD39ROUTE_TIMING_LAYERS=k1,k2,k3 (per class) with
+    // PD39ROUTE_LAYER_R=r1,...,rL (each layer's resistance, any unit).
+    std::vector<double> timingK, layerR;
+    if (const char *v = std::getenv("PD39ROUTE_TIMING_LAYERS"); v) {
+      if (!parseDoubleList(v, timingK) || timingK.size() != 3)
+        fail(std::string("PD39ROUTE_TIMING_LAYERS must be three numbers k1,k2,k3 (got '") + v + "')");
+      const char *r = std::getenv("PD39ROUTE_LAYER_R");
+      if (!r || !parseDoubleList(r, layerR) || layerR.empty())
+        fail("PD39ROUTE_TIMING_LAYERS needs PD39ROUTE_LAYER_R=r1,...,rL (one resistance per layer)");
+      gTiming.on = true;
+    }
     readG24Streaming(argv[1], argv[2], align, g24In, d);
     g24Input = &g24In;
+    if (gTiming.on) {
+      if (static_cast<int>(layerR.size()) != g24In.res.nLayers)
+        fail("PD39ROUTE_LAYER_R has " + std::to_string(layerR.size()) + " values; the design has " +
+             std::to_string(g24In.res.nLayers) + " layers");
+      const double rMax = *std::max_element(layerR.begin(), layerR.end());
+      if (!(rMax > 0))
+        fail("PD39ROUTE_LAYER_R: at least one resistance must be positive");
+      for (double r : layerR)
+        gTiming.relR.push_back(r / rMax);
+      for (int c = 1; c <= 3; ++c)
+        gTiming.k[c] = timingK[static_cast<size_t>(c - 1)];
+      const double worst = gTiming.classify();
+      std::cerr << "ISPD 2025 timing layers: worst slack " << worst << " s; classes 1/2/3: " << gTiming.counts[1] << " / "
+                << gTiming.counts[2] << " / " << gTiming.counts[3] << " nets, k " << gTiming.k[1] << " / " << gTiming.k[2]
+                << " / " << gTiming.k[3] << "\n";
+    }
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {
       std::string sv(v);
       if (sv != "0" && sv != "1")

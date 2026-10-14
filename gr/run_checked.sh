@@ -14,7 +14,7 @@
 # Writes <log_prefix>.{stdout,stderr,time,vsz} (run_tracked.sh), .route,
 # .verify, .eval, and <log_prefix>.summary -- one line:
 #   <name> status=<OK|ILLEGAL|DISAGREE|ROUTER_FAILED> of=<N> max=<N> wl=<N>
-#   eval_of=<N> eval_max=<N> eval_wl=<N> 2d=<N> real_s=<N> rss_mb=<N>
+#   eval_of=<N> eval_max=<N> eval_wl=<N> 2d=<N> real_s=<N> cpu_s=<N> rss_mb=<N>
 #   legal=<m/o/d/i/u counts>
 # status=OK means legal (no malformed, out-of-bounds, disconnected,
 # incomplete or unrouted nets) AND gr_verify and eval2008.pl agree on total
@@ -77,6 +77,9 @@ eval_max=$(echo "$eval_line" | awk '{print $(NF-1)}')
 eval_wl=$(echo "$eval_line" | awk '{print $NF}')
 twod=$(grep -m1 '^2D overflow' "${prefix}.stderr" | sed -E 's/^2D overflow[^:]*: ([0-9]+).*/\1/')
 real_s=$(grep -m1 ' real ' "${prefix}.time" | awk '{print $1}')
+# CPU time (user + system): unlike real_s it does not count time the Mac
+# spent asleep, so it stays comparable when a run is paused (Part 133).
+cpu_s=$(grep -m1 ' real ' "${prefix}.time" | awk '{printf "%.2f", $3 + $5}')
 rss=$(grep -m1 'maximum resident set size' "${prefix}.time" | awk '{printf "%d", $1 / 1048576}')
 
 status=OK
@@ -87,7 +90,7 @@ elif [ -z "$of" ] || [ "$of" != "$eval_of" ] || [ "$max" != "$eval_max" ] || [ "
 fi
 
 echo "$name status=$status of=$of max=$max wl=$wl eval_of=$eval_of eval_max=$eval_max" \
-     "eval_wl=$eval_wl 2d=$twod real_s=$real_s rss_mb=$rss legal=$m/$o/$d/$i/$u" \
+     "eval_wl=$eval_wl 2d=$twod real_s=$real_s cpu_s=$cpu_s rss_mb=$rss legal=$m/$o/$d/$i/$u" \
      > "${prefix}.summary"
 if [ "${KEEP_ROUTE:-0}" != "1" ]; then
   gzip -f "${prefix}.route"

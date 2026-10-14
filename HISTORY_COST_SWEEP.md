@@ -10222,3 +10222,75 @@ run's solution byte-identical to Part 123's (`status=OK`, evaluator agrees):
 Next (exact): split one large net's layer-assignment dynamic program over its tree's independent
 subtrees, so the idle workers shorten the chain itself. Ceiling: the ~49 s spent at one busy worker.
 
+
+## Part 133 -- best-results plan steps 0, 1 and 4 begin (in progress)
+
+**Step 0 (housekeeping).** `run_checked.sh` / `run_checked24.sh` summaries gain `cpu_s` (user + system
+from `/usr/bin/time`; unlike `real_s` it does not count time asleep). `run_batch.sh` holds off idle
+sleep for its own lifetime (`caffeinate -i -w`, started in a subshell so the batch's final `wait` does
+not wait on it). A closed lid still sleeps.
+
+**Step 1 (2008 region stage, profiled).** Time Profiler attached to the running bigblue4 per-net run
+for 120 s in its region stage (round ~81; ~2 min a round, ~12600 reroutes and ~7e8 search expansions
+each): **98% in the maze search** (`multiSourceDijkstra` 91% self, its edge costs 8%), on one thread.
+The plan's A4 (best state kept as a delta, incremental overflow) would save ~nothing there. newblue4's
+region stage runs all 500 rounds (flat at 180-200 from round ~100, best at 298, Part 122). The lever
+is the search kernel itself (exact, and shared with the slow tier on every design) -- a line-level
+profile on newblue1 with a debug-symbol build is queued.
+
+**Layer assignment's large nets (Part 132's follow-up).** The phase breakdown (trace only;
+mempool_cluster_ranking, loaded machine): all nets -- tree 226 s, dynamic program 653 s, commit 109 s;
+the 7872 nets of >= 10 ms -- tree **62.6 s**, program 74.4 s, commit 8.6 s. Tree building was
+quadratic: `buildNetTree` re-sorted its whole node index every 16 new nodes, and tested every pin
+against every leg. Rewritten in O(n log n) -- every node is known before the first edge (leg ends,
+then pins on a leg), so first-seen order comes from one sort; pins are tested against legs sorted by
+line with a running maximum of their far ends; a leg's interior nodes are one range of nodes sorted
+by (line, position). The old builder stays as `buildNetTreeReference`; a self-test compares the two
+(nodes in order, edges, adjacency, result) on 12000 random nets with cycles, repeated legs, vias and
+pins on and off the wire, clean under AddressSanitizer and UndefinedBehaviorSanitizer. (A diagonal
+leg -- malformed input `gr_verify` rejects -- made the old builder write past its union-find array;
+the new one grows it.) Byte-identical routes on the four 2025 designs below; the timing run on
+mempool_cluster_ranking is queued.
+
+**Step 4 (ISPD 2025 timing), D3a.** OpenSTA on our ariane route (the contest's OpenROAD fork):
+placement-only parasitics (Steiner estimates) give TNS -1299.5 / WNS -0.469 -- better TNS than 1st
+place's routed -1325.8 -- and our route -1463.1 / -0.508, so routing costs ~164 of TNS. 11252 failing
+endpoints; 12903 nets on their worst paths. The 2025 `.net` already carries every pin's slack: its
+net minimum correlates 0.949 with OpenSTA's routed worst slack over those nets, and every one of the
+2127 worst (<= -0.4 ns) has input slack < -0.3 ns -- criticality needs no in-loop timer. NanGate45
+resistance by layer (`setRC.tcl`): metal4-6 0.42x metal2-3, metal7-8 0.053x, metal9-10 0.011x.
+
+**D3b: `PD39ROUTE_TIMING_LAYERS=k1,k2,k3` with `PD39ROUTE_LAYER_R=r1..rL`** (pd39route, off by
+default; byte-identical when off). Nets with negative slack fall in classes by slack / the design's
+worst (>= 0.1, 0.4, 0.7; near-zero stays unclassed); a classed net's wire on layer l costs, per GCell
+step, its wirelength term times k[class] x R_l / max R in addition -- in layer assignment's dynamic
+program and in the 3D pattern passes (their DP and their keep-if-better test). Self-test: classes;
+a 7-tile net climbs from layer 0 to a 1/100-resistance layer 2 at k = 10 and stays at k = 1 (the
+vias' 16 outweigh 3.5).
+
+ariane (2024 standard settings, 8 threads; every route legal -- 0 open, 0 incomplete; score with the
+beta medians as references, lower is better; 1st place 0.897):
+
+| k1, k2, k3 | WNS | TNS | overflow cost | via cost | score |
+|---|---|---|---|---|---|
+| off | -0.5075 | -1463.1 | 5.77M | 3.04M | 2.301 |
+| 1, 2, 4 | -0.4256 | -1411.0 | 5.98M | 3.41M | 1.288 |
+| 2, 5, 10 | -0.4085 | -1368.2 | 6.31M | 3.95M | 1.003 |
+| 5, 10, 20 | -0.4003 | -1319.2 | 6.81M | 4.65M | 0.826 |
+| 4, 4, 4 | -0.4264 | -1372.2 | 6.33M | 3.92M | 1.209 |
+| 10, 20, 40 | -0.3955 | -1239.0 | 7.39M | 5.21M | 0.557 |
+| 20, 20, 20 | -0.4015 | -1210.8 | 7.70M | 5.41M | 0.572 |
+| 20, 40, 80 | -0.3872 | -1156.2 | 8.15M | 5.64M | 0.292 |
+| **40, 80, 160** | **-0.3768** | **-1060.0** | 9.14M | 5.97M | **0.008** |
+| 100, 200, 400 | -0.3690 | -973.0 | 10.95M | 6.30M | 0.042 |
+| 0, 0, 160 | -0.3728 | -1252.9 | 6.45M | -- | 0.115 |
+
+The contest's endpoint count is registers + outputs (ariane 19940 + 278 = 20218, Part 125's number).
+Other visible designs at 40, 80, 160 (score change against our own unbiased route, each design's
+weights and endpoint count; lower is better): **bsg_chip -1.06** (WNS -0.437 -> -0.400, TNS -10841 ->
+-8676, overflow 20.8M -> 28.8M); **NV_NVDLA_partition_c -6.12** (WNS -122.0 -> -57.1, TNS -726871 ->
+-522364); **mempool_tile_wrap +1.17, worse** -- its overflow weight (7e-7) on a small, full grid makes
+every overflow unit dear: 1, 2, 4 +0.65; 5, 10, 20 +0.58; 10, 20, 40 +0.56; 0, 0, 40 +0.33 (two
+thirds of its nets are in class 3). One strength does not fit every design: the next test is a bias
+that cannot buy new overflow (applied only where the edge has room), and a strength from each
+design's own weights (the router reads them from the `.cap`).

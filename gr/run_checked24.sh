@@ -12,7 +12,7 @@
 # Summary line (<log_prefix>.summary):
 #   <name> status=<OK|ILLEGAL|DISAGREE|NO_EVALUATOR|ROUTER_FAILED> cost=<total>
 #   wl_cost=<N> via_cost=<N> of_cost=<N> over_gcells=<N> max_over=<tracks>
-#   eval_cost=<total> real_s=<N> rss_mb=<N> opens=<N>
+#   eval_cost=<total> real_s=<N> cpu_s=<N> rss_mb=<N> opens=<N>
 # status=OK: g24_verify finds the solution legal AND its total cost equals the
 # contest evaluator's (bench/ispd24/official/evaluator) to the printed digit.
 # The solution file is gzip-compressed afterwards unless KEEP_ROUTE=1.
@@ -53,6 +53,9 @@ maxo=$(awk '/^overflow cost/ {print $(NF-1)}' "${prefix}.g24verify")
 eval_cost=$(awk '/^total cost/ {print $3}' "${prefix}.g24eval" 2>/dev/null)
 opens=$(awk '/^Number of open nets/ {print $NF}' "${prefix}.g24eval" 2>/dev/null)
 real_s=$(grep -m1 ' real ' "${prefix}.time" | awk '{print $1}')
+# CPU time (user + system): unlike real_s it does not count time the Mac
+# spent asleep, so it stays comparable when a run is paused (Part 133).
+cpu_s=$(grep -m1 ' real ' "${prefix}.time" | awk '{printf "%.2f", $3 + $5}')
 rss=$(grep -m1 'maximum resident set size' "${prefix}.time" | awk '{printf "%d", $1 / 1048576}')
 
 status=OK
@@ -65,7 +68,7 @@ elif [ -z "$cost" ] || [ "$cost" != "$eval_cost" ]; then
 fi
 
 echo "$name status=$status cost=$cost wl_cost=$wlc via_cost=$viac of_cost=$ofc over_gcells=$overg" \
-     "max_over=$maxo eval_cost=$eval_cost real_s=$real_s rss_mb=$rss opens=$opens" > "${prefix}.summary"
+     "max_over=$maxo eval_cost=$eval_cost real_s=$real_s cpu_s=$cpu_s rss_mb=$rss opens=$opens" > "${prefix}.summary"
 if [ "${KEEP_ROUTE:-0}" != "1" ]; then
   gzip -f "${prefix}.g24sol"
 fi

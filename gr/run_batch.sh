@@ -39,6 +39,10 @@ here=$(cd "$(dirname "$0")" && pwd)
 summary="${jobfile}.summary"
 mkdir -p "$outdir"
 : > "$summary"
+# Part 133: hold off idle sleep while the batch runs (a sleeping Mac pauses
+# every run and spoils real_s; a closed lid still sleeps). macOS only.
+# In a subshell, so the final `wait` does not wait on it.
+command -v caffeinate > /dev/null && (caffeinate -i -w $$ > /dev/null 2>&1 &)
 
 run_one() { # name bench router [VAR=value ...]
   local name="$1" bench="$2" router="$3"
