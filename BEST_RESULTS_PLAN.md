@@ -141,7 +141,7 @@ D4. Compare with the published winners' visible-set numbers (leaderboard in
 
 ## Proposed order
 
-1. Part 124 (in flight): fast08 on all sixteen.
+1. Part 124: fast08 on all sixteen -- done; adopted as the 2008 standard (2026-10-14).
 2. A1 (ceiling) -> A4 (exact savings) -> A2 or A3 -> A6.
 3. B1-B4 on the residue benchmarks, using the faster runs; B5 after.
 4. D1 -> D2 -> D3 (D2 can start in parallel with 2, since it is setup).

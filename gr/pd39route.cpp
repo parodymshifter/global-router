@@ -5510,11 +5510,17 @@ bool gCommuteTestIgnoreOverlap = false;
 // pd37route: a net's box, in tiles (inclusive), and the commuting batches.
 // gCommuteCell: the coarse cell, in tiles, overlap is tested on.
 int gCommuteCell = 4; // PD37ROUTE_CELL
+// pd39route (Part 132): PD39ROUTE_LA_CRIT (below) -- critical path first.
 // pd39route (Part 129): PD39ROUTE_LA_CELL, the cell (tiles) of layer
 // assignment's round-0 dependency graph only; 0 = PD37ROUTE_CELL. A pure
 // schedule setting -- a coarser cell only adds dependencies, and the routes
 // are the same under any graph that orders every overlapping pair.
 int gLaCell = 0;
+// pd39route (Part 132): PD39ROUTE_LA_CRIT=1 runs layer assignment's round-0
+// graph critical path first, each net's work estimated as 1 + its pins +
+// its 2D route's tile edges. 0 (default) = lowest position first. A pure
+// schedule setting, like PD39ROUTE_LA_CELL.
+int gLaCrit = 0;
 struct NetBox {
   int x0 = 0, y0 = 0, x1 = -1, y1 = -1;
 };
@@ -5614,7 +5620,8 @@ std::vector<std::vector<size_t>> commutingBatches(const std::vector<NetBox> &box
 // list is kept (a die-spanning box covers tens of thousands of cells).
 using CellsOfFn = std::function<void(size_t, std::vector<uint32_t> &)>;
 size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int threads,
-                         const std::function<void(size_t)> &f);
+                         const std::function<void(size_t)> &f,
+                         const std::function<double(size_t)> *weight = nullptr);
 // pd38route: the graph built once and run any number of times (the 3D
 // passes run the same positions; a box only shrinks when its net is
 // rerouted, so the first pass's graph orders every pair that can overlap
@@ -5622,8 +5629,14 @@ size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int 
 struct CommutingDagPlan {
   size_t n = 0, edges = 0;
   std::vector<uint32_t> succStart, succ, indeg;
+  // pd39route (Part 132): when set, each position's bottom level -- its own
+  // estimated work plus the longest estimated chain of work after it -- and
+  // the scheduler runs the ready position with the largest first (critical
+  // path first), not the lowest. Order only: the routes are the same.
+  std::vector<float> prio;
 };
 CommutingDagPlan buildCommutingDag(size_t n, size_t nCells, const CellsOfFn &cellsOf);
+void setCriticalPathPriority(CommutingDagPlan &plan, const std::function<double(size_t)> &weight);
 void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::function<void(size_t)> &f);
 
 size_t runCommutingDag(const std::vector<NetBox> &boxes, int nx, int ny, int cell, int threads,
@@ -5645,10 +5658,80 @@ size_t runCommutingDag(const std::vector<NetBox> &boxes, int nx, int ny, int cel
 // The graph: position k depends on the last earlier position listing each
 // of its cells (duplicates in a list are harmless).
 size_t runCommutingDagFn(size_t n, size_t nCells, const CellsOfFn &cellsOf, int threads,
-                         const std::function<void(size_t)> &f) {
+                         const std::function<void(size_t)> &f, const std::function<double(size_t)> *weight) {
   CommutingDagPlan plan = buildCommutingDag(n, nCells, cellsOf);
+  if (weight)
+    setCriticalPathPriority(plan, *weight);
   runCommutingDagPlan(plan, threads, f);
   return plan.edges;
+}
+
+// pd39route (Part 132): bottom levels, latest position first (every edge
+// runs from a lower position to a higher one).
+void setCriticalPathPriority(CommutingDagPlan &plan, const std::function<double(size_t)> &weight) {
+  const size_t n = plan.n;
+  std::vector<double> bl(n, 0.0);
+  for (size_t k = n; k-- > 0;) {
+    double after = 0;
+    for (uint32_t e = plan.succStart[k]; e < plan.succStart[k + 1]; ++e)
+      after = std::max(after, bl[plan.succ[e]]);
+    bl[k] = std::max(0.0, weight(k)) + after;
+  }
+  plan.prio.assign(bl.begin(), bl.end());
+}
+
+// pd39route (Part 132): the scheduler's ready order. With priorities, the
+// largest bottom level first, ties to the lower position; without, the
+// lowest position first (pd37route's order).
+struct DagReadyOrder {
+  const float *prio = nullptr;
+  bool operator()(uint32_t a, uint32_t b) const { // true: a runs after b
+    if (prio && prio[a] != prio[b])
+      return prio[a] < prio[b];
+    return a > b;
+  }
+};
+
+// pd39route (Part 132), PD37ROUTE_BATCH_TRACE only: list scheduling replayed
+// on measured task times -- `threads` workers, each idle one taking the best
+// ready position under `order` -- so schedules can be compared free of the
+// machine's other load. Returns the simulated finish time.
+double simulateDagSchedule(const CommutingDagPlan &plan, const std::vector<float> &taskTime, int threads,
+                           const DagReadyOrder &order, std::vector<double> *busyTime = nullptr) {
+  const size_t n = plan.n;
+  std::vector<uint32_t> waiting(plan.indeg.begin(), plan.indeg.end());
+  std::priority_queue<uint32_t, std::vector<uint32_t>, DagReadyOrder> ready(order);
+  for (size_t k = 0; k < n; ++k)
+    if (waiting[k] == 0)
+      ready.push(static_cast<uint32_t>(k));
+  using Ev = std::pair<double, uint32_t>; // (finish time, position)
+  std::priority_queue<Ev, std::vector<Ev>, std::greater<Ev>> running;
+  double now = 0;
+  int idle = std::max(1, threads);
+  size_t done = 0;
+  while (done < n) {
+    while (idle > 0 && !ready.empty()) {
+      uint32_t k = ready.top();
+      ready.pop();
+      running.push({now + taskTime[k], k});
+      --idle;
+    }
+    if (running.empty())
+      break; // unreachable for a valid graph
+    Ev ev = running.top();
+    running.pop();
+    if (busyTime) { // time spent with each number of busy workers
+      busyTime->resize(static_cast<size_t>(std::max(1, threads)) + 1, 0.0);
+      (*busyTime)[running.size() + 1] += ev.first - now;
+    }
+    now = ev.first;
+    ++idle;
+    ++done;
+    for (uint32_t e = plan.succStart[ev.second]; e < plan.succStart[ev.second + 1]; ++e)
+      if (--waiting[plan.succ[e]] == 0)
+        ready.push(plan.succ[e]);
+  }
+  return now;
 }
 
 CommutingDagPlan buildCommutingDag(size_t n, size_t nCells, const CellsOfFn &cellsOf) {
@@ -5718,11 +5801,19 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
   std::vector<std::atomic<uint32_t>> waiting(n);
   for (size_t k = 0; k < n; ++k)
     waiting[k].store(plan.indeg[k], std::memory_order_relaxed);
-  // ready positions, lowest first (keeps the long tail of the order moving)
-  std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
+  // ready positions, lowest first (keeps the long tail of the order moving),
+  // or with priorities set, the largest bottom level first (Part 132)
+  const float *prio = plan.prio.size() == n && n ? plan.prio.data() : nullptr;
+  const DagReadyOrder better{prio};
+  std::priority_queue<uint32_t, std::vector<uint32_t>, DagReadyOrder> ready(better);
   for (size_t k = 0; k < n; ++k)
     if (waiting[k].load(std::memory_order_relaxed) == 0)
       ready.push(static_cast<uint32_t>(k));
+  // Part 132: the queue top's bottom level (under m to write; read relaxed
+  // as a hint), so a worker about to keep a freed position can see whether
+  // a queued one is more urgent.
+  auto topOf = [&]() { return prio && !ready.empty() ? prio[ready.top()] : -1.0f; };
+  std::atomic<float> topPrio{topOf()};
   // Workers: run one freed successor directly (no queue round trip), spin
   // briefly before sleeping, and wake sleepers only when they exist. Which
   // thread runs what, and when, does not matter: dependencies alone decide
@@ -5781,6 +5872,7 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
           return; // done == n
         k = ready.top();
         ready.pop();
+        topPrio.store(topOf(), std::memory_order_relaxed);
         readyN.fetch_sub(1, std::memory_order_release);
         have = true;
         if (dagTrace)
@@ -5798,26 +5890,37 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
       for (uint32_t e = succStart[k]; e < succStart[k + 1]; ++e)
         if (waiting[succ[e]].fetch_sub(1, std::memory_order_acq_rel) == 1)
           freed.push_back(succ[e]);
-      // keep the lowest freed position for this thread; queue the rest
+      // keep the best freed position for this thread (the lowest, or with
+      // priorities the most urgent); queue the rest
       if (!freed.empty()) {
         size_t lo = 0;
         for (size_t j = 1; j < freed.size(); ++j)
-          if (freed[j] < freed[lo])
+          if (better(freed[lo], freed[j]))
             lo = j;
         k = freed[lo];
         freed[lo] = freed.back();
         freed.pop_back();
         have = true;
       }
+      // Part 132: a queued position more urgent than the kept one runs
+      // first; the kept one goes to the queue.
+      const bool swapTop = prio && have && prio[k] < topPrio.load(std::memory_order_relaxed);
       int wake = 0, asleep = 0;
       // pd38route: a task that frees nothing beyond the one this thread
       // keeps needs no lock (most do); sleepers recheck `done` under the
       // lock, and the last task takes it to wake them.
       const bool last = done.fetch_add(1, std::memory_order_acq_rel) + 1 == n;
-      if (!freed.empty() || last) {
+      if (!freed.empty() || last || swapTop) {
         std::lock_guard<std::mutex> lk(m);
         for (uint32_t s2 : freed)
           ready.push(s2);
+        if (swapTop && !ready.empty() && better(k, ready.top())) {
+          ready.push(k);
+          k = ready.top();
+          ready.pop();
+        }
+        if (prio)
+          topPrio.store(topOf(), std::memory_order_relaxed);
         readyN.fetch_add(freed.size(), std::memory_order_release);
         if (last)
           finished.store(true, std::memory_order_release);
@@ -5841,6 +5944,7 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
     // The time-weighted longest path: no schedule on any number of threads
     // can finish sooner. Positions are already in dependency order.
     std::vector<double> start(n, 0.0);
+    std::vector<int64_t> from(n, -1); // Part 132: the path's previous position
     double cp = 0;
     size_t cpEnd = 0;
     for (size_t k = 0; k < n; ++k) {
@@ -5850,10 +5954,76 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
         cpEnd = k;
       }
       for (uint32_t e = succStart[k]; e < succStart[k + 1]; ++e)
-        start[succ[e]] = std::max(start[succ[e]], fin);
+        if (fin > start[succ[e]]) {
+          start[succ[e]] = fin;
+          from[succ[e]] = static_cast<int64_t>(k);
+        }
+    }
+    { // Part 132: what the critical path is made of
+      std::vector<float> onPath;
+      for (int64_t k = static_cast<int64_t>(cpEnd); k >= 0 && n; k = from[static_cast<size_t>(k)])
+        onPath.push_back(taskTime[static_cast<size_t>(k)]);
+      std::sort(onPath.begin(), onPath.end(), std::greater<float>());
+      double big[3] = {0, 0, 0}; // time in path tasks >= 1 ms, 10 ms, 100 ms
+      size_t bigN[3] = {0, 0, 0};
+      for (float t : onPath)
+        for (int b = 0; b < 3; ++b)
+          if (t >= (b == 0 ? 1e-3f : b == 1 ? 1e-2f : 1e-1f))
+            big[b] += t, ++bigN[b];
+      std::cerr << "dependency graph: critical path " << onPath.size() << " positions; in tasks >= 1 ms " << big[0]
+                << " s (" << bigN[0] << "), >= 10 ms " << big[1] << " s (" << bigN[1] << "), >= 100 ms " << big[2]
+                << " s (" << bigN[2] << "); longest";
+      for (size_t j = 0; j < std::min<size_t>(5, onPath.size()); ++j)
+        std::cerr << " " << onPath[j];
+      std::cerr << " s\n";
+      std::vector<float> all(taskTime);
+      std::sort(all.begin(), all.end(), std::greater<float>());
+      double top = 0;
+      for (size_t j = 0; j < std::min<size_t>(100, all.size()); ++j)
+        top += all[j];
+      std::cerr << "dependency graph: longest 100 tasks " << top << " s of " << sWork << " s; longest";
+      for (size_t j = 0; j < std::min<size_t>(5, all.size()); ++j)
+        std::cerr << " " << all[j];
+      std::cerr << " s\n";
     }
     std::cerr << "dependency graph: time-weighted critical path " << cp << " s (ends at position " << cpEnd << " of " << n
               << "); work / threads " << sWork / std::max(1, threads) << " s\n";
+    // Part 132: the same measured tasks replayed under three ready orders,
+    // and how well the estimate (if any) ranks the measured times.
+    {
+      CommutingDagPlan oracle;
+      oracle.n = n;
+      oracle.succStart = plan.succStart;
+      oracle.succ = plan.succ;
+      oracle.indeg = plan.indeg;
+      setCriticalPathPriority(oracle, [&](size_t k) { return static_cast<double>(taskTime[k]); });
+      const int T = std::max(1, threads);
+      std::cerr << "dependency graph: simulated schedule on " << T << " threads -- lowest position first "
+                << simulateDagSchedule(plan, taskTime, T, DagReadyOrder{nullptr}) << " s";
+      if (prio)
+        std::cerr << ", estimated critical path first " << simulateDagSchedule(plan, taskTime, T, DagReadyOrder{prio})
+                  << " s";
+      std::vector<double> busy;
+      std::cerr << ", measured critical path first "
+                << simulateDagSchedule(oracle, taskTime, T, DagReadyOrder{oracle.prio.data()}, &busy) << " s\n";
+      std::cerr << "dependency graph: that schedule's time with 1.." << T << " workers busy:";
+      for (size_t b = 1; b < busy.size(); ++b)
+        std::cerr << " " << busy[b];
+      std::cerr << " s\n";
+      if (prio) { // Pearson correlation of log bottom levels, estimated vs measured
+        double sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+        size_t m2 = 0;
+        for (size_t k = 0; k < n; ++k)
+          if (prio[k] > 0 && oracle.prio[k] > 0) {
+            double x = std::log(prio[k]), y = std::log(oracle.prio[k]);
+            sx += x, sy += y, sxx += x * x, syy += y * y, sxy += x * y, ++m2;
+          }
+        double cov = sxy - sx * sy / std::max<size_t>(1, m2), vx = sxx - sx * sx / std::max<size_t>(1, m2),
+               vy = syy - sy * sy / std::max<size_t>(1, m2);
+        std::cerr << "dependency graph: log bottom level, estimated vs measured: correlation "
+                  << (vx > 0 && vy > 0 ? cov / std::sqrt(vx * vy) : 0.0) << " over " << m2 << " positions\n";
+      }
+    }
   }
   if (std::getenv("PD37ROUTE_BATCH_TRACE"))
     std::cerr << "dependency graph: run " << std::chrono::duration<double>(std::chrono::steady_clock::now() - tRun0).count()
@@ -10687,8 +10857,18 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
       for (size_t k = nets.size(); k-- > 0;)
         assignRound0(order[k]);
     } else {
+      // Part 132: a net's estimated layer-assignment work, from its 2D route
+      // (read before any position runs, so no thread has touched it yet).
+      std::function<double(size_t)> laWork = [&](size_t k) {
+        const RoutedNet &rn = nets[order[k]];
+        double w = 1.0 + static_cast<double>(rn.net->pins.size());
+        for (const Seg &sg : rn.segs)
+          if (sg.l1 == sg.l2)
+            w += std::abs(sg.x2 - sg.x1) + std::abs(sg.y2 - sg.y1);
+        return w;
+      };
       size_t edges = runCommutingDagFn(nets.size(), static_cast<size_t>(cw) * ch, stripCells, gThreads,
-                                       [&](size_t k) { assignRound0(order[k]); });
+                                       [&](size_t k) { assignRound0(order[k]); }, gLaCrit ? &laWork : nullptr);
       round0Work = ", " + std::to_string(gThreads) + " threads, " + std::to_string(edges) + " dependencies";
     }
   }
@@ -17527,6 +17707,62 @@ void testCommutingDagOrder() {
   check(ordered, "commuting DAG: each position starts after every earlier overlapping one finished");
 }
 
+// pd39route (Part 132): critical-path-first scheduling. A hand-checked
+// graph -- 0 -> 1 -> 3, 0 -> 2, weights 1, 5, 1, 2 -- has bottom levels
+// 8, 7, 1, 2; the replay on 1 thread runs every task (finish = total work);
+// and the 300-box fixture under priorities still runs each position after
+// every earlier overlapping one.
+void testCriticalPathFirstDag() {
+  CommutingDagPlan p;
+  p.n = 4;
+  p.succStart = {0, 2, 3, 3, 3};
+  p.succ = {1, 2, 3};
+  p.indeg = {0, 1, 1, 1};
+  const std::vector<double> w = {1, 5, 1, 2};
+  setCriticalPathPriority(p, [&](size_t k) { return w[k]; });
+  check(p.prio == std::vector<float>({8, 7, 1, 2}), "critical path first: bottom levels 8, 7, 1, 2");
+  DagReadyOrder o{p.prio.data()};
+  check(o(2, 1) && !o(1, 2), "critical path first: the larger bottom level runs first");
+  std::vector<float> t = {1, 5, 1, 2};
+  check(simulateDagSchedule(p, t, 1, o) == 9.0f, "schedule replay, 1 thread: finishes at the total work (9)");
+  check(simulateDagSchedule(p, t, 2, o) == 8.0f, "schedule replay, 2 threads: finishes at the critical path (8)");
+  unsigned st = 77;
+  auto rnd = [&](int n) {
+    st = st * 1103515245u + 12345u;
+    return static_cast<int>((st >> 8) % static_cast<unsigned>(n));
+  };
+  std::vector<NetBox> b;
+  for (int i = 0; i < 300; ++i) {
+    int x = rnd(60), y = rnd(60);
+    b.push_back({x, y, std::min(63, x + rnd(10)), std::min(63, y + rnd(10))});
+  }
+  CellsOfFn cellsOf = [&](size_t k, std::vector<uint32_t> &out) {
+    for (int cy = b[k].y0 / 4; cy <= b[k].y1 / 4; ++cy)
+      for (int cx = b[k].x0 / 4; cx <= b[k].x1 / 4; ++cx)
+        out.push_back(static_cast<uint32_t>(cy * 16 + cx));
+  };
+  std::function<double(size_t)> weight = [&](size_t k) { return 1.0 + (k * 7919) % 13; };
+  std::atomic<int> ticket{0};
+  std::vector<int> start(b.size(), -1), finish(b.size(), -1);
+  runCommutingDagFn(b.size(), 256, cellsOf, 4, [&](size_t k) {
+    start[k] = ticket.fetch_add(1);
+    volatile double sink = 0;
+    for (int r = 0; r < 2000; ++r)
+      sink = sink + r;
+    finish[k] = ticket.fetch_add(1);
+  }, &weight);
+  bool all = true, ordered = true;
+  for (size_t i = 0; i < b.size(); ++i) {
+    all = all && start[i] >= 0 && finish[i] > start[i];
+    for (size_t j = i + 1; j < b.size(); ++j) {
+      bool overlap = b[i].x0 <= b[j].x1 && b[j].x0 <= b[i].x1 && b[i].y0 <= b[j].y1 && b[j].y0 <= b[i].y1;
+      if (overlap)
+        ordered = ordered && finish[i] < start[j];
+    }
+  }
+  check(all && ordered, "critical path first: every position runs once, after every earlier overlapping one");
+}
+
 // pd37route: threaded layer assignment equals the sequential one byte for
 // byte -- 2008 cost (NTHU) and the 2024 score with via demand -- on a
 // congested 48 x 48 x 4 fixture with 400 random nets, at 1 and 4 threads.
@@ -17589,6 +17825,10 @@ void testThreadedLayerAssignmentIsExact() {
   gPattern3D.mode2008 = true;
   auto seq = run(1, false), par = run(4, false), rev = run(4, true);
   check(same(seq, par), "threaded layer assignment + 3D passes (2008 cost): 4 threads = 1 thread, byte for byte");
+  gLaCrit = 1; // Part 132: critical path first changes the order only
+  auto crit = run(4, false);
+  gLaCrit = 0;
+  check(same(seq, crit), "threaded layer assignment, critical path first (2008 cost): 4 threads = 1 thread");
   check(!same(seq, rev), "control: reversed order, overlap ignored, routes differently (the order matters)");
   // the 2024 score with via demand on the same fixture
   ViaDemandModel savedV = gViaDemand;
@@ -17966,6 +18206,7 @@ int run() {
   testEmitNetSolutionFastMatches();
   testPatternColorBatchesMatchesFirstFit();
   testCommutingDagOrder();
+  testCriticalPathFirstDag();
   testThreadedLayerAssignmentIsExact();
   testPatternIncrementalRefreshIsExact();
   testG24StreamingMatchesInMemory();
@@ -18064,6 +18305,11 @@ int main(int argc, char **argv) {
     if (!*v || *end || c < 0 || c > 1024)
       fail(std::string("PD39ROUTE_LA_CELL must be 0..1024 (got '") + v + "')");
     gLaCell = static_cast<int>(c);
+  }
+  if (const char *v = std::getenv("PD39ROUTE_LA_CRIT"); v) { // Part 132
+    if (std::strcmp(v, "0") && std::strcmp(v, "1"))
+      fail(std::string("PD39ROUTE_LA_CRIT must be 0 or 1 (got '") + v + "')");
+    gLaCrit = v[0] == '1';
   }
   if (argc != 3 && argc != 4) {
     std::cerr << "usage: " << argv[0] << " <benchmark.gr> <solution.route>\n";

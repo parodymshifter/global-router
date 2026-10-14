@@ -239,6 +239,15 @@ and shared one graph across the 3D passes (`PD38ROUTE_PATTERN_DAG=1`,
 `PD38ROUTE_P3D_REUSE=1`, in `fast24.env`), byte-identical:
 mempool_cluster_ranking 461 s, mempool_cluster 584 s.
 
+**2026-10-14: the ISPD 2008 standard is `./pd39route @standard.env @fast08.env`** (Part 124).
+`gr/fast08.env` brings the 2024 runtime mechanisms to 2008: 8 threads, the pattern stage on the
+dependency graph, and the slow tier batched (256, spread over 64 x 64 tiles). All sixteen legal and
+`eval2008.pl`-cross-checked: the eleven zero-overflow designs stay at zero and run 31-70% faster
+(wirelength within +-0.2%); the residues moved newblue4 144 -> 154, bigblue4 356 -> 366, newblue7
+100 -> 104, newblue1 30 (inside its 24-38 spread), newblue3 38948. pd39route gives the same routes
+on Mac and Linux (Part 123). Most of a residue run is now the region stage (newblue7: 88%), which
+nothing threads yet -- BEST_RESULTS_PLAN.md track A.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned

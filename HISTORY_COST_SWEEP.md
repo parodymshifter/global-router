@@ -9950,7 +9950,7 @@ Queued (`p123.sh`): phase 1, the 13 ISPD 2024 designs on pd38route and pd39route
 Part 120 standard, 8 threads, one job at a time); phase 2, the 16 ISPD 2008 benchmarks on pd39route
 against the recorded standard results.
 
-## Part 124 -- the 2024 runtime mechanisms on the 2008 standard (fast08.env) -- in progress
+## Part 124 -- the 2024 runtime mechanisms on the 2008 standard (fast08.env) -- adopted
 
 `gr/fast08.env` on `@standard.env`: threads 8 and the pattern-stage graph (exact), and the batched,
 tile-spread slow tier (Parts 118-119; not exact). Exactness check, newblue2: standard vs standard +
@@ -9959,6 +9959,43 @@ threads + graph **byte-identical** (7617661). First results (fast08, `status=OK`
 5242781, 414 s (1382); adaptec4 0 / 12204261, 362 s (676); bigblue3 0 / 13165027, 690 s (1730);
 adaptec1 0 / 5407378, 1495 s (2181); newblue2 0 / 7618810, 113 s (102). Wirelength within
 +-0.04% of the recorded standard. Remaining benchmarks running (`p124.jobs`).
+
+**All sixteen** (fast08 = `./pd39route @standard.env @fast08.env`, every run `status=OK`, `gr_verify` =
+`eval2008.pl`). Against the recorded standard-configuration runs: `va_*` (Parts 89-90, pd23route) for the
+zero-overflow designs, `vc8c7_newblue1` (the Part 90 24), `s23_*` for bigblue4 and newblue3 (Part 91),
+`p122off_newblue4` and `p122r10_newblue7` (Part 122). Times are wall clock under whatever else was running
+then and now -- the zero-overflow speedups are far beyond that noise, the residues' are not.
+
+| Benchmark | Overflow, standard -> fast08 | Wirelength | Time, standard -> fast08 |
+|---|---|---|---|
+| adaptec1 | 0 -> 0 | +0.04% | 2181 -> 1495 s (-31%) |
+| adaptec2 | 0 -> 0 | -0.02% | 1382 -> 414 s (-70%) |
+| adaptec3 | 0 -> 0 | -0.01% | 2195 -> 1262 s (-43%) |
+| adaptec4 | 0 -> 0 | -0.01% | 676 -> 362 s (-46%) |
+| adaptec5 | 0 -> 0 | -0.01% | 5353 -> 2279 s (-57%) |
+| bigblue1 | 0 -> 0 | +0.02% | 2804 -> 1630 s (-42%) |
+| bigblue2 | 0 -> 0 | -0.16% | 2729 -> 1525 s (-44%) |
+| bigblue3 | 0 -> 0 | -0.01% | 1730 -> 690 s (-60%) |
+| bigblue4 | 356 -> 366 | +0.30% | 38634 -> 14522 s (-62%) |
+| newblue1 | 24 -> 30 | -0.28% | 4787 -> 5126 s (+7%) |
+| newblue2 | 0 -> 0 | +0.02% | 193 -> 113 s (-41%) |
+| newblue3 | 38916 -> 38948 | +0.09% | 29612 -> 14555 s (-51%) |
+| newblue4 | 144 -> 154 | +0.03% | 9505 -> 9424 s (-1%) |
+| newblue5 | 0 -> 0 | +0.01% | 6465 -> 2795 s (-57%) |
+| newblue6 | 0 -> 0 | +0.03% | 6096 -> 2308 s (-62%) |
+| newblue7 | 100 -> 104 | -0.03% | 29945 s -> not measurable |
+
+newblue7's wall time cannot be read: the Mac slept for hours during the run (the router's own clock,
+which counts the sleep, says 95125 s; `/usr/bin/time`'s real 6741 s is below user / 8 threads, so it
+is wrong too). CPU time is comparable: 80661 s user vs 75414 s for the standard run (+7%). newblue1's
+30 sits inside its standard-configuration spread (24-38 over the Part 90 runs).
+
+**Decision (the user, 2026-10-14): fast08 becomes the 2008 standard** -- `./pd39route @standard.env
+@fast08.env`, and pd39route becomes the 2008 router (the same routes on every platform, Part 123). The
+eleven zero-overflow designs stay at zero and run 31-70% faster; the residues move by +4 to +10 on
+newblue4 / bigblue4 / newblue7 (inside the size of the one-run differences seen between near-neutral
+variants there, Parts 78 and 91, but all in one direction -- the batched slow tier's cost, to win
+back in the region stage's work, BEST_RESULTS_PLAN.md track B).
 
 ## Part 125 -- the ISPD 2025 format, and the evaluation flow on this Mac
 
@@ -10151,3 +10188,37 @@ spread comes from a few nets that need the maze search; there the per-step CV al
 threshold unchanged and the rule did not fire -- the run is the current standard's first newblue7 result
 (earlier: 106 / 108 on older routers; best published 68). On both 2008 designs it could touch, F = 10
 leaves the standard unchanged; it stops the synthetic design early (11.2 -> 4.0 s).
+
+## Part 132 -- layer assignment critical path first: exact, and not the bottleneck
+
+Part 129 found mempool_cluster_ranking's layer assignment scheduling-bound (critical path 95.5 s, run
+140.2 s on a quiet machine) and proposed running ready nets by their estimated remaining path instead
+of lowest position first. Built in pd39route, off by default (`PD39ROUTE_LA_CRIT=1`): each position's
+bottom level -- its estimated work (1 + pins + 2D tile edges) plus the longest estimated chain after
+it -- computed backwards over the graph; the ready queue takes the largest first, and a worker about to
+keep a freed position swaps it for a more urgent queued one. Order only: the routes are the same
+(self-tested at 1 vs 4 threads on the layer-assignment fixture; a hand-checked 4-node graph's bottom
+levels; the 300-box ordering fixture).
+
+New trace output (`PD37ROUTE_BATCH_TRACE=1`): the measured task times **replayed through a simulated
+list schedule** on the same thread count, under three orders -- free of the machine's other load,
+which was heavy (three 8-thread router runs). mempool_cluster_ranking, 2024 standard, 8 threads; every
+run's solution byte-identical to Part 123's (`status=OK`, evaluator agrees):
+
+| Run | Critical path | Work / 8 | Replay: lowest first | estimated CP first | measured CP first |
+|---|---|---|---|---|---|
+| cell 4 (default) | 135.9 s | 127.3 s | 203.2 s | 201.7 s | 201.7 s |
+| cell 2 (`PD39ROUTE_LA_CELL=2`) | 147.4 s | 134.0 s | 218.6 s | 217.5 s | 217.3 s |
+
+- The estimate is right (log bottom levels, estimated vs measured: correlation 0.997), and even the
+  measured critical path first gains under 1%. **The order is not where the time goes.**
+- The replay's busy profile (cell 4): 97.6 s with all 8 workers busy, **48.8 s with only one**, the rest
+  between. The critical path is 13885 nets long; 4163 of them take >= 10 ms (95.3 s), only 6 take
+  >= 100 ms (0.8 s), the longest 0.19 s. So it is a long chain of mid-sized nets that all overlap each
+  other -- the large nets of the order, near its end -- with nothing else ready while it runs.
+- A finer cell adds dependencies (61 M vs 39 M edges: a strip's cells are each a separate last-writer)
+  and lengthens the path. The default stays at 4.
+
+Next (exact): split one large net's layer-assignment dynamic program over its tree's independent
+subtrees, so the idle workers shorten the chain itself. Ceiling: the ~49 s spent at one busy worker.
+
