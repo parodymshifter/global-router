@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """archive_compact.py -- shrink the run archive (~/Code/GlobalRouterRuns) without losing a result.
 
-1. Hash the uncompressed content of every solution file (*.route, *.g24sol, and their .gz) under
-   runs/ and la_from/ -- resumable: hashes go to ARCHIVE_HASHES.tsv as they are computed.
+1. Hash the uncompressed content of every solution file (*.route, *.g24sol, *.sol, and their .gz)
+   anywhere in the archive (2026-10-15: the per-Part folders and instruments/ too, not only runs/ and
+   la_from/), except the 2025 evaluation setup (ispd25eval/, whose scripts name their route files)
+   and Instruments traces -- resumable: hashes go to ARCHIVE_HASHES.tsv as they are computed.
 2. Duplicates (same content hash): keep the earliest file, delete the others. Every deletion is
    written to ARCHIVE_MANIFEST.tsv first (removed path, hash, kept path), so a summary's route can
    always be found.
@@ -20,7 +22,9 @@ ROOT = os.path.expanduser('~/Code/GlobalRouterRuns')
 HASHES = os.path.join(ROOT, 'ARCHIVE_HASHES.tsv')
 MANIFEST = os.path.join(ROOT, 'ARCHIVE_MANIFEST.tsv')
 LOG = os.path.join(ROOT, 'ARCHIVE_COMPACT.log')
-SUFFIXES = ('.route', '.g24sol', '.route.gz', '.g24sol.gz')
+KINDS = ('.route', '.g24sol', '.sol')
+SUFFIXES = KINDS + tuple(k + '.gz' for k in KINDS)
+SKIP_DIRS = ('ispd25eval',)  # top-level folders left alone
 DRY = '--dry-run' in sys.argv
 
 
@@ -35,10 +39,20 @@ def stem(path):
     for s in ('.gz', '.xz'):
         if path.endswith(s):
             path = path[:-len(s)]
-    for s in ('.route', '.g24sol'):
+    for s in KINDS:
         if path.endswith(s):
             return path[:-len(s)]
     return path
+
+
+def kind(path):
+    for s in ('.gz', '.xz'):
+        if path.endswith(s):
+            path = path[:-len(s)]
+    for s in KINDS:
+        if path.endswith(s):
+            return s
+    raise ValueError(path)
 
 
 def in_progress(path):
@@ -72,8 +86,11 @@ def content_hash(path, xz=False):
 
 def candidates():
     out = []
-    for top in ('runs', 'la_from'):
-        for d, _, files in os.walk(os.path.join(ROOT, top)):
+    for top in sorted(os.listdir(ROOT)):
+        if top in SKIP_DIRS or not os.path.isdir(os.path.join(ROOT, top)):
+            continue
+        for d, dirs, files in os.walk(os.path.join(ROOT, top)):
+            dirs[:] = [x for x in dirs if not x.endswith('.trace')]
             for f in files:
                 p = os.path.join(d, f)
                 if f.endswith(SUFFIXES) and not os.path.islink(p) and not in_progress(p):
@@ -127,7 +144,7 @@ def main():
         if p.endswith('.xz'):
             continue
         h = known[p][2]
-        dst = stem(p) + ('.route' if '.route' in os.path.basename(p) else '.g24sol') + '.xz'
+        dst = stem(p) + kind(p) + '.xz'
         tmp = dst + '.tmp'
         src = subprocess.Popen(['gunzip', '-c', p] if p.endswith('.gz') else ['cat', p], stdout=subprocess.PIPE)
         with open(tmp, 'wb') as out:
