@@ -10474,3 +10474,16 @@ blind mempool_group), and the weights cannot reveal that sensitivity. The router
 overflow score itself, so a guard can route layer assignment once unbiased and once biased and back
 the strength off while w_overflow x (its overflow increase) exceeds a budget set by the timing weights
 and the input slack. `standard25.env` is unchanged pending that test.
+
+**The overflow guard, simulated before building it (the user's request; not built).** The guard would
+route layer assignment unbiased and biased and step the strength down while w_overflow x (overflow
+increase) exceeds gamma x the timing at stake, T = |w_WNS| x |worst input slack| + |w_TNS| x |mean
+negative net slack| (ns, from the `.net`). Simulated on the measured calibration runs (start at the
+floor-50 rule's strength, step down through the measured strengths, else unbiased;
+`~/Code/GlobalRouterRuns/p133/cal/guardsim.py`): no gamma beats the rule alone (sum over the ten
+designs -14.10); gamma 0.2-0.3 -12.48, 0.1 -12.36, 0.05 -11.06; gamma chosen with each design left out
+-12.29. The ratio overflow cost / T does not separate winners from losers: visible mempool_group 0.52
+wins (-4.05, from power), blind mempool_group 0.85 loses (+2.24), visible mempool_tile_wrap 0.42 loses
+at every strength, blind mempool_tile_wrap 0.16 wins. What is missing is how much timing a given bias
+buys on a design, which varies widely; a guard needs a router-side estimate of that (e.g. the drop in
+resistance-weighted length of the classed nets), not of the overflow alone.
