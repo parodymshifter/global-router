@@ -1400,6 +1400,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <time.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
 #include <malloc/malloc.h>
@@ -2455,25 +2456,34 @@ inline void addNetTime(const Net *net, int kind, double secs) {
   if (k < gNetTime.size())
     gNetTime[k][static_cast<size_t>(kind)] += static_cast<float>(secs);
 }
+// Part 133: the calling thread's CPU time, seconds. The clock was
+// steady_clock (elapsed time) until Part 133, which counted time a thread
+// spent waiting for a core and time the Mac slept: per-net totals came to
+// 97-1530% of the run's CPU time on the 2008 designs.
+inline double threadCpuSeconds() {
+  timespec ts{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+  return static_cast<double>(ts.tv_sec) + 1e-9 * static_cast<double>(ts.tv_nsec);
+}
 struct NetClock {
   const Net *net = nullptr;
   int kind = 0;
   bool counted = false, outer = false;
-  std::chrono::steady_clock::time_point t0;
+  double t0 = 0;
   NetClock(const Net *n, int k) : net(n), kind(k) {
     if (gNetTime.empty() || !n)
       return;
     counted = true;
     outer = tNetClockDepth++ == 0;
     if (outer)
-      t0 = std::chrono::steady_clock::now();
+      t0 = threadCpuSeconds();
   }
   ~NetClock() {
     if (!counted)
       return;
     --tNetClockDepth;
     if (outer)
-      addNetTime(net, kind, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+      addNetTime(net, kind, threadCpuSeconds() - t0);
   }
   NetClock(const NetClock &) = delete;
   NetClock &operator=(const NetClock &) = delete;
@@ -17784,8 +17794,18 @@ void testNetClock() {
             gNetTime[0][kNtMaze] == 0.0f && tNetClockDepth == 0;
   gNetTime.swap(saved);
   gNetBase = savedBase;
+  // Part 133: CPU time, not elapsed -- 50 ms asleep inside a clock records
+  // (nearly) nothing; the old elapsed-time clock recorded 0.05 s
+  gNetBase = fake.data();
+  saved.swap(gNetTime);
+  gNetTime.assign(fake.size(), std::array<float, 4>{0, 0, 0, 0});
+  { NetClock nap(&fake[0], kNtMaze); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+  bool cpuOnly = gNetTime[0][kNtMaze] < 0.01f;
+  gNetTime.swap(saved);
+  gNetBase = savedBase;
   check(offOk, "per-net time: with the table off a clock records nothing");
   check(ok, "per-net time: the outer clock counts both spans in its kind, the nested one nothing; explicit shares add");
+  check(cpuOnly, "per-net time is thread CPU time: 50 ms asleep records under 10 ms");
 }
 
 // Part 127: concurrent work runs on the persistent pool. runOnThreads calls

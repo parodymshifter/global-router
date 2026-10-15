@@ -57,7 +57,14 @@ def kind(path):
 
 def in_progress(path):
     st = stem(path)
-    return os.path.exists(st + '.stderr.tmp') or time.time() - os.path.getmtime(path) < 3 * 3600
+    if os.path.exists(st + '.stderr.tmp') or time.time() - os.path.getmtime(path) < 3 * 3600:
+        return True
+    # 2026-10-15: a run blocked before writing its solution left an empty output, hours old, still
+    # open -- the age test passed it and it was compressed. Empty files and files any process has
+    # open are in progress too.
+    if os.path.getsize(path) == 0:
+        return True
+    return subprocess.run(['lsof', '-t', '--', path], capture_output=True).returncode == 0
 
 
 def content_hash(path, xz=False):

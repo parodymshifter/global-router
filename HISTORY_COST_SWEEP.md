@@ -10430,3 +10430,16 @@ mempool_cluster (both versions): only 23 GB of disk is free and its .net + .def 
 version, so it is streamed from the zip through a named pipe (the router and the evaluator read
 sequentially; the netlist twice per route) -- routed unbiased and with the standard, congestion and
 legality scored. Its timing cannot be scored here: OpenROAD would load a 9.7 GB DEF on 24 GB.
+
+**Per-net time was elapsed time, not CPU time (a Part 131 error, found here).** Checking what share
+of each 2008 run's CPU time the per-net totals cover gave 97% to 1530% on 13 of 16 designs:
+`NetClock` used steady_clock, so a net's time included waiting for a core (three 8-thread runs on 12
+cores) and the hours the Mac slept (adaptec5, newblue6: ~15x their CPU time). Proportions inside a
+quiet run are roughly right; absolute times, spreads and the slowest-1% shares are not, on any set
+(the 2024 / 2025 numbers in the Atlas were measured the same way). Fixed: `NetClock` reads the
+thread's CPU time (`CLOCK_THREAD_CPUTIME_ID`); a self-test now fails on an elapsed-time clock (50 ms
+asleep inside a clock must record under 10 ms). Routes unchanged (the timer never touched them: all
+16 2008 per-net runs were byte-identical to fast08). All 39 designs are being re-measured.
+
+`archive_compact.py` also skips empty files and files a process has open (`lsof`): a run blocked
+before writing its solution had left an empty, hours-old output that the age test let through.
