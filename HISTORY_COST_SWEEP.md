@@ -10443,3 +10443,34 @@ asleep inside a clock must record under 10 ms). Routes unchanged (the timer neve
 
 `archive_compact.py` also skips empty files and files a process has open (`lsof`): a run blocked
 before writing its solution had left an empty, hours-old output that the age test let through.
+
+**Calibrating the 2025 strength** (the user's request). Eight designs (visible and blind ariane,
+bsg_chip, NV_NVDLA_partition_c, mempool_tile_wrap), each routed unbiased, with the timing bias at
+mt = 0.03, 0.1, 0.3, 1, 3 (and 10, 30, 100 where still improving) times the weight-scaled strength
+(power off), then the power term at mp = 0.1, 0.3, 1 at each design's best mt; every route legal,
+scored with the contest evaluator, OpenROAD and the registers + outputs endpoint count. Raw:
+`~/Code/GlobalRouterRuns/p133/cal/cal.txt`.
+
+- **A weak bias makes timing worse.** On every blind design small mt raised WNS (blind ariane at 0.3x
+  -1.71 -> -3.01 ns, blind bsg_chip at 0.1x -2.44 -> -6.88 ns); only strong settings helped. A weak
+  bias lifts parts of a critical net -- more vias, each with resistance -- without enough low-resistance
+  wire to repay them. Every timing win had a top-class strength k3 >= ~17, and the weight scaling had
+  pushed the blind designs far below that (x0.012 on blind NV_NVDLA).
+- Best per design (score change vs unbiased): visible mempool_tile_wrap -1.08 (power only), ariane
+  -2.29 (mt 1), NV_NVDLA -6.29 (mt >= 3, flat), bsg_chip -1.61 (mt 1, mp 0.1); blind mempool_tile_wrap
+  -1.10 (mt 1, mp 1), ariane -0.25 (mt 30), NV_NVDLA -1.44 (mt >= 10: every violation removed),
+  bsg_chip -0.24 (mt >= 1). Sum -14.30.
+- Rules over the eight (timing only unless noted): the standard (weights, timing + power) -10.28;
+  weights, timing only -11.38; **weights with a floor k3 >= 50 (`PD39ROUTE_TIMING_KMIN=50`) -12.29**;
+  floor 100 -11.86. The floor's remaining gap is visible mempool_tile_wrap (+0.69), where timing never
+  pays: its overflow climbs steeply with the bias and its score weighs overflow heavily.
+- **Out of sample** (the two mempool_group designs, not used to choose the floor; their k3 is 427-572,
+  so for them the rule is timing only): visible -4.05 (standard -6.40, its power term worth -10.0),
+  blind **+2.24** (standard +2.27): ~1M of their nets fall in a class, and overflow rises 42M -> 179M.
+  Over all ten the floor rule sums -14.10 and the standard -14.41 -- no better.
+
+So neither rule handles the designs whose overflow is sensitive to the bias (visible mempool_tile_wrap,
+blind mempool_group), and the weights cannot reveal that sensitivity. The router can: it computes the
+overflow score itself, so a guard can route layer assignment once unbiased and once biased and back
+the strength off while w_overflow x (its overflow increase) exceeds a budget set by the timing weights
+and the input slack. `standard25.env` is unchanged pending that test.
