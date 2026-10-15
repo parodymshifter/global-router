@@ -10396,3 +10396,37 @@ share is not the fix's ceiling -- the next attempt on the search needs a branch-
 The current build with it reproduces the measured ariane route byte for byte (score 2.30 -> 0.14).
 Not yet measured under it: mempool_group (visible), mempool_cluster (its .def / .net are still in the
 zip) and the six blind designs.
+
+**The 2025 standard on the other designs** (the user: score all of them). Score change against our own unbiased Part 130 routes, each design's weights and endpoint count (registers + outputs, OpenSTA), the contest's OpenROAD fork; every route legal (0 open nets):
+
+| set | design | WNS base -> standard25 | TNS base -> 2025 std | power (W) | overflow cost | score change (WNS / TNS / power / overflow) | total |
+|---|---|---|---|---|---|---|---|
+| blind | mempool_tile_wrap | -0.586 -> -0.434 | -2521 -> -1737 | 0.14545 -> 0.14402 | 1.66M -> 2.40M | -0.457 / -1.238 / -0.143 / +0.738 | **-1.100** |
+| blind | ariane | -1.712 -> -1.293 | -546 -> -417 | 0.15595 -> 0.15594 | 4.28M -> 5.15M | -0.084 / -0.013 / -0.001 / +0.347 | **+0.250** |
+| blind | NV_NVDLA_partition_c | -79.474 -> -55.088 | -279252 -> -189834 | 0.13672 -> 0.13657 | 13.13M -> 20.98M | -0.244 / -0.195 / -0.015 / +0.785 | **+0.332** |
+| blind | bsg_chip | -2.437 -> 0.000 | -1574 -> 0 | 0.30485 -> 0.30456 | 20.98M -> 59.68M | -0.244 / -0.007 / -0.014 / +0.774 | **+0.509** |
+| blind | mempool_group | -1.753 -> -0.374 | -58674 -> -26548 | 8.61898 -> 7.87733 | 41.95M -> 180.72M | -0.689 / -0.367 / -2.225 / +5.551 | **+2.270** |
+| visible | mempool_group | -0.946 -> -0.257 | -49902 -> -17225 | 7.83034 -> 7.33155 | 44.31M -> 211.29M | -0.690 / -0.746 / -9.976 / +5.010 | **-6.401** |
+
+sum -4.142
+
+Timing only (`PD39ROUTE_POWER_LAYERS=0`) on three of the blind designs: ariane +0.22, NV_NVDLA_partition_c
+-0.27, bsg_chip -0.24 (vs +0.25 / +0.33 / +0.51 with the power term).
+
+**The setting tuned on the visible designs does not carry to the blind ones**: visible five
+(ariane -2.16, bsg_chip -1.38, NV_NVDLA -6.22, mempool_tile_wrap -0.51, mempool_group -6.40) sum
+-16.7; blind five sum +2.3. The blind designs weigh timing far less (blind ariane's timing weights
+are 1/50 of the visible one's), so the weight scaling gives timing small strengths there (x0.01 to
+x0.35) -- but the power term's strength follows w_power / w_overflow, which is large on the blind set
+(kp up to 10), and on designs whose power barely moves with wiring it only buys overflow (blind
+NV_NVDLA: 2 nets classed, all of its +7.9M overflow from the power term; blind bsg_chip power -0.1%,
+overflow 21M -> 60M). The two mempool_group designs both get timing strengths of 107-572 on ~1M
+classed nets and 4-5x the overflow; the visible one's power weight (20) pays for it with a 0.5 W
+drop (-10.0 of score), the blind one's (3) does not. The strength rule, not the mechanism, is what
+fails: one formula from the weights alone cannot know how sensitive a design's timing and power are
+to its wiring.
+
+mempool_cluster (both versions): only 23 GB of disk is free and its .net + .def are ~18 GB per
+version, so it is streamed from the zip through a named pipe (the router and the evaluator read
+sequentially; the netlist twice per route) -- routed unbiased and with the standard, congestion and
+legality scored. Its timing cannot be scored here: OpenROAD would load a 9.7 GB DEF on 24 GB.
