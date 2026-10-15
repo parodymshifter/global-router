@@ -7707,6 +7707,18 @@ struct TimingLayerModel {
   // (one outlier net no longer leaves every other net unclassed).
   double refQ = -1;
   double worstSlack = 0; // the lowest net slack (classify sets it; the weight scaling's slack)
+  // Part 133 calibration: PD39ROUTE_TIMING_KMIN -- after any scaling, the top
+  // class's k is at least this (all three scaled together). On 8 designs a
+  // weak bias made timing worse (it lifts parts of a critical net, adding
+  // vias, without enough low-resistance wire); every timing win had k3 >= ~17.
+  double kMin = 0;
+  void applyFloor() {
+    if (kMin > 0 && k[3] > 0 && k[3] < kMin) {
+      const double f = kMin / k[3];
+      for (int c = 1; c <= 3; ++c)
+        k[c] *= f;
+    }
+  }
   std::vector<std::vector<double>> bias;    // [class][layer] = k[class] * relR[layer] + kp * relC[layer]
   bool rowOn[4] = {false, false, false, false};
   double rowMax[4] = {0, 0, 0, 0};
@@ -18237,6 +18249,19 @@ void testTimingLayerBiasPicksUpperMetal() {
   gTiming.kp = 2;
   gTiming.classify();
   check(assign(gTiming.bias[0].data()) == std::set<int>{0}, "power term, kp 2: it stays on layer 0");
+  // the calibration floor: k3 9.8 -> 50, the classes scaled together; k3
+  // already above the floor, or no timing bias, untouched
+  gTiming.k[1] = 2.45, gTiming.k[2] = 4.9, gTiming.k[3] = 9.8;
+  gTiming.kMin = 50;
+  gTiming.applyFloor();
+  bool floorOk = std::fabs(gTiming.k[3] - 50) < 1e-9 && std::fabs(gTiming.k[1] - 12.5) < 1e-9;
+  gTiming.k[1] = 40, gTiming.k[2] = 80, gTiming.k[3] = 160;
+  gTiming.applyFloor();
+  floorOk = floorOk && gTiming.k[3] == 160;
+  gTiming.k[1] = gTiming.k[2] = gTiming.k[3] = 0;
+  gTiming.applyFloor();
+  floorOk = floorOk && gTiming.k[3] == 0;
+  check(floorOk, "timing floor: k3 below the floor is raised to it (classes together); above it, or zero, unchanged");
   gTiming = saved;
   gScore = savedS;
 }
@@ -19199,10 +19224,20 @@ int main(int argc, char **argv) {
       // values timing against overflow -- |w_TNS| / w_overflow x |worst
       // slack| (ns) -- relative to ariane's (100 / 3e-7 x 0.4687), where
       // 40, 80, 160 was tuned (Part 133). 1 (default): k as given.
+      if (const char *km = std::getenv("PD39ROUTE_TIMING_KMIN"); km) { // Part 133 calibration
+        std::vector<double> v;
+        if (!parseDoubleList(km, v) || v.size() != 1 || v[0] < 0)
+          fail(std::string("PD39ROUTE_TIMING_KMIN must be one number >= 0 (got '") + km + "')");
+        gTiming.kMin = v[0];
+      }
       const char *sc = std::getenv("PD39ROUTE_TIMING_SCALE");
       std::string scale = sc ? sc : "1";
       if (scale != "1" && scale != "weights")
         fail("PD39ROUTE_TIMING_SCALE must be 1 or weights (got '" + scale + "')");
+      if (scale != "weights") {
+        gTiming.applyFloor();
+        worst = gTiming.classify();
+      }
       if (scale == "weights") {
         if (!g24In.res.ppa || !(g24In.res.ppaWeight[3] > 0))
           fail("PD39ROUTE_TIMING_SCALE=weights needs a 2025 .cap with a positive overflow weight");
@@ -19216,6 +19251,7 @@ int main(int argc, char **argv) {
         // the power term: w_power / w_overflow relative to ariane's (300 / 3e-7)
         const double fp = std::fabs(g24In.res.ppaWeight[2]) / g24In.res.ppaWeight[3] / (300.0 / 3e-7);
         gTiming.kp *= fp;
+        gTiming.applyFloor();
         worst = gTiming.classify();
         std::cerr << "ISPD 2025 timing layers: strength scaled by the design's weights x " << f << " (timing), x " << fp
                   << " (power)\n";
