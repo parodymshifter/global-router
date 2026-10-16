@@ -66,6 +66,7 @@ dd { margin: 0; }
 .axis text, .lbl { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
 .axis line, .axis path { stroke: var(--rule); }
 .grid line { stroke: var(--faint); }
+.findings { margin: 8px 0 0; padding-left: 1.2em; display: grid; gap: 8px; max-width: 72ch; }
 </style>
 
 <div class="wrap">
@@ -77,6 +78,36 @@ dd { margin: 0; }
   shortest right-angle tree joining a net's pins.</p>
   <div class="legend" id="legend"></div>
 </header>
+
+<section class="panel" id="p-findings">
+  <h2>What the data say so far</h2>
+  <p class="lede">Read each contest on its own: the contests use different grids, layer counts and scoring rules,
+  so correlations pooled across them mostly sort designs by contest. Samples are small (16 ISPD 2008 designs, 13
+  ISPD 2024, 10 ISPD 2025): with 16 designs a rank correlation needs to reach about &plusmn;0.5 to mean anything,
+  and among some 60 measures a few will reach it by chance.</p>
+  <ul class="findings">
+    <li><b>ISPD 2008 overflow follows local bottlenecks, not overall density.</b> The worst 3 x 3-GCell cut
+    (Spearman +0.75) and the worst pin escape (+0.63) track the remaining overflow; pin density barely does. The
+    cut bounds agree: at least 26264 of newblue3's overflow is forced for any router, and newblue4's residue sits
+    at 98% of its tightest cut. They rank the designs but do not predict the size of their overflow: eleven
+    designs sit at zero and newblue3 at 38948, and the least-squares fit below scores a leave-one-out R&sup2;
+    below zero.</li>
+    <li><b>Detour follows pin density.</b> ISPD 2008 detour against pins per track: +0.77.</li>
+    <li><b>RUDY works where it should.</b> ISPD 2024: the share of GCells over capacity against RUDY's 99th
+    percentile edge, +0.87 &mdash; the classic congestion estimate's best showing here.</li>
+    <li><b>The clusters are contests and sizes, with one exception.</b> Principal components separate overall
+    density (about 36% of the variation), size (22%) and local bottlenecks (12.5%); three k-means clusters are
+    ISPD 2008, the smaller 2024 / 2025 designs and the large mempool designs. At four, newblue3 splits off alone
+    &mdash; the design no published router brings near zero.</li>
+    <li><b>Per-net route time</b> (thread CPU time, re-measured): on ISPD 2024 / 2025 a net costs 8&ndash;12
+    &micro;s per Steiner step and its length explains its time (log correlation 0.93&ndash;0.97). On ISPD 2008
+    the maze search takes 74&ndash;100% of per-net time, the slowest 1% of nets take 47&ndash;96% of it, and
+    length explains far less (0.64&ndash;0.90): the hard nets, not the many, set the runtime.</li>
+    <li><b>ISPD 2025 timing.</b> A design's timing difficulty is largely set before routing: the input pin slack
+    predicts the routed slack (correlation 0.95 on ariane). What routing controls is the margin, and the timing
+    loop's gain over the unbiased route ranges from 0.2 to 7.5 score points across the ten designs.</li>
+  </ul>
+</section>
 
 <section class="panel" id="p-scatter">
   <h2>Any two measures</h2>
@@ -113,8 +144,8 @@ dd { margin: 0; }
 <section class="panel" id="p-heat">
   <h2>Which measures track which outcomes</h2>
   <p class="lede">Spearman rank correlation between each pre-routing measure and each routing outcome. Outcomes from
-  different contests are not on one scale, so the contest filter matters: "All" pools ranks across contests, which
-  mixes different scoring rules.</p>
+  different contests are not on one scale, so the contest filter matters: it starts on one contest, and "All" pools
+  ranks across contests, which mixes different scoring rules and mostly sorts designs by contest.</p>
   <div class="controls"><label>Contests <select id="hset"></select></label></div>
   <div class="scroll" id="heat"></div>
 </section>
@@ -148,11 +179,12 @@ dd { margin: 0; }
     <summary>What each measure means</summary>
     <dl id="glossary"></dl>
     <p class="note">Sources: measures from <code>gr/routability.cpp</code> (HISTORY_COST_SWEEP.md Parts 101 and 130).
-    Outcomes: ISPD 2008 (International Symposium on Physical Design contest) from the fast08 runs of Part 124, with
-    bigblue4 and newblue7 from earlier standard runs; ISPD 2024 from Part 123's pd39route runs; per-net route times
-    (2024 and 2025 only) from Part 131's timed runs; ISPD 2025 from pd39route
-    with the 2024 settings, scored by the contest's congestion evaluator (timing not run). Runtimes come from each
-    contest's own settings, so compare them within a contest.</p>
+    Outcomes: ISPD 2008 (International Symposium on Physical Design contest) from Part 133's runs of the 2008
+    standard (pd39route with fast08; routes identical to Part 124's); ISPD 2024 from Part 123's pd39route runs;
+    ISPD 2025 from pd39route with the 2024 settings, scored by the contest's congestion evaluator, with timing and
+    power from the contest's OpenROAD (Part 133) and the timing loop's gain (Part 134). Per-net route times, all
+    three contests, are thread CPU time (re-measured in Part 133; Part 131's elapsed-time numbers counted waiting
+    and sleep). Runtimes come from each contest's own settings, so compare them within a contest.</p>
   </details>
 </section>
 </div>
@@ -219,20 +251,27 @@ const M = [
 ];
 const O = [
   ['o:detour', 'Detour ratio (routed / Steiner)', '', 'Wire length the router used over the Steiner total; 1.00 = no detour'],
-  ['o:runtime_knet', 'Runtime per 1000 nets (s)', 'log', 'Within a contest only: each contest runs different settings'],
+  ['o:runtime_knet', 'Runtime per 1000 nets (s)', 'log', 'Wall time; within a contest only: each contest runs different settings'],
   ['o:runtime_mstep', 'Runtime per million Steiner steps (s)', 'log', 'Wall time over the total Steiner tree length of all nets, in millions of GCell steps; within a contest only'],
+  ['o:cpu_knet', 'CPU time per 1000 nets (s)', 'log', 'User + system time: unlike wall time it does not count waiting for a core or sleep'],
+  ['o:cpu_mstep', 'CPU time per million Steiner steps (s)', 'log', 'CPU time over the total Steiner tree length of all nets'],
   ['o:over_share', 'Share over capacity', 'log1p', 'ISPD 2008: overflowed edges; ISPD 2024: GCells over capacity'],
   ['o:overflow', 'Total overflow (ISPD 2008)', 'log1p', 'The 2008 contest\'s first ranking key'],
-  ['o:of_knet', 'Overflow cost per 1000 nets (2024, 2025)', 'log', 'The contest score\'s overflow term per 1000 nets: the cleaner congestion outcome'],
+  ['o:of_knet', 'Overflow cost per 1000 nets (2024, 2025)', 'log', 'The contest score\'s overflow term per 1000 nets; dense designs with many short nets look uncongested on this scale -- prefer per GCell'],
+  ['o:of_gcell', 'Overflow cost per GCell (2024, 2025)', 'log', 'The contest score\'s overflow term over the die\'s GCells: the congestion outcome'],
   ['o:of_share', 'Overflow share of score (2024, 2025)', '', 'The overflow term over the whole score; falls as wire length grows, so it tracks density as much as congestion'],
   ['o:score_knet', 'Contest score per 1000 nets (2024, 2025)', 'log', 'Lower is better'],
-  ['o:nt_mean_us', 'Per-net route time, mean (us)', 'log', 'Each net\'s total time over every stage that worked on it (CPU time on its thread)'],
+  ['o:nt_mean_us', 'Per-net route time, mean (us)', 'log', 'Each net\'s total time over every stage that worked on it: CPU time on its thread (re-measured; the first measurement used elapsed time and counted waiting and sleep)'],
   ['o:nt_cv', 'Per-net route time, CV', '', 'Coefficient of variation of per-net time: standard deviation over mean'],
   ['o:nt_p99_us', 'Per-net route time, 99th pct (us)', 'log', ''],
   ['o:nt_top1_share', 'Slowest 1% of nets\' share of time', '', ''],
   ['o:nt_step_mean_us', 'Route time per Steiner step, mean (us)', 'log', 'Each net\'s time over its own Steiner tree length, averaged over nets'],
   ['o:nt_step_cv', 'Route time per Steiner step, CV', '', 'How unevenly nets cost per unit length'],
   ['o:nt_loglen_corr', 'Correlation of log time with log length', '', 'How much of per-net time length explains'],
+  ['o:wns', 'Worst negative slack, ns (2025)', '', 'The unbiased route, OpenROAD (the contest\'s timing engine); 0 is met'],
+  ['o:tns_ep', 'Total negative slack per endpoint, ns (2025)', '', 'Over the contest\'s endpoints (registers + outputs)'],
+  ['o:power', 'Power, W (2025)', 'log', 'The unbiased route\'s total power, OpenROAD'],
+  ['o:loop_gain', 'Timing loop gain (2025, score points)', '', 'How much the timing loop improved the contest score over the unbiased route'],
 ];
 const GLOSS = {
   nets_all: 'Nets whose pins fall in at least two GCells.', tiles: 'Die area in GCells (grid cells of the routing graph).',
@@ -495,7 +534,7 @@ buildPicker('picker', pcaSel, drawPCA, M);
 for (const id of ['pset', 'pk']) document.getElementById(id).addEventListener('change', drawPCA);
 
 // ---------- panel 3 ----------
-fillSelect('hset', setsOpt, 'all');
+fillSelect('hset', setsOpt, 'ispd08');  // within a contest by default: pooled ranks mostly sort by contest
 function drawHeat() {
   const rows = filterSet(hset.value);
   let h = '<table><thead><tr><th>Measure</th>' + O.map(o => `<th title="${o[3]}">${o[1]}</th>`).join('') + '</tr></thead><tbody>';
@@ -512,8 +551,8 @@ function drawHeat() {
 hset.addEventListener('change', drawHeat);
 
 // ---------- panel 4 ----------
-const fitSel = new Set(['rsmt_per_track', 'cut3_max', 'layers']);
-fillSelect('fy', O.map(o => [o[0], o[1]]), 'o:detour'); fillSelect('fset', setsOpt, 'all');
+const fitSel = new Set(['cut3_max', 'esc_max']);  // ISPD 2008 overflow's two strongest measures
+fillSelect('fy', O.map(o => [o[0], o[1]]), 'o:overflow'); fillSelect('fset', setsOpt, 'ispd08');
 function drawFit() {
   const ky = fy.value, keys = M.map(m => m[0]).filter(k => fitSel.has(k)), lam = +flam.value;
   document.getElementById('flam-v').innerHTML = `penalty <b>${lam}</b>`;

@@ -18,9 +18,17 @@ Outcomes, per design (None where a set has no such measure):
   score_knet    ISPD 2024 / 2025: contest score per 1000 nets
   nt_*          (with NETTIMES.txt, Part 131) per-net routing time: mean, coefficient of variation, percentiles,
                 slowest 1%'s share, time per Steiner step (mean, CV), log time-length correlation, stage shares
-Sources: ISPD 2008 -- Part 124's fast08 runs (pd39route), and for bigblue4 and newblue7 (still running there)
-the standard-configuration records s23_bigblue4 (pd23route) and c200_newblue7 (pd13route); ISPD 2024 -- Part
-123's pd39route runs; ISPD 2025 -- ROUTE25.txt (pd39route, the 2024 standard, scored by the contest evaluator).
+                (CPU time per thread since Part 133; Part 131's elapsed-time numbers were wrong)
+  cpu_knet, cpu_mstep  (Part 133) CPU time per 1000 nets / per million Steiner steps -- unlike wall time it
+                does not count time asleep or waiting for a core
+  of_gcell      (Part 133) ISPD 2024 / 2025: the overflow term per GCell (per-net normalization made dense
+                designs, with many short nets, look uncongested)
+  wns, tns_ep, power  (Part 133) ISPD 2025: timing and power of the unbiased route (the contest's OpenROAD),
+                TNS per contest endpoint (registers + outputs)
+  loop_gain     (Part 134) ISPD 2025: the timing loop's score improvement over the unbiased route
+Sources: ISPD 2008 -- Part 133's re-measurement runs (pd39route, the 2008 standard @fast08, routes
+byte-identical to Part 124's); ISPD 2024 -- Part 123's pd39route runs; ISPD 2025 -- ROUTE25.txt (pd39route,
+the 2024 standard, scored by the contest evaluator), Part 133's OpenROAD scores, Part 134's timing loop.
 """
 import json
 import os
@@ -70,6 +78,35 @@ def routed_steps(path, dbu_per_step=None):
     return w / dbu_per_step if dbu_per_step else w
 
 
+def cpu_of(path):
+    """user + system seconds from a /usr/bin/time -l (.time) or time -p (.err) output."""
+    t = read_text(path)
+    m = re.search(r'([\d.]+) real\s+([\d.]+) user\s+([\d.]+) sys', t)
+    if m:
+        return float(m.group(2)) + float(m.group(3))
+    u, sy = num(r'^user ([\d.]+)$', t), num(r'^sys ([\d.]+)$', t)
+    return u + sy if u is not None and sy is not None else None
+
+
+P133 = os.path.expanduser('~/Code/GlobalRouterRuns/p133')
+P134 = os.path.expanduser('~/Code/GlobalRouterRuns/p134')
+
+
+def sta_of(s, n):
+    """The unbiased route's OpenROAD scores (Part 133) and the contest endpoint count (Part 134's loop)."""
+    which = s.replace('ispd25', '')
+    cands = [os.path.join(P133, 's25', f'{which}.{n}.base.sta')] + (
+        [os.path.join(P133, 'd3', 'base.sta' if n == 'ariane' else f'{n}.base.sta')] if which == 'visible' else [])
+    t = next((read_text(c) for c in cands if os.path.exists(c)), '')
+    loop = read_text(os.path.join(P134, f'bt.{which}.{n}', 'loop.tsv')) or read_text(os.path.join(P134, f'{which}.{n}', 'loop.tsv'))
+    ep = num(r'endpoints (\d+)', loop)
+    gain = num(r'^# best \S+ delta ([-+\d.]+)', loop)
+    wns, tns = num(r'^wns (\S+)', t), num(r'^tns (\S+)', t)
+    pw = re.search(r'^Total\s+\S+\s+\S+\s+\S+\s+(\S+)', t, re.M)
+    return dict(wns=wns, tns_ep=tns / ep if tns is not None and ep else None, power=float(pw.group(1)) if pw else None,
+                loop_gain=-gain if gain is not None else None)
+
+
 def cap_header(cap):
     with open(cap) as f:
         f.readline()
@@ -99,13 +136,15 @@ def main():
                 nt[(d['set'], d['design'])] = d
     for r in rows:
         s, n = r['set'], r['design']
-        o = dict(detour=None, runtime_knet=None, runtime_mstep=None, over_share=None, overflow=None, of_share=None, of_knet=None, score_knet=None)
+        o = dict(detour=None, runtime_knet=None, runtime_mstep=None, over_share=None, overflow=None, of_share=None, of_knet=None,
+                 score_knet=None, cpu_knet=None, cpu_mstep=None, of_gcell=None, wns=None, tns_ep=None, power=None, loop_gain=None)
         rsmt_total = r['rsmt_total']
         if s == 'ispd08':
-            base = os.path.join(RUNS, 'p124', f'p124_fast_{n}')
-            if not os.path.exists(base + '.verify'):
-                base = os.path.join(RUNS, {'bigblue4': 's23_bigblue4', 'newblue7': 'c200_newblue7'}.get(n, ''))
+            base = os.path.join(RUNS, 'p133nt', f'p133nt_{n}')
             v, summ = read_text(base + '.verify'), read_text(base + '.summary')
+            cpu = cpu_of(base + '.time')
+            o['cpu_knet'] = cpu / r['nets_all'] * 1000 if cpu else None
+            o['cpu_mstep'] = cpu / rsmt_total * 1e6 if cpu and rsmt_total else None
             wl = num(r'^\s*wirelength\s+(\d+)', v)
             edges = (num(r'^\s*h edges\s+(\d+)', v) or 0) + (num(r'^\s*v edges\s+(\d+)', v) or 0)
             o['detour'] = wl / rsmt_total if wl and rsmt_total else None
@@ -126,7 +165,11 @@ def main():
             cost, of = num(r' cost=([\d.]+)', summ), num(r'of_cost=([\d.]+)', summ)
             o['of_share'] = of / cost if cost and of is not None else None
             o['of_knet'] = of / r['nets_all'] * 1000 if of is not None else None
+            o['of_gcell'] = of / r['tiles'] if of is not None else None
             o['score_knet'] = cost / r['nets_all'] * 1000 if cost else None
+            cpu = cpu_of(base + '.time')
+            o['cpu_knet'] = cpu / r['nets_all'] * 1000 if cpu else None
+            o['cpu_mstep'] = cpu / rsmt_total * 1e6 if cpu and rsmt_total else None
             t = num(r'real_s=([\d.]+)', summ)
             o['runtime_knet'] = t / r['nets_all'] * 1000 if t else None
             o['runtime_mstep'] = t / rsmt_total * 1e6 if t and rsmt_total else None
@@ -136,10 +179,17 @@ def main():
             if d:
                 which = s.replace('ispd25', '')
                 unit_len, pitch = cap_header(os.path.join(BENCH, 'ispd25', 'ISPD2025_benchmarks', which, n, n + '.cap'))
-                steps = routed_steps(os.path.expanduser(f'~/Code/GlobalRouterRuns/p130/{which}.{n}.route'), pitch)
+                rp = os.path.expanduser(f'~/Code/GlobalRouterRuns/p130/{which}.{n}.route')
+                steps = routed_steps(rp if os.path.exists(rp) else rp + '.xz', pitch)  # archive_compact.py xz's them
                 o['detour'] = steps / rsmt_total if steps and rsmt_total else None
                 o['of_share'] = d['of_cost'] / d['cost'] if d.get('cost') else None
                 o['of_knet'] = d['of_cost'] / r['nets_all'] * 1000 if d.get('of_cost') is not None else None
+                o['of_gcell'] = d['of_cost'] / r['tiles'] if d.get('of_cost') is not None else None
+                err = os.path.expanduser(f'~/Code/GlobalRouterRuns/p130/{which}.{n}.err')
+                cpu = cpu_of(err)
+                o['cpu_knet'] = cpu / r['nets_all'] * 1000 if cpu else None
+                o['cpu_mstep'] = cpu / rsmt_total * 1e6 if cpu and rsmt_total else None
+                o.update(sta_of(s, n))
                 o['score_knet'] = d['cost'] / r['nets_all'] * 1000 if d.get('cost') else None
                 t = num(r'^real ([\d.]+)$', read_text(os.path.expanduser(f'~/Code/GlobalRouterRuns/p130/{which}.{n}.err')))
                 o['runtime_knet'] = t / r['nets_all'] * 1000 if t else None

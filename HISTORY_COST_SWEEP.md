@@ -10587,3 +10587,17 @@ now runs the ladder with both (unbiased + 2 x 3 routes, then the power term at t
 9 routes, three OpenROAD sessions); the best of either over the measured candidates is ~-24.0 for the
 ten (the input-only loop -22.86). `timing_slack.tcl` skips (and counts) path points and paths with no
 object, which mempool_tile_wrap has. Running on all ten.
+
+**The Routing Difficulty Atlas, rebuilt** (version 6, https://claude.ai/artifact/NhWAbyFKkxv2RVXZndpweX).
+Per-net times re-measured as thread CPU time on all 39 designs (coverage of each run's CPU time: 90-99%
+on 14 of the 16 ISPD 2008 designs, 18% / 47% on the two shortest; every 2008 route byte-identical to
+Part 124's). ISPD 2008 outcomes now all from Part 133's runs of the 2008 standard; new outcomes: CPU time
+per 1000 nets and per million Steiner steps, overflow cost per GCell (2024 / 2025; per 1000 nets made dense
+designs look uncongested), and for ISPD 2025 the unbiased route's WNS, TNS per contest endpoint and power
+(the contest's OpenROAD) and the timing loop's gain. The correlation and fit panels open on one contest
+(ISPD 2008) instead of all pooled, and a findings section states what holds within a contest: 2008
+overflow follows local bottlenecks (worst 3 x 3 cut +0.75, worst pin escape +0.63) but those measures do
+not predict its size (leave-one-out R^2 below zero); 2008 detour follows pins per track (+0.77); 2024
+RUDY 99th percentile +0.87; the k-means clusters are contests and sizes, newblue3 alone at k = 4. Per-net
+time, corrected: ISPD 2024 / 2025 8-12 us per Steiner step, log time-length correlation 0.93-0.97; ISPD
+2008 maze search 74-100% of per-net time, the slowest 1% of nets 47-96% of it, correlation 0.64-0.90.
