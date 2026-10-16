@@ -10522,3 +10522,29 @@ Fixed on the way: the per-net timer's self-test spun 2 ms of elapsed time, which
 turn into less than 2 ms of CPU time now that the timer counts CPU time; it spins on CPU time. (A
 router binary copied over itself in place was killed at launch -- macOS's stale signature cache; a
 fresh file fixes it.)
+
+**All ten scored designs** (every candidate legal, 0 open nets; score change against our own unbiased
+route, each design's weights and endpoint count; lower is better; raw: `~/Code/GlobalRouterRuns/p134/`):
+
+| design | loop's choice (k3, kp) | timing loop | standard25 | time |
+|---|---|---|---|---|
+| visible ariane | 180, 0 | -2.27 | -2.16 | 4 min |
+| visible bsg_chip | 540, 0 | -1.56 | -1.38 | 22 min |
+| visible NV_NVDLA_partition_c | 540, 0 | -6.29 | -6.22 | 17 min |
+| visible mempool_tile_wrap | 0, 4 | -0.93 | -0.51 | 4 min |
+| visible mempool_group | 180, 4 | **-7.48** | -6.40 | 2.2 h |
+| blind ariane | 180, 0 | -0.25 | +0.25 | 9 min |
+| blind bsg_chip | 60, 0 | -0.24 | +0.51 | 22 min |
+| blind NV_NVDLA_partition_c | 20, 0 | -1.44 | +0.33 | 18 min |
+| blind mempool_tile_wrap | 20, 1 | -1.15 | -1.10 | 4 min |
+| blind mempool_group | 20, 1 | **-1.26** | +2.27 | 1.8 h |
+| **sum** | | **-22.86** | **-14.41** | |
+
+Every loss is gone (the standard lost on four blind designs), and the sum beats the best per-design
+choice over the calibration runs (-17.05) because the loop also searched strengths and power
+combinations those runs did not (visible mempool_group 180 + kp 4, blind mempool_group 20 + kp 1).
+The best strength spans 20 to 540 and the power term helps on four of ten -- no single setting or
+weight rule could have found these. The cost is time: 8 routes and two OpenROAD sessions per design
+(4 min to 2.2 h here); the contest's score scales by +-20% for runtime against the field's median, so
+a submission would trim the ladder (stage 1 showed the best within a factor 3 of its neighbours'
+score on most designs) or search it adaptively.
