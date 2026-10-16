@@ -10487,3 +10487,18 @@ wins (-4.05, from power), blind mempool_group 0.85 loses (+2.24), visible mempoo
 at every strength, blind mempool_tile_wrap 0.16 wins. What is missing is how much timing a given bias
 buys on a design, which varies widely; a guard needs a router-side estimate of that (e.g. the drop in
 resistance-weighted length of the classed nets), not of the overflow alone.
+
+**A router-side timing estimate for the guard, tested offline (the user's request; not built).** For each
+of the ~100 saved calibration routes (`~/Code/GlobalRouterRuns/p133/cal/rl/`, `rl.awk`): over the classed
+nets (input slack <= 0.1 x the worst), the sum of length x layer resistance and the via count; over all
+nets, length x layer capacitance. Predictor: T (the timing at stake) x the fraction of the classed nets'
+resistive length removed; power proxy |w_power| x the fraction of capacitive length removed. Over 89
+runs: timing gain vs predictor Pearson +0.36, Spearman +0.64; power gain vs proxy Pearson -0.03. The
+realized / predicted ratio is far from constant -- ~0.02-0.2 on most designs, 1.2-7.4 on NV_NVDLA
+(dominated by a few worst-slack nets), negative where a weak bias hurt -- so one scale cannot transfer.
+Guard choosing the strength with the best predicted net gain: fitted on all ten **-16.36**, but
+**leave-one-out -9.88**, worse than the floor rule alone (-14.10); the oracle over the same runs is
+-17.05. How much slack a design recovers from lower resistance depends on its timing paths (which
+nets are on failing paths, their loads, the wire share of path delay), which wire geometry cannot see.
+The working options are a timing engine in the loop (OpenSTA, as CLAUDE.md's stage 6 "net typing"
+envisaged) or accepting either current rule (standard -14.41, floor rule -14.10 over the ten).
