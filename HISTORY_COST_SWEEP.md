@@ -10601,3 +10601,12 @@ not predict its size (leave-one-out R^2 below zero); 2008 detour follows pins pe
 RUDY 99th percentile +0.87; the k-means clusters are contests and sizes, newblue3 alone at k = 4. Per-net
 time, corrected: ISPD 2024 / 2025 8-12 us per Steiner step, log time-length correlation 0.93-0.97; ISPD
 2008 maze search 74-100% of per-net time, the slowest 1% of nets 47-96% of it, correlation 0.64-0.90.
+
+**The timing loop with both class sources, all ten scored designs** (9 routes each; score change against
+the unbiased route, lower is better): visible ariane -3.31 (routed classes, k3 540), bsg_chip -1.69
+(routed, 540), NV_NVDLA -6.29 (routed, 540), mempool_tile_wrap -0.87 (routed, 180, kp 1), mempool_group
+-7.48 (input, 180, kp 4); blind ariane -0.25 (input, 180), bsg_chip -0.24 (input, 180), NV_NVDLA -1.44
+(routed, 20), mempool_tile_wrap -1.15 (input, 20, kp 1), mempool_group -1.26 (input, 20, kp 1).
+**Sum -23.97** (input slack only -22.86; `standard25.env` alone -14.41). The routed classes win on four
+designs, the input classes on five, one ties: neither alone would do. 4-22 min per design, 2.1-2.5 h on
+mempool_group.
