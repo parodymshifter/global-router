@@ -7785,6 +7785,37 @@ struct TimingLayerModel {
   }
 };
 TimingLayerModel gTiming;
+
+// pd39route (Part 134): PD39ROUTE_TIMING_SLACK=<file> -- the nets' slack as OpenROAD measured it on a
+// routed solution (gr/timing_loop.py writes it), in place of the input's pin slack. One line per net:
+// "<net index in the .net's order> <slack, seconds>"; '#' lines are comments. Every net not listed
+// gets no slack (unclassed). Fails on a malformed line, an index out of range or a non-finite slack.
+bool loadSlackOverride(const std::string &path, size_t nNets, std::vector<float> &slack, std::string &err) {
+  std::ifstream in(path);
+  if (!in) {
+    err = "cannot open " + path;
+    return false;
+  }
+  slack.assign(nNets, std::numeric_limits<float>::quiet_NaN());
+  std::string line;
+  size_t lineNo = 0;
+  while (std::getline(in, line)) {
+    ++lineNo;
+    if (line.empty() || line[0] == '#')
+      continue;
+    std::istringstream ls(line);
+    long long idx = -1;
+    double v = 0;
+    std::string extra;
+    if (!(ls >> idx >> v) || (ls >> extra) || idx < 0 || static_cast<size_t>(idx) >= nNets || !std::isfinite(v)) {
+      err = path + ":" + std::to_string(lineNo) + ": expected '<net index 0.." + std::to_string(nNets - 1) +
+            "> <slack>', got '" + line + "'";
+      return false;
+    }
+    slack[static_cast<size_t>(idx)] = static_cast<float>(v);
+  }
+  return true;
+}
 // the net being placed: its per-layer multipliers, or nullptr (no bias)
 thread_local const double *tLayerBias = nullptr;
 thread_local double tLayerBiasMax = 0; // that net's k[class] (the gate's full-edge term)
@@ -18268,6 +18299,30 @@ void testTimingLayerBiasPicksUpperMetal() {
   gScore = savedS;
 }
 
+// pd39route (Part 134): the routed-slack file: listed nets get their value, the rest none; a bad
+// index, a non-number or a trailing field is refused.
+void testSlackOverrideFile() {
+  const std::string path = "pd39route_selftest_slack.txt";
+  auto write = [&](const char *text) {
+    std::ofstream f(path);
+    f << text;
+  };
+  std::vector<float> v;
+  std::string err;
+  write("# routed slack\n0 -2.5e-10\n3 1e-11\n");
+  bool ok = loadSlackOverride(path, 4, v, err) && v.size() == 4 && v[0] == -2.5e-10f && v[1] != v[1] &&
+            v[2] != v[2] && v[3] == 1e-11f;
+  write("4 -1e-10\n");
+  bool badIdx = !loadSlackOverride(path, 4, v, err);
+  write("1 x\n");
+  bool badNum = !loadSlackOverride(path, 4, v, err);
+  write("1 -1e-10 extra\n");
+  bool badExtra = !loadSlackOverride(path, 4, v, err);
+  std::remove(path.c_str());
+  check(ok, "routed slack file: listed nets get their slack, unlisted none");
+  check(badIdx && badNum && badExtra, "routed slack file: an index out of range, a non-number, a trailing field refused");
+}
+
 // pd39route (Part 133): buildNetTree equals buildNetTreeReference -- nodes
 // (order included), edges, adjacency and the return value -- on 3000 random
 // nets: rectilinear walks with repeated and overlapping legs (cycles), a few
@@ -18850,6 +18905,7 @@ int run() {
   testCommutingDagOrder();
   testCriticalPathFirstDag();
   testBuildNetTreeMatchesReference();
+  testSlackOverrideFile();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
   testPatternIncrementalRefreshIsExact();
@@ -19216,6 +19272,28 @@ int main(int argc, char **argv) {
         for (double x : vals)
           out.push_back(x / mx);
       };
+      if (const char *sf = std::getenv("PD39ROUTE_TIMING_SLACK"); sf) { // Part 134: routed slack
+        // PD39ROUTE_TIMING_SLACK_MODE: replace (default) -- the file's slack only, unlisted nets
+        // unclassed; min -- each net keeps its input slack, lowered to the file's where that is worse
+        const char *mv = std::getenv("PD39ROUTE_TIMING_SLACK_MODE");
+        const std::string mode = mv ? mv : "replace";
+        if (mode != "replace" && mode != "min")
+          fail("PD39ROUTE_TIMING_SLACK_MODE must be replace or min (got '" + mode + "')");
+        std::string err;
+        std::vector<float> routed;
+        if (!loadSlackOverride(sf, gTiming.slack.size(), routed, err))
+          fail("PD39ROUTE_TIMING_SLACK: " + err);
+        if (mode == "replace")
+          gTiming.slack.swap(routed);
+        else
+          for (size_t i = 0; i < routed.size(); ++i)
+            if (routed[i] == routed[i] && !(gTiming.slack[i] <= routed[i]))
+              gTiming.slack[i] = routed[i];
+        size_t listed = 0;
+        for (float v : gTiming.slack)
+          listed += v == v;
+        std::cerr << "ISPD 2025 timing layers: routed slack for " << listed << " nets from " << sf << "\n";
+      }
       relative(layerR, "PD39ROUTE_LAYER_R", gTiming.relR);
       relative(layerC, "PD39ROUTE_LAYER_C", gTiming.relC);
       gTiming.kp = powerK;

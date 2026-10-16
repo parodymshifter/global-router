@@ -7,13 +7,16 @@ predicts (Part 133: weight rules sum -14.1 / -14.4 over ten designs, a geometric
 candidate with the contest's own OpenROAD (timing, power -- one session for all of them) and congestion
 evaluator, and keep the best by the contest score's change against the unbiased route.
 
-  python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route]
+  python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes routed|input]
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
 DESIGN_DIR holds <name>.cap/.net/.def/.sdc (the name is the folder's). Stage 1: unbiased plus top-class
 timing strengths k3 in K3_LADDER (classes k3/4, k3/2, k3; power off; absolute, not weight-scaled).
-Stage 2: at stage 1's best, the power term at KP_LADDER. Every candidate is logged to WORK_DIR/loop.tsv.
+Stage 0 (Part 134): the unbiased route is scored and OpenROAD measures its slack on every failing
+endpoint's worst path; those nets become the classes for every biased candidate (PD39ROUTE_TIMING_SLACK,
+replace mode: others unclassed; `--classes input` uses the input slack instead). Stage 2: at stage 1's
+best, the power term at KP_LADDER. Every candidate is logged to WORK_DIR/loop.tsv.
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
@@ -24,6 +27,11 @@ EVAL_DIR = os.path.expanduser('~/Code/GlobalRouterRuns/ispd25eval')       # NanG
 OPENROAD = os.path.expanduser('~/Code/OpenROAD_ISPD25/build/src/openroad')  # the contest's fork
 EVALUATOR = os.path.join(EVAL_DIR, 'evaluator')                             # the contest's congestion score
 MULTI_TCL = os.path.join(GR, 'timing_loop.tcl')
+SLACK_TCL = os.path.join(GR, 'timing_slack.tcl')
+# Part 134: the classes come from the unbiased route's slack as OpenROAD measures it (every net on a
+# failing endpoint's worst path; the rest unclassed) -- on visible ariane -2.90 vs -2.27 from the input
+# slack at the same strength, with a third less added overflow. `--classes input` keeps the input slack.
+# (Re-classifying from the best biased route instead dropped the nets the bias had fixed: -1.53.)
 # 2026-10-16 (Part 134, the user: fewer steps): 20 / 180 / 540 -- dropping 60 and 1600 loses nothing on the
 # ten scored designs (each was best only on blind bsg_chip, by 0.0006); 8 routes per design -> 6
 K3_LADDER = [20, 180, 540]
@@ -52,7 +60,9 @@ def wait_slot():
         time.sleep(5)
 
 
-def route(d, name, work, tag, k3, kp):
+def route(d, name, work, tag, k3, kp, slack_file=None):
+    """One candidate: the 2024 standard plus the timing bias at top-class strength k3 and the power
+    term kp; slack_file (the routed-slack file) replaces the input slack as the classes' source."""
     base = {}
     for f in ('standard.env', 'standard24.env', 'fast24.env'):
         base.update(env_file(os.path.join(GR, f)))
@@ -63,6 +73,9 @@ def route(d, name, work, tag, k3, kp):
         base['PD39ROUTE_POWER_LAYERS'] = str(kp)
         base['PD39ROUTE_LAYER_R'] = s25['PD39ROUTE_LAYER_R']
         base['PD39ROUTE_LAYER_C'] = s25['PD39ROUTE_LAYER_C']
+    if slack_file and (k3 > 0 or kp > 0):
+        base['PD39ROUTE_TIMING_SLACK'] = slack_file
+        base['PD39ROUTE_TIMING_SLACK_MODE'] = 'replace'
     sol = os.path.join(work, f'{tag}.route')
     wait_slot()
     with open(os.path.join(work, f'{tag}.err'), 'w') as err:
@@ -97,6 +110,46 @@ def sta(d, name, cands):
     return int(re.search(r'ENDPOINTS (\d+)', out).group(1))
 
 
+def net_index(net_path):
+    """Net name -> its index in the .net's order (the router's net id)."""
+    idx = {}
+    with open(net_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and line not in '()' and ',' not in line:
+                idx[line.replace('\\', '')] = len(idx)
+    return idx
+
+
+def sta_slack(d, name, c, work, idx):
+    """One OpenROAD session: candidate c's timing and power, and its failing-path nets' slack, written
+    as the router's routed-slack file (net index, seconds). Returns that file."""
+    raw, out = os.path.join(work, c['tag'] + '.slack_names'), os.path.join(work, c['tag'] + '.slack')
+    tcl = os.path.join(work, 'timing_slack.tcl')
+    shutil.copyfile(SLACK_TCL, tcl)
+    env = {**os.environ, 'DESIGN': name, 'DESIGN_DIR': os.path.dirname(d.rstrip('/')), 'ROUTE': c['route'],
+           'SLACK_OUT': raw}
+    txt = subprocess.run([OPENROAD, '-exit', tcl], cwd=EVAL_DIR, env=env, capture_output=True, text=True).stdout
+    if 'SLACKNETS' not in txt:
+        raise SystemExit('timing_loop.py: OpenROAD (slack) failed:\n' + txt[-2000:])
+    c['tns'] = float(re.search(r'^tns (\S+)', txt, re.M).group(1))
+    c['wns'] = float(re.search(r'^wns (\S+)', txt, re.M).group(1))
+    c['power'] = float(re.search(r'^Total\s+\S+\s+\S+\s+\S+\s+(\S+)', txt, re.M).group(1))
+    missing = 0
+    with open(raw) as f, open(out, 'w') as g:
+        g.write(f"# routed slack of {c['tag']} (seconds), from OpenROAD\n")
+        for line in f:
+            nm, v = line.rsplit(' ', 1)
+            i = idx.get(nm.replace('\\', ''))
+            if i is None:
+                missing += 1
+                continue
+            g.write(f'{i} {float(v) * 1e-9:.6e}\n')
+    c['slack_nets'] = sum(1 for _ in open(out)) - 1
+    c['slack_unmatched'] = missing
+    return out
+
+
 def delta(c, b, w, n):
     """The contest score's change from the unbiased candidate (lower is better)."""
     return (w[0] * (c['wns'] - b['wns']) + w[1] * (c['tns'] - b['tns']) / n + w[2] * (c['power'] - b['power'])
@@ -113,23 +166,28 @@ def main():
     os.makedirs(work, exist_ok=True)
     w = weights(os.path.join(d, name + '.cap'))
     t0 = time.time()
-    s1 = [route(d, name, work, 'base', 0, 0)] + [route(d, name, work, f'k{k}', k, 0) for k in K3_LADDER]
-    n = sta(d, name, s1)
-    b = s1[0]
+    use_routed = '--classes' not in sys.argv or sys.argv[sys.argv.index('--classes') + 1] == 'routed'
+    b = route(d, name, work, 'base', 0, 0)
+    slack_file = None
+    if use_routed:  # stage 0: the unbiased route scored, and its failing-path nets' slack measured
+        slack_file = sta_slack(d, name, b, work, net_index(os.path.join(d, name + '.net')))
+    s1 = [route(d, name, work, f'k{k}', k, 0, slack_file) for k in K3_LADDER]
+    n = sta(d, name, s1 if use_routed else [b] + s1)
+    b['delta'] = 0.0
     for c in s1:
         c['delta'] = delta(c, b, w, n)
-    best = min(s1, key=lambda c: c['delta'])
-    s2 = [route(d, name, work, f'k{best["k3"]}p{kp}', best['k3'], kp) for kp in KP_LADDER]
+    best = min([b] + s1, key=lambda c: c['delta'])
+    s2 = [route(d, name, work, f'k{best["k3"]}p{kp}', best['k3'], kp, slack_file) for kp in KP_LADDER]
     sta(d, name, s2)
     for c in s2:
         c['delta'] = delta(c, b, w, n)
-    allc = s1 + s2
+    allc = [b] + s1 + s2
     best = min(allc, key=lambda c: c['delta'])
     with open(os.path.join(work, 'loop.tsv'), 'w') as f:
-        f.write('tag\tk3\tkp\twns\ttns\tpower\tof\topens\tdelta\n')
+        f.write('tag\tk3\tkp\twns\ttns\tpower\tof\topens\tdelta\tslack_nets\tunmatched\n')
         for c in allc:
             f.write(f"{c['tag']}\t{c['k3']}\t{c['kp']}\t{c['wns']}\t{c['tns']}\t{c['power']}\t{c['of']}\t{c['opens']}"
-                    f"\t{c['delta']:+.4f}\n")
+                    f"\t{c['delta']:+.4f}\t{c.get('slack_nets', '')}\t{c.get('slack_unmatched', '')}\n")
         f.write(f"# best {best['tag']} delta {best['delta']:+.4f}; weights {w}; endpoints {n}; "
                 f"{time.time() - t0:.0f} s for {len(allc)} candidates\n")
     if out:

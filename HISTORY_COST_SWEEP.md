@@ -10556,3 +10556,24 @@ bsg_chip, by 0.0006), stage 2 unchanged (kp 1, 4 at the best): 6 routes per desi
 still -22.86 (k3 = 20 / 180 only: 5 routes, -22.34 -- visible bsg_chip and NV_NVDLA need 540).
 Checked by a run on visible mempool_tile_wrap: the same choice and change (k0p4, -0.9288), 173 s vs
 238 s. `standard25.env` stays as the one-route fallback without OpenROAD.
+
+**Routed slack as the classes' source (the user's request).** pd39route: `PD39ROUTE_TIMING_SLACK=<file>`
+("<net index> <slack, s>" per line, from OpenROAD) replaces the input pin slack (`_MODE=replace`,
+default: unlisted nets unclassed) or lowers it where worse (`_MODE=min`); self-tested (listed / unlisted,
+bad index, non-number, trailing field). `gr/timing_slack.tcl` scores one route and writes the worst
+slack of every net on each failing endpoint's worst path; `timing_loop.py` maps the names to the
+`.net` order (all 12903 matched on ariane). Visible ariane, k3 180, classes from:
+
+| classes | WNS | TNS | overflow cost | score change |
+|---|---|---|---|---|
+| input slack (the loop so far) | -0.377 | -1053 | 9.33M | -2.27 |
+| the best biased route's slack, replace (re-route) | -0.475 | -1190 | 6.23M | -1.53 |
+| input, lowered by the best route's slack | -0.377 | -996 | 9.38M | -2.54 |
+| **the unbiased route's slack, replace** | -0.414 | -1029 | **6.39M** | **-2.90** |
+| input, lowered by the unbiased route's slack | -0.376 | -1002 | 9.22M | -2.57 |
+
+Re-classifying from a biased route drops the nets the bias fixed (they fall back and fail again).
+The unbiased route's measured slack picks out exactly the nets that fail with real wires -- 12903
+against the input's 50021 classed -- so nearly the same timing costs a third less overflow. The loop
+now scores the unbiased route first (stage 0), measures its slack, and classes every candidate from it;
+`--classes input` keeps the old behaviour. Running on the eight smaller designs.
