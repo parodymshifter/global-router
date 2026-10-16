@@ -7,16 +7,18 @@ predicts (Part 133: weight rules sum -14.1 / -14.4 over ten designs, a geometric
 candidate with the contest's own OpenROAD (timing, power -- one session for all of them) and congestion
 evaluator, and keep the best by the contest score's change against the unbiased route.
 
-  python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes routed|input]
+  python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
 DESIGN_DIR holds <name>.cap/.net/.def/.sdc (the name is the folder's). Stage 1: unbiased plus top-class
 timing strengths k3 in K3_LADDER (classes k3/4, k3/2, k3; power off; absolute, not weight-scaled).
 Stage 0 (Part 134): the unbiased route is scored and OpenROAD measures its slack on every failing
-endpoint's worst path; those nets become the classes for every biased candidate (PD39ROUTE_TIMING_SLACK,
-replace mode: others unclassed; `--classes input` uses the input slack instead). Stage 2: at stage 1's
-best, the power term at KP_LADDER. Every candidate is logged to WORK_DIR/loop.tsv.
+endpoint's worst path. Stage 1 runs the ladder twice: classes from that routed slack (PD39ROUTE_TIMING_SLACK,
+replace mode: other nets unclassed; tag suffix r) and from the input pin slack (suffix i) -- neither wins
+everywhere (routed: visible ariane -3.31 vs -2.27; input: blind mempool_tile_wrap -1.15 vs -0.21, whose
+unbiased route fails on only 665 nets). `--classes routed|input` runs one. Stage 2: at the best, the power
+term at KP_LADDER with the same classes. Every candidate is logged to WORK_DIR/loop.tsv.
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
@@ -166,18 +168,24 @@ def main():
     os.makedirs(work, exist_ok=True)
     w = weights(os.path.join(d, name + '.cap'))
     t0 = time.time()
-    use_routed = '--classes' not in sys.argv or sys.argv[sys.argv.index('--classes') + 1] == 'routed'
+    mode = sys.argv[sys.argv.index('--classes') + 1] if '--classes' in sys.argv else 'both'
+    if mode not in ('both', 'routed', 'input'):
+        raise SystemExit('timing_loop.py: --classes must be both, routed or input')
     b = route(d, name, work, 'base', 0, 0)
-    slack_file = None
-    if use_routed:  # stage 0: the unbiased route scored, and its failing-path nets' slack measured
-        slack_file = sta_slack(d, name, b, work, net_index(os.path.join(d, name + '.net')))
-    s1 = [route(d, name, work, f'k{k}', k, 0, slack_file) for k in K3_LADDER]
-    n = sta(d, name, s1 if use_routed else [b] + s1)
-    b['delta'] = 0.0
+    srcs = {}
+    if mode in ('both', 'routed'):  # stage 0: the unbiased route scored, its failing-path nets' slack measured
+        srcs['r'] = sta_slack(d, name, b, work, net_index(os.path.join(d, name + '.net')))
+    if mode in ('both', 'input'):
+        srcs['i'] = None  # the input pin slack
+    s1 = [dict(route(d, name, work, f'k{k}{t}', k, 0, sf), src=t) for t, sf in srcs.items() for k in K3_LADDER]
+    n = sta(d, name, s1 if 'r' in srcs else [b] + s1)
+    b['delta'], b['src'] = 0.0, ''
     for c in s1:
         c['delta'] = delta(c, b, w, n)
     best = min([b] + s1, key=lambda c: c['delta'])
-    s2 = [route(d, name, work, f'k{best["k3"]}p{kp}', best['k3'], kp, slack_file) for kp in KP_LADDER]
+    sf = srcs.get(best['src']) if best['src'] else srcs.get('r')
+    s2 = [dict(route(d, name, work, f'k{best["k3"]}{best["src"]}p{kp}', best['k3'], kp, sf), src=best['src'])
+          for kp in KP_LADDER]
     sta(d, name, s2)
     for c in s2:
         c['delta'] = delta(c, b, w, n)

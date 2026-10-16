@@ -76,15 +76,20 @@ report_tns
 report_wns
 report_power
 set worst [dict create]
+set skipped 0
 foreach p [find_timing_paths -path_delay max -group_count 100000000 -endpoint_count 1 -slack_max 0.0] {
-  set s [get_property $p slack]
-  foreach pt [get_property $p points] {
-    set n [get_nets -quiet -of_objects [get_property $pt pin]]
-    if {$n eq ""} { continue }
-    set nm [get_full_name $n]
-    if {![dict exists $worst $nm] || $s < [dict get $worst $nm]} { dict set worst $nm $s }
-  }
+  # a path or point without an object (mempool_tile_wrap has some) is skipped and counted
+  if {[catch {
+    set s [get_property $p slack]
+    foreach pt [get_property $p points] {
+      if {[catch {set pin [get_property $pt pin]}] || $pin eq "" || $pin eq "NULL"} { continue }
+      if {[catch {set n [get_nets -quiet -of_objects $pin]}] || $n eq ""} { continue }
+      set nm [get_full_name $n]
+      if {![dict exists $worst $nm] || $s < [dict get $worst $nm]} { dict set worst $nm $s }
+    }
+  }]} { incr skipped }
 }
+puts "SKIPPEDPATHS $skipped"
 set f [open $::env(SLACK_OUT) w]
 dict for {nm s} $worst { puts $f "$nm $s" }
 close $f

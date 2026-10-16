@@ -10577,3 +10577,13 @@ The unbiased route's measured slack picks out exactly the nets that fail with re
 against the input's 50021 classed -- so nearly the same timing costs a third less overflow. The loop
 now scores the unbiased route first (stage 0), measures its slack, and classes every candidate from it;
 `--classes input` keeps the old behaviour. Running on the eight smaller designs.
+
+The routed-slack loop on the eight smaller designs (score change; input-slack loop in brackets):
+visible ariane **-3.31** (-2.27), visible bsg_chip **-1.69** (-1.56), visible / blind NV_NVDLA -6.29 /
+-1.44 (the same), blind bsg_chip -0.235 (-0.236), blind ariane -0.18 (**-0.25**), visible
+mempool_tile_wrap -0.87 (**-0.93**), blind mempool_tile_wrap -0.21 (**-1.15** -- its unbiased route fails
+on only 665 nets, against 31050 classed by the input slack). Neither source wins everywhere, so stage 1
+now runs the ladder with both (unbiased + 2 x 3 routes, then the power term at the best with its source:
+9 routes, three OpenROAD sessions); the best of either over the measured candidates is ~-24.0 for the
+ten (the input-only loop -22.86). `timing_slack.tcl` skips (and counts) path points and paths with no
+object, which mempool_tile_wrap has. Running on all ten.
