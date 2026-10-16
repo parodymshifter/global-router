@@ -258,6 +258,16 @@ routes: ariane's contest score 2.30 -> 0.14 (1st place 0.90), bsg_chip -1.38, NV
 its endpoint count, registers + outputs; mempool_group, mempool_cluster and the blind designs are not
 yet measured under it.
 
+**2026-10-16: the ISPD 2025 standard flow is `python3 gr/timing_loop.py <design dir> <work dir>
+--out <solution>`** (Part 134), with the contest's timing engine in the loop: it routes the design
+unbiased and at top-class timing strengths 20 / 180 / 540, scores each with the contest's evaluator
+and OpenROAD (one session), tries the power term (kp 1, 4) at the best, and keeps the best by the
+contest score's change. Ten scored designs sum -22.86 against the unbiased routes (`standard25.env`
+alone -14.41), no design worse; 6 routes and two OpenROAD sessions per design (3 min to ~1.5 h).
+`@standard25.env` stays as the one-route fallback where OpenROAD is not available. Part 133 found why
+a fixed rule fails: the best strength (20-540) and whether the power term helps depend on each
+design's timing paths, which neither its score weights nor its wire geometry reveal.
+
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check
 against eval2008.pl, supervised escalation, empirical tuning over reasoned
@@ -712,6 +722,9 @@ agent knew from scratch just to keep going. Two rules follow from that:
   `ROUTER` at the top of `quality-checks.yml` and the file names in
   `codeql.yml`.
 - Run `./<router> --selftest` on the Mac before each commit.
+- Write a new router binary to a fresh file (`rm` it first, or build to a new name): copying over an
+  existing binary in place leaves macOS's code-signature cache stale and later launches are killed
+  at once (Part 134: three mempool_cluster runs and a test run lost that way).
 
 ## Profiling (2026-10-12)
 

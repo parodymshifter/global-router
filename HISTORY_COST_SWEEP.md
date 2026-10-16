@@ -10548,3 +10548,11 @@ weight rule could have found these. The cost is time: 8 routes and two OpenROAD 
 (4 min to 2.2 h here); the contest's score scales by +-20% for runtime against the field's median, so
 a submission would trim the ladder (stage 1 showed the best within a factor 3 of its neighbours'
 score on most designs) or search it adaptively.
+
+**Decision (the user, 2026-10-16): the timing loop is the ISPD 2025 standard flow, with fewer steps.**
+Chosen offline from the 80 measured candidates (deterministic, so selection is exact): stage 1 at
+k3 = 20 / 180 / 540 (dropping 60 and 1600 loses nothing on the ten -- each was best only on blind
+bsg_chip, by 0.0006), stage 2 unchanged (kp 1, 4 at the best): 6 routes per design instead of 8, sum
+still -22.86 (k3 = 20 / 180 only: 5 routes, -22.34 -- visible bsg_chip and NV_NVDLA need 540).
+Checked by a run on visible mempool_tile_wrap: the same choice and change (k0p4, -0.9288), 173 s vs
+238 s. `standard25.env` stays as the one-route fallback without OpenROAD.

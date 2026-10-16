@@ -9,6 +9,8 @@ evaluator, and keep the best by the contest score's change against the unbiased 
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route]
 
+The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
+
 DESIGN_DIR holds <name>.cap/.net/.def/.sdc (the name is the folder's). Stage 1: unbiased plus top-class
 timing strengths k3 in K3_LADDER (classes k3/4, k3/2, k3; power off; absolute, not weight-scaled).
 Stage 2: at stage 1's best, the power term at KP_LADDER. Every candidate is logged to WORK_DIR/loop.tsv.
@@ -22,7 +24,9 @@ EVAL_DIR = os.path.expanduser('~/Code/GlobalRouterRuns/ispd25eval')       # NanG
 OPENROAD = os.path.expanduser('~/Code/OpenROAD_ISPD25/build/src/openroad')  # the contest's fork
 EVALUATOR = os.path.join(EVAL_DIR, 'evaluator')                             # the contest's congestion score
 MULTI_TCL = os.path.join(GR, 'timing_loop.tcl')
-K3_LADDER = [20, 60, 180, 540, 1600]
+# 2026-10-16 (Part 134, the user: fewer steps): 20 / 180 / 540 -- dropping 60 and 1600 loses nothing on the
+# ten scored designs (each was best only on blind bsg_chip, by 0.0006); 8 routes per design -> 6
+K3_LADDER = [20, 180, 540]
 KP_LADDER = [1, 4]
 
 
