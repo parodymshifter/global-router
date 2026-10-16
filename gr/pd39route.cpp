@@ -17790,7 +17790,9 @@ void testNetClock() {
   const Net *savedBase = gNetBase;
   std::vector<std::array<float, 4>> saved;
   saved.swap(gNetTime);
-  auto spin = [] { auto t = std::chrono::steady_clock::now(); while (std::chrono::steady_clock::now() - t < std::chrono::milliseconds(2)) {} };
+  // Part 133: spin for 2 ms of this thread's CPU time (an elapsed-time spin can get less CPU than that on
+  // a loaded machine, now that the clock counts CPU time)
+  auto spin = [] { const double t = threadCpuSeconds(); while (threadCpuSeconds() - t < 0.002) {} };
   { NetClock off(&fake[0], kNtMaze); spin(); }
   bool offOk = gNetTime.empty();
   gNetBase = fake.data();

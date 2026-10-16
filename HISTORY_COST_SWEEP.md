@@ -10502,3 +10502,23 @@ Guard choosing the strength with the best predicted net gain: fitted on all ten 
 nets are on failing paths, their loads, the wire share of path delay), which wire geometry cannot see.
 The working options are a timing engine in the loop (OpenSTA, as CLAUDE.md's stage 6 "net typing"
 envisaged) or accepting either current rule (standard -14.41, floor rule -14.10 over the ten).
+
+## Part 134 -- ISPD 2025 with the contest's timing engine in the loop
+
+The user's choice after Part 133 (no strength rule from weights or wire geometry transfers across
+designs). `gr/timing_loop.py` (standard library) routes a design unbiased and at absolute top-class
+timing strengths k3 = 20, 60, 180, 540, 1600 (classes k3/4, k3/2, k3; power off), scores every route
+with the contest's congestion evaluator and -- in one OpenROAD session (`gr/timing_loop.tcl`: the
+contest flow, then read_global_route_segments / estimate_parasitics -global_routing / tns, wns, power
+per route) -- the contest's own timing and power, then tries the power term (kp 1, 4) at the best
+strength, and keeps the candidate with the best change in the contest score against the unbiased
+route. One-session scoring checked against separate sessions on ariane: identical tns / wns / power,
+and a route re-read after another gives the same numbers.
+
+First result, visible ariane: best k3 180 (power off), **score change -2.27** (the calibration's best
+-2.29 at k3 160), every candidate legal, 243 s for 8 candidates. The other nine scored designs running.
+
+Fixed on the way: the per-net timer's self-test spun 2 ms of elapsed time, which a loaded machine can
+turn into less than 2 ms of CPU time now that the timer counts CPU time; it spins on CPU time. (A
+router binary copied over itself in place was killed at launch -- macOS's stale signature cache; a
+fresh file fixes it.)
