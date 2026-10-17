@@ -10634,3 +10634,21 @@ then wire, then earliest), the region stage with multipliers reaching zero on th
 fixture with every net connected, and a portfolio whose variant 0 matches the stage run alone and whose
 kept routes are the best variant's. First runs: newblue1 and newblue4, own settings + lagr 0.05 / 0.2 /
 1 + vcap 0 + (lagr 0.2, vcap 0).
+
+**First results** (the 2008 standard + portfolio; every kept route `status=OK`, `gr_verify` =
+`eval2008.pl`; overflow after refinement per variant):
+
+| run | own settings | lagr 0.05 | 0.1 | 0.2 | 0.3 | 1 | vcap 0 | lagr 0.2 + vcap 0 | kept |
+|---|---|---|---|---|---|---|---|---|---|
+| newblue1 | 30 | 36 | | **24** | | 38 | 42 | 44 | **24** |
+| newblue1, slow spread 48 | 36 | | 42 | **32** | 36 | | | | **32** |
+| newblue1, slow spread 80 | 36 | | **26** | 36 | 40 | | | | **26** |
+| newblue4 | 154 | **140** | | 148 | | 146 | 150 | 154 | **140** |
+
+newblue4 140 is the best this project has had there (the 2008 standard 154; the best before, 144).
+The Lagrangian term on its own is a weak gain on newblue1: lagr 0.2 beats or ties the own settings at
+all three starting points (mean 30.7 vs 34.0, inside its 24-38 spread), and no step is best everywhere.
+The portfolio's gain is firmer: best of the variants, mean 27.3 vs 34.0 on newblue1 (-20%), 140 vs 154 on
+newblue4 (-9%) -- the multipliers' main use is as diversity. Cost: newblue1 6081 s vs 5126 s wall
+(+19%), newblue4 11664 s vs 9424 s (+24%), with 4-6 region stages sharing the cores. bigblue4 and newblue3
+(own + lagr 0.05 / 0.2 / 1) running, newblue7 after them alone (memory).
