@@ -1655,6 +1655,9 @@ struct Prices {
   // pd22route: virtual capacity. When set (the region stage only), the
   // present-demand cost prices edge e against virtualCap(cap, red[e]).
   const std::vector<int> *vredH = nullptr, *vredV = nullptr;
+  // pd39route (Part 135): the region stage's Lagrangian multipliers (PD39ROUTE_REGION_LAGRANGE), one per
+  // 2D edge, added as lambda x demand to the present-demand cost; null = none (the cost unchanged).
+  const std::vector<double> *lagH = nullptr, *lagV = nullptr;
 };
 
 // `threshold` is a parameter, not a fixed static lookup, specifically so
@@ -1808,7 +1811,8 @@ double wireCostH(const Prices &pr, size_t e, int amount) {
     return score2dCost(gScore2D.wlH[e], gScore2D.capH[e], gScore2D.nH[e], gScore2D.w, lv->h[e], amount,
                        pr.pdHistH[e]);
   int cap = pr.vredH ? virtualCap(lv->capH[e], (*pr.vredH)[e]) : lv->capH[e];
-  return presentDemandCost(lv->h[e], cap, amount, pr.pdHistH[e], pr.pdIter, pr.pdFactor, pdWl(pr));
+  const double c = presentDemandCost(lv->h[e], cap, amount, pr.pdHistH[e], pr.pdIter, pr.pdFactor, pdWl(pr));
+  return pr.lagH ? c + (*pr.lagH)[e] * amount : c;
 }
 double wireCostV(const Prices &pr, size_t e, int amount) {
   const Usage *lv = liveOf(pr);
@@ -1820,7 +1824,8 @@ double wireCostV(const Prices &pr, size_t e, int amount) {
     return score2dCost(gScore2D.wlV[e], gScore2D.capV[e], gScore2D.nV[e], gScore2D.w, lv->v[e], amount,
                        pr.pdHistV[e]);
   int cap = pr.vredV ? virtualCap(lv->capV[e], (*pr.vredV)[e]) : lv->capV[e];
-  return presentDemandCost(lv->v[e], cap, amount, pr.pdHistV[e], pr.pdIter, pr.pdFactor, pdWl(pr));
+  const double c = presentDemandCost(lv->v[e], cap, amount, pr.pdHistV[e], pr.pdIter, pr.pdFactor, pdWl(pr));
+  return pr.lagV ? c + (*pr.lagV)[e] * amount : c;
 }
 
 // A* multiplies its Manhattan heuristic by a lower bound on any one edge's
@@ -1858,6 +1863,18 @@ void configureCostModel(Prices &pr, const Usage &u, const CostSettings &cs) {
 // edge overflowed in the settled state gains 1 history, then the iteration
 // counter and its WL factor advance. NTHU's pre_evaluate_congestion_cost
 // does the same at the start of each iteration.
+// pd39route (Part 135): one subgradient step of the region stage's Lagrangian multipliers -- each edge's
+// lambda moves by alpha x its relative excess, (usage - capacity) / capacity, and never below 0: it grows
+// while the edge stays over capacity and gives the price back once nets leave it (unlike the history
+// term, which only grows). LMgr reached zero on newblue1 with multipliers (BEST_RESULTS_PLAN.md B3).
+void advanceLagrange(std::vector<double> &lam, const std::vector<int> &use, const std::vector<int> &cap,
+                     double alpha) {
+  for (size_t i = 0; i < lam.size(); ++i) {
+    const double excess = static_cast<double>(use[i] - cap[i]) / static_cast<double>(std::max(1, cap[i]));
+    lam[i] = std::max(0.0, lam[i] + alpha * excess);
+  }
+}
+
 void advancePresentDemand(Prices &pr, const Usage &u) {
   if (pr.model != CostModel::kPresentDemand)
     return;
@@ -4057,6 +4074,7 @@ struct RegionSettings {
   int boxCap = 0;             // pd13route: PD13ROUTE_*_BOX_CAP (0 = uncapped)
   int vcapTracks = 0;         // pd22route: PD22ROUTE_VCAP (0 = off)
   int vcapRadius = 5;         // pd22route: PD22ROUTE_VCAP_RADIUS
+  double lagrange = 0;        // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE, the multipliers' step (0 = off)
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4269,6 +4287,14 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
                 << " tiles of the overflow priced " << rep.vcapReduction << " capacity units lower ("
                 << rs.vcapTracks << " tracks)\n";
   }
+  // Part 135: Lagrangian multipliers, all 0 at the start
+  std::vector<double> lagH, lagV;
+  if (rs.lagrange > 0) {
+    lagH.assign(usage.h.size(), 0.0);
+    lagV.assign(usage.v.size(), 0.0);
+    prices.lagH = &lagH;
+    prices.lagV = &lagV;
+  }
   LayerPlan lp(g);
   SearchRegion region;
   std::vector<std::pair<std::vector<ChargeRecord>, std::vector<Seg>>> best;
@@ -4299,6 +4325,10 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
       ++rerouted;
     }
     advancePresentDemand(prices, usage);
+    if (rs.lagrange > 0) {
+      advanceLagrange(lagH, usage.h, usage.capH, rs.lagrange);
+      advanceLagrange(lagV, usage.v, usage.capV, rs.lagrange);
+    }
     long long total = totalOverflow(g, usage);
     rep.roundsRun = r + 1;
     grprof::event("region round", r); // Part 126: Instruments marker
@@ -4904,6 +4934,86 @@ long long totalWire2D(const std::vector<RoutedNet> &nets) {
   return w;
 }
 
+// pd39route (Part 135): the late-stage portfolio (PD39ROUTE_PORTFOLIO). A 2008 run keeps ~1-2 of 14
+// cores busy in its region stage, so path A (region stage + refinement) runs as several variants at once,
+// each on its own thread and its own copy of the routes, and the best is kept: least overflow, then least
+// 2D wire, then the earliest listed (variant 0 is the run's own settings) -- deterministic whatever the
+// threads' timing. A variant is a comma-separated list of key=value overrides of the region settings:
+// vcap (tracks), vcapr (radius), boxinit, boxgrow, boxcap, rounds, expand, lagr (the Lagrangian step);
+// variants are separated by ';'.
+bool applyRegionVariant(const std::string &spec, RegionSettings &rs, std::string &err) {
+  std::stringstream ss(spec);
+  std::string kv;
+  while (std::getline(ss, kv, ',')) {
+    if (kv.empty())
+      continue;
+    const size_t eq = kv.find('=');
+    if (eq == std::string::npos) {
+      err = "portfolio variant '" + spec + "': expected key=value, got '" + kv + "'";
+      return false;
+    }
+    const std::string k = kv.substr(0, eq), v = kv.substr(eq + 1);
+    char *end = nullptr;
+    const double x = std::strtod(v.c_str(), &end);
+    if (v.empty() || *end != '\0' || !std::isfinite(x) || x < 0) {
+      err = "portfolio variant '" + spec + "': " + k + " needs a number >= 0 (got '" + v + "')";
+      return false;
+    }
+    auto asInt = [&](int &dst, int lo, int hi) {
+      if (x != std::floor(x) || x < lo || x > hi) {
+        err = "portfolio variant '" + spec + "': " + k + " must be an integer " + std::to_string(lo) + "-" +
+              std::to_string(hi);
+        return false;
+      }
+      dst = static_cast<int>(x);
+      return true;
+    };
+    bool ok = true;
+    if (k == "vcap")
+      ok = asInt(rs.vcapTracks, 0, 1000);
+    else if (k == "vcapr")
+      ok = asInt(rs.vcapRadius, 0, 1000);
+    else if (k == "boxinit")
+      ok = asInt(rs.boxInit, 1, 100000);
+    else if (k == "boxgrow")
+      ok = asInt(rs.boxGrow, 0, 100000);
+    else if (k == "boxcap")
+      ok = asInt(rs.boxCap, 0, 100000);
+    else if (k == "rounds")
+      ok = asInt(rs.rounds, 1, 1000000);
+    else if (k == "expand")
+      ok = asInt(rs.expand, 0, 100000);
+    else if (k == "lagr")
+      rs.lagrange = x;
+    else {
+      err = "portfolio variant '" + spec + "': unknown key '" + k + "'";
+      return false;
+    }
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
+std::vector<std::string> gPortfolio; // PD39ROUTE_PORTFOLIO's variants (empty = off)
+
+struct PortfolioResult {
+  std::string spec;
+  long long overflow = 0, wire = 0;
+  RegionReport region;
+  RefineReport refine;
+};
+
+// Index of the best result: least overflow, then least wire, then the earliest.
+size_t pickPortfolio(const std::vector<PortfolioResult> &res) {
+  size_t best = 0;
+  for (size_t i = 1; i < res.size(); ++i)
+    if (res[i].overflow < res[best].overflow ||
+        (res[i].overflow == res[best].overflow && res[i].wire < res[best].wire))
+      best = i;
+  return best;
+}
+
 struct FallbackReport {
   long long overflowA = 0, wireA = 0, overflowB = 0, wireB = 0;
   bool tookB = false;
@@ -4913,7 +5023,55 @@ struct FallbackReport {
   ReclaimReport reclaim;
   RegionReport regionA, regionB;
   RefineReport refineA, refineB;
+  std::vector<PortfolioResult> portfolio; // Part 135: path A's variants (empty = off)
+  size_t portfolioPick = 0;
 };
+
+// Part 135: path A as a portfolio -- variant 0 (the run's own region settings) on `nets` in this thread,
+// the rest on copies, each on its own thread; the best is left in `nets`. Without variants, path A as before.
+void runPathA(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &region,
+              const RefineSettings &refine, bool trace, FallbackReport &fr) {
+  const RoutingGrid &g = d.grid;
+  if (gPortfolio.empty()) {
+    if (region.enabled)
+      fr.regionA = regionNegotiate(d, nets, region, trace);
+    if (refine.enabled)
+      fr.refineA = refine2D(d, nets, refine, trace);
+    return;
+  }
+  const size_t k = gPortfolio.size() + 1;
+  std::vector<std::vector<RoutedNet>> copies(k - 1, nets);
+  std::vector<PortfolioResult> res(k);
+  std::vector<RegionSettings> rs(k, region);
+  res[0].spec = "(own settings)";
+  for (size_t i = 1; i < k; ++i) {
+    res[i].spec = gPortfolio[i - 1];
+    std::string err;
+    if (!applyRegionVariant(gPortfolio[i - 1], rs[i], err)) // parsed in main already; defensive
+      fail(err);
+  }
+  auto run = [&](size_t i, std::vector<RoutedNet> &mine, bool tr) {
+    if (region.enabled)
+      res[i].region = regionNegotiate(d, mine, rs[i], tr);
+    if (refine.enabled)
+      res[i].refine = refine2D(d, mine, refine, tr);
+    res[i].overflow = totalOverflow(g, usageFromCharges(g, mine));
+    res[i].wire = totalWire2D(mine);
+  };
+  std::vector<std::thread> th;
+  for (size_t i = 1; i < k; ++i)
+    th.emplace_back([&, i]() { run(i, copies[i - 1], false); });
+  run(0, nets, trace);
+  for (std::thread &t : th)
+    t.join();
+  const size_t pick = pickPortfolio(res);
+  if (pick > 0)
+    nets = std::move(copies[pick - 1]);
+  fr.regionA = res[pick].region;
+  fr.refineA = res[pick].refine;
+  fr.portfolioPick = pick;
+  fr.portfolio = std::move(res);
+}
 
 // Runs both paths from the state in `nets` and leaves the kept one there.
 // pd35route (memory): spilling a vector of routed nets to an anonymous
@@ -5054,12 +5212,7 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
   RegionSettings regionB = region;
   if (!vcapB)
     regionB.vcapTracks = 0;
-  auto runA = [&]() {
-    if (region.enabled)
-      fr.regionA = regionNegotiate(d, nets, region, trace);
-    if (refine.enabled)
-      fr.refineA = refine2D(d, nets, refine, trace);
-  };
+  auto runA = [&]() { runPathA(d, nets, region, refine, trace, fr); }; // Part 135: a portfolio if set
   auto runB = [&]() {
     ReclaimSettings rs = reclaim;
     rs.enabled = true;
@@ -18299,6 +18452,73 @@ void testTimingLayerBiasPicksUpperMetal() {
   gScore = savedS;
 }
 
+// pd39route (Part 135): the Lagrangian step (over capacity: up by alpha x relative excess; under: down,
+// never below 0), its cost term (lambda x demand, nothing without multipliers), the portfolio's variant
+// parser and pick (least overflow, then wire, then earliest), and on the three-nets-on-one-row fixture:
+// the region stage with multipliers still reaches zero with every net connected, and a portfolio of
+// variants keeps the best of what each variant reaches on its own.
+void testLagrangeAndPortfolio() {
+  std::vector<double> lam = {0.0, 0.5, 0.1};
+  std::vector<int> use = {12, 5, 5}, cap = {10, 10, 10};
+  advanceLagrange(lam, use, cap, 1.0);
+  check(std::fabs(lam[0] - 0.2) < 1e-12 && lam[1] == 0.0 && lam[2] == 0.0,
+        "Lagrangian step: +0.2 on an edge 20% over; down to 0 (not below) on edges under capacity");
+  RegionSettings rs;
+  std::string err;
+  check(applyRegionVariant("vcap=0,boxcap=150,lagr=0.5,rounds=40", rs, err) && rs.vcapTracks == 0 &&
+            rs.boxCap == 150 && rs.lagrange == 0.5 && rs.rounds == 40,
+        "portfolio variant parse: vcap, boxcap, lagr, rounds");
+  check(!applyRegionVariant("vcap=-1", rs, err) && !applyRegionVariant("bogus=1", rs, err) &&
+            !applyRegionVariant("rounds=0", rs, err) && !applyRegionVariant("vcap", rs, err) &&
+            !applyRegionVariant("boxinit=1.5", rs, err),
+        "portfolio variant parse: negative, unknown key, zero rounds, missing value, fractional integer refused");
+  std::vector<PortfolioResult> pr(3);
+  pr[0].overflow = 5, pr[0].wire = 100;
+  pr[1].overflow = 3, pr[1].wire = 120;
+  pr[2].overflow = 3, pr[2].wire = 110;
+  check(pickPortfolio(pr) == 2, "portfolio pick: least overflow, then least wire");
+  pr[2].wire = 120;
+  check(pickPortfolio(pr) == 1, "portfolio pick: a full tie goes to the earliest");
+
+  Design d = parse("pd39route_selftest_lagrange.gr", kThreeOnOneRowGr);
+  auto fresh = [&]() {
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &d.nets[i];
+      nets[i].segs = {{0, 1, 0, 7, 1, 0}};
+    }
+    prepareFor2DRefine(d, nets);
+    return nets;
+  };
+  RegionSettings lr;
+  lr.enabled = true;
+  lr.lagrange = 0.5;
+  std::vector<RoutedNet> nl = fresh();
+  RegionReport rl = regionNegotiate(d, nl, lr, false);
+  bool conn = true;
+  for (const RoutedNet &rn : nl)
+    conn = conn && segsConnected(rn.segs);
+  check(rl.after == 0 && conn, "region stage with multipliers: zero overflow, every net connected");
+  // portfolio: variant 0 (one round) cannot finish; the variant with the default rounds can
+  RegionSettings one;
+  one.enabled = true;
+  one.rounds = 1;
+  RefineSettings noRefine;
+  noRefine.enabled = false;
+  std::vector<RoutedNet> alone = fresh();
+  RegionReport ra = regionNegotiate(d, alone, one, false);
+  std::vector<std::string> saved = gPortfolio;
+  gPortfolio = {"rounds=60"};
+  std::vector<RoutedNet> np = fresh();
+  FallbackReport fr;
+  runPathA(d, np, one, noRefine, false, fr);
+  gPortfolio = saved;
+  check(fr.portfolio.size() == 2 && fr.portfolio[0].overflow == ra.after &&
+            fr.portfolioPick == (ra.after > 0 ? 1u : 0u) &&
+            totalOverflow(d.grid, usageFromCharges(d.grid, np)) == fr.portfolio[fr.portfolioPick].overflow,
+        "portfolio: variant 0 matches the stage run alone, and the kept routes are the best variant's");
+}
+
 // pd39route (Part 134): the routed-slack file: listed nets get their value, the rest none; a bad
 // index, a non-number or a trailing field is refused.
 void testSlackOverrideFile() {
@@ -18906,6 +19126,7 @@ int run() {
   testCriticalPathFirstDag();
   testBuildNetTreeMatchesReference();
   testSlackOverrideFile();
+  testLagrangeAndPortfolio();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
   testPatternIncrementalRefreshIsExact();
@@ -19613,6 +19834,29 @@ int main(int argc, char **argv) {
     if (!parseVirtualCap(std::getenv("PD22ROUTE_VCAP"), std::getenv("PD22ROUTE_VCAP_RADIUS"), region, err))
       fail(err);
   }
+  // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
+  // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
+  if (const char *v = std::getenv("PD39ROUTE_REGION_LAGRANGE"); v) {
+    char *end = nullptr;
+    const double x = std::strtod(v, &end);
+    if (!*v || *end || !std::isfinite(x) || x < 0)
+      fail(std::string("PD39ROUTE_REGION_LAGRANGE must be a number >= 0 (got '") + v + "')");
+    region.lagrange = x;
+  }
+  if (const char *v = std::getenv("PD39ROUTE_PORTFOLIO"); v && *v) {
+    std::stringstream ss(v);
+    std::string spec;
+    while (std::getline(ss, spec, ';')) {
+      RegionSettings probe = region;
+      std::string err;
+      if (!applyRegionVariant(spec, probe, err))
+        fail("PD39ROUTE_PORTFOLIO: " + err);
+      gPortfolio.push_back(spec);
+    }
+    std::cerr << "late-stage portfolio: path A runs as " << gPortfolio.size() + 1
+              << " variants on their own threads (variant 0 = the run's own settings)"
+              << (gLowMem ? "; low-memory mode runs path A alone" : "") << "\n";
+  }
   // pd23route: PD23ROUTE_VCAP_B (0 | 1; unset = 1).
   bool vcapB = true;
   if (const char *v = std::getenv("PD23ROUTE_VCAP_B"); v) {
@@ -19681,6 +19925,11 @@ int main(int argc, char **argv) {
                                             bFirst, aMax, fallbackParallel, vcapB);
     if (fr.parallel)
       std::cerr << "reclaim fallback: path B ran on a second thread (its per-round trace suppressed)\n";
+    for (size_t i = 0; i < fr.portfolio.size(); ++i) // Part 135
+      std::cerr << "late-stage portfolio: variant " << i << " (" << fr.portfolio[i].spec << "): region "
+                << fr.portfolio[i].region.before << " -> " << fr.portfolio[i].region.after << " in "
+                << fr.portfolio[i].region.roundsRun << " rounds, then 2D overflow " << fr.portfolio[i].overflow
+                << ", wire " << fr.portfolio[i].wire << (i == fr.portfolioPick ? "  <- kept" : "") << "\n";
     if (region.vcapTracks > 0)
       std::cerr << "region virtual capacity: path A " << fr.regionA.vcapEdges << " edges, path B "
                 << fr.regionB.vcapEdges << " edges, " << region.vcapTracks << " tracks (" << fr.regionA.vcapReduction
@@ -19705,7 +19954,11 @@ int main(int argc, char **argv) {
     detourTrace("reclaim fallback (kept path)", rep.nets);
     gStages.mark("fallback (region + refinement, paths A/B)", &rep.nets, fr.tookB ? fr.overflowB : fr.overflowA,
                  std::numeric_limits<double>::quiet_NaN(),
-                 std::string("kept ") + (fr.tookB ? "B" : "A") + "; region rounds A " +
+                 std::string("kept ") + (fr.tookB ? "B" : "A") +
+                     (fr.portfolio.empty() ? std::string()
+                                           : " (portfolio of " + std::to_string(fr.portfolio.size()) + ", variant " +
+                                                 std::to_string(fr.portfolioPick) + ")") +
+                     "; region rounds A " +
                      std::to_string(fr.regionA.roundsRun) + ", B " + std::to_string(fr.regionB.roundsRun) +
                      "; expansions " + std::to_string(fr.regionA.pops + fr.regionB.pops));
   }

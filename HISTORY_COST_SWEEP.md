@@ -10610,3 +10610,27 @@ the unbiased route, lower is better): visible ariane -3.31 (routed classes, k3 5
 **Sum -23.97** (input slack only -22.86; `standard25.env` alone -14.41). The routed classes win on four
 designs, the input classes on five, one ties: neither alone would do. 4-22 min per design, 2.1-2.5 h on
 mempool_group.
+
+## Part 135 -- the late-stage portfolio and Lagrangian multipliers (2008 residues)
+
+BEST_RESULTS_PLAN.md A6 and B3 together (the user's choice). pd39route, both off by default (newblue2
+byte-identical to fast08 with them off):
+
+- **`PD39ROUTE_REGION_LAGRANGE=alpha`**: the region stage's edges carry Lagrangian multipliers, added as
+  lambda x demand to the present-demand cost; after every round lambda <- max(0, lambda + alpha x
+  (usage - capacity) / capacity) -- it grows while an edge stays over capacity and gives the price back
+  once nets leave it, unlike the history term. lambda >= 0, so the A* heuristic stays admissible.
+  (LMgr reached zero on newblue1 with multipliers.)
+- **`PD39ROUTE_PORTFOLIO="v1;v2;..."`**: path A of the fallback (region stage + refinement -- the only
+  path a residue design keeps) runs as variant 0 (the run's own settings) plus each listed variant, each
+  on its own thread and copy of the routes; the best is kept by (overflow, 2D wire, earliest listed), so
+  the result does not depend on thread timing. A variant overrides region settings: vcap, vcapr,
+  boxinit, boxgrow, boxcap, rounds, expand, lagr. Every variant's result is logged, so one run is also a
+  sweep. (The low-memory path runs path A alone.)
+
+Self-tests: the step (up by alpha x relative excess, down to 0 and not below), the variant parser
+(negative, unknown key, zero rounds, missing value, fractional integer refused), the pick (overflow,
+then wire, then earliest), the region stage with multipliers reaching zero on the three-nets-on-one-row
+fixture with every net connected, and a portfolio whose variant 0 matches the stage run alone and whose
+kept routes are the best variant's. First runs: newblue1 and newblue4, own settings + lagr 0.05 / 0.2 /
+1 + vcap 0 + (lagr 0.2, vcap 0).
