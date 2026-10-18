@@ -10626,7 +10626,7 @@ byte-identical to fast08 with them off):
   on its own thread and copy of the routes; the best is kept by (overflow, 2D wire, earliest listed), so
   the result does not depend on thread timing. A variant overrides region settings: vcap, vcapr,
   boxinit, boxgrow, boxcap, rounds, expand, lagr. Every variant's result is logged, so one run is also a
-  sweep. (The low-memory path runs path A alone.)
+  sweep. (Low-memory mode runs it too, from the bigblue4 fix below.)
 
 Self-tests: the step (up by alpha x relative excess, down to 0 and not below), the variant parser
 (negative, unknown key, zero rounds, missing value, fractional integer refused), the pick (overflow,
@@ -10650,5 +10650,20 @@ The Lagrangian term on its own is a weak gain on newblue1: lagr 0.2 beats or tie
 all three starting points (mean 30.7 vs 34.0, inside its 24-38 spread), and no step is best everywhere.
 The portfolio's gain is firmer: best of the variants, mean 27.3 vs 34.0 on newblue1 (-20%), 140 vs 154 on
 newblue4 (-9%) -- the multipliers' main use is as diversity. Cost: newblue1 6081 s vs 5126 s wall
-(+19%), newblue4 11664 s vs 9424 s (+24%), with 4-6 region stages sharing the cores. bigblue4 and newblue3
-(own + lagr 0.05 / 0.2 / 1) running, newblue7 after them alone (memory).
+(+19%), newblue4 11664 s vs 9424 s (+24%), with 4-6 region stages sharing the cores.
+
+**newblue3** (own + lagr 0.05 / 0.2 / 1; `status=OK`, `gr_verify` = `eval2008.pl`): region 41504 ->
+39094 / 39042 / 39054 / 39028, after refinement 38948 / 38932 / 38908 / **38898** (kept, lagr 1;
+wirelength 10806526 vs 10805564). -50 (-0.13%): the multipliers move newblue3 no more than its noise,
+which fits its cut bound (>= 26264 forced, Part 91) and every published router's ~31000. Wall 13563 s
+(the standard's 14555 s ran alongside other jobs too; CPU 51562 s).
+
+**A gap found on bigblue4: low-memory mode skipped the portfolio.** Above 2M nets (bigblue4 2228903,
+newblue7 2635625) the fallback takes its low-memory path, which ran path A's region stage directly, so
+the bigblue4 run was the standard run again: 366, byte-identical in overflow and wirelength to Part 124
+(a reproducibility check, nothing more; its wall 36317 s vs 14522 s is the cost of sharing the machine
+with newblue3's four region stages). The newblue7 run was stopped 40 s in. Fix: the low-memory path
+calls `runPathA` too, so the portfolio's copies live in memory only while path A runs (its start state
+still spills to disk); a new self-test case on the row fixture checks that low-memory mode with a
+two-variant portfolio runs every variant and keeps the same pick and routes as the normal path.
+bigblue4 and then newblue7 rerun with it, one at a time (memory).

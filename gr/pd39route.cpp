@@ -5168,10 +5168,7 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
     const Net *base = d.nets.data();
     NetSpill start, aFinal;
     start.write(nets, base);
-    if (region.enabled)
-      fr.regionA = regionNegotiate(d, nets, region, trace);
-    if (refine.enabled)
-      fr.refineA = refine2D(d, nets, refine, trace);
+    runPathA(d, nets, region, refine, trace, fr); // Part 135: the portfolio's copies too, if set
     fr.overflowA = totalOverflow(g, usageFromCharges(g, nets));
     fr.wireA = totalWire2D(nets);
     if (fr.overflowA > aMax) {
@@ -17712,6 +17709,16 @@ void testLowMemFallbackMatches() {
   runRow(true, g1, s1);
   check(!g1.ranB && !g1.tookB && g1.overflowA == g0.overflowA && g1.overflowA > 10 && sameSegs(s0, s1),
         "low-memory fallback, A above the threshold: B never runs, the same A kept");
+  // Part 135: low-memory mode runs path A's portfolio too, with the same pick and routes.
+  const std::vector<std::string> savedPf = gPortfolio;
+  gPortfolio = {"lagr=0.2", "rounds=3"};
+  FallbackReport p0, p1;
+  runRow(false, p0, s0);
+  runRow(true, p1, s1);
+  gPortfolio = savedPf;
+  check(p1.portfolio.size() == 3 && p0.portfolio.size() == 3 && p1.portfolioPick == p0.portfolioPick &&
+            p1.overflowA == p0.overflowA && sameSegs(s0, s1),
+        "low-memory fallback with a portfolio: every variant runs, the same pick and routes");
 }
 
 // pd36route: the incremental pattern-stage refresh gives exactly the routes
@@ -19855,7 +19862,7 @@ int main(int argc, char **argv) {
     }
     std::cerr << "late-stage portfolio: path A runs as " << gPortfolio.size() + 1
               << " variants on their own threads (variant 0 = the run's own settings)"
-              << (gLowMem ? "; low-memory mode runs path A alone" : "") << "\n";
+              << (gLowMem ? "; low-memory mode keeps a copy per variant while path A runs" : "") << "\n";
   }
   // pd23route: PD23ROUTE_VCAP_B (0 | 1; unset = 1).
   bool vcapB = true;
