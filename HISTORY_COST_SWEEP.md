@@ -10667,3 +10667,11 @@ calls `runPathA` too, so the portfolio's copies live in memory only while path A
 still spills to disk); a new self-test case on the row fixture checks that low-memory mode with a
 two-variant portfolio runs every variant and keeps the same pick and routes as the normal path.
 bigblue4 and then newblue7 rerun with it, one at a time (memory).
+
+**bigblue4 with the portfolio** (`status=OK`, `gr_verify` = `eval2008.pl`): region 406 -> 398 / 396 /
+402 / 394, after refinement 366 / **360** (kept, lagr 0.05) / 368 / 366; scored wirelength 24946873 vs
+24938567 (+0.03%). 366 -> 360 (-1.6%); the best before is still pd23route's 356 (Part 91). Variant 0
+reproduces the standard exactly (366, 2D wire 15152743), as it should. Wall 36381 s by the router's own
+stage report; the standard's report says 41549 s (its `/usr/bin/time` real of 14522 s is wrong, as
+newblue7's was in Part 133), so on this machine the portfolio cost no measurable wall time here -- CPU
+127351 s, peak RSS 2959 MB (standard 2843 MB): four copies of the routes add little next to the rest.
