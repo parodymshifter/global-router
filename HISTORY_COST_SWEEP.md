@@ -10965,3 +10965,9 @@ but prunes the cheap, useless parts of the box (CUGR's coarse-to-fine search is 
 (-59%)**, fallback stage 1825 s vs 4463 s, run 2525 s vs 5125 s (both on a shared machine). Round 100:
 1658 reroutes, 26.8M pops (16k each, vs 44k at cap 200). As Part 138's traces predicted, late work is box
 area; a cap of 100 keeps overflow inside newblue1's noise. newblue4 at cap 100 running.
+
+**Box cap 100, newblue4** (portfolio off; `status=OK`, `gr_verify` = `eval2008.pl`): total overflow **144**
+(the standard's path A 154; the best before, 144), wirelength 13707234 (13716227), fallback expansions
+**20.33e9 vs 45.77e9 (-56%)**, run 4789 s vs 9424 s (shared machine both times). **Both designs: region
+search work more than halved, overflow no worse.** Next: the 2008 standard with cap 100 on the residues and
+the zero designs, before any change to the standard.
