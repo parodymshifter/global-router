@@ -10782,4 +10782,13 @@ effect); its effect on search work was never measured.
 
 Runs (portfolio off, so only the box rule differs from path A of the 2008 standard; compared by search
 expansions, which are deterministic, since the machine is shared): newblue1 at step 2 and 6, newblue4 at
-step 2, against Part 124 (newblue1: 30, expansions 25093951215; newblue4: 154).
+step 2, against Part 124 (newblue1: 30, expansions 25093951215; newblue4: 154, expansions 45770568469).
+
+**The WL floor's effect on search time** (the user's follow-up). `PD1ROUTE_WL_FLOOR` turns out never
+to have reached the region stage: `regionNegotiate` builds its own `CostSettings`, so Part 79's floors
+changed only the slow tier. New: `PD39ROUTE_REGION_WL_FLOOR` (portfolio key `wlfloor=`; 0 = off,
+byte-identical) sets the region stage's floor, which also floors the A* heuristic's scale. Self-tests: a
+decayed factor (round 100) held at 0.2, the heuristic's scale with it, every edge still costing at
+least that; the stage clears the row fixture at 0.2; the key parses. Runs, newblue1, portfolio off:
+floor 0.05 (the factor falls below it at round ~46) and 0.2 (round ~31). A floor changes routes, so it
+is judged on overflow as well as on search expansions.

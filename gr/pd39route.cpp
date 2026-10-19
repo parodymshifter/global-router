@@ -4103,6 +4103,9 @@ struct RegionSettings {
   // grown by `step` (to boxCap) after a reroute whose search was box-limited and left the net overflowed,
   // instead of every net's margin being boxInit + boxGrow x round.
   int evidenceStep = 0;
+  // Part 138: PD39ROUTE_REGION_WL_FLOOR (>= 0; 0 = off, NTHU's decay): the region stage's present-demand
+  // WL term is max(factor, floor). PD1ROUTE_WL_FLOOR never reached this stage (its own CostSettings).
+  double wlFloor = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4304,6 +4307,7 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   Prices prices(g);
   CostSettings cs;
   cs.model = CostModel::kPresentDemand;
+  cs.wlFloor = rs.wlFloor; // Part 138 (0 = NTHU's decay, as before)
   configureCostModel(prices, usage, cs);
   // pd22route: virtual capacity around the overflow the stage starts from.
   std::vector<int> vredH, vredV;
@@ -5053,6 +5057,8 @@ bool applyRegionVariant(const std::string &spec, RegionSettings &rs, std::string
       ok = asInt(rs.rounds, 1, 1000000);
     else if (k == "evidence") // Part 138
       ok = asInt(rs.evidenceStep, 0, 100000);
+    else if (k == "wlfloor") // Part 138
+      rs.wlFloor = x;
     else if (k == "expand")
       ok = asInt(rs.expand, 0, 100000);
     else if (k == "lagr")
@@ -15988,10 +15994,41 @@ void testBoxLimitSignalAndEvidenceRule() {
     check(rr.after == 0 && conn && rr.evReroutes > 0 && rr.evMeanMargin >= rs.boxInit,
           "region stage with the evidence rule: zero overflow, every net connected, margins from boxInit");
   }
+  {
+    // The region WL floor: a late round's decayed factor is held at the floor, the heuristic's scale with
+    // it (so every edge still costs at least the scale), and the stage still clears the row fixture.
+    Design d = parse("pd39route_selftest_wlfloor_row.gr", kThreeOnOneRowGr);
+    Usage u = usageFromCharges(d.grid, std::vector<RoutedNet>{});
+    Prices pr(d.grid);
+    CostSettings cs;
+    cs.model = CostModel::kPresentDemand;
+    cs.wlFloor = 0.2;
+    configureCostModel(pr, u, cs);
+    pr.pdIter = 100;
+    pr.pdFactor = pdFactorForIter(pr.pdIter);
+    double minCost = std::numeric_limits<double>::infinity();
+    for (size_t e = 0; e < u.h.size(); ++e)
+      minCost = std::min(minCost, wireCostH(pr, e, 2));
+    check(pr.pdFactor < 0.001 && heuristicScale(pr) == 0.2 && minCost >= 0.2,
+          "region WL floor: a decayed factor is held at the floor, as is the heuristic's scale");
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &d.nets[i];
+      nets[i].segs = {{0, 1, 0, 7, 1, 0}};
+    }
+    prepareFor2DRefine(d, nets);
+    RegionSettings rs;
+    rs.enabled = true;
+    rs.wlFloor = 0.2;
+    RegionReport rr = regionNegotiate(d, nets, rs, false);
+    check(rr.after == 0, "region stage with a WL floor of 0.2: zero overflow on the row fixture");
+  }
   RegionSettings v;
   std::string err;
   check(applyRegionVariant("evidence=3", v, err) && v.evidenceStep == 3 && !applyRegionVariant("evidence=1.5", v, err),
         "portfolio variant parse: evidence (an integer step)");
+  check(applyRegionVariant("wlfloor=0.05", v, err) && v.wlFloor == 0.05 && !applyRegionVariant("wlfloor=-1", v, err),
+        "portfolio variant parse: wlfloor (a number >= 0)");
 }
 
 void testBoxHeuristicFindsTheSameCost() {
@@ -20122,6 +20159,15 @@ int main(int argc, char **argv) {
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
+  if (const char *v = std::getenv("PD39ROUTE_REGION_WL_FLOOR"); v) { // Part 138
+    char *end = nullptr;
+    const double x = std::strtod(v, &end);
+    if (!*v || *end || !std::isfinite(x) || x < 0)
+      fail(std::string("PD39ROUTE_REGION_WL_FLOOR must be a number >= 0 (got '") + v + "')");
+    region.wlFloor = x;
+    if (x > 0)
+      std::cerr << "region WL floor: the region stage's WL term is max(NTHU's factor, " << x << ")\n";
+  }
   if (const char *v = std::getenv("PD39ROUTE_REGION_BOX_EVIDENCE"); v) { // Part 138
     char *end = nullptr;
     const long x = std::strtol(v, &end, 10);
