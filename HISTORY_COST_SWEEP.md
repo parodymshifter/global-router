@@ -10749,6 +10749,22 @@ everything before the fallback is unchanged, so only the reclaim path differs). 
 of a few tenths of a percent are inside one design's run-to-run spread (Part 78: 1.6-3.6% between
 quality-neutral perturbations), so a variant is judged by whether it shortens all four, not by size.
 
+**#2 results, reclaim budget** (all `status=OK`, 0 overflow, `gr_verify` = `eval2008.pl`; scored
+wirelength vs the 2008 standard):
+
+| design | standard | passes 2 | ratio 1.2 | mu 2 |
+|---|---|---|---|---|
+| newblue2 | 7618810 | -0.01% | -0.04% | -0.06% |
+| adaptec4 | 12204261 | -0.00% | -0.02% | -0.01% |
+| adaptec2 | 5242781 | +0.01% | -0.03% | -0.04% |
+| bigblue3 | 13165027 | -0.01% | -0.00% | -0.02% |
+
+mu 2 and ratio 1.2 shorten all four, but by 0.00-0.06% -- a hundredth of the 0.7-2.4% these designs
+trail NTHU-Route 2.0 by, and of the 1.6-3.6% a quality-neutral upstream perturbation moves wirelength.
+The reclaim pass is saturated at its current budget: the remaining wirelength is not where more
+reclaim budget reaches. Not adopted; the zero designs' wirelength needs a different mechanism (the
+plan's B5 post-pass, or the stages before the fallback).
+
 ## Part 138 -- evidence-driven box growth, re-tested in the region stage (present-demand pricing)
 
 The user's request, after Part 137 found 94-97% of the region stage's search work in rounds whose
