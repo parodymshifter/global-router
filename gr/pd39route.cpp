@@ -4138,6 +4138,7 @@ struct RegionSettings {
   // Part 138: PD39ROUTE_REGION_WL_FLOOR (>= 0; 0 = off, NTHU's decay): the region stage's present-demand
   // WL term is max(factor, floor). PD1ROUTE_WL_FLOOR never reached this stage (its own CostSettings).
   double wlFloor = 0;
+  std::string dumpTag = "A"; // Part 140 (trace): this stage's file name tag (A, A<variant>, B)
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4319,6 +4320,55 @@ long long virtualCapZone(const RoutingGrid &g, const Usage &u, int reduction, in
   return n;
 }
 
+// Part 140 (trace only): PD39ROUTE_REGION_DUMP=prefix writes, per region stage, prefix.<tag>.txt with each
+// round's overflowed edges and every reroute's margin, box limit, work and halo (below). Never read by routing.
+std::string gRegionDumpPrefix;
+
+// Part 140: the halo -- for every 2D edge, the Manhattan distance (in edge steps over the same direction's
+// edges, 4-neighbour) to the nearest edge of that direction with room for one more net of `unit`; 0 on an
+// edge with room. A multi-source breadth-first search per direction, O(edges). -1 if no edge has room.
+void edgeHalo(const RoutingGrid &g, const Usage &u, int unit, std::vector<int> &haloH, std::vector<int> &haloV) {
+  auto one = [&](const std::vector<int> &use, const std::vector<int> &cap, int w, int h, std::vector<int> &dist) {
+    dist.assign(use.size(), -1);
+    std::vector<size_t> q;
+    q.reserve(use.size());
+    for (size_t i = 0; i < use.size(); ++i)
+      if (use[i] + unit <= cap[i]) {
+        dist[i] = 0;
+        q.push_back(i);
+      }
+    for (size_t head = 0; head < q.size(); ++head) {
+      const size_t i = q[head];
+      const int x = static_cast<int>(i % w), y = static_cast<int>(i / w);
+      const int nb[4][2] = {{x - 1, y}, {x + 1, y}, {x, y - 1}, {x, y + 1}};
+      for (const auto &n : nb)
+        if (n[0] >= 0 && n[0] < w && n[1] >= 0 && n[1] < h) {
+          const size_t j = static_cast<size_t>(n[1]) * w + n[0];
+          if (dist[j] < 0) {
+            dist[j] = dist[i] + 1;
+            q.push_back(j);
+          }
+        }
+    }
+  };
+  one(u.h, u.capH, std::max(g.nx - 1, 0), g.ny, haloH);
+  one(u.v, u.capV, g.nx, std::max(g.ny - 1, 0), haloV);
+}
+
+// Part 140: a net's halo now -- the largest halo over its 2D edges that are over capacity (0 if none).
+int netHalo(const RoutingGrid &g, const Usage &u, const RoutedNet &rn, const std::vector<int> &haloH,
+            const std::vector<int> &haloV) {
+  int worst = 0;
+  for (const ChargeRecord &c : rn.charges)
+    for (int t = c.a; t < c.b; ++t) {
+      const size_t e = c.horizontal ? g.hIndex(t, c.cross, 0) : g.vIndex(c.cross, t, 0);
+      const bool over = c.horizontal ? u.h[e] > u.capH[e] : u.v[e] > u.capV[e];
+      if (over)
+        worst = std::max(worst, c.horizontal ? haloH[e] : haloV[e]);
+    }
+  return worst;
+}
+
 RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &rs,
                              bool trace, const std::atomic<bool> *cancel = nullptr) {
   const RoutingGrid &g = d.grid;
@@ -4367,6 +4417,17 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   for (size_t i : members)
     best.push_back({nets[i].charges, nets[i].segs});
   gSearchTrace = SearchTraceStats{}; // Part 138 (trace): this stage's rounds only
+  // Part 140 (trace only): the region dump.
+  std::unique_ptr<std::ofstream> dump;
+  std::vector<int> haloH, haloV;
+  const int haloUnit = 1 + g.minSpacing[0];
+  if (!gRegionDumpPrefix.empty()) {
+    dump = std::make_unique<std::ofstream>(gRegionDumpPrefix + "." + rs.dumpTag + ".txt");
+    if (!*dump)
+      fail("PD39ROUTE_REGION_DUMP: cannot write " + gRegionDumpPrefix + "." + rs.dumpTag + ".txt");
+    *dump << "G " << g.nx << " " << g.ny << " members " << members.size() << " start " << rep.before
+          << " lagrange " << rs.lagrange << " vcap " << rs.vcapTracks << "\n";
+  }
   // Part 138: per-net margins for the evidence rule (unused otherwise).
   const int evCap = rs.boxCap > 0 ? rs.boxCap : std::numeric_limits<int>::max();
   std::vector<int> evMargin(rs.evidenceStep > 0 ? members.size() : 0, std::min(rs.boxInit, evCap));
@@ -4378,11 +4439,15 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     int rerouted = 0;
     long long roundLimited = 0, roundGrew = 0;
     rep.lastMargin = stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
+    if (dump)
+      edgeHalo(g, usage, haloUnit, haloH, haloV); // Part 140: at the round's start
     for (size_t k = 0; k < members.size(); ++k) {
       RoutedNet &rn = nets[members[k]];
       if (r > 0 && !netOverflowed(g, usage, rn))
         continue;
       const int margin = rs.evidenceStep > 0 ? evMargin[k] : stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
+      const int haloNow = dump ? netHalo(g, usage, rn, haloH, haloV) : 0;
+      const long long popsBefore = gSearchPops;
       gBoxLimited = false;
       bool done = false;
       if (rs.pieces) {
@@ -4399,6 +4464,9 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
         routeNetSlowMSMV(g, prices, usage, lp, region, 0.0, rn);
         ++rerouted;
       }
+      if (dump) // Part 140: N round net margin limited pops halo
+        *dump << "N " << r << " " << members[k] << " " << margin << " " << (gBoxLimited ? 1 : 0) << " "
+              << gSearchPops - popsBefore << " " << haloNow << "\n";
       if (rs.evidenceStep > 0) {
         ++rep.evReroutes;
         if (gBoxLimited) {
@@ -4420,6 +4488,15 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     }
     long long total = totalOverflow(g, usage);
     rep.roundsRun = r + 1;
+    if (dump) { // Part 140: R round total, then O h|v edge excess for every edge over capacity
+      *dump << "R " << r << " " << total << "\n";
+      for (size_t e = 0; e < usage.h.size(); ++e)
+        if (usage.h[e] > usage.capH[e])
+          *dump << "O h " << e << " " << usage.h[e] - usage.capH[e] << "\n";
+      for (size_t e = 0; e < usage.v.size(); ++e)
+        if (usage.v[e] > usage.capV[e])
+          *dump << "O v " << e << " " << usage.v[e] - usage.capV[e] << "\n";
+    }
     grprof::event("region round", r); // Part 126: Instruments marker
     if (trace) {
       std::cerr << "region round " << r << ": 2D overflow " << total << " (rerouted " << rerouted << ", pops "
@@ -5161,6 +5238,8 @@ std::vector<RegionSettings> portfolioSettings(const RegionSettings &region, std:
   res.assign(k, PortfolioResult());
   std::vector<RegionSettings> rs(k, region);
   res[0].spec = "(own settings)";
+  for (size_t i = 0; i < k; ++i)
+    rs[i].dumpTag = "A" + std::to_string(i); // Part 140 (trace): one dump file per variant
   for (size_t i = 1; i < k; ++i) {
     res[i].spec = gPortfolio[i - 1];
     std::string err;
@@ -5362,6 +5441,7 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
     std::vector<RoutedNet> b;
     start.read(b, base);
     RegionSettings regionB = region;
+    regionB.dumpTag = "B"; // Part 140 (trace)
     if (!vcapB)
       regionB.vcapTracks = 0;
     ReclaimSettings rs = reclaim;
@@ -5387,6 +5467,7 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
   // pd23route: the reclaim path's region settings (no virtual capacity
   // unless vcapB).
   RegionSettings regionB = region;
+  regionB.dumpTag = "B"; // Part 140 (trace)
   if (!vcapB)
     regionB.vcapTracks = 0;
   // Part 135: a portfolio if set; gated on path A's result when there is a threshold.
@@ -16069,6 +16150,66 @@ void testBoxLimitSignalAndEvidenceRule() {
     RegionReport rr = regionNegotiate(d, nets, rs, false);
     check(rr.after == 0, "region stage with a WL floor of 0.2: zero overflow on the row fixture");
   }
+  {
+    // Part 140: the halo. A 6 x 3 grid, one-track horizontal edges (capacity 2, a net needs 2), all full but
+    // edge (4,1): its distances run 0 at (4,1), 1 beside it, ...; the vertical edges all have room (0).
+    const char *gr6 = "grid 6 3 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                      "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\nnum net 0\n0\n";
+    Design d6 = parse("pd39route_selftest_halo.gr", gr6);
+    const RoutingGrid &g6 = d6.grid;
+    Usage u6(g6);
+    for (size_t e = 0; e < u6.h.size(); ++e)
+      u6.h[e] = u6.capH[e];
+    u6.h[g6.hIndex(4, 1, 0)] = 0;
+    u6.h[g6.hIndex(0, 0, 0)] = u6.capH[g6.hIndex(0, 0, 0)] + 2; // over capacity, 4 + 1 = 5 steps from room
+    std::vector<int> hh, hv;
+    edgeHalo(g6, u6, 2, hh, hv);
+    bool vRoom = true;
+    for (int x : hv)
+      vRoom = vRoom && x == 0;
+    check(hh[g6.hIndex(4, 1, 0)] == 0 && hh[g6.hIndex(3, 1, 0)] == 1 && hh[g6.hIndex(4, 0, 0)] == 1 &&
+              hh[g6.hIndex(0, 0, 0)] == 5 && hh[g6.hIndex(0, 2, 0)] == 5 && vRoom,
+          "halo: distance to the nearest same-direction edge with room (0 there, 5 at the far corner)");
+    // The dump changes nothing: the region stage on the row fixture, dump on and off.
+    auto runRow = [&](bool on, std::vector<std::vector<Seg>> &out) {
+      Design d = parse("pd39route_selftest_dump_row.gr", kThreeOnOneRowGr);
+      std::vector<RoutedNet> nets(3);
+      for (int i = 0; i < 3; ++i) {
+        nets[i].net = &d.nets[i];
+        nets[i].segs = {{0, 1, 0, 7, 1, 0}};
+      }
+      prepareFor2DRefine(d, nets);
+      RegionSettings rs;
+      rs.enabled = true;
+      const std::string saved = gRegionDumpPrefix;
+      gRegionDumpPrefix = on ? "pd39route_selftest_dump" : "";
+      regionNegotiate(d, nets, rs, false);
+      gRegionDumpPrefix = saved;
+      out.clear();
+      for (const RoutedNet &rn : nets)
+        out.push_back(rn.segs);
+    };
+    std::vector<std::vector<Seg>> off, on;
+    runRow(false, off);
+    runRow(true, on);
+    std::ifstream df("pd39route_selftest_dump.A.txt");
+    std::string first;
+    std::getline(df, first);
+    int rLines = 0;
+    for (std::string ln; std::getline(df, ln);)
+      rLines += ln.rfind("R ", 0) == 0;
+    df.close();
+    std::remove("pd39route_selftest_dump.A.txt");
+    bool same = off.size() == on.size();
+    for (size_t i = 0; same && i < off.size(); ++i) {
+      same = off[i].size() == on[i].size();
+      for (size_t k = 0; same && k < off[i].size(); ++k)
+        same = off[i][k].x1 == on[i][k].x1 && off[i][k].y1 == on[i][k].y1 && off[i][k].x2 == on[i][k].x2 &&
+               off[i][k].y2 == on[i][k].y2;
+    }
+    check(same && first.rfind("G 8 3 members 3 start 28", 0) == 0 && rLines >= 1,
+          "region dump: same routes with it on; a header and one R line per round");
+  }
   RegionSettings v;
   std::string err;
   check(applyRegionVariant("evidence=3", v, err) && v.evidenceStep == 3 && !applyRegionVariant("evidence=1.5", v, err),
@@ -20205,6 +20346,10 @@ int main(int argc, char **argv) {
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
+  if (const char *v = std::getenv("PD39ROUTE_REGION_DUMP"); v && *v) { // Part 140 (trace only)
+    gRegionDumpPrefix = v;
+    std::cerr << "region dump: " << gRegionDumpPrefix << ".<A|A<variant>|B>.txt\n";
+  }
   if (const char *v = std::getenv("PD39ROUTE_SEARCH_TRACE"); v && std::string(v) == "1") // Part 138
     gSearchTraceOn = true;
   if (const char *v = std::getenv("PD39ROUTE_REGION_WL_FLOOR"); v) { // Part 138

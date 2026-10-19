@@ -10913,3 +10913,26 @@ box-limited there (Part 138), so the congestion the late rounds route around is 
 the pre-routing map: it is built by negotiation (nets pushed out of the hotspots fill their surroundings).
 A length scale meant to size search boxes (idea 1) has to come from the route state at the region stage's
 start, not from the input.
+
+## Part 140 -- a smaller region box cap, and a region dump for diagnosing late passes (in progress)
+
+**Box cap 100** (the user's request; the cheaper test of Part 139's idea 1): `PD13ROUTE_REGION_BOX_CAP=100`
+(standard 200), portfolio off, on newblue1 and newblue4, against the standard's path A (newblue1 30, region
+expansions 25.09e9; newblue4 154, 45.77e9). If overflow holds and work falls, a per-design cap derived
+from the route state is worth building; if overflow rises, the idea is settled without code.
+
+**The region dump** (`PD39ROUTE_REGION_DUMP=prefix`, trace only; the user's request, to test whether
+Fourier analysis of a late pass's state can recommend what the next pass should do). Each region stage --
+every portfolio variant (`A0`..`A3`) and the reclaim path (`B`) -- writes `prefix.<tag>.txt`: a header
+(grid, members, starting overflow, the variant's Lagrangian step and virtual capacity); per round `R round
+total` and `O h|v edge excess` for every 2D edge over capacity (the per-edge time series: oscillating,
+stuck or drifting); per reroute `N round net margin limited pops halo`, where halo is the largest, over
+the net's over-capacity edges at the round's start, of the distance in edge steps to the nearest
+same-direction edge with room for one more net (`edgeHalo`, a breadth-first search per direction, O(edges)
+per round). Self-tests: halo distances on a hand-built grid (0 at the edge with room, 5 at the far corner,
+vertical edges with room 0); the region stage's routes are identical with the dump on and off. Runs: the
+2008 standard with its portfolio on newblue1 and newblue4 (variants known: newblue1 30 / 36 / 24 / 38,
+newblue4 154 / 140 / 148 / 146), queued behind the box-cap runs. Analysis to come: each edge's
+over-capacity series Fourier-transformed (oscillation vs stuck vs drift) and whether the first 50 rounds
+predict each variant's final overflow; whether halo against margin predicts which searches are
+box-limited.
