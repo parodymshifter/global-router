@@ -10827,3 +10827,26 @@ margin stays at 45-60 -- the nets that stop growing were not where the work was.
 falls less than 2x against the 500-1700x growth over the stage (Part 137): the box is not the main
 cost. The same verdict as Part 54 under the lambda price. newblue4 at step 2 and the WL floors (the
 other suspect, a heuristic decayed to near zero) still running.
+
+**newblue1, region WL floor** (portfolio off; `status=OK`, `gr_verify` = `eval2008.pl`):
+
+| run | total overflow | wirelength | fallback expansions | vs standard | round 100: reroutes / pops |
+|---|---|---|---|---|---|
+| standard | 30 | 4891216 | 25.09e9 | -- | 1967 / 86.6M (44k each) |
+| floor 0.05 | 26 | 4871722 (-0.40%) | 23.77e9 | -5.3% | 1690 / 66.8M (40k) |
+| floor 0.2 | 36 | 4863451 (-0.57%) | 23.22e9 | -7.5% | 1932 / 71.3M (37k) |
+
+The decayed heuristic is not the main cost either: holding it at 0.05-0.2 (30-1000x the decayed value)
+saves 5-8% of the work. Overflow 26 / 36 is inside the 24-38 spread; both floors shorten wire a little.
+Together with the evidence rule (-12%): box size and heuristic strength explain about a tenth of the
+search work. Hypothesis, not yet measured: once history and cong^5 build up, a congested crossing costs
+far more than hScale x its distance, so A* must expand every node cheaper than that crossing -- which fills
+the box whatever the heuristic. A cheap check is to log the found cost over hScale x Manhattan distance per
+search; if it holds, the levers are ones that do not rest on the heuristic (bidirectional search, two
+half-radius fronts; precomputed lower bounds on congested cost, as landmark heuristics do).
+
+**#1 results, the wider portfolio on newblue1** (`status=OK`, `gr_verify` = `eval2008.pl`): own 30;
+lagr 0.1 **24** (kept: wire 2895680); vcap 12 28; vcapr 8 40; lagr 0.2 + vcapr 8 36; lagr 0.1 + vcap 12
+32. No new best: lagr 0.1 ties the standard's lagr 0.2 at 24 with longer wire (2895680 vs 2892629), so
+the standard's portfolio would keep its own variant. Not adopted. Wall 10281 s for six region stages
+(CPU 33618 s).
