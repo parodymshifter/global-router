@@ -10712,3 +10712,39 @@ kept. Checks (`status=OK`, `gr_verify` = `eval2008.pl`):
 gate, which on them only writes the start state once.) The residue cost: the variants run after path A
 instead of beside it, so newblue1 takes +61% wall over the standard (always-on +19%) but 44% less CPU
 than always-on, since path B no longer runs to the end beside a path A that will not use it.
+
+## Part 137 -- the three most predictable next steps (the user's ranking, items 1-3)
+
+**#3, independent hotspots in parallel (BEST_RESULTS_PLAN.md A3): ruled out from the logs, no run
+needed.** The region stage's search margin is 10 + 2 x round, capped at 200 tiles; the 2008 grids with
+residues are 399-490 tiles wide. Search work (pops) by round, from the region-round traces of the
+latest runs:
+
+| design (grid) | rounds | pops | rounds 0-9 | 10-49 | 50+ | pops per reroute, round 0 -> 100 |
+|---|---|---|---|---|---|---|
+| newblue7 (488 x 490) | 500 | 2.71e11 | 0% | 5% | 95% | 39 -> 67500 |
+| bigblue4 (403 x 405) | 280 | 1.98e11 | 0% | 3% | 97% | 32 -> 65700 |
+| newblue4 (455 x 458) | 500 | 4.58e10 | 0% | 3% | 96% | 61 -> 31700 |
+| newblue1 (399 x 399) | 500 | 2.51e10 | 0% | 6% | 94% | 82 -> 44000 |
+
+From round 50 on (margin >= 110, 200 from round 95) every overflowed net's search box spans most of the
+grid, so two hotspots would have to be more than ~2 x 110-200 tiles apart in both directions to share
+no edge -- not possible on these grids more than once or twice, and 94-97% of the work is in those
+rounds. An exact per-hotspot split can only reach the first 50 rounds (3-6% of the work). Where the
+time goes instead: search work per reroute grows ~500-1700x as the margin widens. Evidence-driven box
+growth (grow a net's box only when its search touched the box edge, Part 54's `nv12route`) is the
+mechanism aimed at that; it was "on the same trade-off curve as blind growth" under the lambda price
+and has not been re-tested under present-demand pricing.
+
+**#1, a wider late-stage portfolio on newblue1** (`p137.jobs`, `pd39route` 86e76c1): own + lagr 0.1;
+vcap 12; vcapr 8; lagr 0.2 + vcapr 8; lagr 0.1 + vcap 12. The standard's variants are deterministic from
+this start (own 30, lagr 0.05 36, 0.2 24, 1 38, Part 136), so any new variant below 24 is a gain the
+standard would keep by adding it.
+
+**#2, reclaim budget on the zero-overflow designs** (same batch): `PD16ROUTE_RECLAIM_PASSES=2`,
+`_RATIO=1.2` (more nets count as detoured; default 1.5) and `_MU=2` (keep a reroute whose saved wire
+exceeds 2x the overflow it adds; default 8; Part 83 had mu 2 at -3.28% vs mu 8's -3.18% on bigblue2),
+each on newblue2, adaptec4, adaptec2 and bigblue3, against the 2008 standard's routes (Part 124;
+everything before the fallback is unchanged, so only the reclaim path differs). Wirelength differences
+of a few tenths of a percent are inside one design's run-to-run spread (Part 78: 1.6-3.6% between
+quality-neutral perturbations), so a variant is judged by whether it shortens all four, not by size.
