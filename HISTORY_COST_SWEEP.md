@@ -10808,3 +10808,22 @@ decayed factor (round 100) held at 0.2, the heuristic's scale with it, every edg
 least that; the stage clears the row fixture at 0.2; the key parses. Runs, newblue1, portfolio off:
 floor 0.05 (the factor falls below it at round ~46) and 0.2 (round ~31). A floor changes routes, so it
 is judged on overflow as well as on search expansions.
+
+**Parity:** `pd39route` with the rule off -- newblue2's route file byte-identical to Part 124's.
+
+**newblue1, evidence rule** (portfolio off; `status=OK`, `gr_verify` = `eval2008.pl`; Part 124's path A
+for reference: 30, region-stage expansions 25093951215):
+
+| run | total overflow | wirelength | fallback expansions | vs standard | region round 100: reroutes / pops | round 300 |
+|---|---|---|---|---|---|---|
+| standard (Part 124 / 136) | 30 | 4891216 | 25.09e9 | -- | 1967 / 86.6M (44k each) | 1257 / 65.4M (52k) |
+| evidence step 2 | 32 | 4895546 | 22.19e9 | -11.6% | 2022 / 54.4M (27k) | 1027 / 47.6M (46k) |
+| evidence step 6 | 32 | 4890725 | 28.54e9 | +13.7% | 1321 / 52.0M (39k) | 991 / 47.3M (48k) |
+
+Overflow 32 is inside newblue1's 24-38 spread. The trace shows why the saving is small: the nets still
+overflowed late are the ones whose searches reach their box edge (step 2: 780 of 2022 reroutes limited
+at round 100, 465 of 1027 at round 300), so their margins still climb to the 200 cap while the mean
+margin stays at 45-60 -- the nets that stop growing were not where the work was. Work per reroute
+falls less than 2x against the 500-1700x growth over the stage (Part 137): the box is not the main
+cost. The same verdict as Part 54 under the lambda price. newblue4 at step 2 and the WL floors (the
+other suspect, a heuristic decayed to near zero) still running.
