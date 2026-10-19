@@ -10748,3 +10748,38 @@ each on newblue2, adaptec4, adaptec2 and bigblue3, against the 2008 standard's r
 everything before the fallback is unchanged, so only the reclaim path differs). Wirelength differences
 of a few tenths of a percent are inside one design's run-to-run spread (Part 78: 1.6-3.6% between
 quality-neutral perturbations), so a variant is judged by whether it shortens all four, not by size.
+
+## Part 138 -- evidence-driven box growth, re-tested in the region stage (present-demand pricing)
+
+The user's request, after Part 137 found 94-97% of the region stage's search work in rounds whose
+margins (10 + 2 x round, cap 200) span most of the grid. Part 54 built this rule on `nv12route` under
+the lambda price, where it sat on the same overflow-vs-runtime curve as blind growth; it was never
+re-tested under present-demand pricing, the region stage, or piece reroutes.
+
+**pd39route, off by default (byte-identical; a newblue2 parity run is queued):**
+- `MSMVResult::boxLimited` (`multiSourceDijkstra`): the smallest f = g + h over popped nodes on a box
+  edge that can grow (not the grid border); limited iff it is below the found cost. Sound because every
+  edge costs at least the heuristic's scale (present demand: wl + hist x cong^5 + lambda x amount, wl =
+  the scale), so h is consistent and a route leaving the box costs at least f at its exit node -- the
+  proof is in the code. One comparison per popped node; routes unchanged. The no-path retry also counts
+  as limited. `thread_local gBoxLimited` collects it per reroute (piece or whole net).
+- `PD39ROUTE_REGION_BOX_EVIDENCE=step` (portfolio key `evidence=`): each region member keeps its own
+  margin, from `PD5ROUTE_REGION_BOX_INIT` (10), grown by `step` up to the cap (200) after a reroute that
+  was box-limited and left the net overflowed. A net first rerouted late starts small instead of at 200.
+  Region-round trace: limited / grew counts and the mean and largest margin.
+
+Self-tests: the wall fixture limited at margin 6, never limited with the whole grid as the box; a
+straight uncongested route not limited; soundness on 80 present-demand fixtures (a late round's decayed
+WL term, history, hot spots, both heuristics): all 46 "not limited" searches have exactly the whole-grid
+cost, and 14 limited ones really were cheaper outside; the region stage with the rule clears the
+three-nets-on-one-row fixture; the variant key.
+
+**A side finding.** The heuristic's scale is the present-demand WL term, which decays with the
+region stage's round count (pdFactorForIter: 0.99 at 1, 0.49 at 20, 0.033 at 50). Late rounds' A* is then
+close to Dijkstra over the whole box, which is part of why work per reroute grows 500-1700x (Part 137),
+not only the margin. `PD1ROUTE_WL_FLOOR` was screened in Part 79 for wirelength only (no consistent
+effect); its effect on search work was never measured.
+
+Runs (portfolio off, so only the box rule differs from path A of the 2008 standard; compared by search
+expansions, which are deterministic, since the machine is shared): newblue1 at step 2 and 6, newblue4 at
+step 2, against Part 124 (newblue1: 30, expansions 25093951215; newblue4: 154).

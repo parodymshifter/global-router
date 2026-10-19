@@ -3150,6 +3150,7 @@ struct MSMVResult {
   bool found = false;
   std::vector<PathNode> path;
   int sinkIndex = -1;
+  bool boxLimited = false; // Part 138: the box may have kept a cheaper route out (see multiSourceDijkstra)
 };
 
 // `sources` are tiles already part of the growing tree; `layer == -1` means
@@ -3165,6 +3166,9 @@ struct MSMVResult {
 // region stage's work-gated plateau stop counts (never read by routing).
 // pd22route: per thread, so each fallback path counts only its own work.
 thread_local long long gSearchPops = 0;
+// Part 138: set when a search's box may have limited it (MSMVResult::boxLimited, or the no-path retry);
+// a caller clears it before a reroute and reads it after. Never read by routing itself.
+thread_local bool gBoxLimited = false;
 
 // pd38route: a search region limit (slow tier on the dependency graph).
 // While gSearchLimitOn, a search whose box would leave gSearchLimit, or
@@ -3262,6 +3266,10 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
 
   MSMVResult result;
   int foundIdx = -1;
+  // Part 138: the smallest f = g + h of any popped node on a box edge that could grow (an edge on the
+  // grid border cannot) -- the proof below the loop.
+  const bool growX0 = x0 > 0, growX1 = x1 < g.nx - 1, growY0 = y0 > 0, growY1 = y1 < g.ny - 1;
+  double minEdgeF = std::numeric_limits<double>::infinity();
   while (!pq.empty()) {
     QueueEntry top = pq.top();
     pq.pop();
@@ -3277,6 +3285,8 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
       result.sinkIndex = it->second;
       break;
     }
+    if ((x == x0 && growX0) || (x == x1 && growX1) || (y == y0 && growY0) || (y == y1 && growY1))
+      minEdgeF = std::min(minEdgeF, top.priority);
     int amount = width + g.minSpacing[l];
 
     if (lp.isH(l)) {
@@ -3314,6 +3324,19 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
     return result;
 
   result.found = true;
+  // Part 138 (nv12route's proof, Part 54, for this cost model): every edge costs at least hScale (the
+  // present-demand cost is wl + hist * cong^5 + lambda * amount with wl = hScale; lambda pricing >= 1;
+  // refinement >= kRefineEps), and h is hScale x a Manhattan distance to the sinks (or to their box), so h
+  // is consistent: nodes pop in nondecreasing f, each popped node's g exact within the box. A route that
+  // leaves the box does so first at some growable edge node b, after a prefix inside the box, so it costs
+  // at least g(b) + hScale x dist(b, nearest sink) >= f(b). If b popped before the sink, minEdgeF <= f(b);
+  // if it never popped, f(b) >= C, the found cost. So unless minEdgeF < C, no route outside is cheaper.
+  {
+    const double found = region.distAt(foundIdx);
+    result.boxLimited = minEdgeF < found - 1e-9 * std::max(1.0, found);
+    if (result.boxLimited)
+      gBoxLimited = true;
+  }
   for (int i = foundIdx; i != -1; i = region.parent[i]) {
     int x, y, l;
     region.coordsOf(i, x, y, l);
@@ -3343,6 +3366,7 @@ MSMVResult routeStepMSMV(const RoutingGrid &g, const Prices &prices, const Layer
       gSearchWantedOut = true;
       return MSMVResult{};
     }
+    gBoxLimited = true; // Part 138: no path inside the box at all
     margin *= 2;
   }
   return MSMVResult{};
@@ -4075,6 +4099,10 @@ struct RegionSettings {
   int vcapTracks = 0;         // pd22route: PD22ROUTE_VCAP (0 = off)
   int vcapRadius = 5;         // pd22route: PD22ROUTE_VCAP_RADIUS
   double lagrange = 0;        // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE, the multipliers' step (0 = off)
+  // Part 138: PD39ROUTE_REGION_BOX_EVIDENCE = step (0 = off): each net keeps its own margin, from boxInit,
+  // grown by `step` (to boxCap) after a reroute whose search was box-limited and left the net overflowed,
+  // instead of every net's margin being boxInit + boxGrow x round.
+  int evidenceStep = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4203,6 +4231,8 @@ struct RegionReport {
   long long vcapEdges = 0; // pd22route: 2D edges priced against a virtual capacity
   int vcapReduction = 0;   // pd22route: capacity units taken off each
   bool cancelled = false;  // pd22route: stopped by the fallback's cancel flag
+  long long evReroutes = 0, evLimited = 0, evGrew = 0; // Part 138: box evidence, summed over rounds
+  double evMeanMargin = 0;                               // Part 138: members' mean margin at the end
 };
 
 // pd22route: the virtual-capacity zone. Every 2D edge with an end tile
@@ -4300,30 +4330,52 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   std::vector<std::pair<std::vector<ChargeRecord>, std::vector<Seg>>> best;
   for (size_t i : members)
     best.push_back({nets[i].charges, nets[i].segs});
+  // Part 138: per-net margins for the evidence rule (unused otherwise).
+  const int evCap = rs.boxCap > 0 ? rs.boxCap : std::numeric_limits<int>::max();
+  std::vector<int> evMargin(rs.evidenceStep > 0 ? members.size() : 0, std::min(rs.boxInit, evCap));
   for (int r = 0; r < rs.rounds; ++r) {
     if (cancel && cancel->load()) {
       rep.cancelled = true;
       break;
     }
     int rerouted = 0;
+    long long roundLimited = 0, roundGrew = 0;
     rep.lastMargin = stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
-    for (size_t i : members) {
-      RoutedNet &rn = nets[i];
+    for (size_t k = 0; k < members.size(); ++k) {
+      RoutedNet &rn = nets[members[k]];
       if (r > 0 && !netOverflowed(g, usage, rn))
         continue;
+      const int margin = rs.evidenceStep > 0 ? evMargin[k] : stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
+      gBoxLimited = false;
+      bool done = false;
       if (rs.pieces) {
         // Round 0: every piece with wire in the box; later: overflowed ones.
-        PieceStats ps = rerouteNetPieces(g, usage, prices, lp, region, rn, stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap),
-                                         AcceptMode::kKeep, r == 0 ? &rep.box : nullptr);
+        PieceStats ps = rerouteNetPieces(g, usage, prices, lp, region, rn, margin, AcceptMode::kKeep,
+                                         r == 0 ? &rep.box : nullptr);
         if (ps.ok) {
           rerouted += ps.pieces;
-          continue;
+          done = true;
         }
       }
-      rn.boxMargin = stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
-      routeNetSlowMSMV(g, prices, usage, lp, region, 0.0, rn);
-      ++rerouted;
+      if (!done) {
+        rn.boxMargin = margin;
+        routeNetSlowMSMV(g, prices, usage, lp, region, 0.0, rn);
+        ++rerouted;
+      }
+      if (rs.evidenceStep > 0) {
+        ++rep.evReroutes;
+        if (gBoxLimited) {
+          ++roundLimited;
+          if (evMargin[k] < evCap && netOverflowed(g, usage, rn)) {
+            evMargin[k] = static_cast<int>(
+                std::min<long long>(evCap, static_cast<long long>(evMargin[k]) + rs.evidenceStep));
+            ++roundGrew;
+          }
+        }
+      }
     }
+    rep.evLimited += roundLimited;
+    rep.evGrew += roundGrew;
     advancePresentDemand(prices, usage);
     if (rs.lagrange > 0) {
       advanceLagrange(lagH, usage.h, usage.capH, rs.lagrange);
@@ -4332,9 +4384,21 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     long long total = totalOverflow(g, usage);
     rep.roundsRun = r + 1;
     grprof::event("region round", r); // Part 126: Instruments marker
-    if (trace)
+    if (trace) {
       std::cerr << "region round " << r << ": 2D overflow " << total << " (rerouted " << rerouted << ", pops "
-                << gSearchPops - (popsAfter.empty() ? popsAtStart : popsAfter.back()) << ")\n";
+                << gSearchPops - (popsAfter.empty() ? popsAtStart : popsAfter.back()) << ")";
+      if (rs.evidenceStep > 0) {
+        long long sum = 0;
+        int mx = 0;
+        for (int m : evMargin) {
+          sum += m;
+          mx = std::max(mx, m);
+        }
+        std::cerr << " box evidence: limited " << roundLimited << ", grew " << roundGrew << ", margin mean "
+                  << (evMargin.empty() ? 0.0 : double(sum) / evMargin.size()) << " max " << mx;
+      }
+      std::cerr << "\n";
+    }
     if (total < rep.after) {
       rep.after = total;
       for (size_t k = 0; k < members.size(); ++k)
@@ -4356,6 +4420,12 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   for (size_t k = 0; k < members.size(); ++k) {
     nets[members[k]].charges = best[k].first;
     nets[members[k]].segs = best[k].second;
+  }
+  if (!evMargin.empty()) {
+    long long sum = 0;
+    for (int m : evMargin)
+      sum += m;
+    rep.evMeanMargin = double(sum) / evMargin.size();
   }
   rep.pops = gSearchPops - popsAtStart;
   rep.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - stageStart).count();
@@ -4981,6 +5051,8 @@ bool applyRegionVariant(const std::string &spec, RegionSettings &rs, std::string
       ok = asInt(rs.boxCap, 0, 100000);
     else if (k == "rounds")
       ok = asInt(rs.rounds, 1, 1000000);
+    else if (k == "evidence") // Part 138
+      ok = asInt(rs.evidenceStep, 0, 100000);
     else if (k == "expand")
       ok = asInt(rs.expand, 0, 100000);
     else if (k == "lagr")
@@ -15808,6 +15880,120 @@ void testPieceRerouteMovesOnlyTheOverflowedPiece() {
 
 // The box heuristic (distance to the sinks' bounding box) must find paths
 // of exactly the same cost as the nearest-sink heuristic: both admissible.
+// Part 138: the box-limit signal (MSMVResult::boxLimited) and the region stage's evidence rule.
+// (1) A walled grid whose cheap gap lies outside a margin-6 box: limited; the same search over the whole
+// grid (no growable edge): not limited. (2) A straight, uncongested route: not limited. (3) The claim the
+// rule rests on, on the region stage's own cost model (present demand, a decayed WL term, history and
+// hot spots): whenever a search reports "not limited", a whole-grid search finds exactly the same cost --
+// with both heuristics; and some limited searches really were cheaper outside (the fixtures have teeth).
+// (4) The region stage with the evidence rule clears the three-nets-on-one-row fixture; (5) the variant key.
+void testBoxLimitSignalAndEvidenceRule() {
+  {
+    std::string gr = "grid 40 40 2\nvertical capacity 0 20\nhorizontal capacity 20 0\n"
+                     "minimum width 1 1\nminimum spacing 0 0\nvia spacing 0 0\n0 0 10 10\n"
+                     "num net 1\nnetW 0 2 1\n55 205 1\n155 205 1\n0\n";
+    Design d = parse("pd39route_selftest_boxlimit_wall.gr", gr.c_str());
+    const RoutingGrid &g = d.grid;
+    Prices pr(g);
+    LayerPlan lp(g);
+    SearchRegion region;
+    for (int y = 0; y < g.ny; ++y)
+      pr.h[g.hIndex(10, y, 0)] = (y == 5) ? 1.0 : 1e6;
+    std::vector<PathNode> src = {{5, 20, -1}};
+    std::vector<Point> snk = {{15, 20}};
+    MSMVResult narrow = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 6);
+    MSMVResult whole = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 100);
+    check(narrow.found && narrow.boxLimited, "box-limit signal: the wall's cheap gap outside a margin-6 box -> limited");
+    check(whole.found && !whole.boxLimited, "box-limit signal: a box covering the whole grid is never limited");
+    Prices flat(g);
+    MSMVResult open = multiSourceDijkstra(g, flat, lp, region, src, snk, 1, 6);
+    check(open.found && !open.boxLimited, "box-limit signal: a straight route on an uncongested grid -> not limited");
+  }
+  {
+    std::string gr = "grid 30 30 2\nvertical capacity 0 20\nhorizontal capacity 20 0\n"
+                     "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                     "num net 1\nn0 0 2 1\n5 5 1\n15 5 1\n0\n";
+    Design d = parse("pd39route_selftest_boxlimit_pd.gr", gr.c_str());
+    const RoutingGrid &g = d.grid;
+    LayerPlan lp(g);
+    SearchRegion region;
+    int notLimited = 0, sameWhenNot = 0, limitedCheaper = 0, cases = 0;
+    for (int f = 0; f < 80; ++f) {
+      Usage u = usageFromCharges(g, std::vector<RoutedNet>{});
+      Prices pr(g);
+      CostSettings cs;
+      cs.model = CostModel::kPresentDemand;
+      configureCostModel(pr, u, cs);
+      pr.pdIter = 40; // a late region round: the WL term has decayed to ~0.07
+      pr.pdFactor = pdFactorForIter(pr.pdIter);
+      auto hot = [&](int cx, int cy, int r, int level) {
+        for (int y = std::max(0, cy - r); y <= std::min(g.ny - 1, cy + r); ++y)
+          for (int x = std::max(0, cx - r); x + 1 < g.nx && x <= cx + r; ++x) {
+            const size_t e = g.hIndex(x, y, 0);
+            u.h[e] = u.capH[e] * level / 4;
+            pr.pdHistH[e] = 1 + (x + y + f) % 6;
+          }
+        for (int y = std::max(0, cy - r); y + 1 < g.ny && y <= cy + r; ++y)
+          for (int x = std::max(0, cx - r); x <= std::min(g.nx - 1, cx + r); ++x) {
+            const size_t e = g.vIndex(x, y, 0);
+            u.v[e] = u.capV[e] * level / 4;
+            pr.pdHistV[e] = 1 + (x * 3 + y + f) % 6;
+          }
+      };
+      const int sx = 4 + (f * 7) % 20, sy = 4 + (f * 11) % 20;
+      const int tx = 4 + (f * 13 + 9) % 20, ty = 4 + (f * 5 + 3) % 20;
+      hot((sx + tx) / 2, (sy + ty) / 2, 1 + f % 3, 5 + f % 4);
+      if (f % 2)
+        hot((sx + tx) / 2 + 3, (sy + ty) / 2 - 2, 1, 7);
+      std::vector<PathNode> src = {{sx, sy, 0}};
+      std::vector<Point> snk = {{tx, ty}};
+      if (f % 3 == 0)
+        snk.push_back({(tx + 5) % g.nx, ty});
+      const int margin = 1 + f % 4;
+      const bool boxH = f % 2 == 0;
+      MSMVResult a = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, margin, boxH);
+      const double ca = a.found ? region.distAt(region.idx(a.path.back().x, a.path.back().y, 0)) : 0;
+      MSMVResult b = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 100, boxH);
+      const double cb = b.found ? region.distAt(region.idx(b.path.back().x, b.path.back().y, 0)) : 0;
+      if (!a.found || !b.found)
+        continue;
+      ++cases;
+      if (!a.boxLimited) {
+        ++notLimited;
+        sameWhenNot += std::abs(ca - cb) <= 1e-9 * std::max(1.0, cb);
+      } else if (cb < ca - 1e-9 * std::max(1.0, ca)) {
+        ++limitedCheaper;
+      }
+    }
+    check(cases == 80 && notLimited >= 10 && sameWhenNot == notLimited && limitedCheaper >= 1,
+          "box-limit signal is sound on 80 present-demand fixtures: every 'not limited' search (" +
+              std::to_string(sameWhenNot) + "/" + std::to_string(notLimited) +
+              ") has the whole-grid cost; " + std::to_string(limitedCheaper) + " limited ones were cheaper outside");
+  }
+  {
+    Design d = parse("pd39route_selftest_evidence_row.gr", kThreeOnOneRowGr);
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &d.nets[i];
+      nets[i].segs = {{0, 1, 0, 7, 1, 0}};
+    }
+    prepareFor2DRefine(d, nets);
+    RegionSettings rs;
+    rs.enabled = true;
+    rs.evidenceStep = 2;
+    RegionReport rr = regionNegotiate(d, nets, rs, false);
+    bool conn = true;
+    for (const RoutedNet &rn : nets)
+      conn = conn && segsConnected(rn.segs);
+    check(rr.after == 0 && conn && rr.evReroutes > 0 && rr.evMeanMargin >= rs.boxInit,
+          "region stage with the evidence rule: zero overflow, every net connected, margins from boxInit");
+  }
+  RegionSettings v;
+  std::string err;
+  check(applyRegionVariant("evidence=3", v, err) && v.evidenceStep == 3 && !applyRegionVariant("evidence=1.5", v, err),
+        "portfolio variant parse: evidence (an integer step)");
+}
+
 void testBoxHeuristicFindsTheSameCost() {
   std::string gr = "grid 30 30 2\nvertical capacity 0 20\nhorizontal capacity 20 0\n"
                    "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
@@ -19155,6 +19341,7 @@ int run() {
   testRegionNegotiationClearsTheThreeOnOneRowFixture();
   testPieceRerouteMovesOnlyTheOverflowedPiece();
   testBoxHeuristicFindsTheSameCost();
+  testBoxLimitSignalAndEvidenceRule();
   testPieceModeStagesClearTheThreeOnOneRowFixture();
   testBendAwareSearchCountsCorners();
   testWlRecoveryShortensADetour();
@@ -19935,6 +20122,16 @@ int main(int argc, char **argv) {
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
+  if (const char *v = std::getenv("PD39ROUTE_REGION_BOX_EVIDENCE"); v) { // Part 138
+    char *end = nullptr;
+    const long x = std::strtol(v, &end, 10);
+    if (!*v || *end || x < 0 || x > 100000)
+      fail(std::string("PD39ROUTE_REGION_BOX_EVIDENCE must be an integer 0-100000 (got '") + v + "')");
+    region.evidenceStep = static_cast<int>(x);
+    if (region.evidenceStep > 0)
+      std::cerr << "region box evidence: each net's margin from " << region.boxInit << ", +" << region.evidenceStep
+                << " after a box-limited reroute that left it overflowed (to the region box cap)\n";
+  }
   if (const char *v = std::getenv("PD39ROUTE_REGION_LAGRANGE"); v) {
     char *end = nullptr;
     const double x = std::strtod(v, &end);
