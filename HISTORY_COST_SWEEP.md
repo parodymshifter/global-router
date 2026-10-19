@@ -10863,3 +10863,53 @@ box's cells; each region round reports the share of that round's pops by ratio (
 searches show large ratios and full boxes, the cost landscape, not the heuristic or the box, sets the
 work. Runs (`p139.jobs`, portfolio off): newblue1 standard and with the 0.2 floor, newblue4 standard --
 each must reproduce its untraced run's routes.
+
+## Part 139 -- the congestion spectrum as a difficulty predictor (Routing Difficulty Atlas)
+
+The user's request, after a literature check (Fourier methods are established in placement density --
+ePlace's FFT Poisson solve -- and in lithography hotspot detection's DCT features, but not found applied to
+global routing). `gr/routability.cpp` gains a spectrum of its pre-routing RUDY map: per GCell, the larger
+of the mean horizontal and mean vertical RUDY ratio; block-averaged by s so no side exceeds 1024; mean
+removed, Hann window, each side zero-padded to its own power of two, 2D FFT, power binned by physical
+wavenumber. Measures (`spec_*` for the ratio field, `xs_*` for the excess field max(0, ratio - 1)):
+power-weighted mean wavelength in GCells (`_len`) and over the die's side (`_rel`), power shares at
+wavelengths > 64 GCells (`_large`) and < 8 GCells (`_small`, only where s < 4 resolves it), and the
+log-log spectral slope. Self-tests: a 32-GCell wave reads 32.0; a constant field has no spectrum; white
+noise is flat (slope 0.08); a 2400 x 1800 die (s = 3) finds its 300-GCell wave (300.0); s = 5 does not
+report the < 8 share. (A first version padded every field to a square, which mixed a narrow die's short
+side into the wavenumbers -- a 300-GCell wave read 233; the self-test caught it.) Every existing measure
+is unchanged (adaptec1: 58 of 58 identical); 0.5 s per 2008 design, 2 min for all 41.
+
+**Evaluation** (`gr/atlas_spectrum_eval.py`, the Atlas page's own fit ported exactly -- standardized
+measures, ridge penalty 2, the page's transforms, leave-one-out R^2; it reproduces the page's numbers,
+e.g. 2008 overflow on cut3_max + esc_max below zero, Spearman +0.75 / +0.63). For each set and outcome:
+Spearman of the ten spectral measures; leave-one-out R^2 of the two strongest existing measures alone and
+with each spectral measure added; a permutation test of the best gain (each spectral measure shuffled,
+best of ten recomputed, 500 times). Raw output: `~/Code/GlobalRouterRuns/p139/spectrum_eval.txt`.
+
+| set, outcome | strongest existing (Spearman) | best spectral (Spearman) | LOO R^2 baseline -> best | permutation p |
+|---|---|---|---|---|
+| 2008 overflow | cut3_max +0.75 | xs_large -0.22 | -3.14 -> 0.42 (spec_small) | 0.31 |
+| 2008 share over | cut3_max +0.75 | xs_large -0.22 | -2.37 -> 0.40 (spec_small) | 0.48 |
+| 2008 CPU per Steiner step | esc_max +0.65 | xs_rel +0.41 | -45.6, no gain | 1.00 |
+| 2008 detour | pin_per_vtrack +0.77 | xs_rel +0.61 | 0.45, no gain | 0.95 |
+| 2024 share over | rudy_p99 +0.87 | spec_rel -0.80 | 0.75, no gain | 0.75 |
+| 2024 overflow per GCell | util +0.98 | xs_rel +0.83 | 0.96, no gain | 0.93 |
+| 2024 CPU per Steiner step | ppn_mean +0.62 | spec_large +0.58 | 0.02 -> 0.16 | 0.67 |
+| 2025 overflow per GCell | reg16_maxmean -0.89 | xs_large +0.89 | 0.22 -> **0.78** | **0.012** |
+| 2025 CPU per Steiner step | ppn_share2 +0.67 | spec_large -0.83 | -0.64 -> -0.50 | 0.52 |
+
+The one pass, 2025 overflow per GCell, does not hold up: the ten 2025 designs are five designs in a
+visible and a blind version, and leaving both versions out together (the honest test) gives baseline
+-0.40 -> +0.14 with xs_large. The outcome barely varies except mempool_group (log10 1.21-1.23 vs
+1.00-1.05), which also has the largest xs_large (0.24-0.27): one design family carries it, and it is one of
+eleven tests. **Verdict: the pre-routing congestion spectrum adds no reliable predictive power to the
+Atlas.** It is kept in `routability.cpp` (the measures are cheap and now available to the Atlas page).
+
+**What the spectrum does show.** Before routing, the excess over capacity has a length scale of 6-22 GCells
+on every 2008 design (`xs_len`; the demand field 18-68 GCells), and the five residues are not distinct from
+the eleven zero designs. The region stage's margins reach 200 GCells and late searches are still
+box-limited there (Part 138), so the congestion the late rounds route around is far larger than anything in
+the pre-routing map: it is built by negotiation (nets pushed out of the hotspots fill their surroundings).
+A length scale meant to size search boxes (idea 1) has to come from the route state at the region stage's
+start, not from the input.

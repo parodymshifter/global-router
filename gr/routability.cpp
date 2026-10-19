@@ -29,6 +29,19 @@
 //   cut3_*: the same for every 3 x 3 block of tiles: cut3_max, cut3_over1.
 //   long_share: share of nets whose half-perimeter exceeds 10% of the die's
 //     half-perimeter.
+// Part 139 (the congestion spectrum): a per-GCell field -- the larger of the
+//   GCell's mean horizontal and mean vertical RUDY ratio over its edges
+//   with capacity -- block-averaged by s so neither side exceeds 1024,
+//   mean removed, Hann-windowed, zero-padded to N x N (N a power of two),
+//   2D FFT, power radially averaged over integer wavenumbers k = 1..N/2
+//   (wavelength N s / k GCells):
+//   spec_len: power-weighted mean wavenumber, as a wavelength in GCells;
+//   spec_rel: spec_len over the die's side (sqrt of GCells);
+//   spec_large / spec_small: shares of the field's power at wavelengths
+//     > 64 GCells / < 8 GCells (spec_small only when s < 4 resolves it);
+//   spec_slope: least-squares slope of log power on log k over k = 2..N/4.
+//   xs_*: the same for the excess field max(0, ratio - 1) (absent when
+//   nothing exceeds capacity). spec_scale: s.
 // Part 130 (difficulty predictors; areas in GCells, the routing grid's
 // cells; "nets" below are nets with pins in >= 2 GCells unless noted):
 //   pins, pin_density: pins of every net with >= 2 pins, and per GCell.
@@ -70,6 +83,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <complex>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -118,11 +132,139 @@ std::vector<NetBox> boxes(const Design &d) {
   return out;
 }
 
+// Part 139: the congestion spectrum of a per-GCell field (see the header).
+struct Spectrum {
+  bool ok = false, smallOk = false;
+  int scale = 1;
+  double len = 0, rel = 0, large = 0, small = 0, slope = 0;
+};
+
+void fft(std::vector<std::complex<double>> &a) { // in place, radix 2; a.size() a power of two
+  const size_t n = a.size();
+  for (size_t i = 1, j = 0; i < n; ++i) {
+    size_t bit = n >> 1;
+    for (; j & bit; bit >>= 1)
+      j ^= bit;
+    j ^= bit;
+    if (i < j)
+      std::swap(a[i], a[j]);
+  }
+  const double pi = std::acos(-1.0);
+  for (size_t len = 2; len <= n; len <<= 1) {
+    const std::complex<double> w(std::cos(-2 * pi / len), std::sin(-2 * pi / len));
+    for (size_t i = 0; i < n; i += len) {
+      std::complex<double> wk(1, 0);
+      for (size_t k = 0; k < len / 2; ++k) {
+        const std::complex<double> u = a[i + k], v = a[i + k + len / 2] * wk;
+        a[i + k] = u + v;
+        a[i + k + len / 2] = u - v;
+        wk *= w;
+      }
+    }
+  }
+}
+
+Spectrum spectrumOf(const std::vector<double> &field, int nx, int ny) {
+  Spectrum sp;
+  const int maxSide = 1024;
+  const int s = std::max(1, (std::max(nx, ny) + maxSide - 1) / maxSide);
+  sp.scale = s;
+  const int mx = (nx + s - 1) / s, my = (ny + s - 1) / s;
+  std::vector<double> b(static_cast<size_t>(mx) * my, 0);
+  std::vector<int> cnt(b.size(), 0);
+  for (int y = 0; y < ny; ++y)
+    for (int x = 0; x < nx; ++x) {
+      const size_t k = static_cast<size_t>(y / s) * mx + x / s;
+      b[k] += field[static_cast<size_t>(y) * nx + x];
+      ++cnt[k];
+    }
+  double mean = 0;
+  for (size_t k = 0; k < b.size(); ++k) {
+    b[k] /= cnt[k];
+    mean += b[k];
+  }
+  mean /= b.size();
+  int nxp = 1, nyp = 1; // each side padded to its own power of two
+  while (nxp < mx)
+    nxp <<= 1;
+  while (nyp < my)
+    nyp <<= 1;
+  const int n = std::max(nxp, nyp); // radial bins: physical frequency x n, k = 1..n/2
+  const double pi = std::acos(-1.0);
+  std::vector<std::complex<double>> a(static_cast<size_t>(nxp) * nyp, 0);
+  double var = 0;
+  for (int y = 0; y < my; ++y)
+    for (int x = 0; x < mx; ++x) {
+      const double wx = mx > 1 ? 0.5 - 0.5 * std::cos(2 * pi * x / (mx - 1)) : 1.0;
+      const double wy = my > 1 ? 0.5 - 0.5 * std::cos(2 * pi * y / (my - 1)) : 1.0;
+      const double v = (b[static_cast<size_t>(y) * mx + x] - mean);
+      var += v * v;
+      a[static_cast<size_t>(y) * nxp + x] = v * wx * wy;
+    }
+  if (!(var > 0))
+    return sp;
+  std::vector<std::complex<double>> row(nxp), col(nyp);
+  for (int y = 0; y < nyp; ++y) { // rows, then columns
+    for (int x = 0; x < nxp; ++x)
+      row[x] = a[static_cast<size_t>(y) * nxp + x];
+    fft(row);
+    for (int x = 0; x < nxp; ++x)
+      a[static_cast<size_t>(y) * nxp + x] = row[x];
+  }
+  for (int x = 0; x < nxp; ++x) {
+    for (int y = 0; y < nyp; ++y)
+      col[y] = a[static_cast<size_t>(y) * nxp + x];
+    fft(col);
+    for (int y = 0; y < nyp; ++y)
+      a[static_cast<size_t>(y) * nxp + x] = col[y];
+  }
+  std::vector<double> pk(n / 2 + 1, 0);
+  std::vector<long long> nk(n / 2 + 1, 0);
+  for (int y = 0; y < nyp; ++y)
+    for (int x = 0; x < nxp; ++x) {
+      const int kx = x <= nxp / 2 ? x : x - nxp, ky = y <= nyp / 2 ? y : y - nyp;
+      const double fx = double(kx) / nxp, fy = double(ky) / nyp; // cycles per averaged cell
+      const int k = static_cast<int>(std::lround(std::sqrt(fx * fx + fy * fy) * n));
+      if (k < 1 || k > n / 2)
+        continue;
+      pk[k] += std::norm(a[static_cast<size_t>(y) * nxp + x]);
+      ++nk[k];
+    }
+  double tot = 0, mom = 0, large = 0, small = 0;
+  for (int k = 1; k <= n / 2; ++k) {
+    tot += pk[k];
+    mom += k * pk[k];
+    const double lambda = double(n) * s / k;
+    if (lambda > 64)
+      large += pk[k];
+    if (lambda < 8)
+      small += pk[k];
+  }
+  if (!(tot > 0))
+    return sp;
+  sp.ok = true;
+  sp.len = double(n) * s / (mom / tot);
+  sp.rel = sp.len / std::sqrt(double(nx) * ny);
+  sp.large = large / tot;
+  sp.smallOk = double(n) * s / 8 < n / 2.0; // some k <= N/2 has a wavelength under 8 GCells
+  sp.small = sp.smallOk ? small / tot : 0;
+  double sx = 0, sy = 0, sxx = 0, sxy = 0;
+  int m = 0;
+  for (int k = 2; k <= n / 4; ++k)
+    if (nk[k] > 0 && pk[k] > 0) {
+      const double lx = std::log(double(k)), ly = std::log(pk[k] / nk[k]);
+      sx += lx, sy += ly, sxx += lx * lx, sxy += lx * ly, ++m;
+    }
+  sp.slope = m >= 2 && m * sxx - sx * sx > 0 ? (m * sxy - sx * sy) / (m * sxx - sx * sx) : 0;
+  return sp;
+}
+
 struct Features {
   long long nets = 0, tiles = 0;
   double util = 0, rudyP99 = 0, rudyP999 = 0, rudyOver = 0, rudyExcess = 0;
   double escMax = 0, escP999 = 0, cut3Max = 0, longShare = 0;
   long long escOver1 = 0, escOver09 = 0, cut3Over1 = 0;
+  Spectrum spec, specX; // Part 139: the RUDY ratio field and its excess over capacity
 };
 
 double pct(std::vector<double> v, double q) {
@@ -213,6 +355,31 @@ Features analyze(const Design &d) {
       over += e > c;
       excess += std::max(0.0, e - c) / unit;
     }
+  { // Part 139: per-GCell fields for the congestion spectrum
+    std::vector<double> ratio(static_cast<size_t>(g.nx) * g.ny, 0), excessF(ratio.size(), 0);
+    for (int y = 0; y < g.ny; ++y)
+      for (int x = 0; x < g.nx; ++x) {
+        double hs = 0, vs = 0;
+        int hn = 0, vn = 0;
+        for (int ex : {x - 1, x})
+          if (ex >= 0 && ex + 1 < g.nx) {
+            const double c = capH[static_cast<size_t>(y) * (g.nx - 1) + ex];
+            if (c > 0)
+              hs += dH[static_cast<size_t>(y) * (g.nx + 1) + ex] / c, ++hn;
+          }
+        for (int ey : {y - 1, y})
+          if (ey >= 0 && ey + 1 < g.ny) {
+            const double c = capV[static_cast<size_t>(ey) * g.nx + x];
+            if (c > 0)
+              vs += dV[static_cast<size_t>(ey) * (g.nx + 1) + x] / c, ++vn;
+          }
+        const double r = std::max(hn ? hs / hn : 0.0, vn ? vs / vn : 0.0);
+        ratio[static_cast<size_t>(y) * g.nx + x] = r;
+        excessF[static_cast<size_t>(y) * g.nx + x] = std::max(0.0, r - 1.0);
+      }
+    f.spec = spectrumOf(ratio, g.nx, g.ny);
+    f.specX = spectrumOf(excessF, g.nx, g.ny);
+  }
   f.rudyP99 = pct(ratios, 0.99);
   f.rudyP999 = pct(ratios, 0.999);
   f.rudyOver = ratios.empty() ? 0 : static_cast<double>(over) / ratios.size();
@@ -728,6 +895,37 @@ int run() {
         "layers: one horizontal, one vertical; horizontal tracks per GCell 9 edges x 2 / 12 GCells");
   check(std::abs(rt::gini({1, 1, 1, 1})) < 1e-12 && std::abs(rt::gini({0, 0, 0, 4}) - 0.75) < 1e-12,
         "Gini: equal values 0, all in one of four 0.75");
+  { // Part 139: the spectrum on fields whose answer is known
+    const int n = 256;
+    std::vector<double> wave(n * n), flat(n * n, 2.0), noise(n * n), big(2400 * 1800);
+    const double pi = std::acos(-1.0);
+    for (int y = 0; y < n; ++y)
+      for (int x = 0; x < n; ++x)
+        wave[y * n + x] = 1 + 0.5 * std::sin(2 * pi * x / 32.0);
+    unsigned st = 12345;
+    for (double &v : noise) {
+      st = st * 1103515245u + 12345u;
+      v = (st >> 8) / double(1 << 24);
+    }
+    for (int y = 0; y < 1800; ++y)
+      for (int x = 0; x < 2400; ++x)
+        big[y * 2400 + x] = 1 + std::sin(2 * pi * x / 300.0);
+    rt::Spectrum w = rt::spectrumOf(wave, n, n), f0 = rt::spectrumOf(flat, n, n), wn = rt::spectrumOf(noise, n, n);
+    rt::Spectrum bg = rt::spectrumOf(big, 2400, 1800);
+    check(w.ok && std::abs(w.len - 32) < 3 && w.large < 0.01 && w.small < 0.01,
+          "spectrum: a 32-GCell wave -> mean wavelength ~32 (" + std::to_string(w.len) + "), none above 64 or below 8");
+    check(!f0.ok, "spectrum: a constant field has no spectrum");
+    check(wn.ok && std::abs(wn.slope) < 0.3 && wn.len < 8, "spectrum: white noise -> flat (slope " +
+                                                              std::to_string(wn.slope) + "), short wavelengths");
+    check(bg.ok && bg.scale == 3 && bg.smallOk && bg.small < 0.01 && std::abs(bg.len - 300) < 30 && bg.large > 0.9,
+          "spectrum: a 2400 x 1800 die is averaged by 3 (shortest wavelength 6 GCells); its 300-GCell wave is found (" +
+              std::to_string(bg.len) + ")");
+    std::vector<double> huge(4800 * 100, 1.0);
+    for (int x = 0; x < 4800; ++x)
+      huge[50 * 4800 + x] = 3.0;
+    rt::Spectrum hg = rt::spectrumOf(huge, 4800, 100);
+    check(hg.ok && hg.scale == 5 && !hg.smallOk, "spectrum: averaged by 5, wavelengths under 8 GCells are not reported");
+  }
   std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -790,6 +988,17 @@ int main(int argc, char **argv) {
               "long_share=%.4f\n",
               f.nets, f.tiles, f.util, f.rudyP99, f.rudyP999, f.rudyOver, f.rudyExcess, f.escMax, f.escP999,
               f.escOver1, f.escOver09, f.cut3Max, f.cut3Over1, f.longShare);
+  auto printSpec = [](const char *p, const rt::Spectrum &sp) { // Part 139
+    if (!sp.ok)
+      return;
+    std::printf("%s_len=%.3f %s_rel=%.5f %s_large=%.5f %s_slope=%.4f ", p, sp.len, p, sp.rel, p, sp.large, p,
+                sp.slope);
+    if (sp.smallOk)
+      std::printf("%s_small=%.5f ", p, sp.small);
+  };
+  printSpec("spec", f.spec);
+  printSpec("xs", f.specX);
+  std::printf("spec_scale=%d\n", f.spec.scale);
   std::printf("pins=%lld pin_density=%.5f pin_per_htrack=%.5f pin_per_vtrack=%.5f row_cv=%.4f col_cv=%.4f "
               "ppn_mean=%.4f ppn_median=%.1f ppn_p90=%.1f ppn_p99=%.1f ppn_max=%lld ppn_skew=%.3f ppn_share2=%.4f "
               "ppn_share10=%.4f big_nets=%lld big_share=%.6f regions=%lld region_top=%.4f",
