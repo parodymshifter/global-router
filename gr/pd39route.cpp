@@ -4996,6 +4996,9 @@ bool applyRegionVariant(const std::string &spec, RegionSettings &rs, std::string
 }
 
 std::vector<std::string> gPortfolio; // PD39ROUTE_PORTFOLIO's variants (empty = off)
+// PD39ROUTE_PORTFOLIO_WHEN: after (default) = the variants run only once path A ends above the fallback's
+// threshold, from path A's saved start state; always = alongside path A from the start (Part 135's runs).
+bool gPortfolioAfter = true;
 
 struct PortfolioResult {
   std::string spec;
@@ -5025,23 +5028,13 @@ struct FallbackReport {
   RefineReport refineA, refineB;
   std::vector<PortfolioResult> portfolio; // Part 135: path A's variants (empty = off)
   size_t portfolioPick = 0;
+  bool portfolioSkipped = false; // gated portfolio: path A ended at or below the threshold, no variants run
 };
 
-// Part 135: path A as a portfolio -- variant 0 (the run's own region settings) on `nets` in this thread,
-// the rest on copies, each on its own thread; the best is left in `nets`. Without variants, path A as before.
-void runPathA(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &region,
-              const RefineSettings &refine, bool trace, FallbackReport &fr) {
-  const RoutingGrid &g = d.grid;
-  if (gPortfolio.empty()) {
-    if (region.enabled)
-      fr.regionA = regionNegotiate(d, nets, region, trace);
-    if (refine.enabled)
-      fr.refineA = refine2D(d, nets, refine, trace);
-    return;
-  }
+// Part 135: the portfolio's region settings (variant 0 = the run's own) and result slots.
+std::vector<RegionSettings> portfolioSettings(const RegionSettings &region, std::vector<PortfolioResult> &res) {
   const size_t k = gPortfolio.size() + 1;
-  std::vector<std::vector<RoutedNet>> copies(k - 1, nets);
-  std::vector<PortfolioResult> res(k);
+  res.assign(k, PortfolioResult());
   std::vector<RegionSettings> rs(k, region);
   res[0].spec = "(own settings)";
   for (size_t i = 1; i < k; ++i) {
@@ -5050,20 +5043,34 @@ void runPathA(const Design &d, std::vector<RoutedNet> &nets, const RegionSetting
     if (!applyRegionVariant(gPortfolio[i - 1], rs[i], err)) // parsed in main already; defensive
       fail(err);
   }
-  auto run = [&](size_t i, std::vector<RoutedNet> &mine, bool tr) {
-    if (region.enabled)
-      res[i].region = regionNegotiate(d, mine, rs[i], tr);
-    if (refine.enabled)
-      res[i].refine = refine2D(d, mine, refine, tr);
-    res[i].overflow = totalOverflow(g, usageFromCharges(g, mine));
-    res[i].wire = totalWire2D(mine);
-  };
+  return rs;
+}
+
+void runPortfolioVariant(const Design &d, std::vector<RoutedNet> &mine, const RegionSettings &rs,
+                         const RefineSettings &refine, bool tr, PortfolioResult &r) {
+  if (rs.enabled)
+    r.region = regionNegotiate(d, mine, rs, tr);
+  if (refine.enabled)
+    r.refine = refine2D(d, mine, refine, tr);
+  r.overflow = totalOverflow(d.grid, usageFromCharges(d.grid, mine));
+  r.wire = totalWire2D(mine);
+}
+
+// Variants 1.. on `copies` (one start state each), each on its own thread; the caller joins them.
+std::vector<std::thread> startPortfolioVariants(const Design &d, std::vector<std::vector<RoutedNet>> &copies,
+                                                const std::vector<RegionSettings> &rs, const RefineSettings &refine,
+                                                std::vector<PortfolioResult> &res) {
   std::vector<std::thread> th;
-  for (size_t i = 1; i < k; ++i)
-    th.emplace_back([&, i]() { run(i, copies[i - 1], false); });
-  run(0, nets, trace);
-  for (std::thread &t : th)
-    t.join();
+  for (size_t i = 1; i < res.size(); ++i)
+    th.emplace_back([&d, &copies, &rs, &refine, &res, i]() {
+      runPortfolioVariant(d, copies[i - 1], rs[i], refine, false, res[i]);
+    });
+  return th;
+}
+
+// Leaves the best of all the variants (variant 0's routes in `nets`, the others' in `copies`) in `nets`.
+void keepBestVariant(std::vector<RoutedNet> &nets, std::vector<std::vector<RoutedNet>> &copies,
+                     std::vector<PortfolioResult> &res, FallbackReport &fr) {
   const size_t pick = pickPortfolio(res);
   if (pick > 0)
     nets = std::move(copies[pick - 1]);
@@ -5073,10 +5080,27 @@ void runPathA(const Design &d, std::vector<RoutedNet> &nets, const RegionSetting
   fr.portfolio = std::move(res);
 }
 
-// Runs both paths from the state in `nets` and leaves the kept one there.
-// pd35route (memory): spilling a vector of routed nets to an anonymous
-// temporary file (std::tmpfile: deleted when closed) and reading it back.
-// The net pointer is stored as its index into the Design's nets.
+// Part 135: path A as a portfolio -- variant 0 (the run's own region settings) on `nets` in this thread,
+// the rest on copies, each on its own thread; the best is left in `nets`. Without variants, path A as before.
+void runPathA(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &region,
+              const RefineSettings &refine, bool trace, FallbackReport &fr) {
+  if (gPortfolio.empty()) {
+    if (region.enabled)
+      fr.regionA = regionNegotiate(d, nets, region, trace);
+    if (refine.enabled)
+      fr.refineA = refine2D(d, nets, refine, trace);
+    return;
+  }
+  std::vector<PortfolioResult> res;
+  const std::vector<RegionSettings> rs = portfolioSettings(region, res);
+  std::vector<std::vector<RoutedNet>> copies(res.size() - 1, nets);
+  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res);
+  runPortfolioVariant(d, nets, rs[0], refine, trace, res[0]);
+  for (std::thread &t : th)
+    t.join();
+  keepBestVariant(nets, copies, res, fr);
+}
+
 struct NetSpill {
   FILE *f = nullptr;
   NetSpill() = default;
@@ -5148,6 +5172,35 @@ struct NetSpill {
   }
 };
 
+// Part 135 (PD39ROUTE_PORTFOLIO_WHEN=after): path A with the run's own settings first; only if it ends above
+// the fallback's threshold (where the reclaim path is skipped anyway) do the other variants run, from path
+// A's start state saved in `start`, each on its own thread. The same variants from the same start as the
+// always-on portfolio, so the same pick and routes; a design that ends at or below the threshold gets
+// exactly the routes it gets without a portfolio, at no extra cost.
+void runPathAGated(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &region,
+                   const RefineSettings &refine, bool trace, FallbackReport &fr, long long aMax, NetSpill &start,
+                   const std::function<void()> &onAbove = {}) {
+  std::vector<PortfolioResult> res;
+  const std::vector<RegionSettings> rs = portfolioSettings(region, res);
+  runPortfolioVariant(d, nets, rs[0], refine, trace, res[0]);
+  if (res[0].overflow <= aMax) {
+    fr.regionA = res[0].region;
+    fr.refineA = res[0].refine;
+    fr.portfolioSkipped = true;
+    return;
+  }
+  if (onAbove)
+    onAbove(); // e.g. stop the reclaim path running alongside: its result will not be used
+  std::vector<std::vector<RoutedNet>> copies(res.size() - 1);
+  start.read(copies[0], d.nets.data());
+  for (size_t i = 1; i < copies.size(); ++i)
+    copies[i] = copies[0];
+  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res);
+  for (std::thread &t : th)
+    t.join();
+  keepBestVariant(nets, copies, res, fr);
+}
+
 // pd35route (memory): low-memory mode (PD35ROUTE_LOWMEM = auto (default:
 // on above kLowMemNets nets) | 0 | 1). The reclaim fallback then runs its
 // paths in sequence (A, then B only at or below the threshold -- the same
@@ -5168,7 +5221,10 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
     const Net *base = d.nets.data();
     NetSpill start, aFinal;
     start.write(nets, base);
-    runPathA(d, nets, region, refine, trace, fr); // Part 135: the portfolio's copies too, if set
+    if (!gPortfolio.empty() && gPortfolioAfter) // Part 135: the portfolio's copies too, if set
+      runPathAGated(d, nets, region, refine, trace, fr, aMax, start);
+    else
+      runPathA(d, nets, region, refine, trace, fr);
     fr.overflowA = totalOverflow(g, usageFromCharges(g, nets));
     fr.wireA = totalWire2D(nets);
     if (fr.overflowA > aMax) {
@@ -5209,7 +5265,18 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
   RegionSettings regionB = region;
   if (!vcapB)
     regionB.vcapTracks = 0;
-  auto runA = [&]() { runPathA(d, nets, region, refine, trace, fr); }; // Part 135: a portfolio if set
+  // Part 135: a portfolio if set; gated on path A's result when there is a threshold.
+  const bool gateA = !gPortfolio.empty() && gPortfolioAfter && aMax >= 0;
+  NetSpill startA;
+  if (gateA)
+    startA.write(nets, d.nets.data());
+  std::atomic<bool> cancelB{false};
+  auto runA = [&]() {
+    if (gateA)
+      runPathAGated(d, nets, region, refine, trace, fr, aMax, startA, [&]() { cancelB.store(true); });
+    else
+      runPathA(d, nets, region, refine, trace, fr);
+  };
   auto runB = [&]() {
     ReclaimSettings rs = reclaim;
     rs.enabled = true;
@@ -5223,7 +5290,6 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
     // pd22route: B on a second thread from the start; cancelled (and
     // discarded) if A ends above the threshold. `nets` belongs to this
     // thread, `b` to B's; `d` is read-only; each writes its own fields of fr.
-    std::atomic<bool> cancelB{false};
     std::thread tb([&]() {
       ReclaimSettings rs = reclaim;
       rs.enabled = true;
@@ -17709,16 +17775,42 @@ void testLowMemFallbackMatches() {
   runRow(true, g1, s1);
   check(!g1.ranB && !g1.tookB && g1.overflowA == g0.overflowA && g1.overflowA > 10 && sameSegs(s0, s1),
         "low-memory fallback, A above the threshold: B never runs, the same A kept");
-  // Part 135: low-memory mode runs path A's portfolio too, with the same pick and routes.
+  // Part 135: low-memory mode runs path A's portfolio too, with the same pick and routes; the gated
+  // portfolio (variants only after path A ends above the threshold) matches the always-on one.
   const std::vector<std::string> savedPf = gPortfolio;
+  const bool savedAfter = gPortfolioAfter;
   gPortfolio = {"lagr=0.2", "rounds=3"};
-  FallbackReport p0, p1;
+  FallbackReport p0, p1, p2, p3;
+  std::vector<std::vector<Seg>> s2, s3;
+  gPortfolioAfter = false;
   runRow(false, p0, s0);
   runRow(true, p1, s1);
-  gPortfolio = savedPf;
+  gPortfolioAfter = true;
+  runRow(false, p2, s2);
+  runRow(true, p3, s3);
   check(p1.portfolio.size() == 3 && p0.portfolio.size() == 3 && p1.portfolioPick == p0.portfolioPick &&
             p1.overflowA == p0.overflowA && sameSegs(s0, s1),
         "low-memory fallback with a portfolio: every variant runs, the same pick and routes");
+  bool sameRes = p2.portfolio.size() == 3 && p3.portfolio.size() == 3;
+  for (size_t i = 0; sameRes && i < 3; ++i)
+    sameRes = p2.portfolio[i].overflow == p0.portfolio[i].overflow && p2.portfolio[i].wire == p0.portfolio[i].wire &&
+              p3.portfolio[i].overflow == p0.portfolio[i].overflow && p3.portfolio[i].wire == p0.portfolio[i].wire;
+  check(sameRes && p2.portfolioPick == p0.portfolioPick && p3.portfolioPick == p0.portfolioPick &&
+            !p2.portfolioSkipped && sameSegs(s0, s2) && sameSegs(s0, s3),
+        "gated portfolio, A above the threshold: the same variant results, pick and routes as always-on");
+  // A at or below the threshold: the gated portfolio runs no variants and keeps the no-portfolio routes.
+  FallbackReport q0, q1, q2;
+  std::vector<std::vector<Seg>> t0, t1, t2;
+  gPortfolio = {};
+  run(false, 0, q0, t0);
+  gPortfolio = {"lagr=0.2", "rounds=3"};
+  run(false, 0, q1, t1);
+  run(true, 0, q2, t2);
+  gPortfolio = savedPf;
+  gPortfolioAfter = savedAfter;
+  check(q1.portfolioSkipped && q2.portfolioSkipped && q1.portfolio.empty() && q1.ranB && q1.tookB == q0.tookB &&
+            sameSegs(t0, t1) && sameSegs(t0, t2),
+        "gated portfolio, A at the threshold: no variants run, B runs, the no-portfolio routes kept");
 }
 
 // pd36route: the incremental pattern-stage refresh gives exactly the routes
@@ -19860,9 +19952,17 @@ int main(int argc, char **argv) {
         fail("PD39ROUTE_PORTFOLIO: " + err);
       gPortfolio.push_back(spec);
     }
+    if (const char *w = std::getenv("PD39ROUTE_PORTFOLIO_WHEN"); w) {
+      const std::string sw(w);
+      if (sw != "after" && sw != "always")
+        fail("PD39ROUTE_PORTFOLIO_WHEN must be after or always (got '" + sw + "')");
+      gPortfolioAfter = sw == "after";
+    }
     std::cerr << "late-stage portfolio: path A runs as " << gPortfolio.size() + 1
               << " variants on their own threads (variant 0 = the run's own settings)"
-              << (gLowMem ? "; low-memory mode keeps a copy per variant while path A runs" : "") << "\n";
+              << (gPortfolioAfter ? ", the others only if path A ends above the fallback threshold"
+                                  : ", all from the start")
+              << (gLowMem ? "; low-memory mode keeps a copy per variant while they run" : "") << "\n";
   }
   // pd23route: PD23ROUTE_VCAP_B (0 | 1; unset = 1).
   bool vcapB = true;
@@ -19932,6 +20032,9 @@ int main(int argc, char **argv) {
                                             bFirst, aMax, fallbackParallel, vcapB);
     if (fr.parallel)
       std::cerr << "reclaim fallback: path B ran on a second thread (its per-round trace suppressed)\n";
+    if (fr.portfolioSkipped)
+      std::cerr << "late-stage portfolio: path A ended at " << fr.overflowA << " <= " << aMax
+                << ", variants not run\n";
     for (size_t i = 0; i < fr.portfolio.size(); ++i) // Part 135
       std::cerr << "late-stage portfolio: variant " << i << " (" << fr.portfolio[i].spec << "): region "
                 << fr.portfolio[i].region.before << " -> " << fr.portfolio[i].region.after << " in "

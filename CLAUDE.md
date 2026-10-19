@@ -247,6 +247,10 @@ dependency graph, and the slow tier batched (256, spread over 64 x 64 tiles). Al
 100 -> 104, newblue1 30 (inside its 24-38 spread), newblue3 38948. pd39route gives the same routes
 on Mac and Linux (Part 123). Most of a residue run is now the region stage (newblue7: 88%), which
 nothing threads yet -- BEST_RESULTS_PLAN.md track A.
+Since 2026-10-19 (Part 135) `fast08.env` also carries the late-stage portfolio: when path A of the
+fallback ends above 10, it is rerun from its start with Lagrangian multipliers (steps 0.05 / 0.2 / 1),
+each on its own thread, and the best kept -- newblue1 24, newblue4 140, bigblue4 360, newblue3 38898,
+newblue7 104; designs ending at or below 10 are byte-identical and pay nothing.
 
 **2026-10-14: the ISPD 2025 standard is `./pd39route @standard.env @standard24.env @fast24.env
 @standard25.env`** (Part 133). `gr/standard25.env` adds timing plus capacitance to the 2024

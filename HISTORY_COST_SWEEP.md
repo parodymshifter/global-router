@@ -10690,3 +10690,25 @@ ones. The kept variant: lagr 0.05 on three designs, 0.2 and 1 on one each -- no 
 done as well, which is why the portfolio, not a fixed multiplier, carries the gain. The eleven
 zero-overflow designs were not run with it: their path A also runs, so with the portfolio on they would
 spend extra CPU and could change which path is kept.
+
+**Adopted, gated after path A** (the user's choice, 2026-10-19; `PD39ROUTE_PORTFOLIO=lagr=0.05;lagr=0.2;lagr=1`
+and `PD39ROUTE_PORTFOLIO_WHEN=after` in `gr/fast08.env`). Path A runs with the run's own settings first,
+its start state saved to a temporary file; only if it ends above the fallback threshold (10 -- where
+path B is skipped anyway, and B, if running alongside, is cancelled at that moment) do the other three
+variants run from that start, each on its own thread. The starting 2D overflow cannot tell residues from
+zero designs (zero designs 54-298, newblue1 282, newblue4 276), so the gate has to wait for path A's
+result. Same variants from the same start, so the same pick and routes as always-on (`PD39ROUTE_PORTFOLIO_WHEN=always`
+keeps that mode). Self-tests: gated above the threshold gives the always-on variant results, pick and
+routes (normal and low-memory paths); at the threshold no variants run and the no-portfolio routes are
+kept. Checks (`status=OK`, `gr_verify` = `eval2008.pl`):
+
+| run | total overflow | wirelength | wall s (stage report) | CPU s | vs |
+|---|---|---|---|---|---|
+| newblue2 | 0 | 7618810 | 169 | 148 | route file byte-identical to Part 124 (113 s) |
+| adaptec2 | 0 | 5242781 | 507 | 1934 | route file byte-identical to Part 124 (414 s) |
+| newblue1 | **24** | 4893525 | 8228 | 21042 | always-on 24 / 4893525 (6081 s, CPU 37315); standard 30 (5125 s) |
+
+(The two zero designs ran three at a time; their extra wall time is the shared machine, not the
+gate, which on them only writes the start state once.) The residue cost: the variants run after path A
+instead of beside it, so newblue1 takes +61% wall over the standard (always-on +19%) but 44% less CPU
+than always-on, since path B no longer runs to the end beside a path A that will not use it.
