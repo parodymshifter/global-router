@@ -10971,3 +10971,11 @@ area; a cap of 100 keeps overflow inside newblue1's noise. newblue4 at cap 100 r
 **20.33e9 vs 45.77e9 (-56%)**, run 4789 s vs 9424 s (shared machine both times). **Both designs: region
 search work more than halved, overflow no worse.** Next: the 2008 standard with cap 100 on the residues and
 the zero designs, before any change to the standard.
+
+## Part 141 -- the 2008 standard at region box cap 100, all sixteen designs (running)
+
+The user's go-ahead after Part 140. `p141.jobs`: `./pd39route @standard.env @fast08.env
+PD13ROUTE_REGION_BOX_CAP=100` (the portfolio included), shortest first, at most three at a time. Pass:
+the eleven zero designs stay at zero with wirelength inside their own spread (against Part 124's routes,
+which are current: the portfolio never runs on them), and the five residues no worse than the standard
+with its portfolio (newblue1 24, newblue4 140, bigblue4 360, newblue3 38898, newblue7 104).
