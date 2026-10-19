@@ -10675,3 +10675,18 @@ reproduces the standard exactly (366, 2D wire 15152743), as it should. Wall 3638
 stage report; the standard's report says 41549 s (its `/usr/bin/time` real of 14522 s is wrong, as
 newblue7's was in Part 133), so on this machine the portfolio cost no measurable wall time here -- CPU
 127351 s, peak RSS 2959 MB (standard 2843 MB): four copies of the routes add little next to the rest.
+
+**newblue7 with the portfolio** (`status=OK`, `gr_verify` = `eval2008.pl`): region 694 -> 128 / **120**
+/ 130 / 136, 2D overflow after refinement 106 / **104** (kept, lagr 0.05) / 106 / 106. The final total
+overflow is 104 -- the standard's too (its 2D 106 also ends at 104 after layer assignment), so no gain;
+scored wirelength 36126675 vs 36114599 (+0.03%). Wall 51649 s by the stage report (the standard's 95124
+s ran alongside other jobs), CPU 206074 s, peak RSS 4522 MB (standard 3826 MB).
+
+**Summary over the five residue designs** (total overflow, the 2008 standard -> with the portfolio of own
++ lagr 0.05 / 0.2 / 1): newblue1 30 -> 24 (mean of three starts 34.0 -> 27.3, -20%), newblue4 154 -> 140
+(-9%, the project's best), bigblue4 366 -> 360 (-1.6%), newblue3 38948 -> 38898 (-0.13%), newblue7 104
+-> 104. No design worse (variant 0 is the standard itself); wirelength within +0.03% on the three large
+ones. The kept variant: lagr 0.05 on three designs, 0.2 and 1 on one each -- no single step would have
+done as well, which is why the portfolio, not a fixed multiplier, carries the gain. The eleven
+zero-overflow designs were not run with it: their path A also runs, so with the portfolio on they would
+spend extra CPU and could change which path is kept.
