@@ -171,6 +171,10 @@ Order (runs: at most 3 at once; one long 2008 residue run plus short 2024 / 2025
    (virtual capacity on / off, margins, seeds), keep the best by (overflow, max, wirelength).
    Directly attacks the +4 to +10 that fast08 cost the residues, using idle cores rather than
    splitting one search. Memory bounds K (newblue7 ~5.5 GB per state, 24 GB machine).
+   *Status 2026-10-19 (with B3, Part 135): done and in the 2008 standard, gated after path A --
+   own settings + Lagrangian steps 0.05 / 0.2 / 1. newblue1 30 -> 24, newblue4 154 -> 140 (project
+   best), bigblue4 366 -> 360, newblue3 and newblue7 flat; zero designs byte-identical. Four states
+   fit easily (newblue7 peak 4.5 GB). Cost on residues: about +60% wall (the variants run after path A).*
 4. **D3: timing-driven routing for 2025** (in parallel with 1-3: the 2025 runs are minutes).
    *Status 2026-10-16: D3a done; D3b's weight rule did not transfer to the blind designs (Part 133);
    the standard flow is now `gr/timing_loop.py` -- the contest's OpenROAD scores candidate strengths
