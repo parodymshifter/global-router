@@ -10850,3 +10850,16 @@ lagr 0.1 **24** (kept: wire 2895680); vcap 12 28; vcapr 8 40; lagr 0.2 + vcapr 8
 32. No new best: lagr 0.1 ties the standard's lagr 0.2 at 24 with longer wire (2895680 vs 2892629), so
 the standard's portfolio would keep its own variant. Not adopted. Wall 10281 s for six region stages
 (CPU 33618 s).
+
+**newblue4, evidence step 2** (portfolio off; `status=OK`, `gr_verify` = `eval2008.pl`): total overflow
+**148** (the standard's path A 154), wirelength 13703765 (13716227), fallback expansions 41.35e9 vs
+45.77e9 (**-9.7%**). Round 300: 2880 reroutes, 1281 limited, 109 grew, mean margin 13.2. A small gain on
+both counts, consistent with newblue1's -12%; one run each, inside the residues' spreads.
+
+**The cost-ratio check** (`PD39ROUTE_SEARCH_TRACE=1`, trace only, routes unchanged): for every successful
+maze search, the found cost over hScale x the Manhattan length between the path's ends, and pops over the
+box's cells; each region round reports the share of that round's pops by ratio (< 2, 2-10, 10-100,
+100-1e3, >= 1e3, heuristic 0) and by box fill (< 0.1, 0.1-0.5, 0.5-0.9, >= 0.9). If the work-heavy
+searches show large ratios and full boxes, the cost landscape, not the heuristic or the box, sets the
+work. Runs (`p139.jobs`, portfolio off): newblue1 standard and with the 0.2 floor, newblue4 standard --
+each must reproduce its untraced run's routes.

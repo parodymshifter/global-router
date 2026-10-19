@@ -1387,6 +1387,7 @@
 #include <fstream>
 #include <condition_variable>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -3169,6 +3170,28 @@ thread_local long long gSearchPops = 0;
 // Part 138: set when a search's box may have limited it (MSMVResult::boxLimited, or the no-path retry);
 // a caller clears it before a reroute and reads it after. Never read by routing itself.
 thread_local bool gBoxLimited = false;
+// Part 138 (trace only, PD39ROUTE_SEARCH_TRACE=1): per thread, what each successful search cost against
+// what its heuristic expected. ratio = found cost / (hScale x Manhattan length from the path's source end
+// to its sink); fill = pops / box cells. Buckets weight both by count and by pops (where the work is).
+// Never read by routing.
+bool gSearchTraceOn = false;
+struct SearchTraceStats {
+  static constexpr int kR = 6; // ratio < 2, 2-10, 10-100, 100-1e3, >= 1e3, heuristic 0 (scale or length)
+  static constexpr int kF = 4; // fill < 0.1, 0.1-0.5, 0.5-0.9, >= 0.9
+  long long n = 0, pops = 0;
+  long long nR[kR] = {}, popsR[kR] = {}, nF[kF] = {}, popsF[kF] = {};
+  void add(double ratio, bool zero, double fill, long long p) {
+    const int r = zero ? 5 : ratio < 2 ? 0 : ratio < 10 ? 1 : ratio < 100 ? 2 : ratio < 1000 ? 3 : 4;
+    const int f = fill < 0.1 ? 0 : fill < 0.5 ? 1 : fill < 0.9 ? 2 : 3;
+    ++n;
+    pops += p;
+    ++nR[r];
+    popsR[r] += p;
+    ++nF[f];
+    popsF[f] += p;
+  }
+};
+thread_local SearchTraceStats gSearchTrace;
 
 // pd38route: a search region limit (slow tier on the dependency graph).
 // While gSearchLimitOn, a search whose box would leave gSearchLimit, or
@@ -3266,6 +3289,7 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
 
   MSMVResult result;
   int foundIdx = -1;
+  const long long popsAtSearchStart = gSearchPops; // Part 138 (trace)
   // Part 138: the smallest f = g + h of any popped node on a box edge that could grow (an edge on the
   // grid border cannot) -- the proof below the loop.
   const bool growX0 = x0 > 0, growX1 = x1 < g.nx - 1, growY0 = y0 > 0, growY1 = y1 < g.ny - 1;
@@ -3343,6 +3367,14 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
     result.path.push_back({x, y, l});
   }
   std::reverse(result.path.begin(), result.path.end());
+  if (gSearchTraceOn) { // Part 138 (trace only)
+    const PathNode &a = result.path.front(), &b = result.path.back();
+    const double expect = hScale * static_cast<double>(std::abs(a.x - b.x) + std::abs(a.y - b.y));
+    const double cells = static_cast<double>(x1 - x0 + 1) * static_cast<double>(y1 - y0 + 1);
+    const long long p = gSearchPops - popsAtSearchStart;
+    const double found = region.distAt(foundIdx);
+    gSearchTrace.add(expect > 0 ? found / expect : 0.0, !(expect > 0), static_cast<double>(p) / cells, p);
+  }
   return result;
 }
 
@@ -4334,6 +4366,7 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   std::vector<std::pair<std::vector<ChargeRecord>, std::vector<Seg>>> best;
   for (size_t i : members)
     best.push_back({nets[i].charges, nets[i].segs});
+  gSearchTrace = SearchTraceStats{}; // Part 138 (trace): this stage's rounds only
   // Part 138: per-net margins for the evidence rule (unused otherwise).
   const int evCap = rs.boxCap > 0 ? rs.boxCap : std::numeric_limits<int>::max();
   std::vector<int> evMargin(rs.evidenceStep > 0 ? members.size() : 0, std::min(rs.boxInit, evCap));
@@ -4401,8 +4434,21 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
         std::cerr << " box evidence: limited " << roundLimited << ", grew " << roundGrew << ", margin mean "
                   << (evMargin.empty() ? 0.0 : double(sum) / evMargin.size()) << " max " << mx;
       }
+      if (gSearchTraceOn) { // Part 138: this round's searches, by cost ratio and box fill (share of pops)
+        const SearchTraceStats &t = gSearchTrace;
+        auto pct = [&](long long x) { return t.pops > 0 ? 100.0 * double(x) / double(t.pops) : 0.0; };
+        std::cerr << std::fixed << std::setprecision(1) << " searches " << t.n << ", pops% by ratio <2 "
+                  << pct(t.popsR[0]) << " 2-10 " << pct(t.popsR[1]) << " 10-100 " << pct(t.popsR[2]) << " 100-1e3 "
+                  << pct(t.popsR[3]) << " >=1e3 " << pct(t.popsR[4]) << " h=0 " << pct(t.popsR[5])
+                  << "; by box fill <0.1 " << pct(t.popsF[0]) << " 0.1-0.5 " << pct(t.popsF[1]) << " 0.5-0.9 "
+                  << pct(t.popsF[2]) << " >=0.9 " << pct(t.popsF[3]) << "; searches by ratio";
+        for (int r = 0; r < SearchTraceStats::kR; ++r)
+          std::cerr << " " << t.nR[r];
+        std::cerr << std::defaultfloat << std::setprecision(6);
+      }
       std::cerr << "\n";
     }
+    gSearchTrace = SearchTraceStats{};
     if (total < rep.after) {
       rep.after = total;
       for (size_t k = 0; k < members.size(); ++k)
@@ -20159,6 +20205,8 @@ int main(int argc, char **argv) {
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
+  if (const char *v = std::getenv("PD39ROUTE_SEARCH_TRACE"); v && std::string(v) == "1") // Part 138
+    gSearchTraceOn = true;
   if (const char *v = std::getenv("PD39ROUTE_REGION_WL_FLOOR"); v) { // Part 138
     char *end = nullptr;
     const double x = std::strtod(v, &end);
