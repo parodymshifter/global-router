@@ -10959,3 +10959,9 @@ set by box area -- the box-cap test (Part 140) is the right question. A lever th
 wall-aware admissible heuristic -- a lower bound on the cost to go from a search on a coarse grid priced
 at each coarse cell's cheapest fine-edge cost -- which stays exact in cost (A* with a consistent heuristic)
 but prunes the cheap, useless parts of the box (CUGR's coarse-to-fine search is the nearest relative).
+
+**Box cap 100, newblue1** (portfolio off; `status=OK`, `gr_verify` = `eval2008.pl`): total overflow **32**
+(standard 30; spread 24-38), wirelength 4888539 (4891216), fallback expansions **10.33e9 vs 25.09e9
+(-59%)**, fallback stage 1825 s vs 4463 s, run 2525 s vs 5125 s (both on a shared machine). Round 100:
+1658 reroutes, 26.8M pops (16k each, vs 44k at cap 200). As Part 138's traces predicted, late work is box
+area; a cap of 100 keeps overflow inside newblue1's noise. newblue4 at cap 100 running.
