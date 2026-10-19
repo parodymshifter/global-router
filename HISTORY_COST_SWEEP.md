@@ -10936,3 +10936,26 @@ newblue4 154 / 140 / 148 / 146), queued behind the box-cap runs. Analysis to com
 over-capacity series Fourier-transformed (oscillation vs stuck vs drift) and whether the first 50 rounds
 predict each variant's final overflow; whether halo against margin predicts which searches are
 box-limited.
+
+**Part 138's cost-ratio check, newblue1** (`p139`, trace only; both runs' routes byte-identical to their
+untraced runs). Per region round, the share of that round's search work (pops) by box fill (pops over box
+cells) and by cost ratio (found cost over hScale x the path's Manhattan length):
+
+| round | pops in searches filling >= 90% of their box | standard: ratio >= 1e3 | floor 0.2: ratio 100-1e3 / >= 1e3 |
+|---|---|---|---|
+| 0 | 5.9% | 0% (94% at 2-10) | same |
+| 10 | 57.4% | 0% (79% at 10-100) | same |
+| 50 | 91.6% (floor: 89.3%) | 78.4% | 69.2% / 20.0% |
+| 100 | 95.9% (91.4%) | 100% | 70.9% / 25.5% |
+| 200-300 | 97.1-97.3% (93.4-96.2%) | 100% | 65-68% / 31-34% |
+| 400-499 | 97.0-97.7% (94.4-97.0%) | heuristic exactly 0 | 43-58% / 42-54% |
+
+**The hypothesis holds.** From round 50 on, 90-98% of the work is in searches that expand nearly their
+whole box before the sink: every cell of the box is cheaper to reach than the route found, because the
+route must cross a costly congested wall the heuristic cannot see. Holding the WL term at 0.2 leaves found
+costs 100-1000x the straight-line estimate, which is why it saved only 5-8%. Without a floor the WL factor
+underflows to exactly 0 near round 380 (pdFactorForIter), and A* becomes Dijkstra. So late-round work is
+set by box area -- the box-cap test (Part 140) is the right question. A lever this points to, not built: a
+wall-aware admissible heuristic -- a lower bound on the cost to go from a search on a coarse grid priced
+at each coarse cell's cheapest fine-edge cost -- which stays exact in cost (A* with a consistent heuristic)
+but prunes the cheap, useless parts of the box (CUGR's coarse-to-fine search is the nearest relative).
