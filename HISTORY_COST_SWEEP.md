@@ -11040,3 +11040,17 @@ fraction of that, near the +-0.02% noise between quality-neutral variants, for a
 charge path (about a dozen, the batched slow tier and the pattern kernel's interface included). **Not
 built.** The channel model is the one to revisit if the flow reaches detailed routing (TritonRoute), where
 use inside a GCell decides routability.
+
+**Region dump, newblue4** (`p140_newblue4_dump`; routed to 140 as before; output
+`~/Code/GlobalRouterRuns/p140/newblue4_dump_analysis.txt`): the same picture. Oscillating 83-88% of the excess
+in every window of every variant, none stuck; window 0's share does **not** rank the variants' finals
+(Spearman -0.2; newblue1's 1.0 was chance), nor does a window's share predict the next window's gain
+(+0.03 over 36 windows); halo median 2, max 5, never beyond the margin, while 50% of late searches are
+box-limited; and the residue is one hotspot -- at the best round (212, 174) all of it is in one cluster,
+the others at zero since rounds 0-104 -- so per-cluster best rounds gain nothing.
+
+**Verdict on the time-series diagnostic (Parts 140-141's question).** On both designs, the residue
+behaves the same way -- nets trading places at 2-4-round periods in a single hotspot -- and none of the
+measures tells the portfolio's variants apart early, so they cannot replace it or prune it. What the data
+does recommend is the class of remedy: damping (a cost for changing a route, rerouting the trading nets
+together or alternately, larger history steps on edges that keep flipping), not breadth or more rounds.
