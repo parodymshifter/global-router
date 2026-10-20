@@ -11019,3 +11019,24 @@ adaptec2, adaptec4, bigblue3 and adaptec1, each at global 0.95 and 0.90 and hots
 dump on, mildest first, starting when Part 141 finishes. Questions: do variants of one parent behave alike
 (which portfolio variant wins, oscillating share, box-limited share, decay curve) more than variants of the
 same strength from different parents?
+
+## Part 143 -- the channel model's via demand in the 2D stages: the ceiling first (not built)
+
+The user's TI experience: mini-channels as graph edges (capacity there), the interfaces between them as
+free vertices, gave the better results. Against this router's model (GCells as vertices, boundaries as
+capacitated edges) it differs where a route uses a channel without crossing a boundary: pin ends, turns,
+vias. The ISPD 2008 scorer and the ISPD 2024/2025 wire demand are boundary counts (a wire charges GCells
+[lo, hi)), so the model already matches the score there; the one channel-like charge in the scorer is via
+demand (half a track in each layer-z GCell beside a via unless the net covers it), which only layer
+assignment and the 3D pattern passes price. Proposed: charge each 2D bend's expected via demand to the
+channels beside it, in the 2D stages.
+
+**Ceiling, measured before building** (the Part 123 routes; `g24_verify` reports each layer's overflow cost
+and its wire-only part): via demand is 0.32-0.71% of the score on all thirteen designs (0.70-4.42% of the
+overflow cost), and 21-90% of it is on metal2 -- pin access stacks at fixed pin positions, which only layer
+choice at the pins changes, not 2D bends. What 2D bends could touch is 0.07-0.43% of the score (nvdla_rank
+the most, the mempool designs 0.07-0.14%), part of it already priced by the 3D passes; a realistic gain is a
+fraction of that, near the +-0.02% noise between quality-neutral variants, for a change touching every 2D
+charge path (about a dozen, the batched slow tier and the pattern kernel's interface included). **Not
+built.** The channel model is the one to revisit if the flow reaches detailed routing (TritonRoute), where
+use inside a GCell decides routability.
