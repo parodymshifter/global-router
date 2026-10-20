@@ -11113,3 +11113,8 @@ runtime option at a small overflow cost, not a quality gain.
 standard -- `gr/speed08.env` (`PD13ROUTE_REGION_BOX_CAP=100`, `PD39ROUTE_REGION_BOX_CAP_B=200`), layered after
 `@standard.env @fast08.env`. The 2008 standard is unchanged. Part 142's tightened variants run with it (they
 were queued with these two settings), which is fine for their purpose -- comparing variants with each other.
+
+**Part 141, newblue7 verified**: total overflow **104** (the standard with its portfolio 104), wirelength
+35876771 vs 36126675 (-0.69%), `gr_verify` = `eval2008.pl`; 42800 s vs 51649 s. Part 141 complete.
+**Part 142 first results**: newblue2 g95 and adaptec4 g95 both still route to **0** (wirelength 7909502 /
+12660248, +3.8% / +3.7% over their parents) -- a 5% cut is not enough to make these designs hard.
