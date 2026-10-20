@@ -11118,3 +11118,11 @@ were queued with these two settings), which is fine for their purpose -- compari
 35876771 vs 36126675 (-0.69%), `gr_verify` = `eval2008.pl`; 42800 s vs 51649 s. Part 141 complete.
 **Part 142 first results**: newblue2 g95 and adaptec4 g95 both still route to **0** (wirelength 7909502 /
 12660248, +3.8% / +3.7% over their parents) -- a 5% cut is not enough to make these designs hard.
+
+## Part 145 -- harsher tightened variants (queued after Part 142)
+
+The user's request after the first 5% variants still reached zero. Ten more with `gr/tighten_gr.py --global`
+0.85 and 0.80 on the same five parents (newblue2, adaptec2, adaptec4, bigblue3, adaptec1), same settings as
+Part 142 (`@speed08.env`, region dump on), `p145.jobs`, starting when Part 142 finishes. Rounding to whole
+tracks makes adaptec4's two strengths equal on its main layers (28 -> 22 units both), so they differ only in
+the existing adjustments.
