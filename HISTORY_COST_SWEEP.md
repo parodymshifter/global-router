@@ -11065,3 +11065,25 @@ the fallback keeps the longer path A. **newblue1 28** (the standard with its por
 `PD39ROUTE_REGION_BOX_CAP_B` (the reclaim path's own cap; unset = the region cap, byte-identical),
 self-tested (B's margin 5 under its own cap 7 while A's stays at 2); bigblue2 rerun with A at 100 and B at
 200 queued (B then starts and runs exactly as in the standard, so its routes should be the standard's).
+
+**Part 141, more results** (`status=OK`, `gr_verify` = `eval2008.pl`): **bigblue2 with the reclaim path at 200
+(A at 100): route file byte-identical to the standard's** -- the fix works. newblue4 **144** (the standard
+with its portfolio 140; variants 144 / 150 / 154 / 144), run 8601 s; newblue3 **38898**, identical (its
+region stage stops at round 59, before the margin reaches 100); bigblue4 **360**, identical, 29099 s vs 36381 s
+(-20%). Residues so far at cap 100 vs 200: 28 / 24, 144 / 140, 38898 / 38898, 360 / 360; newblue7 running.
+
+## Part 144 -- damping the residue's oscillation (the user's request, after Part 140's dumps)
+
+Two mechanisms in the region stage, each off by default:
+- **Route-change discount** (`PD39ROUTE_REGION_DAMP=beta`, portfolio key `damp=`): while a net is rerouted,
+  the edges of its previous route (stamped, O(route) per reroute) cost wl + (1 - beta) x (congestion part):
+  a net leaves its route only for one clearly better. The WL term stays whole, so every edge still costs at
+  least the heuristic's scale (A* and Part 138's box-limit proof unchanged).
+- **Cooldown** (`PD39ROUTE_REGION_COOLDOWN=k`, key `cool=`): a net rerouted in round r sits out rounds
+  r+1..r+k, so two nets trading places cannot swap back every round; it also cuts reroutes.
+Self-tests: a stamped edge pays exactly wl + half its congestion term at beta 0.5, unstamped edges
+unchanged, never below the heuristic's scale; both settings clear the row fixture with every net
+connected; the keys parse (damp > 1 and fractional cool refused). Runs (`p144.jobs`, portfolio off, region
+cap 100, reclaim path 200 -- against Part 140's cap-100 runs, newblue1 32 / 10.33e9 expansions, newblue4
+144 / 20.33e9): damp 0.3, damp 0.7, cooldown 1 on newblue1 and newblue4, plus a newblue2 parity run.
+Part 142's tightened variants now wait for this batch too.

@@ -1659,6 +1659,12 @@ struct Prices {
   // pd39route (Part 135): the region stage's Lagrangian multipliers (PD39ROUTE_REGION_LAGRANGE), one per
   // 2D edge, added as lambda x demand to the present-demand cost; null = none (the cost unchanged).
   const std::vector<double> *lagH = nullptr, *lagV = nullptr;
+  // Part 144: the region stage's route-change damping (PD39ROUTE_REGION_DAMP). While a net is rerouted, an
+  // edge whose stamp equals incStamp is on the net's previous route, and the congestion part of its cost (all
+  // but the WL term, which floors the heuristic) is multiplied by 1 - incBeta. Null = off.
+  const std::vector<uint32_t> *incH = nullptr, *incV = nullptr;
+  uint32_t incStamp = 0;
+  double incBeta = 0;
 };
 
 // `threshold` is a parameter, not a fixed static lookup, specifically so
@@ -1813,7 +1819,12 @@ double wireCostH(const Prices &pr, size_t e, int amount) {
                        pr.pdHistH[e]);
   int cap = pr.vredH ? virtualCap(lv->capH[e], (*pr.vredH)[e]) : lv->capH[e];
   const double c = presentDemandCost(lv->h[e], cap, amount, pr.pdHistH[e], pr.pdIter, pr.pdFactor, pdWl(pr));
-  return pr.lagH ? c + (*pr.lagH)[e] * amount : c;
+  const double t = pr.lagH ? c + (*pr.lagH)[e] * amount : c;
+  if (pr.incH && (*pr.incH)[e] == pr.incStamp) { // Part 144: damping on the net's previous route
+    const double wl = pdWl(pr);
+    return wl + (1.0 - pr.incBeta) * (t - wl);
+  }
+  return t;
 }
 double wireCostV(const Prices &pr, size_t e, int amount) {
   const Usage *lv = liveOf(pr);
@@ -1826,7 +1837,12 @@ double wireCostV(const Prices &pr, size_t e, int amount) {
                        pr.pdHistV[e]);
   int cap = pr.vredV ? virtualCap(lv->capV[e], (*pr.vredV)[e]) : lv->capV[e];
   const double c = presentDemandCost(lv->v[e], cap, amount, pr.pdHistV[e], pr.pdIter, pr.pdFactor, pdWl(pr));
-  return pr.lagV ? c + (*pr.lagV)[e] * amount : c;
+  const double t = pr.lagV ? c + (*pr.lagV)[e] * amount : c;
+  if (pr.incV && (*pr.incV)[e] == pr.incStamp) { // Part 144: damping on the net's previous route
+    const double wl = pdWl(pr);
+    return wl + (1.0 - pr.incBeta) * (t - wl);
+  }
+  return t;
 }
 
 // A* multiplies its Manhattan heuristic by a lower bound on any one edge's
@@ -4142,6 +4158,12 @@ struct RegionSettings {
   // Part 141: PD39ROUTE_REGION_BOX_CAP_B -- the reclaim path's region box cap (-1 = the same as boxCap). That
   // path starts from the overflow the reclaim injects (bigblue2: 20734), which needs wider boxes.
   int boxCapB = -1;
+  // Part 144: damping for the residue's oscillation. damp (PD39ROUTE_REGION_DAMP, 0-1; 0 = off): while a net is
+  // rerouted, the congestion part of the cost of the edges on its previous route is scaled by 1 - damp.
+  // cooldown (PD39ROUTE_REGION_COOLDOWN, rounds; 0 = off): a net rerouted in round r is not rerouted in rounds
+  // r+1 .. r+cooldown.
+  double damp = 0;
+  int cooldown = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4431,6 +4453,17 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     *dump << "G " << g.nx << " " << g.ny << " members " << members.size() << " start " << rep.before
           << " lagrange " << rs.lagrange << " vcap " << rs.vcapTracks << "\n";
   }
+  // Part 144: damping state.
+  std::vector<uint32_t> incH, incV;
+  uint32_t incStamp = 0;
+  if (rs.damp > 0) {
+    incH.assign(usage.h.size(), 0);
+    incV.assign(usage.v.size(), 0);
+    prices.incH = &incH;
+    prices.incV = &incV;
+    prices.incBeta = rs.damp;
+  }
+  std::vector<int> lastRerouted(rs.cooldown > 0 ? members.size() : 0, -1000000);
   // Part 138: per-net margins for the evidence rule (unused otherwise).
   const int evCap = rs.boxCap > 0 ? rs.boxCap : std::numeric_limits<int>::max();
   std::vector<int> evMargin(rs.evidenceStep > 0 ? members.size() : 0, std::min(rs.boxInit, evCap));
@@ -4449,6 +4482,26 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
       if (r > 0 && !netOverflowed(g, usage, rn))
         continue;
       const int margin = rs.evidenceStep > 0 ? evMargin[k] : stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
+      if (rs.cooldown > 0) { // Part 144: sit out the rounds after a reroute
+        if (r - lastRerouted[k] <= rs.cooldown)
+          continue;
+        lastRerouted[k] = r;
+      }
+      if (rs.damp > 0) { // Part 144: stamp the net's current route
+        if (++incStamp == 0) { // wrapped: clear and restart
+          std::fill(incH.begin(), incH.end(), 0);
+          std::fill(incV.begin(), incV.end(), 0);
+          incStamp = 1;
+        }
+        prices.incStamp = incStamp;
+        for (const ChargeRecord &c : rn.charges)
+          for (int t = c.a; t < c.b; ++t) {
+            if (c.horizontal)
+              incH[g.hIndex(t, c.cross, 0)] = incStamp;
+            else
+              incV[g.vIndex(c.cross, t, 0)] = incStamp;
+          }
+      }
       const int haloNow = dump ? netHalo(g, usage, rn, haloH, haloV) : 0;
       const long long popsBefore = gSearchPops;
       gBoxLimited = false;
@@ -5185,6 +5238,14 @@ bool applyRegionVariant(const std::string &spec, RegionSettings &rs, std::string
       ok = asInt(rs.evidenceStep, 0, 100000);
     else if (k == "wlfloor") // Part 138
       rs.wlFloor = x;
+    else if (k == "damp") { // Part 144
+      if (x > 1) {
+        err = "portfolio variant '" + spec + "': damp must be 0-1";
+        return false;
+      }
+      rs.damp = x;
+    } else if (k == "cool") // Part 144
+      ok = asInt(rs.cooldown, 0, 1000);
     else if (k == "expand")
       ok = asInt(rs.expand, 0, 100000);
     else if (k == "lagr")
@@ -18109,6 +18170,57 @@ void testNetSpillRoundTrip() {
   check(same, "NetSpill: a spilled and re-read state equals the original");
 }
 
+// Part 144: damping. The route-change discount scales only the congestion part of a stamped edge's cost (the
+// WL term, the heuristic's floor, stays whole); unstamped edges are unchanged. With either damping setting the
+// region stage still clears the three-nets-on-one-row fixture; the portfolio keys parse.
+void testRegionDamping() {
+  Design d = parse("pd39route_selftest_damp.gr", kThreeOnOneRowGr);
+  const RoutingGrid &g = d.grid;
+  Usage u = usageFromCharges(g, std::vector<RoutedNet>{});
+  u.h[g.hIndex(2, 1, 0)] = 4; // over capacity 2: a large congestion term
+  Prices pr(g);
+  CostSettings cs;
+  cs.model = CostModel::kPresentDemand;
+  configureCostModel(pr, u, cs);
+  const size_t e = g.hIndex(2, 1, 0), f = g.hIndex(3, 1, 0);
+  const double ce = wireCostH(pr, e, 2), cf = wireCostH(pr, f, 2), wl = pdWl(pr);
+  std::vector<uint32_t> incH(u.h.size(), 0), incV(u.v.size(), 0);
+  incH[e] = 7;
+  pr.incH = &incH;
+  pr.incV = &incV;
+  pr.incStamp = 7;
+  pr.incBeta = 0.5;
+  const double de = wireCostH(pr, e, 2), df = wireCostH(pr, f, 2);
+  check(std::abs(de - (wl + 0.5 * (ce - wl))) < 1e-9 * ce && df == cf && de >= heuristicScale(pr) && de < ce,
+        "region damping: a stamped edge pays the WL term plus half its congestion term; others unchanged");
+  bool ok = true;
+  for (int mode = 0; mode < 2; ++mode) {
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &d.nets[i];
+      nets[i].segs = {{0, 1, 0, 7, 1, 0}};
+    }
+    prepareFor2DRefine(d, nets);
+    RegionSettings rs;
+    rs.enabled = true;
+    if (mode == 0)
+      rs.damp = 0.5;
+    else
+      rs.cooldown = 1;
+    RegionReport rr = regionNegotiate(d, nets, rs, false);
+    bool conn = true;
+    for (const RoutedNet &rn : nets)
+      conn = conn && segsConnected(rn.segs);
+    ok = ok && rr.after == 0 && conn;
+  }
+  check(ok, "region stage with damping 0.5, and with a 1-round cooldown: zero overflow, every net connected");
+  RegionSettings v;
+  std::string err;
+  check(applyRegionVariant("damp=0.3,cool=2", v, err) && v.damp == 0.3 && v.cooldown == 2 &&
+            !applyRegionVariant("damp=1.5", v, err) && !applyRegionVariant("cool=0.5", v, err),
+        "portfolio variant parse: damp (0-1) and cool (an integer)");
+}
+
 // Part 141: the reclaim path's own region box cap (RegionSettings::boxCapB): on testLowMemFallbackMatches'
 // fixture (A at 0 <= the threshold, so B runs), path A's last margin stays within boxCap and B's within
 // boxCapB; boxCapB unset (-1) gives B the same cap as A.
@@ -19673,6 +19785,7 @@ int run() {
   testNetSpillRoundTrip();
   testLowMemFallbackMatches();
   testReclaimPathBoxCap();
+  testRegionDamping();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
@@ -20406,6 +20519,23 @@ int main(int argc, char **argv) {
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
+  if (const char *v = std::getenv("PD39ROUTE_REGION_DAMP"); v) { // Part 144
+    char *end = nullptr;
+    const double x = std::strtod(v, &end);
+    if (!*v || *end || !(x >= 0 && x <= 1))
+      fail(std::string("PD39ROUTE_REGION_DAMP must be a number 0-1 (got '") + v + "')");
+    region.damp = x;
+  }
+  if (const char *v = std::getenv("PD39ROUTE_REGION_COOLDOWN"); v) { // Part 144
+    char *end = nullptr;
+    const long x = std::strtol(v, &end, 10);
+    if (!*v || *end || x < 0 || x > 1000)
+      fail(std::string("PD39ROUTE_REGION_COOLDOWN must be an integer 0-1000 (got '") + v + "')");
+    region.cooldown = static_cast<int>(x);
+  }
+  if (region.damp > 0 || region.cooldown > 0)
+    std::cerr << "region damping: route-change discount " << region.damp << ", cooldown " << region.cooldown
+              << " rounds\n";
   if (const char *v = std::getenv("PD39ROUTE_REGION_DUMP"); v && *v) { // Part 140 (trace only)
     gRegionDumpPrefix = v;
     std::cerr << "region dump: " << gRegionDumpPrefix << ".<A|A<variant>|B>.txt\n";
