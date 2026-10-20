@@ -11004,3 +11004,18 @@ before; analysis `gr/region_dump_analysis.py`, output `~/Code/GlobalRouterRuns/p
 What this recommends for later passes: the residue is a ping-pong, so the indicated class is damping
 (a cost for changing a route, rerouting the trading nets jointly or alternately, larger history steps on
 oscillating edges) rather than breadth (boxes) or more of the same rounds. newblue4's dump to come.
+
+## Part 142 -- capacity-tightened variants: related hard cases with known parents (queued)
+
+The user's idea: each difficult design may have its own "personality", which needs many related examples to
+classify. `gr/tighten_gr.py` writes a tightened copy of a `.gr` -- `--global F` scales every edge's capacity
+(the default layer capacities and every adjustment), `--hotspot F` scales the edges inside the 30%-of-the-die
+window with the highest mean RUDY ratio -- rounding down to whole tracks (so the lowest layer's 4 tracks
+become 3 even at 0.95: the global variants cut that layer 25% and the upper ones 5-11%). Nets are copied
+unchanged. Check: a x1.0 copy of adaptec2 reads back with every routability measure identical. Twenty
+variants in `~/Code/GlobalRouterRuns/bench_tight/` (not in the repository; derived from the benchmarks): newblue2,
+adaptec2, adaptec4, bigblue3 and adaptec1, each at global 0.95 and 0.90 and hotspot 0.85 and 0.70 (windows
+97-232 tiles a side). `p142.jobs` routes them with the 2008 standard at region box cap 100 and the region
+dump on, mildest first, starting when Part 141 finishes. Questions: do variants of one parent behave alike
+(which portfolio variant wins, oscillating share, box-limited share, decay curve) more than variants of the
+same strength from different parents?
