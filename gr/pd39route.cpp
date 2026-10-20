@@ -4139,6 +4139,9 @@ struct RegionSettings {
   // WL term is max(factor, floor). PD1ROUTE_WL_FLOOR never reached this stage (its own CostSettings).
   double wlFloor = 0;
   std::string dumpTag = "A"; // Part 140 (trace): this stage's file name tag (A, A<variant>, B)
+  // Part 141: PD39ROUTE_REGION_BOX_CAP_B -- the reclaim path's region box cap (-1 = the same as boxCap). That
+  // path starts from the overflow the reclaim injects (bigblue2: 20734), which needs wider boxes.
+  int boxCapB = -1;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -5442,6 +5445,8 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
     start.read(b, base);
     RegionSettings regionB = region;
     regionB.dumpTag = "B"; // Part 140 (trace)
+    if (region.boxCapB >= 0) // Part 141
+      regionB.boxCap = region.boxCapB;
     if (!vcapB)
       regionB.vcapTracks = 0;
     ReclaimSettings rs = reclaim;
@@ -5468,6 +5473,8 @@ FallbackReport reclaimWithFallback(const Design &d, std::vector<RoutedNet> &nets
   // unless vcapB).
   RegionSettings regionB = region;
   regionB.dumpTag = "B"; // Part 140 (trace)
+  if (region.boxCapB >= 0) // Part 141
+    regionB.boxCap = region.boxCapB;
   if (!vcapB)
     regionB.vcapTracks = 0;
   // Part 135: a portfolio if set; gated on path A's result when there is a threshold.
@@ -18102,6 +18109,51 @@ void testNetSpillRoundTrip() {
   check(same, "NetSpill: a spilled and re-read state equals the original");
 }
 
+// Part 141: the reclaim path's own region box cap (RegionSettings::boxCapB): on testLowMemFallbackMatches'
+// fixture (A at 0 <= the threshold, so B runs), path A's last margin stays within boxCap and B's within
+// boxCapB; boxCapB unset (-1) gives B the same cap as A.
+void testReclaimPathBoxCap() {
+  const char *gr = "grid 16 5 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                   "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                   "num net 4\n"
+                   "nA 0 2 1\n5 15 1\n55 15 1\n"
+                   "nD 1 2 1\n105 15 1\n155 15 1\n"
+                   "nB 2 2 1\n105 35 1\n155 35 1\n"
+                   "nC 3 2 1\n105 35 1\n155 35 1\n0\n";
+  RefineSettings refine;
+  refine.iters = 5;
+  ReclaimSettings rs;
+  rs.ratio = 1.2;
+  rs.minExcess = 2;
+  auto run = [&](int capB) {
+    RegionSettings region;
+    region.enabled = true;
+    region.rounds = 20;
+    region.expand = 0;
+    region.boxInit = 5; // round 0's margin is min(5, cap): the cap shows from the first round
+    region.boxGrow = 1;
+    region.boxCap = 2;
+    region.boxCapB = capB;
+    Design d = parse("pd39route_selftest_capb.gr", gr);
+    std::vector<RoutedNet> nets(4);
+    for (int i = 0; i < 4; ++i)
+      nets[i].net = &d.nets[i];
+    nets[0].segs = {{0, 1, 0, 0, 0, 0}, {0, 0, 0, 5, 0, 0}, {5, 0, 0, 5, 1, 0}};
+    nets[1].segs = {{10, 1, 0, 10, 0, 0}, {10, 0, 0, 15, 0, 0}, {15, 0, 0, 15, 1, 0}};
+    nets[2].segs = {{10, 3, 0, 15, 3, 0}};
+    nets[3].segs = {{10, 3, 0, 15, 3, 0}};
+    prepareFor2DRefine(d, nets);
+    return reclaimWithFallback(d, nets, rs, region, refine, false, false, 0);
+  };
+  FallbackReport same = run(-1), wide = run(7);
+  check(same.ranB && wide.ranB && same.regionA.lastMargin == 2 && same.regionB.lastMargin == 2 &&
+            wide.regionA.lastMargin == 2 && wide.regionB.roundsRun >= 1 && wide.regionB.lastMargin > 2 &&
+            wide.regionB.lastMargin <= 7,
+        "reclaim path's box cap: A keeps the region cap; B uses its own (" +
+            std::to_string(wide.regionB.lastMargin) + " after " + std::to_string(wide.regionB.roundsRun) +
+            " rounds), the region cap when unset");
+}
+
 // pd35route (memory): the low-memory fallback keeps exactly the routes the
 // sequential fallback keeps, on testFallbackAFirstThreshold's fixtures:
 // A at 0 <= threshold (B runs and wins) and A above it (B never runs).
@@ -19620,6 +19672,7 @@ int run() {
   testChargeRecordHasNoUninitialisedBytes();
   testNetSpillRoundTrip();
   testLowMemFallbackMatches();
+  testReclaimPathBoxCap();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
@@ -19861,6 +19914,13 @@ int main(int argc, char **argv) {
     if (!parseBoxCaps(std::getenv("PD13ROUTE_REGION_BOX_CAP"), std::getenv("PD13ROUTE_REFINE_BOX_CAP"), region.boxCap,
                       refine.boxCap, err))
       fail(err);
+    if (const char *v = std::getenv("PD39ROUTE_REGION_BOX_CAP_B"); v) { // Part 141
+      char *end = nullptr;
+      const long x = std::strtol(v, &end, 10);
+      if (!*v || *end || x < 0 || x > 1000000)
+        fail(std::string("PD39ROUTE_REGION_BOX_CAP_B must be an integer >= 0 (got '") + v + "')");
+      region.boxCapB = static_cast<int>(x);
+    }
     // pd14route's own mechanism: the work-gated region plateau stop.
     if (!parseCostPlateau(std::getenv("PD14ROUTE_REGION_COST_WINDOW"), std::getenv("PD14ROUTE_REGION_COST_POPS"),
                           region.costWindow, region.costPops, err))

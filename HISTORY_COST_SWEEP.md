@@ -11054,3 +11054,14 @@ behaves the same way -- nets trading places at 2-4-round periods in a single hot
 measures tells the portfolio's variants apart early, so they cannot replace it or prune it. What the data
 does recommend is the class of remedy: damping (a cost for changing a route, rerouting the trading nets
 together or alternately, larger history steps on edges that keep flipping), not breadth or more rounds.
+
+**Part 141 results so far** (all `status=OK`, `gr_verify` = `eval2008.pl`): ten zero designs (adaptec1-5,
+bigblue1, bigblue3, newblue2, newblue5, newblue6) byte-for-byte the standard's wirelength -- their region
+stages end before the margin reaches 100, so the cap never acts. **bigblue2 stays at 0 but wirelength
++3.60%** (9521277 vs 9190777): its reclaim path injects 20734 units of overflow (the shorter routes it
+pulls in), which the region stage clears in 97 rounds at cap 200 but leaves at 2 after 500 at cap 100, so
+the fallback keeps the longer path A. **newblue1 28** (the standard with its portfolio 24; variants 32 /
+28 / 36 / 46 vs 30 / 36 / 24 / 38 -- both sets inside its 24-38 spread). Fix for bigblue2:
+`PD39ROUTE_REGION_BOX_CAP_B` (the reclaim path's own cap; unset = the region cap, byte-identical),
+self-tested (B's margin 5 under its own cap 7 while A's stays at 2); bigblue2 rerun with A at 100 and B at
+200 queued (B then starts and runs exactly as in the standard, so its routes should be the standard's).
