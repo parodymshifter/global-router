@@ -10979,3 +10979,28 @@ PD13ROUTE_REGION_BOX_CAP=100` (the portfolio included), shortest first, at most 
 the eleven zero designs stay at zero with wirelength inside their own spread (against Part 124's routes,
 which are current: the portfolio never runs on them), and the five residues no worse than the standard
 with its portfolio (newblue1 24, newblue4 140, bigblue4 360, newblue3 38898, newblue7 104).
+
+**Region dump, newblue1** (`p140_newblue1_dump`, the 2008 standard with its portfolio; routed to 24 as
+before; analysis `gr/region_dump_analysis.py`, output `~/Code/GlobalRouterRuns/p140/newblue1_dump_analysis.txt`):
+
+1. **The residual overflow oscillates; nothing is stuck.** In every 50-round window of every variant, no
+   edge is over capacity in >= 90% of the rounds; 59-79% of the excess (weighted by amount) sits on edges
+   whose over/under series puts at least half its power at periods of 2-4 rounds -- nets trading places
+   round to round -- and the rest is transient. The Lagrangian variants do not damp it (window 0: 0.767-0.789
+   oscillating for all four; late windows 0.59-0.70).
+2. **The oscillation share does not predict what helps.** Window 0's share ranks the four variants' finals
+   exactly (24 < 30 < 36 < 38; Spearman 1.0, n 4, chance 1 in 24), but across a spread of 0.767-0.789 --
+   too narrow to act on until newblue4 agrees. Across all 36 windows the share vs the next window's gain is
+   +0.47, but within each window (four variants, time held fixed) the correlations are -0.80 to +0.74,
+   mean -0.27: the +0.47 was the shared decline of both over time.
+3. **The halo is no guide to box size.** For every late reroute (rounds >= 50, ~430-480k per variant) the
+   nearest same-direction edge with room is 2 steps away (median; p99 6, max 8), never beyond the margin,
+   yet 47-48% of those searches are box-limited. Boxes are limited by expensive regions (history x cong^5)
+   that have room, not by a lack of room -- consistent with the cost-ratio check (Part 138).
+4. **No gain from keeping each hotspot's best round.** Clustering each variant's overflowed edges (5, 20,
+   60 tiles) gives 1-4 clusters, and the sum of per-cluster minima over the rounds equals the best round's
+   total in every case (46 / 46 / 30 / 50): newblue1's overflow is one hotspot.
+
+What this recommends for later passes: the residue is a ping-pong, so the indicated class is damping
+(a cost for changing a route, rerouting the trading nets jointly or alternately, larger history steps on
+oscillating edges) rather than breadth (boxes) or more of the same rounds. newblue4's dump to come.
