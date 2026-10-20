@@ -11087,3 +11087,24 @@ connected; the keys parse (damp > 1 and fractional cool refused). Runs (`p144.jo
 cap 100, reclaim path 200 -- against Part 140's cap-100 runs, newblue1 32 / 10.33e9 expansions, newblue4
 144 / 20.33e9): damp 0.3, damp 0.7, cooldown 1 on newblue1 and newblue4, plus a newblue2 parity run.
 Part 142's tightened variants now wait for this batch too.
+
+**Part 144 results** (portfolio off, region cap 100, reclaim path 200; `status=OK`, `gr_verify` =
+`eval2008.pl`; parity: newblue2 with damping off byte-identical to the standard):
+
+| run | newblue1 overflow | fallback expansions | newblue4 overflow | fallback expansions |
+|---|---|---|---|---|
+| no damping (Part 140, cap 100) | 32 | 10.33e9 | 144 | 20.33e9 |
+| route-change discount 0.3 | **176** | 27.63e9 | **180** | 26.72e9 |
+| route-change discount 0.7 | **220** | 41.07e9 | **226** | 49.22e9 |
+| cooldown 1 round | 40 | **7.19e9 (-30%)** | 152 | **12.22e9 (-40%)** |
+
+**The route-change discount fails badly** -- 5.5-7x newblue1's overflow, +25-57% on newblue4, and more search
+work, rising with the discount. **The cooldown** trades a little overflow (+8 on each) for 30-40% less work
+(newblue1 1701 s vs 2525 s). Why the discount fails: it is a soft version of the revert rule, which Part 59
+found is the obstacle under present-demand pricing (reroutes then land on just-full edges and nothing moves).
+The oscillation the dumps show is not waste to be damped: under present-demand pricing it is how the
+negotiation explores -- the history term, not inertia, is what settles it. Not adopted; the cooldown is a
+runtime option at a small overflow cost, not a quality gain.
+
+**Part 141, newblue7** at cap 100 (with its portfolio): routed to **104**, the standard's result, 42800 s vs
+51649 s (-17%); verification running.
