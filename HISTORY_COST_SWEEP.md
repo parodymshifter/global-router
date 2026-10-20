@@ -11108,3 +11108,8 @@ runtime option at a small overflow cost, not a quality gain.
 
 **Part 141, newblue7** at cap 100 (with its portfolio): routed to **104**, the standard's result, 42800 s vs
 51649 s (-17%); verification running.
+
+**Part 141 decision** (the user's, 2026-10-20): region box cap 100 is kept as a **speed setting**, not the
+standard -- `gr/speed08.env` (`PD13ROUTE_REGION_BOX_CAP=100`, `PD39ROUTE_REGION_BOX_CAP_B=200`), layered after
+`@standard.env @fast08.env`. The 2008 standard is unchanged. Part 142's tightened variants run with it (they
+were queued with these two settings), which is fine for their purpose -- comparing variants with each other.

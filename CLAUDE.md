@@ -251,6 +251,9 @@ Since 2026-10-19 (Part 135) `fast08.env` also carries the late-stage portfolio: 
 fallback ends above 10, it is rerun from its start with Lagrangian multipliers (steps 0.05 / 0.2 / 1),
 each on its own thread, and the best kept -- newblue1 24, newblue4 140, bigblue4 360, newblue3 38898,
 newblue7 104; designs ending at or below 10 are byte-identical and pay nothing.
+`gr/speed08.env` (2026-10-20, Parts 140-141) is a speed setting layered after the standard, not part of
+it: the region stage's box capped at 100 (the reclaim path kept at 200) cuts the residue runs 17-26% with
+13 of 16 designs identical and newblue1 / newblue4 4 units worse (inside their spreads).
 
 **2026-10-14: the ISPD 2025 standard is `./pd39route @standard.env @standard24.env @fast24.env
 @standard25.env`** (Part 133). `gr/standard25.env` adds timing plus capacitance to the 2024
