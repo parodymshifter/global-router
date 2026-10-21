@@ -4164,6 +4164,11 @@ struct RegionSettings {
   // r+1 .. r+cooldown.
   double damp = 0;
   int cooldown = 0;
+  // Part 146: PD39ROUTE_REGION_ABORT=above,rounds (above 0 = off): when more than `above` units of 2D overflow
+  // enter the stage and its best is still not below its start after `rounds` rounds, stop -- such a stage
+  // returned its start in every run seen (Part 142), so the routes are the same, sooner.
+  long long abortAbove = 0;
+  int abortRounds = 20;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4292,6 +4297,7 @@ struct RegionReport {
   long long vcapEdges = 0; // pd22route: 2D edges priced against a virtual capacity
   int vcapReduction = 0;   // pd22route: capacity units taken off each
   bool cancelled = false;  // pd22route: stopped by the fallback's cancel flag
+  bool aborted = false;    // Part 146: stopped early, no better than its start (PD39ROUTE_REGION_ABORT)
   long long evReroutes = 0, evLimited = 0, evGrew = 0; // Part 138: box evidence, summed over rounds
   double evMeanMargin = 0;                               // Part 138: members' mean margin at the end
 };
@@ -4597,6 +4603,10 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     }
     if (workGatedPlateau(bestAfter, popsAfter, rs.costWindow, rs.costPops, rs.plateauGain)) {
       rep.costStopped = true;
+      break;
+    }
+    if (rs.abortAbove > 0 && rep.before > rs.abortAbove && r + 1 >= rs.abortRounds && rep.after >= rep.before) {
+      rep.aborted = true; // Part 146: no gain on a large start by now
       break;
     }
   }
@@ -5450,7 +5460,7 @@ void runPathAGated(const Design &d, std::vector<RoutedNet> &nets, const RegionSe
   std::vector<PortfolioResult> res;
   const std::vector<RegionSettings> rs = portfolioSettings(region, res);
   runPortfolioVariant(d, nets, rs[0], refine, trace, res[0]);
-  if (res[0].overflow <= aMax) {
+  if (res[0].overflow <= aMax || res[0].region.aborted) { // Part 146: an aborted stage gave its start back
     fr.regionA = res[0].region;
     fr.refineA = res[0].refine;
     fr.portfolioSkipped = true;
@@ -18170,6 +18180,63 @@ void testNetSpillRoundTrip() {
   check(same, "NetSpill: a spilled and re-read state equals the original");
 }
 
+// Part 146: the region stage's early stop. A start above the threshold that is not beaten by the round limit
+// stops there with its start back (the round count and the aborted flag say so); below the threshold, or
+// with the stop off, the stage runs as before, with the same routes.
+void testRegionAbort() {
+  // Three nets on a one-row grid with one track: the overflow is forced, so no round can beat the start.
+  const char *row = "grid 8 1 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                    "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                    "num net 3\nnA 0 2 1\n5 5 1\n75 5 1\nnB 1 2 1\n5 5 1\n75 5 1\n"
+                    "nC 2 2 1\n5 5 1\n75 5 1\n0\n";
+  Design d = parse("pd39route_selftest_abort.gr", row);
+  auto fresh = [&]() {
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &d.nets[i];
+      nets[i].segs = {{0, 0, 0, 7, 0, 0}};
+    }
+    prepareFor2DRefine(d, nets);
+    return nets;
+  };
+  auto segsOf = [](const std::vector<RoutedNet> &ns) {
+    std::vector<std::vector<Seg>> out;
+    for (const RoutedNet &rn : ns)
+      out.push_back(rn.segs);
+    return out;
+  };
+  auto same = [](const std::vector<std::vector<Seg>> &a, const std::vector<std::vector<Seg>> &b) {
+    if (a.size() != b.size())
+      return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+      if (a[i].size() != b[i].size())
+        return false;
+      for (size_t k = 0; k < a[i].size(); ++k)
+        if (a[i][k].x1 != b[i][k].x1 || a[i][k].y1 != b[i][k].y1 || a[i][k].x2 != b[i][k].x2 ||
+            a[i][k].y2 != b[i][k].y2)
+          return false;
+    }
+    return true;
+  };
+  RegionSettings rs;
+  rs.enabled = true;
+  rs.rounds = 30;
+  std::vector<RoutedNet> a = fresh(), b = fresh(), c = fresh();
+  RegionReport off = regionNegotiate(d, b, rs, false);
+  RegionSettings ab = rs;
+  ab.abortAbove = 1;
+  ab.abortRounds = 3;
+  RegionReport on = regionNegotiate(d, a, ab, false);
+  RegionSettings hi = ab;
+  hi.abortAbove = 1000000; // the start is below this threshold: no stop
+  RegionReport below = regionNegotiate(d, c, hi, false);
+  check(off.after == off.before && off.roundsRun > 3, "region abort fixture: forced overflow, no round beats the start");
+  check(on.aborted && on.roundsRun == 3 && on.after == on.before && same(segsOf(a), segsOf(b)),
+        "region abort: a start above the threshold, not beaten by round 3, stops there with the same routes");
+  check(!below.aborted && below.roundsRun == off.roundsRun && same(segsOf(c), segsOf(b)),
+        "region abort: below the threshold the stage runs exactly as with the stop off");
+}
+
 // Part 144: damping. The route-change discount scales only the congestion part of a stamped edge's cost (the
 // WL term, the heuristic's floor, stays whole); unstamped edges are unchanged. With either damping setting the
 // region stage still clears the three-nets-on-one-row fixture; the portfolio keys parse.
@@ -19786,6 +19853,7 @@ int run() {
   testLowMemFallbackMatches();
   testReclaimPathBoxCap();
   testRegionDamping();
+  testRegionAbort();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
@@ -20519,6 +20587,18 @@ int main(int argc, char **argv) {
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
+  if (const char *v = std::getenv("PD39ROUTE_REGION_ABORT"); v) { // Part 146: above,rounds
+    long long above = -1;
+    int rounds = -1;
+    char tail = 0;
+    if (std::sscanf(v, "%lld,%d%c", &above, &rounds, &tail) != 2 || above < 0 || rounds < 1)
+      fail(std::string("PD39ROUTE_REGION_ABORT must be above,rounds (above >= 0, rounds >= 1; got '") + v + "')");
+    region.abortAbove = above;
+    region.abortRounds = rounds;
+    if (above > 0)
+      std::cerr << "region abort: above " << above << " units of entering overflow, no gain by round " << rounds
+                << " -> stop\n";
+  }
   if (const char *v = std::getenv("PD39ROUTE_REGION_DAMP"); v) { // Part 144
     char *end = nullptr;
     const double x = std::strtod(v, &end);
@@ -20658,7 +20738,10 @@ int main(int argc, char **argv) {
                                             bFirst, aMax, fallbackParallel, vcapB);
     if (fr.parallel)
       std::cerr << "reclaim fallback: path B ran on a second thread (its per-round trace suppressed)\n";
-    if (fr.portfolioSkipped)
+    if (fr.portfolioSkipped && fr.regionA.aborted)
+      std::cerr << "late-stage portfolio: path A's region stage stopped without gain (PD39ROUTE_REGION_ABORT), "
+                   "variants not run\n";
+    else if (fr.portfolioSkipped)
       std::cerr << "late-stage portfolio: path A ended at " << fr.overflowA << " <= " << aMax
                 << ", variants not run\n";
     for (size_t i = 0; i < fr.portfolio.size(); ++i) // Part 135

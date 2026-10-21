@@ -11170,3 +11170,23 @@ oscillating share holds within a parent and differs between them -- adaptec2 0.7
 0.44, bigblue3 0.34 / 0.08. To test with the 0.90, hotspot 0.70 and Part 145 variants. A rule the third
 regime suggests (not built): above ~1000 units of 2D overflow entering the late stages, skip the region
 stage (or its round-0 blanket reroute) for refinement -- here that stage returned its start every time.
+
+## Part 146 -- the region stage's early stop (queued after Part 142)
+
+The user's request after Part 142's third regime. Region trajectories show that a threshold on the
+entering overflow alone would be wrong -- newblue3 (41504 entering) and bigblue3 hotspot 0.85 (31778) gain
+5.8% and 24% in the region stage, while adaptec1 hotspot 0.85 (31718) gains nothing -- and that "below the
+start by round K" separates them: at round 20 newblue3 (39220 < 41504), bigblue3 0.85 (24454 < 31778) and
+bigblue3 0.95 (5512 < 5584) are below their starts; adaptec1 0.85, adaptec4 0.85, adaptec1 0.95 and adaptec2
+0.95, which all return their start, are 1.1-3.5x above. newblue1 and newblue4 fall below their starts only
+near round 50, but enter with < 300 units.
+
+`PD39ROUTE_REGION_ABORT=above,rounds` (off by default): when more than `above` units of 2D overflow enter
+the region stage and its best is still not below the start after `rounds` rounds, stop (`aborted`); when
+path A's own run stops so, the gated portfolio's variants are not run (they differ only in region
+settings, and every such stage returned its start). Expected to be exact on every run seen -- the stopped
+stages would have returned their start anyway -- and to save rounds 20-50 plus the portfolio's second
+region stage. Self-tests: a forced-overflow one-row fixture stops at round 3 with the same routes as the
+full stage; below the threshold the stage runs as with the stop off. Runs (`p146.jobs`, 1000,20, Part
+142's settings otherwise): adaptec2 0.95, adaptec1 0.95, adaptec4 hotspot 0.85 (should stop) and bigblue3
+0.95 (should not) -- each must reproduce its Part 142 route file. Part 145 now waits for this batch.
