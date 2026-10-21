@@ -2652,8 +2652,37 @@ bool parseBoxGrowth(const char *mode, const char *init, const char *grow, const 
 // route and let history pricing move nets off over later rounds.
 enum class AcceptMode { kRevert, kKeep };
 
+// Part 147: annealed acceptance (PD39ROUTE_REFINE_ANNEAL). While `on` (set by refine2D on its own thread
+// only), a reroute that adds dl > 0 units of local overflow is kept with probability exp(-dl / T) instead of
+// always reverted; the draws come from a seeded splitmix64 stream, so a run is reproducible.
+struct AnnealState {
+  bool on = false;
+  double T = 0;
+  uint64_t rng = 0;
+  long long worse = 0, kept = 0; // worse reroutes seen, and kept, since the last reset
+};
+thread_local AnnealState gAnneal;
+
+double annealUniform(uint64_t &state) { // splitmix64 -> [0, 1)
+  uint64_t z = (state += 0x9E3779B97F4A7C15ULL);
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  z ^= z >> 31;
+  return static_cast<double>(z >> 11) * (1.0 / 9007199254740992.0);
+}
+
 bool revertReroute(AcceptMode mode, long long localBefore, long long localAfter) {
-  return mode == AcceptMode::kRevert && localAfter > localBefore;
+  if (mode != AcceptMode::kRevert || localAfter <= localBefore)
+    return false;
+  if (gAnneal.on && gAnneal.T > 0) {
+    ++gAnneal.worse;
+    const double dl = static_cast<double>(localAfter - localBefore);
+    if (annealUniform(gAnneal.rng) < detmath::exp(-dl / gAnneal.T)) {
+      ++gAnneal.kept;
+      return false;
+    }
+  }
+  return true;
 }
 
 // Parses PD2ROUTE_ACCEPT (revert | keep; unset = revert). Fails loudly on
@@ -3673,6 +3702,10 @@ struct RefineSettings {
   double plateauGain = 0.01;  // pd12route: PD12ROUTE_PLATEAU_GAIN / 100
   long long plateauMin = 0;   // pd12route: PD12ROUTE_PLATEAU_MIN
   int boxCap = 0;             // pd13route: PD13ROUTE_*_BOX_CAP (0 = uncapped)
+  // Part 147: PD39ROUTE_REFINE_ANNEAL=T0,alpha (T0 0 = off): with the revert rule, a worse reroute is kept with
+  // probability exp(-added local overflow / T), T = T0 x alpha^iteration; the best state is still what is kept.
+  double annealT0 = 0;
+  double annealAlpha = 0.9;
 };
 
 // pd5route: parses PD5ROUTE_REFINE_ORDER (nthu | shuffle; unset = nthu) and
@@ -3880,6 +3913,7 @@ struct RefineReport {
   bool plateaued = false; // pd12route: stopped by the plateau rule
   double seconds = 0;     // pd12route: stage wall time
   int lastMargin = 0;     // pd13route: the margin of the last round run
+  long long annealWorse = 0, annealKept = 0; // Part 147: worse reroutes seen / kept by annealing
 };
 
 // pd12route: the plateau rule. bestAfter[k] is the best overflow after k
@@ -3979,6 +4013,13 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
   rep.before = rep.after = total;
   std::vector<long long> bestAfter{rep.after};
   NetDelta best; // pd35route: the best state as a delta (was a full copy)
+  // Part 147: annealed acceptance, on this thread for this stage only.
+  const bool anneal = rs.annealT0 > 0 && rs.accept == AcceptMode::kRevert;
+  if (anneal) {
+    gAnneal = AnnealState{};
+    gAnneal.on = true;
+    gAnneal.rng = 0x51ED2701ULL ^ (static_cast<uint64_t>(rs.seed) << 32);
+  }
   for (int it = 0; it < rs.iters && total > 0; ++it) {
     std::vector<long long> ov(nets.size(), 0);
     std::vector<int> bbox(nets.size(), 0);
@@ -3999,6 +4040,9 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
     int margin = stageMargin(rs.boxInit, rs.boxInc, it, rs.boxCap);
     rep.lastMargin = margin;
     int rerouted = 0, reverted = 0;
+    if (anneal) // Part 147
+      gAnneal.T = rs.annealT0 * detmath::pow(rs.annealAlpha, static_cast<double>(it));
+    const long long worse0 = gAnneal.worse, kept0 = gAnneal.kept;
     for (size_t i : refineOrderFor(ov, bbox, rs, it)) {
       RoutedNet &rn = nets[i];
       if (!netOverflowed(g, usage, rn))
@@ -4037,9 +4081,14 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
     }
     total = totalOverflow(g, usage);
     rep.itersRun = it + 1;
-    if (trace)
+    if (trace) {
       std::cerr << "refine iter " << it << " margin " << margin << ": 2D overflow " << total
-                << " (rerouted " << rerouted << ", reverted " << reverted << ")\n";
+                << " (rerouted " << rerouted << ", reverted " << reverted << ")";
+      if (anneal)
+        std::cerr << " anneal T " << gAnneal.T << ": kept " << gAnneal.kept - kept0 << " of "
+                  << gAnneal.worse - worse0 << " worse";
+      std::cerr << "\n";
+    }
     if (total < rep.after) {
       rep.after = total;
       best.mark();
@@ -4051,6 +4100,11 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
     }
   }
   best.restore(nets);
+  if (anneal) { // Part 147
+    rep.annealWorse = gAnneal.worse;
+    rep.annealKept = gAnneal.kept;
+    gAnneal.on = false;
+  }
   rep.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - stageStart).count();
   return rep;
 }
@@ -18180,6 +18234,83 @@ void testNetSpillRoundTrip() {
   check(same, "NetSpill: a spilled and re-read state equals the original");
 }
 
+// Part 147: annealed refinement. The acceptance rule: off -> a worse reroute is always reverted; on at a
+// very high temperature nearly always kept, at a very low one never; a better or equal reroute is never
+// reverted; the same seed draws the same decisions. The stage with annealing on the row fixture still ends
+// at its best state (no worse than its start), every net connected, and repeats exactly.
+void testAnnealedRefinement() {
+  const AnnealState saved = gAnneal;
+  gAnneal = AnnealState{};
+  bool offReverts = revertReroute(AcceptMode::kRevert, 3, 5) && !revertReroute(AcceptMode::kRevert, 5, 5) &&
+                    !revertReroute(AcceptMode::kRevert, 5, 3) && !revertReroute(AcceptMode::kKeep, 3, 5);
+  gAnneal.on = true;
+  gAnneal.rng = 42;
+  gAnneal.T = 1e9;
+  int keptHot = 0;
+  for (int i = 0; i < 1000; ++i)
+    keptHot += !revertReroute(AcceptMode::kRevert, 3, 5);
+  gAnneal.T = 1e-9;
+  int keptCold = 0;
+  for (int i = 0; i < 1000; ++i)
+    keptCold += !revertReroute(AcceptMode::kRevert, 3, 5);
+  gAnneal.T = 1.0; // exp(-2) ~ 0.135
+  gAnneal.rng = 7;
+  std::vector<bool> d1, d2;
+  for (int i = 0; i < 2000; ++i)
+    d1.push_back(revertReroute(AcceptMode::kRevert, 3, 5));
+  gAnneal.rng = 7;
+  for (int i = 0; i < 2000; ++i)
+    d2.push_back(revertReroute(AcceptMode::kRevert, 3, 5));
+  int keptMid = 0;
+  for (bool r : d1)
+    keptMid += !r;
+  const bool betterKept = !revertReroute(AcceptMode::kRevert, 5, 3);
+  gAnneal = saved;
+  check(offReverts && keptHot >= 999 && keptCold == 0 && betterKept,
+        "annealing acceptance: off reverts worse; very hot keeps worse (" + std::to_string(keptHot) +
+            "/1000), very cold keeps none; better is never reverted");
+  check(d1 == d2 && keptMid > 200 && keptMid < 340,
+        "annealing acceptance: seeded and reproducible; at T 1 a 2-unit worse reroute kept " +
+            std::to_string(keptMid) + "/2000 times (exp(-2) ~ 270)");
+  auto runRow = [&](std::vector<std::vector<Seg>> &out, RefineReport &rr) {
+    Design d = parse("pd39route_selftest_anneal.gr", kThreeOnOneRowGr);
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &d.nets[i];
+      nets[i].segs = {{0, 1, 0, 7, 1, 0}};
+    }
+    prepareFor2DRefine(d, nets);
+    RefineSettings rs;
+    rs.accept = AcceptMode::kRevert;
+    rs.pieces = true;
+    rs.annealT0 = 2.0;
+    rs.annealAlpha = 0.8;
+    rr = refine2D(d, nets, rs, false);
+    out.clear();
+    bool conn = true;
+    for (const RoutedNet &rn : nets) {
+      out.push_back(rn.segs);
+      conn = conn && segsConnected(rn.segs);
+    }
+    if (!conn)
+      out.clear();
+  };
+  std::vector<std::vector<Seg>> a, b;
+  RefineReport ra, rb;
+  runRow(a, ra);
+  runRow(b, rb);
+  bool same = !a.empty() && a.size() == b.size();
+  for (size_t i = 0; same && i < a.size(); ++i) {
+    same = a[i].size() == b[i].size();
+    for (size_t k = 0; same && k < a[i].size(); ++k)
+      same = a[i][k].x1 == b[i][k].x1 && a[i][k].y1 == b[i][k].y1 && a[i][k].x2 == b[i][k].x2 &&
+             a[i][k].y2 == b[i][k].y2;
+  }
+  check(same && ra.after <= ra.before && ra.after == rb.after && !gAnneal.on,
+        "annealed refinement: ends at its best (" + std::to_string(ra.after) + " from " + std::to_string(ra.before) +
+            "), every net connected, the same routes twice, annealing off afterwards");
+}
+
 // Part 146: the region stage's early stop. A start above the threshold that is not beaten by the round limit
 // stops there with its start back (the round count and the aborted flag say so); below the threshold, or
 // with the stop off, the stage runs as before, with the same routes.
@@ -19854,6 +19985,7 @@ int run() {
   testReclaimPathBoxCap();
   testRegionDamping();
   testRegionAbort();
+  testAnnealedRefinement();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
@@ -20079,6 +20211,18 @@ int main(int argc, char **argv) {
                              std::getenv("PD4ROUTE_REFINE_ACCEPT"), refine, err) ||
         !parseRefineOrder(std::getenv("PD5ROUTE_REFINE_ORDER"), std::getenv("PD5ROUTE_SEED"), refine, err))
       fail(err);
+    if (const char *v = std::getenv("PD39ROUTE_REFINE_ANNEAL"); v) { // Part 147: T0,alpha
+      double t0 = -1, alpha = -1;
+      char tail = 0;
+      if (std::sscanf(v, "%lf,%lf%c", &t0, &alpha, &tail) != 2 || !(t0 >= 0) || !(alpha > 0 && alpha <= 1))
+        fail(std::string("PD39ROUTE_REFINE_ANNEAL must be T0,alpha (T0 >= 0, 0 < alpha <= 1; got '") + v + "')");
+      refine.annealT0 = t0;
+      refine.annealAlpha = alpha;
+      if (t0 > 0 && refine.accept != AcceptMode::kRevert)
+        fail("PD39ROUTE_REFINE_ANNEAL needs PD4ROUTE_REFINE_ACCEPT=revert (it softens the revert rule)");
+      if (t0 > 0)
+        std::cerr << "refinement annealing: T0 " << t0 << ", x" << alpha << " per iteration\n";
+    }
   }
   // pd12route's own mechanism: the plateau stop for both stages.
   {

@@ -11190,3 +11190,24 @@ region stage. Self-tests: a forced-overflow one-row fixture stops at round 3 wit
 full stage; below the threshold the stage runs as with the stop off. Runs (`p146.jobs`, 1000,20, Part
 142's settings otherwise): adaptec2 0.95, adaptec1 0.95, adaptec4 hotspot 0.85 (should stop) and bigblue3
 0.95 (should not) -- each must reproduce its Part 142 route file. Part 145 now waits for this batch.
+
+## Part 147 -- annealed refinement (queued after Part 145)
+
+The user's question: had any experiment used annealing? None had (the "temperature" of Parts 13-14 is a
+cluster congestion ranking). Simulated annealing was global routing's method in the early 1980s (IEEE TCAD
+1983, "Global wiring by simulated annealing"; TimberWolf's standard-cell global router) before negotiated
+congestion (PathFinder, NTHU-Route, FastRoute) replaced it at scale. Part 144 showed the residue's
+oscillation is the negotiation exploring; annealing schedules exploration instead of suppressing it, and
+CLAUDE.md's rule against moving thresholds in the main loop points it at a one-time, supervised,
+post-convergence pass -- refinement, which (with `PD4ROUTE_REFINE_ACCEPT=revert`) reroutes each overflowed
+net and reverts any reroute that adds local overflow.
+
+`PD39ROUTE_REFINE_ANNEAL=T0,alpha` (off by default): a reroute adding dl > 0 units of local overflow is kept
+with probability exp(-dl / T), T = T0 x alpha^iteration, draws from a seeded splitmix64 stream
+(`revertReroute`, a thread-local `AnnealState` set only inside refinement); the stage still returns its best
+state. Self-tests: off reverts every worse reroute; T 1e9 keeps 1000/1000, T 1e-9 none; a better reroute
+is never reverted; T 1 keeps a 2-unit-worse reroute 290/2000 (exp(-2) ~ 270), identically for the same
+seed; annealed refinement on the row fixture ends at its best (0 from 28), every net connected, the same
+routes twice. Runs (`p147.jobs`): newblue1 and newblue4 at T0 1 and 0.3, alpha 0.9 (portfolio off, vs Part
+124's path A 30 / 154); adaptec2 and adaptec1 global 0.95 at T0 1 (Part 142's settings plus the early stop,
+vs 1008 / 3596) -- the spread-overflow cases where refinement did all the work.
