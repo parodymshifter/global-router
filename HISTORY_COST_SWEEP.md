@@ -11126,3 +11126,28 @@ The user's request after the first 5% variants still reached zero. Ten more with
 Part 142 (`@speed08.env`, region dump on), `p145.jobs`, starting when Part 142 finishes. Rounding to whole
 tracks makes adaptec4's two strengths equal on its main layers (28 -> 22 units both), so they differ only in
 the existing adjustments.
+
+**Part 142, first seven variants against their parents** (`gr/variant_compare.py`; all `status=OK`,
+`gr_verify` = `eval2008.pl`; parents: the 2008 standard, Part 124, all at 0):
+
+| design | variant | overflow | wire vs parent | 2D into late stages | time vs parent | late-stage outcome |
+|---|---|---|---|---|---|---|
+| newblue2 | global 0.95 | 0 | +3.8% | 222 | 221 vs 113 s | reclaim path kept |
+| newblue2 | hotspot 0.85 | 0 | +1.7% | 248 | 392 vs 113 s | reclaim path kept |
+| adaptec4 | global 0.95 | 0 | +3.7% | 272 | 830 vs 362 s | reclaim path kept |
+| adaptec2 | hotspot 0.85 | **56** | +7.5% | 288 | 7985 vs 414 s | region 500 rounds; portfolio 58 / 62 / **56** / 58; oscillating 0.75 -> 0.99 |
+| adaptec2 | global 0.95 | **1008** | +18.4% | 1188 | 10736 vs 414 s | region stopped at round 50 with no gain; all four variants 1008 |
+| adaptec1 | global 0.95 | **3596** | +27.1% | 4854 | 14908 vs 1494 s | region 4854 -> 146652 at round 0, 6676 at 49, stopped at 50: no gain; all four 3598; refinement 4854 -> 3598 |
+| bigblue3 | global 0.95 | **4640** | +5.9% | 5584 | 33600 vs 689 s | region 5584 -> 33008 at round 0, best 5458-5506 by round 67; portfolio 4642-4668 |
+
+Early reading (seven runs): **the kind of congestion, not the parent, sets the behaviour.** A local cut
+(adaptec2 hotspot 0.85) leaves a residue like newblue1's and newblue4's -- one hotspot, the region stage
+working through 500 rounds, mostly oscillating, the portfolio's variants differing. A global cut leaves
+overflow spread over the die, and then the region stage hurts: its round 0 reroutes every piece in the
+overflow's bounding box (here most of the die) under fresh prices, overflow jumps 7-30x, and in 50-67
+rounds it does not get back below its start, so the plateau stop hands back the starting state -- the
+portfolio's variants are then identical and refinement does all the work. Two parents (newblue2, adaptec4)
+absorb a 5% cut with longer wires. Cost: the slow tier runs its full 150 rounds without reaching its stop
+(49-62% of these runs), and the region stage the rest -- 10-50x the parents' time.
+A rule this suggests (not built): when the overflow is spread out, skip the region stage's round-0 blanket
+reroute (reroute only overflowed pieces) or skip the stage and go to refinement.
