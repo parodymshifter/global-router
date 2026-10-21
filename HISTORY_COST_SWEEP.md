@@ -11151,3 +11151,22 @@ absorb a 5% cut with longer wires. Cost: the slow tier runs its full 150 rounds 
 (49-62% of these runs), and the region stage the rest -- 10-50x the parents' time.
 A rule this suggests (not built): when the overflow is spread out, skip the region stage's round-0 blanket
 reroute (reroute only overflowed pieces) or skip the stage and go to refinement.
+
+**Part 142, twelve variants** (`gr/variant_compare.py`, output in `~/Code/GlobalRouterRuns/p142/compare_*.txt`;
+all `status=OK`, `gr_verify` = `eval2008.pl`). New since the first seven: newblue2 global 0.90 **0** (+4.5%);
+adaptec4 global 0.90 **0** (+5.2%); adaptec4 hotspot 0.85 **4954** (+15.1%, 22241 vs 362 s, all four
+portfolio variants 4956); adaptec1 hotspot 0.85 **25064** (+33.4%, all four 25066); bigblue3 hotspot 0.85
+**23394** (+8.0%, 50419 vs 689 s, variants 23416-23508).
+
+Three regimes, by what is left: **absorbed** (0; newblue2 under every cut so far, adaptec4 under global
+cuts) at 2-4x the parent's time; **a small residue** (adaptec2 hotspot 0.85, 56) that behaves like
+newblue1 / newblue4 -- one hotspot, oscillating, the region stage working 500 rounds and the portfolio's
+variants differing; **large spread overflow** (thousands), where the region stage's round 0 blows the
+overflow up, its plateau stop returns the start after 50-67 rounds, the portfolio's variants come back
+identical (or within 0.5%), refinement does the work, and the run takes 10-73x the parent's time.
+The parents differ in where they tip: newblue2 not yet, adaptec4 only under its hotspot cut, adaptec1,
+adaptec2 and bigblue3 already at a 5% global cut. **A possible per-parent trait** (two cuts each): the
+oscillating share holds within a parent and differs between them -- adaptec2 0.79 / 0.75, adaptec1 0.51 /
+0.44, bigblue3 0.34 / 0.08. To test with the 0.90, hotspot 0.70 and Part 145 variants. A rule the third
+regime suggests (not built): above ~1000 units of 2D overflow entering the late stages, skip the region
+stage (or its round-0 blanket reroute) for refinement -- here that stage returned its start every time.
