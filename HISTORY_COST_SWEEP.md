@@ -11250,3 +11250,7 @@ standard's routes are unchanged by construction.
 
 **Part 142, last three** (`status=OK`, `gr_verify` = `eval2008.pl`): bigblue3 global 0.90 **12306**, adaptec1
 global 0.90 **60982**, newblue2 hotspot 0.70 **23862** (newblue2's first cut it does not absorb).
+
+**Part 146 decision** (the user's, 2026-10-22): the early stop joins the 2008 standard --
+`PD39ROUTE_REGION_ABORT=1000,20` in `gr/fast08.env`. Confirmation queued (end of `p147.jobs`): newblue3 with the
+updated standard must reproduce Part 135's route file (38898); if it does not, the rule comes back out.

@@ -254,6 +254,10 @@ newblue7 104; designs ending at or below 10 are byte-identical and pay nothing.
 `gr/speed08.env` (2026-10-20, Parts 140-141) is a speed setting layered after the standard, not part of
 it: the region stage's box capped at 100 (the reclaim path kept at 200) cuts the residue runs 17-26% with
 13 of 16 designs identical and newblue1 / newblue4 4 units worse (inside their spreads).
+Since 2026-10-22 (Part 146) `fast08.env` also carries the region stage's early stop
+(`PD39ROUTE_REGION_ABORT=1000,20`): above 1000 units of entering 2D overflow, a region stage still no
+better than its start after 20 rounds stops there -- exact (such stages returned their start; routes
+byte-identical, runs 31-48% faster on hard variants), and it cannot act on the sixteen benchmarks.
 
 **2026-10-14: the ISPD 2025 standard is `./pd39route @standard.env @standard24.env @fast24.env
 @standard25.env`** (Part 133). `gr/standard25.env` adds timing plus capacitance to the 2024
