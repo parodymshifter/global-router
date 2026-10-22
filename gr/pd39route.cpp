@@ -4727,6 +4727,7 @@ struct RunReport {
   int escalatedCount = 0;
   bool convergedToZero = false;
   bool stalled = false;
+  bool slowPlateaued = false; // Part 148: stopped by PD39ROUTE_SLOW_PLATEAU
 };
 
 // nproute's post-convergence cleanup pass, unmodified: one supervised sweep
@@ -5035,6 +5036,18 @@ struct SlowReclaim {
   ReclaimSettings settings;
 };
 SlowReclaim gSlowReclaim;
+
+// Part 148: the slow tier's plateau stop (PD39ROUTE_SLOW_PLATEAU=window,gain%,floor; window 0 = off): stop
+// once the best overflow has fallen by less than gain% (at least 1 unit) over the last `window` slow rounds
+// while it is still >= floor (plateauReached, as the region and refinement stages use). The slow tier returns
+// its best round either way, so where the best would not have moved again the routes are the same; where it
+// would have (Part 148: newblue3, bigblue3 0.95), the stop trades some of that for time -- a speed setting.
+struct SlowPlateau {
+  int window = 0;
+  double gain = 0;
+  long long floor = 0;
+};
+SlowPlateau gSlowPlateau;
 
 struct ReclaimReport {
   long long candidates = 0, kept = 0;
@@ -7535,6 +7548,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   roundsSinceImprovement = 0;
   bool reclaimedAtStop = false; // pd18route
   int slowReclaims = 0;         // pd18route
+  std::vector<long long> slowBestAfter; // Part 148: the best after each slow round
   for (int round = 0; round < maxSlowRounds; ++round) {
     int accepted = 0, rejected = 0, keptWorse = 0;
     const long long popsRound0 = gSearchPops; // pd38route: trace
@@ -7969,6 +7983,17 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       if (trace)
         std::cerr << "slow tier stopped: 2D overflow " << overflow << " <= PD9ROUTE_STOP_AT " << stopAt << "\n";
       break;
+    }
+    if (gSlowPlateau.window > 0) { // Part 148
+      slowBestAfter.push_back(rep.bestOverflow);
+      if (plateauReached(slowBestAfter, gSlowPlateau.window, gSlowPlateau.gain, gSlowPlateau.floor)) {
+        rep.slowPlateaued = true;
+        if (trace)
+          std::cerr << "slow tier stopped: best " << rep.bestOverflow << " fell less than " << 100 * gSlowPlateau.gain
+                    << "% over the last " << gSlowPlateau.window << " rounds (PD39ROUTE_SLOW_PLATEAU), after round "
+                    << round << "\n";
+        break;
+      }
     }
   }
   if (deltaBest) { // the best state, from the delta
@@ -18234,6 +18259,39 @@ void testNetSpillRoundTrip() {
   check(same, "NetSpill: a spilled and re-read state equals the original");
 }
 
+// Part 148: the slow tier's plateau stop. Three nets on a one-row, one-track grid: the overflow is forced, so
+// the slow tier's best never falls. With the stop (window 3, any gain, floor 1) it ends early with the same
+// best and the same routes as the full slow budget; with the floor above the best it runs the full budget.
+void testSlowPlateauStop() {
+  const char *row = "grid 8 1 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                    "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                    "num net 3\nnA 0 2 1\n5 5 1\n75 5 1\nnB 1 2 1\n5 5 1\n75 5 1\n"
+                    "nC 2 2 1\n5 5 1\n75 5 1\n0\n";
+  Design d = parse("pd39route_selftest_slowplateau.gr", row);
+  CostSettings cs;
+  cs.model = CostModel::kPresentDemand;
+  auto run = [&](int window, long long floor) {
+    const SlowPlateau saved = gSlowPlateau;
+    gSlowPlateau = SlowPlateau{window, 0.01, floor};
+    RunReport r = route(d, 2, 30, 0.02, 1.0, HistMode::kAdditive, 1.0, 1, false, true, 1.0, 0.0, true, true, true, 8,
+                        BoxGrowth{}, cs, AcceptMode::kKeep, false, -1);
+    gSlowPlateau = saved;
+    return r;
+  };
+  RunReport full = run(0, 0), stop = run(3, 1), high = run(3, 1000000);
+  bool same = full.nets.size() == stop.nets.size();
+  for (size_t i = 0; same && i < full.nets.size(); ++i) {
+    same = full.nets[i].segs.size() == stop.nets[i].segs.size();
+    for (size_t k = 0; same && k < full.nets[i].segs.size(); ++k)
+      same = full.nets[i].segs[k].x1 == stop.nets[i].segs[k].x1 && full.nets[i].segs[k].y1 == stop.nets[i].segs[k].y1 &&
+             full.nets[i].segs[k].x2 == stop.nets[i].segs[k].x2 && full.nets[i].segs[k].y2 == stop.nets[i].segs[k].y2;
+  }
+  check(!full.slowPlateaued && stop.slowPlateaued && !high.slowPlateaued && stop.roundsRun < full.roundsRun &&
+            stop.bestOverflow == full.bestOverflow && full.bestOverflow > 0 && same,
+        "slow-tier plateau stop: a flat best stops early (" + std::to_string(stop.roundsRun) + " vs " +
+            std::to_string(full.roundsRun) + " rounds) with the same best and routes; not below its floor");
+}
+
 // Part 147: annealed refinement. The acceptance rule: off -> a worse reroute is always reverted; on at a
 // very high temperature nearly always kept, at a very low one never; a better or equal reroute is never
 // reverted; the same seed draws the same decisions. The stage with annealing on the row fixture still ends
@@ -19986,6 +20044,7 @@ int run() {
   testRegionDamping();
   testRegionAbort();
   testAnnealedRefinement();
+  testSlowPlateauStop();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
@@ -20731,6 +20790,20 @@ int main(int argc, char **argv) {
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
+  if (const char *v = std::getenv("PD39ROUTE_SLOW_PLATEAU"); v) { // Part 148: window,gain%,floor
+    int w = -1;
+    double gp = -1;
+    long long fl = -1;
+    char tail = 0;
+    if (std::sscanf(v, "%d,%lf,%lld%c", &w, &gp, &fl, &tail) != 3 || w < 0 || !(gp >= 0 && gp <= 100) || fl < 0)
+      fail(std::string("PD39ROUTE_SLOW_PLATEAU must be window,gain%,floor (window >= 0, gain 0-100, floor >= 0; got '") +
+           v + "')");
+    gSlowPlateau.window = w;
+    gSlowPlateau.gain = gp / 100.0;
+    gSlowPlateau.floor = fl;
+    if (w > 0)
+      std::cerr << "slow tier plateau stop: best down < " << gp << "% over " << w << " rounds while >= " << fl << "\n";
+  }
   if (const char *v = std::getenv("PD39ROUTE_REGION_ABORT"); v) { // Part 146: above,rounds
     long long above = -1;
     int rounds = -1;

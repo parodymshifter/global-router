@@ -11219,3 +11219,23 @@ Order now: Part 146 (the early stop), then Part 147 (annealed refinement), then 
 x0.85 variants, with the early stop on (`p145.jobs.orig` keeps the full list). New result: adaptec2 global
 0.90 **12262** (+11.9% wire, 36715 s vs 414 s); the running three were in refinement at 12356 / 61462 / 23908
 (newblue2's first cut it does not absorb).
+
+## Part 148 -- a plateau stop for the slow tier (queued with Part 147)
+
+The user's request. The slow tier runs its 150 rounds unless 2D overflow reaches `PD9ROUTE_STOP_AT` (300);
+bigblue4, newblue7 and newblue3 never do, nor do the spread-overflow variants (Part 142), whose 10-15 h runs
+spend about half their time there. Best-so-far trajectories (rounds 50 / 100 / 150): bigblue4 474 / 418 /
+406, newblue7 1818 / 850 / 694, newblue3 44602 / 42014 / 41504; adaptec4 hotspot 0.85 and adaptec1 hotspot
+0.85 flat from about round 75; the others still gaining 4-12% over rounds 100-150. Simulated on those logs:
+no rule is free -- even "no improvement at all for 25 rounds" stops newblue3 at round 128 (best 41778 vs
+41504, +0.7%) and bigblue3 0.95 at round 101 (+11%: a flat stretch, then gains), while on the two flat
+cases it saves 39-48% of the slow rounds exactly. A floor of 1000 keeps it off bigblue4 and newblue7, whose
+best is below 1000 by round 75. So it is a time-for-quality trade: a candidate for the speed setting, not the
+standard.
+
+`PD39ROUTE_SLOW_PLATEAU=window,gain%,floor` (off by default; `plateauReached`, the region and refinement
+stages' rule): stop once the best has fallen by less than gain% over the last `window` slow rounds while
+still >= floor; the slow tier returns its best round either way. Self-test: three nets forced onto one track
+-- the stop ends at 6 rounds instead of 32 with the same best and routes, and not when the floor is above the
+best. Runs (appended to `p147.jobs`, 25 rounds, 1%, floor 1000): adaptec4 hotspot 0.85 (flat; must equal Part
+142's route), bigblue3 global 0.95 and newblue3 (the trade, against 4640 and 38898).
