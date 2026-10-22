@@ -204,6 +204,21 @@ jobs:
           name: portable-${{ matrix.os }}
           path: fp/
 
+  settings-e2e:
+    name: New settings take effect (end to end)
+    # gr/e2e_settings.py (HISTORY_COST_SWEEP.md Part 149): runs the router itself on small synthetic designs,
+    # each recent setting given through the environment as a real run gives it, and checks for evidence the
+    # mechanism acted (a self-test that sets the variable directly cannot catch a setting main() reads too late).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and check
+        shell: bash
+        run: |
+          c++ -std=c++17 -O2 -Wall -Wextra -ffp-contract=off -pthread -o e2e-router "gr/$PORTABLE_ROUTER.cpp"
+          python3 gr/e2e_settings.py e2e-router e2e-work
+
   portable-compare:
     name: Same routes on every platform (compare)
     needs: portable-fingerprint

@@ -11278,3 +11278,24 @@ Part 145 waits for both. An audit of every setting added since Part 135 found th
 read after its stage: the region-stage settings are read before the late stages (main, lines ~20800-20880 vs
 `reclaimWithFallback` at ~20954), refinement annealing and the box caps before the slow tier; each also left a
 visible trace or result change in its runs.
+
+## Part 149 -- end-to-end checks for the new settings
+
+The user's request after Part 148's bug. `gr/e2e_settings.py ROUTER [WORKDIR]` (about 70 s) generates three
+small designs with `perf/gen_synth.py` -- hard (overflow that cannot be cleared), residue (a region stage with
+work and path A above the fallback's threshold), light (path A at or below it, so the reclaim path runs) --
+loads `standard.env` and `fast08.env` line by line as `run_batch.sh` does, shortens the round budgets, and runs
+the router binary with each setting through the environment, checking for evidence that it acted: the slow
+tier's stop line and fewer slow rounds; the region stage's round count at the abort; the portfolio's
+variant lines and their gating; a changed region-round trace for the Lagrangian step, damping, cooldown and
+WL floor; evidence-growth and search-trace fields in the region rounds; one dump `R` line per region round
+and the dump header's Lagrangian step; annealing's temperature in the refinement trace; and the reclaim
+path's own cap changing path B's wire while path A's stays the same. 15 of 15 pass on pd39route.p148b; against
+pd39route.p148 (the parse-order bug) the slow-tier check fails (30 slow rounds either way), as it should.
+Two first-draft checks were weak and were tightened, not the code: a Lagrangian step of 0.5 changed nothing on
+the small design in 40 rounds (the region stage did receive it -- its dump header says so), and the
+reclaim-path cap changed path B's routes (wire 30064 -> 30060) while overflow and round counts stayed equal.
+CI: a `settings-e2e` job in `quality-checks.yml`. CLAUDE.md: every new setting read in `main()` gets a check
+here. A side finding: sourcing `fast08.env` with `.` truncates `PD39ROUTE_PORTFOLIO` at its first `;` (the shell
+reads the rest as commands); `run_batch.sh` exports each line whole, so no run was affected, and CI sources only
+`standard.env`.

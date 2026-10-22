@@ -733,6 +733,14 @@ agent knew from scratch just to keep going. Two rules follow from that:
   `ROUTER` at the top of `quality-checks.yml` and the file names in
   `codeql.yml`.
 - Run `./<router> --selftest` on the Mac before each commit.
+- **Every new setting read in `main()` gets a check in `gr/e2e_settings.py`** (2026-10-22, Part 149): run the
+  router itself with the setting given through the environment, and look for evidence the mechanism acted (a
+  trace line only it writes while it runs, or a change in its stage's own trace) -- never a start-up echo.
+  A self-test that sets the variable directly cannot catch a setting `main()` reads after its stage has run
+  (Part 148's slow-tier stop). Run `python3 gr/e2e_settings.py <router>` (about a minute) before committing a
+  router change that adds a setting; CI runs it on every push.
+- Load settings files line by line (as `gr/run_batch.sh` does), never by sourcing them with `.`:
+  `fast08.env`'s `PD39ROUTE_PORTFOLIO` value contains `;`, which a shell treats as a command separator.
 - Write a new router binary to a fresh file (`rm` it first, or build to a new name): copying over an
   existing binary in place leaves macOS's code-signature cache stale and later launches are killed
   at once (Part 134: three mempool_cluster runs and a test run lost that way).
