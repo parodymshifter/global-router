@@ -11239,3 +11239,14 @@ still >= floor; the slow tier returns its best round either way. Self-test: thre
 -- the stop ends at 6 rounds instead of 32 with the same best and routes, and not when the floor is above the
 best. Runs (appended to `p147.jobs`, 25 rounds, 1%, floor 1000): adaptec4 hotspot 0.85 (flat; must equal Part
 142's route), bigblue3 global 0.95 and newblue3 (the trade, against 4640 and 38898).
+
+**Part 146 results** (`PD39ROUTE_REGION_ABORT=1000,20`; `status=OK`, `gr_verify` = `eval2008.pl`): **all four
+route files byte-identical to Part 142's.** The stop fired on the three whose region stage returned its start
+-- adaptec2 0.95 (fallback 261 vs 2939 s, run 7416 vs 10736 s, -31%), adaptec1 0.95 (1156 vs 7383 s; 7767 vs
+14908 s, -48%), adaptec4 hotspot 0.85 (888 vs 8161 s; 12439 vs 22241 s, -44%) -- and not on bigblue3 0.95,
+whose region stage gains (route identical). Exact, as predicted. On the sixteen benchmarks it can act only on
+newblue3 (the only one entering above 1000), whose region stage is below its start by round 20, so the 2008
+standard's routes are unchanged by construction.
+
+**Part 142, last three** (`status=OK`, `gr_verify` = `eval2008.pl`): bigblue3 global 0.90 **12306**, adaptec1
+global 0.90 **60982**, newblue2 hotspot 0.70 **23862** (newblue2's first cut it does not absorb).
