@@ -11254,3 +11254,11 @@ global 0.90 **60982**, newblue2 hotspot 0.70 **23862** (newblue2's first cut it 
 **Part 146 decision** (the user's, 2026-10-22): the early stop joins the 2008 standard --
 `PD39ROUTE_REGION_ABORT=1000,20` in `gr/fast08.env`. Confirmation queued (end of `p147.jobs`): newblue3 with the
 updated standard must reproduce Part 135's route file (38898); if it does not, the rule comes back out.
+
+**Part 147 results, annealed refinement** (`status=OK`, `gr_verify` = `eval2008.pl`): newblue1 T0 1 and 0.3:
+**30 / 30**, route identical to the standard's (wire 4891216) -- annealing kept **0** worse reroutes (e.g. 0 of
+9, 14, 10 in iterations 0-2): newblue1's rejected reroutes add several units each, so exp(-dl/T) is ~0 at T
+<= 1. newblue4 T0 1: **150** vs 154 (kept 13-23 of 200-270 worse per early iteration); T0 0.3: 154. adaptec2
+global 0.95 T0 1: 1006 vs 1008; adaptec1 global 0.95 T0 1: 3574 vs 3596 (-0.6%; kept 111-259 of 3000-4000
+worse per iteration). Where it acts the gains are -0.1% to -2.6%, inside run-to-run noise; where it does not
+(newblue1), a hotter start would be needed even to test it. Not adopted.
