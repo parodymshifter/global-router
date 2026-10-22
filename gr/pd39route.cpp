@@ -20674,6 +20674,20 @@ int main(int argc, char **argv) {
       fail("PD9ROUTE_SLOW_PIECES must be 0 or 1 (got '" + sv + "')");
     slowPieces = sv == "1";
   }
+  if (const char *v = std::getenv("PD39ROUTE_SLOW_PLATEAU"); v) { // Part 148: window,gain%,floor -- read before route() runs the slow tier
+    int w = -1;
+    double gp = -1;
+    long long fl = -1;
+    char tail = 0;
+    if (std::sscanf(v, "%d,%lf,%lld%c", &w, &gp, &fl, &tail) != 3 || w < 0 || !(gp >= 0 && gp <= 100) || fl < 0)
+      fail(std::string("PD39ROUTE_SLOW_PLATEAU must be window,gain%,floor (window >= 0, gain 0-100, floor >= 0; got '") +
+           v + "')");
+    gSlowPlateau.window = w;
+    gSlowPlateau.gain = gp / 100.0;
+    gSlowPlateau.floor = fl;
+    if (w > 0)
+      std::cerr << "slow tier plateau stop: best down < " << gp << "% over " << w << " rounds while >= " << fl << "\n";
+  }
   if (const char *v = std::getenv("PD9ROUTE_STOP_AT"); v) {
     char *end = nullptr;
     long long x = std::strtoll(v, &end, 10);
@@ -20790,20 +20804,6 @@ int main(int argc, char **argv) {
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
-  if (const char *v = std::getenv("PD39ROUTE_SLOW_PLATEAU"); v) { // Part 148: window,gain%,floor
-    int w = -1;
-    double gp = -1;
-    long long fl = -1;
-    char tail = 0;
-    if (std::sscanf(v, "%d,%lf,%lld%c", &w, &gp, &fl, &tail) != 3 || w < 0 || !(gp >= 0 && gp <= 100) || fl < 0)
-      fail(std::string("PD39ROUTE_SLOW_PLATEAU must be window,gain%,floor (window >= 0, gain 0-100, floor >= 0; got '") +
-           v + "')");
-    gSlowPlateau.window = w;
-    gSlowPlateau.gain = gp / 100.0;
-    gSlowPlateau.floor = fl;
-    if (w > 0)
-      std::cerr << "slow tier plateau stop: best down < " << gp << "% over " << w << " rounds while >= " << fl << "\n";
-  }
   if (const char *v = std::getenv("PD39ROUTE_REGION_ABORT"); v) { // Part 146: above,rounds
     long long above = -1;
     int rounds = -1;

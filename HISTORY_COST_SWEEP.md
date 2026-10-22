@@ -11264,3 +11264,10 @@ worse per iteration). Where it acts the gains are -0.1% to -2.6%, inside run-to-
 (newblue1), a hotter start would be needed even to test it. Not adopted.
 Follow-up queued (the user's request): newblue1 at T0 5, alpha 0.9 (portfolio off, vs 30), so that a
 3-unit-worse reroute is kept about 55% of the time in the first iteration.
+
+**Part 148, a bug and a rerun.** The first three runs (`p148_*`) never had the stop: `main()` read
+`PD39ROUTE_SLOW_PLATEAU` after `route()` had already run the slow tier (the parse sat with the region stage's
+settings); the self-test sets the setting directly, so it could not catch this. adaptec4 hotspot 0.85 ran all
+150 slow rounds and reproduced Part 142's route only because nothing had changed; bigblue3 0.95 and newblue3
+were stopped (duplicates of earlier runs; their summaries are failures, not results). Fixed: the parse now
+precedes `route()` (pd39route.cpp, next to `PD9ROUTE_STOP_AT`). Rerun as `p148b_*` (appended to `p147.jobs`).
