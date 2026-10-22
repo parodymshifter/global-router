@@ -11262,3 +11262,5 @@ updated standard must reproduce Part 135's route file (38898); if it does not, t
 global 0.95 T0 1: 1006 vs 1008; adaptec1 global 0.95 T0 1: 3574 vs 3596 (-0.6%; kept 111-259 of 3000-4000
 worse per iteration). Where it acts the gains are -0.1% to -2.6%, inside run-to-run noise; where it does not
 (newblue1), a hotter start would be needed even to test it. Not adopted.
+Follow-up queued (the user's request): newblue1 at T0 5, alpha 0.9 (portfolio off, vs 30), so that a
+3-unit-worse reroute is kept about 55% of the time in the first iteration.
