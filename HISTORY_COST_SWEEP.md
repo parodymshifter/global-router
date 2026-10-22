@@ -11271,3 +11271,10 @@ settings); the self-test sets the setting directly, so it could not catch this. 
 150 slow rounds and reproduced Part 142's route only because nothing had changed; bigblue3 0.95 and newblue3
 were stopped (duplicates of earlier runs; their summaries are failures, not results). Fixed: the parse now
 precedes `route()` (pd39route.cpp, next to `PD9ROUTE_STOP_AT`). Rerun as `p148b_*` (appended to `p147.jobs`).
+**Scheduling slip.** The batch loop had already reached the end of `p147.jobs` when the hot newblue1 run and
+the three `p148b_*` reruns were appended, so it would never have started them (appending to a running batch
+works only while its loop is still waiting for a slot). They now run as their own batch, `p147b.jobs`, and
+Part 145 waits for both. An audit of every setting added since Part 135 found the slow-tier stop the only one
+read after its stage: the region-stage settings are read before the late stages (main, lines ~20800-20880 vs
+`reclaimWithFallback` at ~20954), refinement annealing and the box caps before the slow tier; each also left a
+visible trace or result change in its runs.
