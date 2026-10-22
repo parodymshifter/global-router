@@ -11211,3 +11211,11 @@ seed; annealed refinement on the row fixture ends at its best (0 from 28), every
 routes twice. Runs (`p147.jobs`): newblue1 and newblue4 at T0 1 and 0.3, alpha 0.9 (portfolio off, vs Part
 124's path A 30 / 154); adaptec2 and adaptec1 global 0.95 at T0 1 (Part 142's settings plus the early stop,
 vs 1008 / 3596) -- the spread-overflow cases where refinement did all the work.
+
+**Queue change (the user's call, 2026-10-21): long, harsh runs stop paying for themselves past a point.**
+Part 142's last four jobs (hotspot 0.70 on adaptec2, adaptec4, bigblue3, adaptec1) are deferred, not run
+(`p142/deferred_h70.jobs`); its three running jobs (bigblue3 0.90, adaptec1 0.90, newblue2 hotspot 0.70) finish.
+Order now: Part 146 (the early stop), then Part 147 (annealed refinement), then Part 145 trimmed to the five
+x0.85 variants, with the early stop on (`p145.jobs.orig` keeps the full list). New result: adaptec2 global
+0.90 **12262** (+11.9% wire, 36715 s vs 414 s); the running three were in refinement at 12356 / 61462 / 23908
+(newblue2's first cut it does not absorb).
