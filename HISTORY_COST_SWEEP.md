@@ -11319,3 +11319,15 @@ with two other runs.) The rule stays in the standard.
 `gr_verify` = `eval2008.pl`): stopped after slow round 117 (148 rounds in all vs 180), best 41778 vs 41504;
 the portfolio then 38928 / **38924** / 38946 / 38948 -> **38924** vs 38898 (+26, +0.07%); slow tier 10827 vs
 13433 s (-19%), run 15945 vs 18788 s (-15%). A small trade, as simulated. bigblue3 0.95 still running.
+
+**Part 142, correction to the "per-parent trait".** The 0.90 variants give a third cut per parent, and the
+pattern does not hold as stated: the oscillating share falls as overflow rises within every parent -- adaptec1
+3596 / 25064 / 60982 -> 0.51 / 0.44 / 0.29; adaptec2 56 / 1008 / 12262 -> 0.75 / 0.79 / 0.25; bigblue3 4640 /
+12306 / 23394 -> 0.34 / 0.20 / 0.08 -- and across all eleven cases (Spearman -0.65 against overflow). So the
+share mostly measures how much overflow is left. A parent offset remains at similar levels (about 24000:
+adaptec1 0.44, newblue2 0.33, bigblue3 0.08; about 12000: adaptec2 0.25, bigblue3 0.20; about 4000-5000:
+adaptec4 0.55, adaptec1 0.51, bigblue3 0.34): bigblue3's congestion is consistently less oscillating. What is
+clearly per parent is headroom -- where it tips: newblue2 absorbs every global cut tried (0.95, 0.90) and the
+hotspot 0.85, tipping only at hotspot 0.70; adaptec4 absorbs both global cuts but not its hotspot 0.85;
+adaptec1, adaptec2 and bigblue3 tip at a 5% global cut. The 0.90 runs: adaptec1 60982, adaptec2 12262, bigblue3
+12306, all in the spread-overflow regime (region stage <= 71 rounds, the portfolio's variants within ~1%).
