@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Router Recap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+a { color: var(--trace); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+figure.shot { margin: 10px 0 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+figure.shot figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 5px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.shots > * { min-width: 0; }
+img.px { image-rendering: pixelated; }
+/* Recap 4 additions: a diverging bar for "ours vs the contest". */
+.div { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 10px; margin: 8px 0 10px; overflow-x: auto; }
+.div-inner { min-width: 560px; }
+.dvrow { display: grid; grid-template-columns: 170px 1fr 92px; align-items: center; gap: 10px; height: 26px; font-size: 13px; }
+.dvrow .nm { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+.dvrow .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.dvrow .v.good { color: var(--good); }
+.dvrow .v.bad { color: var(--bad); }
+.dvtrack { position: relative; height: 16px; }
+.dvtrack .zero { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--ink-soft); }
+.dvtrack .gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.dvtrack b { position: absolute; top: 2px; height: 12px; }
+.dvtrack b.good { background: var(--good); }
+.dvtrack b.bad { background: var(--bad); }
+.dvaxis { display: grid; grid-template-columns: 170px 1fr 92px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.dvaxis .t { position: relative; height: 16px; }
+.dvaxis .t span { position: absolute; transform: translateX(-50%); }
+.dvgroup { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); margin: 10px 0 4px; }
+.dvgroup:first-child { margin-top: 0; }
+
+/* Recap 5 additions: runtime bars and the congestion gallery. */
+.rt { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 10px; margin: 8px 0 12px; overflow-x: auto; }
+.rt-inner { min-width: 600px; }
+.rtrow { display: grid; grid-template-columns: 270px 1fr 80px; align-items: center; gap: 10px; min-height: 28px; font-size: 13px; }
+.rtrow .nm { font-size: 13px; }
+.rtrow .nm small { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); }
+.rtrow .v { font-family: var(--font-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rtbar { position: relative; height: 14px; }
+.rtbar b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--bar); }
+.rtbar b.old { background: var(--bar-neg); }
+.rtaxis { display: grid; grid-template-columns: 270px 1fr 80px; gap: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); }
+.rtaxis .t { position: relative; height: 16px; }
+.rtaxis .t span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.rtaxis .t span:first-child { transform: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--ink-soft); margin: 6px 0 12px; }
+.legend i { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 5px; border: 1px solid rgba(0,0,0,.15); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin: 10px 0 18px; }
+.gallery figure { margin: 0; background: var(--sheet); border: 1px solid var(--rule); }
+.gallery a { display: block; }
+.gallery img { display: block; width: 100%; height: auto; aspect-ratio: 14 / 9; object-fit: cover; background: #eceff1; }
+.gallery figcaption { padding: 7px 10px 9px; font-size: 13px; line-height: 1.4; }
+.gallery figcaption b { font-family: var(--font-mono); font-weight: 500; font-size: 12.5px; }
+.gallery figcaption span { display: block; color: var(--ink-soft); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap 6 · 23 October 2026 · Parts 137–149</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">Five days on one question: where the late stages of an ISPD 2008 run spend their time, and what the
+  overflow they leave behind is doing. The searches turn out to flood their boxes, so late work is box area; the residue
+  on the hard benchmarks is nets trading places in one hotspot, which is exploration, not waste; and deliberately
+  tightened copies of easy designs fall into three distinct regimes. Two exact time savers came out of it (one now in the
+  2008 standard), a speed setting with two more, eight ideas measured and set aside, and a new safeguard after a bug.</p>
+  <div class="meta"><span><b>Standard (2008):</b> <span class="mono">pd39route @standard.env @fast08.env</span> (now with the region early stop)</span>
+  <span><b>Speed setting:</b> <span class="mono">… @speed08.env</span></span>
+  <span><b>Checks:</b> every result legal, <span class="mono">gr_verify</span> equal to the official <span class="mono">eval2008.pl</span></span></div>
+</header>
+<nav class="toc">
+  <a href="#glance">At a glance</a><a href="#settings">Settings that changed</a><a href="#time">Where late time goes</a>
+  <a href="#residue">What the residue is doing</a><a href="#hard">Hard cases</a><a href="#setaside">Set aside</a>
+  <a href="#process">Process</a><a href="#next">Still open</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">90–98%</div><div class="lab">of the region stage's search work, from round 50 on, is in searches that expand nearly their whole box</div></div>
+    <div class="tile"><div class="fig">−31–48%</div><div class="lab">run time where the new early stop fires, with byte-identical routes; now in the 2008 standard</div></div>
+    <div class="tile"><div class="fig">−14–45%</div><div class="lab">run time with the speed setting on runs that never converge, for at most +0.56% overflow</div></div>
+    <div class="tile"><div class="fig">8</div><div class="lab">ideas measured and set aside, each with its number on record</div></div>
+  </div>
+</section>
+
+<section id="settings">
+  <h2>Settings that changed</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Setting</th><th>Where</th><th>What it does</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td><span class="mono">PD39ROUTE_REGION_ABORT=1000,20</span></td><td><span class="pill good">2008 standard</span></td>
+        <td>Above 1000 units of entering overflow, a region stage no better than its start after 20 rounds stops (and the portfolio's variants are skipped)</td>
+        <td>Exact: four hard variants byte-identical, 31–48% faster; newblue3 byte-identical with it on (Parts 146)</td></tr>
+      <tr><td><span class="mono">PD13ROUTE_REGION_BOX_CAP=100</span>, <span class="mono">PD39ROUTE_REGION_BOX_CAP_B=200</span></td><td><span class="pill info">speed08</span></td>
+        <td>Path A's region box capped at 100 tiles; the reclaim path keeps 200, which it needs to clear the overflow it injects</td>
+        <td>13 of 16 benchmarks identical; long residues 17–26% faster; newblue1 28 vs 24, newblue4 144 vs 140 (Parts 140–141)</td></tr>
+      <tr><td><span class="mono">PD39ROUTE_SLOW_PLATEAU=25,1,1000</span></td><td><span class="pill info">speed08</span></td>
+        <td>Stops the slow tier once its best has fallen less than 1% over 25 rounds while still ≥ 1000</td>
+        <td>Exact where the best had stopped (−45% run); newblue3 +0.07% (−15%); bigblue3 0.95 +0.56% (−14%) (Part 148)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Every other new mechanism is off by default and leaves routes byte-identical.</p>
+</section>
+
+<section id="time">
+  <h2>Where the late stages spend their time</h2>
+  <p>The region stage is 70–88% of a run on the designs that keep some overflow, and 94–97% of its search work comes after
+  round 50, when each box reaches 110–200 tiles past its net on grids only 400–490 tiles wide. A trace of every search
+  (Part 138) showed why the boxes cost so much:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>newblue1, region round</th><th class="num">work in searches filling ≥ 90% of their box</th><th class="num">searches costing ≥ 1000× the heuristic's estimate</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td class="num">6%</td><td class="num">0%</td></tr>
+      <tr><td>10</td><td class="num">57%</td><td class="num">0%</td></tr>
+      <tr><td>50</td><td class="num">92%</td><td class="num">78%</td></tr>
+      <tr><td>100–499</td><td class="num">96–98%</td><td class="num">100% (heuristic exactly 0 after ~380)</td></tr>
+    </tbody>
+  </table></div>
+  <p>Every cell of the box is cheaper to reach than the route the search finally takes, because that route must cross a
+  costly congested wall the heuristic cannot see. So late work is box area, and the levers on the heuristic or on how boxes
+  grow buy little:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Change (newblue1 / newblue4)</th><th class="num">region search work</th><th>overflow</th></tr></thead>
+    <tbody>
+      <tr><td>Evidence-driven box growth (grow only when the search hit its box edge)</td><td class="num">−12% / −10%</td><td>32 vs 30 / 148 vs 154</td></tr>
+      <tr><td>Wire-length floor on the heuristic, 0.05 and 0.2</td><td class="num">−5% / −8%</td><td>26, 36 vs 30</td></tr>
+      <tr><td><b>Box cap 100</b></td><td class="num"><b>−59% / −56%</b></td><td>32 vs 30 / 144 vs 154</td></tr>
+    </tbody>
+  </table></div>
+  <p>Splitting the region stage into independent hotspots on separate threads was ruled out from the same traces: with
+  boxes that wide, no two hotspots on these grids are far enough apart to share no edges.</p>
+</section>
+
+<section id="residue">
+  <h2>What the residue is doing</h2>
+  <p>A per-round dump of every overflowed edge (Part 140) on newblue1 and newblue4, all four portfolio variants each:</p>
+  <div class="findings">
+    <div class="finding"><h3>It oscillates; nothing is stuck</h3><p>59–88% of the remaining excess sits on edges that go over and
+    under capacity every 2–4 rounds — nets trading places — and no edge stays over for 90% of any 50-round window. On both
+    designs it is a single hotspot: keeping each hotspot's best round separately gains nothing.</p></div>
+    <div class="finding"><h3>Damping it is harmful</h3><p>A discount for staying on the current route made newblue1 176–220 (from 32)
+    and newblue4 180–226 (from 144): the oscillation is the negotiation exploring, and slowing it is a soft form of the
+    revert rule Part 59 already rejected. A one-round cooldown kept overflow within about 8 units for 30–40% less work.</p></div>
+    <div class="finding"><h3>Annealing refinement does not help</h3><p>Accepting worse reroutes with falling probability left
+    newblue1 at 30 (T0 0.3 and 1: nothing accepted) and made it 34 at T0 5; newblue4 150 vs 154 once, adaptec1 0.95 −0.6%.
+    Inside the noise.</p></div>
+    <div class="finding"><h3>Nothing early predicts the winning variant</h3><p>The first 50 rounds' oscillation share ranked
+    newblue1's four variants exactly, but not newblue4's (Spearman −0.2), and it does not predict the next window's gain.
+    The portfolio, which tries several and keeps the best, stays the right tool.</p></div>
+  </div>
+</section>
+
+<section id="hard">
+  <h2>Hard cases from easy parents</h2>
+  <p>To get more related examples of difficult designs, the capacities of five zero-overflow designs were cut (Part 142):
+  every edge to 95%, 90% and 85%, or the densest 30% window to 85% and 70%. Eighteen variants finished. They fall into three
+  regimes:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Regime</th><th>Cases</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pill good">Absorbed</span></td><td>newblue2 under every global cut and hotspot 85%; adaptec4 under global cuts</td><td>Zero overflow with 2–5% longer wires, at 2–4× the parent's time</td></tr>
+      <tr><td><span class="pill info">Hotspot residue</span></td><td>adaptec2 hotspot 85% (56)</td><td>Like newblue1/newblue4: one hotspot, oscillating, the region stage working 500 rounds and the portfolio's variants differing</td></tr>
+      <tr><td><span class="pill warn">Spread overflow</span></td><td>The other eleven (1,008 to 60,982)</td><td>The region stage's first round multiplies the overflow 1.8–30×, it often never gets back below its start, the portfolio's variants come back within ~1%, refinement does the work, and runs take 10–73× the parent's time</td></tr>
+    </tbody>
+  </table></div>
+  <p><b>What belongs to each design is headroom.</b> newblue2 absorbs every global cut down to 85% and tips only under its hotspot at
+  70%; adaptec4 absorbs global cuts but not its hotspot at 85%; adaptec1, adaptec2 and bigblue3 tip at a 5% global cut. An
+  apparent per-design oscillation trait mostly measured how much overflow was left (Spearman −0.65 against it), with a
+  smaller offset: bigblue3 is the least oscillating at every level. The early stop and the slow-tier stop both came out of
+  the spread-overflow regime.</p>
+  <p class="note">A pre-routing congestion spectrum (2D Fourier transform of the RUDY map, Part 139) was added to the Difficulty
+  Atlas as a predictor and predicts nothing reliably; its one apparent success rested on one design family.</p>
+</section>
+
+<section id="setaside">
+  <h2>Measured and set aside</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Idea</th><th>Result</th><th>Part</th></tr></thead>
+    <tbody>
+      <tr><td>Independent hotspots on separate threads</td><td>Impossible at these box sizes (from the traces)</td><td class="num">137</td></tr>
+      <tr><td>Wider portfolio on newblue1 (five more variants)</td><td>No new best (24 tie)</td><td class="num">137</td></tr>
+      <tr><td>Larger reclaim budget (passes, ratio, keep threshold)</td><td>−0.00% to −0.06% wire on four zero designs</td><td class="num">137</td></tr>
+      <tr><td>Evidence-driven box growth</td><td>−10–12% work, overflow within noise</td><td class="num">138</td></tr>
+      <tr><td>Wire-length floor on the heuristic</td><td>−5–8% work</td><td class="num">138</td></tr>
+      <tr><td>Route-change damping / cooldown</td><td>5–7× worse / +8 for −30–40% work</td><td class="num">144</td></tr>
+      <tr><td>Annealed refinement</td><td>newblue1 30–34, others −0.1 to −2.6%</td><td class="num">147</td></tr>
+      <tr><td>Bend via demand in the 2D stages (the TI channel model's idea for 2024)</td><td>Ceiling 0.07–0.43% of the score; not built</td><td class="num">143</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="process">
+  <h2>Process</h2>
+  <ul>
+    <li><b>A bug and its safeguard.</b> The slow-tier stop's setting was read in <span class="mono">main()</span> after the slow tier had already
+    run, and its self-test set the value directly, so three runs tested nothing (Part 148). An audit found it the only setting
+    read late. <span class="mono">gr/e2e_settings.py</span> now runs the router itself with each new setting through the environment and looks
+    for evidence the mechanism acted (15 checks, about a minute, in CI on every push); it fails on the buggy binary. CLAUDE.md:
+    every new setting gets a check there.</li>
+    <li><b>Settings files are loaded line by line.</b> Sourcing <span class="mono">fast08.env</span> with <span class="mono">.</span> cuts the portfolio's
+    value at its first <span class="mono">;</span>. The batch script was never affected.</li>
+    <li><b>Long runs trimmed.</b> Runs on spread-overflow variants reached 10–15 hours for little; the hotspot-70% and 85%-global batches
+    were deferred or cancelled once the regimes were clear.</li>
+  </ul>
+</section>
+
+<section id="next">
+  <h2>Still open</h2>
+  <ul>
+    <li><b>A wall-aware search heuristic</b>: a lower bound on the remaining cost from a search on a coarse grid priced at each
+    coarse cell's cheapest edge, which would stay exact in cost but stop the flood across the cheap parts of a box. The data
+    point straight at it.</li>
+    <li><b>"Make room" moves</b>: moving legal nets near a hotspot into spare areas to free tracks for the overflowed ones.</li>
+    <li><b>The slow tier on spread overflow</b> still runs long; its stop helps but is a trade, not a fix.</li>
+    <li><b>The channel model</b> from TI experience, once the flow reaches detailed routing, where use inside a GCell decides routability.</li>
+  </ul>
+</section>
+</div>
+</body>
+</html>
