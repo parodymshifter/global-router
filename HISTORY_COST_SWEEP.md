@@ -11331,3 +11331,15 @@ clearly per parent is headroom -- where it tips: newblue2 absorbs every global c
 hotspot 0.85, tipping only at hotspot 0.70; adaptec4 absorbs both global cuts but not its hotspot 0.85;
 adaptec1, adaptec2 and bigblue3 tip at a 5% global cut. The 0.90 runs: adaptec1 60982, adaptec2 12262, bigblue3
 12306, all in the spread-overflow regime (region stage <= 71 rounds, the portfolio's variants within ~1%).
+
+**Part 148, bigblue3 global 0.95 with the slow-tier stop** (`status=OK`, `gr_verify` = `eval2008.pl`): stopped
+after slow round 97 (128 rounds in all vs 180), slow-tier best 6198 vs 5584 (+11%), but the late stages absorb
+most of it: final **4666** vs 4640 (**+0.56%**); slow tier 11063 vs 15986 s (-31%), run 21904 vs 25581 s
+(-14%). **Summary of the slow-tier stop** (25 rounds, 1%, floor 1000): exact where the best had stopped moving
+(adaptec4 hotspot 0.85, byte-identical, -45% run); +0.07% on newblue3 (-15%) and +0.56% on bigblue3 0.95
+(-14%) where gains came after a flat stretch; never acts on bigblue4, newblue7 or the designs below 1000.
+
+**Part 145 cancelled** (the user's call: the remaining analysis would refine, not change, the conclusions).
+Finished before the cancel: newblue2 global 0.85 **0** (wire 8052324; it absorbs a 15% global cut too) and
+adaptec4 global 0.85 **4842**. adaptec2, bigblue3 and adaptec1 at 0.85 were stopped after 5-10 h (their
+summaries read ROUTER_FAILED exit 143: cancelled, not results).
