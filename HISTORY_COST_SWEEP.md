@@ -11299,3 +11299,14 @@ CI: a `settings-e2e` job in `quality-checks.yml`. CLAUDE.md: every new setting r
 here. A side finding: sourcing `fast08.env` with `.` truncates `PD39ROUTE_PORTFOLIO` at its first `;` (the shell
 reads the rest as commands); `run_batch.sh` exports each line whole, so no run was affected, and CI sources only
 `standard.env`.
+
+**Part 148, rerun with the fix: adaptec4 hotspot 0.85** (`status=OK`, `gr_verify` = `eval2008.pl`): the stop
+fired after slow round 77 (best 6396, flat since about round 70), 108 rounds in all vs 180; **route file
+byte-identical to Part 142's**; slow tier 5253 vs 11213 s (-53%), run 6784 vs 12439 s (-45%, both with the
+region early stop). bigblue3 0.95 and newblue3 (the trade cases) still running.
+
+**Part 147, the hotter start: newblue1 at T0 5** (portfolio off; `status=OK`, `gr_verify` = `eval2008.pl`):
+**34** vs 30, wire 4896396 vs 4891216. Annealing now acts -- 12 of 42 worse reroutes kept over the stage (4 of
+10, 4 of 17, 1 of 10, 3 of 5 in iterations 0-3) -- but the walk uphill never comes back below the start:
+refinement's best is 34. Inside newblue1's 24-38 spread, and no better at any temperature tried (0.3, 1, 5).
+**Verdict: annealed refinement does not help**; not adopted.
