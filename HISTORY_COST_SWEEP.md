@@ -11343,3 +11343,6 @@ most of it: final **4666** vs 4640 (**+0.56%**); slow tier 11063 vs 15986 s (-31
 Finished before the cancel: newblue2 global 0.85 **0** (wire 8052324; it absorbs a 15% global cut too) and
 adaptec4 global 0.85 **4842**. adaptec2, bigblue3 and adaptec1 at 0.85 were stopped after 5-10 h (their
 summaries read ROUTER_FAILED exit 143: cancelled, not results).
+
+**Part 148 decision** (the user's, 2026-10-23): the slow-tier stop joins the speed setting, not the standard --
+`PD39ROUTE_SLOW_PLATEAU=25,1,1000` in `gr/speed08.env`.
