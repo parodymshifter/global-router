@@ -11310,3 +11310,12 @@ region early stop). bigblue3 0.95 and newblue3 (the trade cases) still running.
 10, 4 of 17, 1 of 10, 3 of 5 in iterations 0-3) -- but the walk uphill never comes back below the start:
 refinement's best is 34. Inside newblue1's 24-38 spread, and no better at any temperature tried (0.3, 1, 5).
 **Verdict: annealed refinement does not help**; not adopted.
+
+**Part 146 confirmed.** newblue3 with the updated 2008 standard (the early stop in `fast08.env`): route file
+**byte-identical** to Part 135's (38898); the stop did not fire. (21550 s vs 13563 s: it shared the machine
+with two other runs.) The rule stays in the standard.
+
+**Part 148, newblue3 with the slow-tier stop** (25 rounds, 1%, floor 1000, on `@speed08.env`; `status=OK`,
+`gr_verify` = `eval2008.pl`): stopped after slow round 117 (148 rounds in all vs 180), best 41778 vs 41504;
+the portfolio then 38928 / **38924** / 38946 / 38948 -> **38924** vs 38898 (+26, +0.07%); slow tier 10827 vs
+13433 s (-19%), run 15945 vs 18788 s (-15%). A small trade, as simulated. bigblue3 0.95 still running.
