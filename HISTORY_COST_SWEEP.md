@@ -11395,3 +11395,28 @@ and most local first:
 Suggested order: 1 as a cheap probe (does freeing tracks change anything?), then 2 on newblue1 if 1 shows any
 movement; 5 only if 2 moves newblue1 materially, since it is the expensive one. Each is supervised and off by
 default, with an end-to-end check (Part 149) and runs judged against newblue1's 24-38 spread.
+
+**Part 150 results** (portfolio off; `status=OK`, `gr_verify` = `eval2008.pl`; Part 124's path A for reference):
+newblue1 B 8 **34**, fallback expansions 24.99e9 vs 25.09e9 (-0.4%); B 32 **38**, 24.53e9 (-2.2%); newblue4 B 8
+**142** (vs 154), 45.94e9 vs 45.77e9 (+0.4%); newblue4 B 32 running. **No real pruning.** The column/row bound
+helps only where every row of a column inside the box is expensive; real boxes span hundreds of rows, and each
+column has a cheap edge somewhere, so the bound collapses towards the old one. The expense is not a wall across
+the box but the congestion around the hotspot near the sink, which a route can approach from anywhere. And with
+the WL term decayed to ~0 (Part 138), travel over uncongested ground costs almost nothing, so every cheap node
+sits just under the found cost and an exact A* must expand it whatever the bound -- the flood is a near-tie,
+which no admissible heuristic removes. A bound around the sink (the cheapest crossing of each concentric ring
+around it) would capture the hotspot better, but it meets the same near-tie limit; what reduces the tie is
+distance mattering again (a WL floor; Part 138: -5-8% alone). Not adopted.
+
+## Part 152 -- lateral shifts, the "make room" probe
+
+`PD39ROUTE_REFINE_SHIFT=k[,radius]` (off by default; Part 151's option 1): before refinement's first iteration,
+for each legal net in order, a straight piece of its tree (between pins or branch tiles) that uses a full edge
+within `radius` parallel rows (columns) of an over-capacity edge is replaced by a U through the same two ends,
+shifted 1, -1, 2, -2, ... k rows (columns), the first whose every edge has room for the net and whose tiles are
+not already on the net. The net stays a connected tree, no edge goes over capacity, the net grows by 2|s| edges,
+and overflow is unchanged by the pass itself: it frees tracks next to the overflow for refinement to use. At most
+one shift per net. Self-tests: on an 8 x 6 fixture a boxed-in net stays and the other moves to the free row
+(connected, +2 wire, overflow unchanged, usage equal to the charges); at k 2 the first moves two rows; with no
+overflow nothing is a candidate. End-to-end check added (17 of 17). Runs (`p152.jobs`, portfolio off, vs path A
+30 / 154): newblue1 at k 2 and 3, newblue4 at k 2.

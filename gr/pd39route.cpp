@@ -3824,6 +3824,10 @@ struct RefineSettings {
   // probability exp(-added local overflow / T), T = T0 x alpha^iteration; the best state is still what is kept.
   double annealT0 = 0;
   double annealAlpha = 0.9;
+  // Part 152: PD39ROUTE_REFINE_SHIFT=k[,radius] (k 0 = off): before refinement's first iteration, legal nets'
+  // straight pieces on full edges within `radius` parallel rows (columns) of an overflowed edge are shifted
+  // sideways by up to k rows (columns) where every new edge has room -- making room for the overflowed nets.
+  int shiftK = 0, shiftRadius = 2;
 };
 
 // pd5route: parses PD5ROUTE_REFINE_ORDER (nthu | shuffle; unset = nthu) and
@@ -4032,6 +4036,7 @@ struct RefineReport {
   double seconds = 0;     // pd12route: stage wall time
   int lastMargin = 0;     // pd13route: the margin of the last round run
   long long annealWorse = 0, annealKept = 0; // Part 147: worse reroutes seen / kept by annealing
+  long long shiftCandidates = 0, shiftShifted = 0, shiftWire = 0; // Part 152: the lateral-shift probe
 };
 
 // pd12route: the plateau rule. bestAfter[k] is the best overflow after k
@@ -4116,6 +4121,178 @@ PieceStats rerouteNetPieces(const RoutingGrid &g, Usage &usage, const Prices &pr
                             SearchRegion &region, RoutedNet &rn, int margin, AcceptMode accept,
                             const TileBox *box);
 
+// Part 152: lateral shifts ("make room", Part 151's option 1). For each legal net (none of its edges over
+// capacity), in net order: if a straight piece of its tree -- a maximal run of unit edges in one row (column)
+// between key tiles (pins, or tiles of degree other than 2) -- uses a target edge (one with no room for one more
+// net, lying within `radius` parallel rows (columns) of an over-capacity edge, or over capacity itself), try
+// replacing the piece by a U of the same two ends shifted s = 1, -1, 2, -2, ... k rows (columns) over. The first
+// U whose every edge has room for this net and whose tiles, other than the two ends, are not already on the net
+// is kept: the net stays a connected tree, no edge goes over capacity (every new edge had room; the old ones only
+// lose usage), and the net's wire grows by 2|s|. At most one shift per net. Overflow is unchanged by the pass
+// itself; it frees tracks next to the overflow for refinement to use.
+struct ShiftOutcome {
+  long long candidates = 0, shifted = 0, wireAdded = 0;
+};
+
+ShiftOutcome shiftLegalPieces(const RoutingGrid &g, Usage &usage, std::vector<RoutedNet> &nets, int k, int radius) {
+  ShiftOutcome out;
+  const int R = std::max(0, radius);
+  std::vector<char> nearH(usage.h.size(), 0), nearV(usage.v.size(), 0);
+  for (int y = 0; y < g.ny; ++y)
+    for (int x = 0; x + 1 < g.nx; ++x)
+      if (usage.h[g.hIndex(x, y, 0)] > usage.capH[g.hIndex(x, y, 0)])
+        for (int dy = -R; dy <= R; ++dy)
+          if (y + dy >= 0 && y + dy < g.ny)
+            nearH[g.hIndex(x, y + dy, 0)] = 1;
+  for (int y = 0; y + 1 < g.ny; ++y)
+    for (int x = 0; x < g.nx; ++x)
+      if (usage.v[g.vIndex(x, y, 0)] > usage.capV[g.vIndex(x, y, 0)])
+        for (int dx = -R; dx <= R; ++dx)
+          if (x + dx >= 0 && x + dx < g.nx)
+            nearV[g.vIndex(x + dx, y, 0)] = 1;
+  struct UE {
+    bool h;
+    int x, y;
+  };
+  auto key = [](int x, int y) { return (static_cast<long long>(x) << 32) | static_cast<unsigned>(y); };
+  for (RoutedNet &rn : nets) {
+    if (rn.giant || rn.pts.size() < 2 || netOverflowed(g, usage, rn))
+      continue;
+    const int amount = rn.net->minWidth + g.minSpacing[0];
+    std::vector<UE> ue;
+    for (const ChargeRecord &c : rn.charges)
+      for (int t = c.a; t < c.b; ++t)
+        ue.push_back(c.horizontal ? UE{true, t, c.cross} : UE{false, c.cross, t});
+    auto edgeOf = [&](const UE &u) { return u.h ? g.hIndex(u.x, u.y, 0) : g.vIndex(u.x, u.y, 0); };
+    auto room = [&](const UE &u) {
+      const size_t e = edgeOf(u);
+      return u.h ? usage.h[e] + amount <= usage.capH[e] : usage.v[e] + amount <= usage.capV[e];
+    };
+    auto target = [&](const UE &u) {
+      const size_t e = edgeOf(u);
+      return !room(u) && (u.h ? nearH[e] : nearV[e]);
+    };
+    bool any = false;
+    for (const UE &u : ue)
+      any = any || target(u);
+    if (!any)
+      continue;
+    ++out.candidates;
+    // the tree: tiles, adjacency, key tiles; skip anything that is not a tree
+    std::map<long long, std::vector<int>> adj;
+    std::set<std::pair<long long, long long>> seenE;
+    bool dup = false;
+    for (int i = 0; i < static_cast<int>(ue.size()); ++i) {
+      const long long a = key(ue[i].x, ue[i].y), b = ue[i].h ? key(ue[i].x + 1, ue[i].y) : key(ue[i].x, ue[i].y + 1);
+      dup = dup || !seenE.insert({a, b}).second;
+      adj[a].push_back(i);
+      adj[b].push_back(i);
+    }
+    if (dup || adj.size() != ue.size() + 1)
+      continue; // a repeated edge or a cycle: leave this net alone
+    std::set<long long> pins;
+    for (const Point &p : rn.pts)
+      pins.insert(key(p.x, p.y));
+    auto isKey = [&](long long t) { return pins.count(t) || adj[t].size() != 2; };
+    auto other = [&](int i, long long t) {
+      const long long a = key(ue[i].x, ue[i].y);
+      return a == t ? (ue[i].h ? key(ue[i].x + 1, ue[i].y) : key(ue[i].x, ue[i].y + 1)) : a;
+    };
+    bool shifted = false;
+    std::vector<char> done(ue.size(), 0);
+    for (auto it = adj.begin(); it != adj.end() && !shifted; ++it) {
+      if (!isKey(it->first))
+        continue;
+      for (int start : it->second) {
+        if (done[start] || shifted)
+          continue;
+        std::vector<int> piece;
+        long long t = it->first;
+        int e = start;
+        while (true) {
+          piece.push_back(e);
+          done[e] = 1;
+          t = other(e, t);
+          if (isKey(t))
+            break;
+          e = adj[t][0] == e ? adj[t][1] : adj[t][0];
+        }
+        const bool horiz = ue[piece[0]].h;
+        const int cross = horiz ? ue[piece[0]].y : ue[piece[0]].x;
+        bool straight = true, hasTarget = false;
+        int lo = std::numeric_limits<int>::max(), hi = std::numeric_limits<int>::min();
+        for (int i : piece) {
+          straight = straight && ue[i].h == horiz && (horiz ? ue[i].y : ue[i].x) == cross;
+          hasTarget = hasTarget || target(ue[i]);
+          const int at = horiz ? ue[i].x : ue[i].y;
+          lo = std::min(lo, at);
+          hi = std::max(hi, at + 1);
+        }
+        if (!straight || !hasTarget)
+          continue;
+        for (int m = 1; m <= k && !shifted; ++m)
+          for (int sgn : {1, -1}) {
+            const int off = sgn * m, c2 = cross + off;
+            if (c2 < 0 || c2 >= (horiz ? g.ny : g.nx))
+              continue;
+            std::vector<UE> fresh;
+            auto jog = [&](int along) { // the edges from (along, cross) to (along, c2)
+              for (int c = std::min(cross, c2); c < std::max(cross, c2); ++c)
+                fresh.push_back(horiz ? UE{false, along, c} : UE{true, c, along});
+            };
+            jog(lo);
+            for (int a = lo; a < hi; ++a)
+              fresh.push_back(horiz ? UE{true, a, c2} : UE{false, c2, a});
+            jog(hi);
+            bool ok = true;
+            for (const UE &u : fresh)
+              ok = ok && room(u);
+            // the U's tiles other than its two ends must not be on the net already
+            const long long endA = horiz ? key(lo, cross) : key(cross, lo), endB = horiz ? key(hi, cross) : key(cross, hi);
+            for (const UE &u : fresh) {
+              if (!ok)
+                break;
+              for (long long tt : {key(u.x, u.y), u.h ? key(u.x + 1, u.y) : key(u.x, u.y + 1)})
+                if (tt != endA && tt != endB && adj.count(tt)) {
+                  ok = false;
+                  break;
+                }
+            }
+            if (!ok)
+              continue;
+            for (int i : piece)
+              (ue[i].h ? usage.h : usage.v)[edgeOf(ue[i])] -= amount;
+            for (const UE &u : fresh)
+              (u.h ? usage.h : usage.v)[edgeOf(u)] += amount;
+            std::vector<char> inPiece(ue.size(), 0);
+            for (int i : piece)
+              inPiece[i] = 1;
+            std::vector<UE> next;
+            for (size_t i = 0; i < ue.size(); ++i)
+              if (!inPiece[i])
+                next.push_back(ue[i]);
+            next.insert(next.end(), fresh.begin(), fresh.end());
+            ue = std::move(next);
+            out.wireAdded += static_cast<long long>(fresh.size()) - static_cast<long long>(piece.size());
+            ++out.shifted;
+            shifted = true;
+            break;
+          }
+      }
+    }
+    if (shifted) {
+      rn.segs.clear();
+      rn.charges.clear();
+      for (const UE &u : ue) {
+        rn.charges.push_back(u.h ? ChargeRecord{true, u.y, u.x, u.x + 1, 0, amount} : ChargeRecord{false, u.x, u.y, u.y + 1, 0, amount});
+        rn.segs.push_back(u.h ? Seg{u.x, u.y, 0, u.x + 1, u.y, 0} : Seg{u.x, u.y, 0, u.x, u.y + 1, 0});
+      }
+    }
+  }
+  return out;
+}
+
+
 RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const RefineSettings &rs,
                       bool trace) {
   const RoutingGrid &g = d.grid;
@@ -4131,6 +4308,16 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
   rep.before = rep.after = total;
   std::vector<long long> bestAfter{rep.after};
   NetDelta best; // pd35route: the best state as a delta (was a full copy)
+  if (rs.shiftK > 0 && total > 0) { // Part 152: make room before the first iteration
+    const ShiftOutcome so = shiftLegalPieces(g, usage, nets, rs.shiftK, rs.shiftRadius);
+    rep.shiftCandidates = so.candidates;
+    rep.shiftShifted = so.shifted;
+    rep.shiftWire = so.wireAdded;
+    if (trace)
+      std::cerr << "refine shift: k " << rs.shiftK << " radius " << rs.shiftRadius << ": " << so.candidates
+                << " legal nets on full edges near overflow, " << so.shifted << " shifted, +" << so.wireAdded
+                << " wire, 2D overflow " << totalOverflow(g, usage) << "\n";
+  }
   // Part 147: annealed acceptance, on this thread for this stage only.
   const bool anneal = rs.annealT0 > 0 && rs.accept == AcceptMode::kRevert;
   if (anneal) {
@@ -18399,6 +18586,68 @@ void testNetSpillRoundTrip() {
   check(same, "NetSpill: a spilled and re-read state equals the original");
 }
 
+// Part 152: lateral shifts. An 8 x 6 grid, one track per horizontal edge. Nets A and B share row 2 between
+// columns 2 and 5 (over capacity there); legal net L runs along row 3 from column 1 to 6 and M along row 4 --
+// full edges within 2 rows of the overflow. With k 1, L cannot move (row 2 over, row 4 full) and stays as it
+// was, while M moves to row 5 (free): a U through columns 1 and 6, two edges longer, still connected; overflow is
+// unchanged and the usage equals what the nets' charges add up to. With k 2, L also moves (two rows down). With
+// no overflow anywhere, nothing is a candidate.
+void testLateralShifts() {
+  const char *gr = "grid 8 6 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                   "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                   "num net 4\n"
+                   "nA 0 2 1\n25 25 1\n55 25 1\n"
+                   "nB 1 2 1\n25 25 1\n55 25 1\n"
+                   "nL 2 2 1\n15 35 1\n65 35 1\n"
+                   "nM 3 2 1\n15 45 1\n65 45 1\n0\n";
+  auto setup = [&](Design &d, std::vector<RoutedNet> &nets) {
+    nets.assign(4, RoutedNet());
+    for (int i = 0; i < 4; ++i)
+      nets[i].net = &d.nets[i];
+    nets[0].segs = {{2, 2, 0, 5, 2, 0}};
+    nets[1].segs = {{2, 2, 0, 5, 2, 0}};
+    nets[2].segs = {{1, 3, 0, 6, 3, 0}};
+    nets[3].segs = {{1, 4, 0, 6, 4, 0}};
+    prepareFor2DRefine(d, nets);
+  };
+  Design d = parse("pd39route_selftest_shift.gr", gr);
+  std::vector<RoutedNet> nets;
+  setup(d, nets);
+  Usage u = usageFromCharges(d.grid, nets);
+  const long long ov0 = totalOverflow(d.grid, u);
+  const auto Lsegs = nets[2].segs;
+  const long long wireM0 = totalWire2D(std::vector<RoutedNet>{nets[3]});
+  ShiftOutcome o = shiftLegalPieces(d.grid, u, nets, 1, 2);
+  Usage again = usageFromCharges(d.grid, nets);
+  bool rowM5 = false;
+  for (const Seg &sg : nets[3].segs)
+    rowM5 = rowM5 || (sg.y1 == 5 && sg.y2 == 5);
+  bool Lsame = nets[2].segs.size() == Lsegs.size();
+  for (size_t i = 0; Lsame && i < Lsegs.size(); ++i)
+    Lsame = nets[2].segs[i].x1 == Lsegs[i].x1 && nets[2].segs[i].y1 == Lsegs[i].y1 &&
+            nets[2].segs[i].x2 == Lsegs[i].x2 && nets[2].segs[i].y2 == Lsegs[i].y2;
+  check(o.candidates == 2 && o.shifted == 1 && o.wireAdded == 2 && rowM5 && Lsame && segsConnected(nets[3].segs) &&
+            totalOverflow(d.grid, u) == ov0 && ov0 > 0 && again.h == u.h && again.v == u.v &&
+            totalWire2D(std::vector<RoutedNet>{nets[3]}) == wireM0 + 2,
+        "lateral shifts (k 1): the boxed-in net stays, the other moves to the free row; connected, +2 wire, "
+        "overflow unchanged, usage = the charges");
+  setup(d, nets);
+  Usage u2 = usageFromCharges(d.grid, nets);
+  ShiftOutcome o2 = shiftLegalPieces(d.grid, u2, nets, 2, 2);
+  bool Lmoved = false;
+  for (const Seg &sg : nets[2].segs)
+    Lmoved = Lmoved || (sg.y1 == 5 && sg.y2 == 5) || (sg.y1 == 1 && sg.y2 == 1);
+  check(o2.shifted >= 1 && Lmoved && segsConnected(nets[2].segs) && totalOverflow(d.grid, u2) == ov0,
+        "lateral shifts (k 2): the first net can now move two rows, still connected, overflow unchanged");
+  // no overflow anywhere: A and B removed
+  std::vector<RoutedNet> two = {nets[2], nets[3]};
+  setup(d, nets);
+  two = {nets[2], nets[3]};
+  Usage u3 = usageFromCharges(d.grid, two);
+  ShiftOutcome o3 = shiftLegalPieces(d.grid, u3, two, 2, 2);
+  check(o3.candidates == 0 && o3.shifted == 0, "lateral shifts: no overflow, no candidates");
+}
+
 // Part 150: the wall-aware heuristic. (1) On 40 present-demand fixtures with a congested wall (gaps at varied
 // rows, a decayed WL term, history), the search with the coarse bound finds exactly the cost the plain search
 // finds, and expands fewer nodes in all. (2) Consistency, checked edge by edge: h(u) <= cost(u, v) + h(v) with h =
@@ -20302,6 +20551,7 @@ int run() {
   testAnnealedRefinement();
   testSlowPlateauStop();
   testWallAwareHeuristic();
+  testLateralShifts();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
@@ -20527,6 +20777,15 @@ int main(int argc, char **argv) {
                              std::getenv("PD4ROUTE_REFINE_ACCEPT"), refine, err) ||
         !parseRefineOrder(std::getenv("PD5ROUTE_REFINE_ORDER"), std::getenv("PD5ROUTE_SEED"), refine, err))
       fail(err);
+    if (const char *v = std::getenv("PD39ROUTE_REFINE_SHIFT"); v) { // Part 152: k[,radius]
+      int k = -1, r = 2;
+      char tail = 0;
+      const int n = std::sscanf(v, "%d,%d%c", &k, &r, &tail);
+      if (!(n == 1 || n == 2) || k < 0 || k > 1000 || r < 0 || r > 1000)
+        fail(std::string("PD39ROUTE_REFINE_SHIFT must be k[,radius] (0-1000 each; got '") + v + "')");
+      refine.shiftK = k;
+      refine.shiftRadius = r;
+    }
     if (const char *v = std::getenv("PD39ROUTE_REFINE_ANNEAL"); v) { // Part 147: T0,alpha
       double t0 = -1, alpha = -1;
       char tail = 0;

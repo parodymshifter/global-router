@@ -136,6 +136,9 @@ def main():
     head = open(prefix2 + '.A.txt').readline() if os.path.exists(prefix2 + '.A.txt') else ''
     check('PD39ROUTE_REGION_LAGRANGE reaches the region stage (its dump header)', ' lagrange 0.5 ' in head, head.strip())
     # refinement annealing: the refinement trace reports its temperature.
+    b = run('residue', {**off, 'PD39ROUTE_REFINE_SHIFT': '2'}, 'shift')
+    m = re.search(r'^refine shift: k 2 radius 2: (\d+) legal nets', b, re.M)
+    check('PD39ROUTE_REFINE_SHIFT runs before refinement', bool(m), m.group(0) if m else 'no refine shift line')
     b = run('residue', {**off, 'PD39ROUTE_REFINE_ANNEAL': '5,0.9'}, 'anneal')
     check('PD39ROUTE_REFINE_ANNEAL runs in refinement', any(' anneal T ' in l for l in lines(b, 'refine iter ')))
     # the reclaim path's own box cap: on the light design path B runs a region stage of its own.
