@@ -11346,3 +11346,30 @@ summaries read ROUTER_FAILED exit 143: cancelled, not results).
 
 **Part 148 decision** (the user's, 2026-10-23): the slow-tier stop joins the speed setting, not the standard --
 `PD39ROUTE_SLOW_PLATEAU=25,1,1000` in `gr/speed08.env`.
+
+## Part 150 -- a wall-aware search heuristic for the region stage
+
+The user's request, from Part 138's finding that late region searches flood their boxes because the found
+route must cross a costly congested wall the Manhattan heuristic cannot see. A first design -- coarse K x K
+cells, each boundary priced at its cheapest crossing edge, a coarse Dijkstra per search -- was exact but pruned
+almost nothing (19273 vs 19275 expansions on walled fixtures, 28252 vs 28339 with gapless walls): it sees only
+the edges lying on cell boundaries, at most one column of a three-column wall, and treats every cell interior
+as free. Replaced before any run by a stronger bound that is still exact:
+
+`PD39ROUTE_REGION_WALL_H=B[,from]` (off by default): a route from (x, y) to a sink crosses every column between x
+and the sink's x on some horizontal edge and every row between on some vertical edge -- disjoint edges -- so
+the sum over those columns of the cheapest horizontal edge in the column, plus the same over rows, is a lower
+bound on the remaining cost (Manhattan x the global cheapest edge is the special case). Consistent: a step
+changes it by at most its column's (row's) minimum, at most that edge's cost. Minima are kept per block of B
+rows (columns), taken per search over the blocks the box covers, prefix-summed across the box; rebuilt at each
+round start (history and the WL term change there) and lowered before each reroute to the cost of the net's
+current route without the net (usage only falls through rip-ups), so it stays a lower bound all round. Refused
+with route-change damping (it discounts edges below the minima) and with evidence-driven boxes (the box-limit
+proof needs a bound valid outside the box).
+
+Self-tests: on 40 present-demand walled fixtures (half with a gap, half gapless; decayed WL term; history) the
+same cheapest cost as the plain search on all 40, **expansions 11332 vs 28339 (-60%)**; consistent on every
+edge of every fixture; a rip-up's block is lowered first, so the table stays a lower bound; the region stage
+clears the row fixture with it. End-to-end check added (16 of 16 pass). Runs (`p150.jobs`, portfolio off,
+against Part 124's path A): newblue1 and newblue4 at B 8 and 32. Routes are not expected to be byte-identical
+(equal-cost ties can break differently), so judged on overflow and search work.

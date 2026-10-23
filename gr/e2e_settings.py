@@ -113,6 +113,11 @@ def main():
                      ('PD39ROUTE_REGION_COOLDOWN', '1'), ('PD39ROUTE_REGION_WL_FLOOR', '0.2')]:
         b = run('residue', {**off, var: val}, var.lower())
         check(f'{var} changes the region stage', lines(b, 'region round ') != rr0 and len(rr0) > 0)
+    b = run('residue', {**off, 'PD39ROUTE_REGION_WALL_H': '8'}, 'wallh')
+    pops = lambda t: sum(int(m.group(1)) for m in re.finditer(r'^region round \d+: .*?pops (\d+)\)', t, re.M))
+    check('PD39ROUTE_REGION_WALL_H runs in the region stage and cuts its search work',
+          any(' wall-h B 8 ' in l for l in lines(b, 'region round ')) and pops(b) < pops(base_res),
+          f'region pops {pops(b)} vs {pops(base_res)}')
     b = run('residue', {**off, 'PD39ROUTE_REGION_BOX_EVIDENCE': '2'}, 'evidence')
     check('PD39ROUTE_REGION_BOX_EVIDENCE runs (box evidence in the region rounds)',
           any('box evidence: limited' in l for l in lines(b, 'region round ')))

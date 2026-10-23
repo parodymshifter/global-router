@@ -3245,6 +3245,100 @@ thread_local SearchTraceStats gSearchTrace;
 thread_local bool gSearchLimitOn = false, gSearchWantedOut = false;
 thread_local int gSearchLimitX0 = 0, gSearchLimitY0 = 0, gSearchLimitX1 = -1, gSearchLimitY1 = -1;
 
+// Part 150: the wall-aware heuristic (PD39ROUTE_REGION_WALL_H=B[,from]). A route from (x, y) to a sink at (sx, sy)
+// crosses every column boundary between x and sx on some horizontal edge, and every row boundary between y and sy
+// on some vertical edge -- different edges -- so the sum, over those columns, of the cheapest horizontal edge in
+// the column, plus the same over the rows with vertical edges, is a lower bound on its remaining cost (Manhattan
+// distance x the cheapest edge anywhere is the special case). Consistent: a step along a horizontal edge changes
+// the bound by at most its column's minimum, which is at most that edge's cost. The minimum is taken over the rows
+// (columns) the search box covers, from a table of minima per block of B rows (columns), so a gapless congested
+// wall is charged in full while a cheap gap still counts as one. The table must stay a lower bound while costs
+// move: costs only fall when usage falls, so regionNegotiate rebuilds it at each round start and, before each
+// reroute, lowers the blocks on the net's current route to their cost without the net.
+struct WallBound {
+  int B = 0, nbx = 0, nby = 0, amount = 2;
+  std::vector<double> minH; // minH[x * nby + by]: cheapest H edge x -> x+1 in rows of block by
+  std::vector<double> minV; // minV[y * nbx + bx]: cheapest V edge y -> y+1 in columns of block bx
+  std::vector<double> P, Q; // per search: prefix sums of the column / row minima across the box
+  int x0 = 0, y0 = 0;       // per search: the box origin P and Q are indexed from
+  long long builds = 0, lowered = 0;
+};
+thread_local WallBound *gWall = nullptr;
+
+double wireCostH(const Prices &pr, size_t e, int amount);
+double wireCostV(const Prices &pr, size_t e, int amount);
+
+void wallBuild(WallBound &wb, const RoutingGrid &g, const Prices &pr) {
+  const int B = wb.B;
+  wb.nbx = (g.nx + B - 1) / B;
+  wb.nby = (g.ny + B - 1) / B;
+  const double inf = std::numeric_limits<double>::infinity();
+  wb.minH.assign(static_cast<size_t>(std::max(g.nx - 1, 0)) * wb.nby, inf);
+  wb.minV.assign(static_cast<size_t>(std::max(g.ny - 1, 0)) * wb.nbx, inf);
+  for (int y = 0; y < g.ny; ++y)
+    for (int x = 0; x + 1 < g.nx; ++x) {
+      double &m = wb.minH[static_cast<size_t>(x) * wb.nby + y / B];
+      m = std::min(m, wireCostH(pr, g.hIndex(x, y, 0), wb.amount));
+    }
+  for (int y = 0; y + 1 < g.ny; ++y)
+    for (int x = 0; x < g.nx; ++x) {
+      double &m = wb.minV[static_cast<size_t>(y) * wb.nbx + x / B];
+      m = std::min(m, wireCostV(pr, g.vIndex(x, y, 0), wb.amount));
+    }
+  ++wb.builds;
+}
+
+// Lowers the blocks holding `charges`' edges to those edges' cost with the charges' own usage removed (what they
+// will cost once the net is ripped up). `usage` is the live usage the prices read; restored before returning.
+void wallLower(WallBound &wb, const RoutingGrid &g, const Prices &pr, Usage &usage,
+               const std::vector<ChargeRecord> &charges) {
+  for (const ChargeRecord &c : charges)
+    for (int t = c.a; t < c.b; ++t) {
+      if (c.horizontal) {
+        const size_t e = g.hIndex(t, c.cross, 0);
+        usage.h[e] -= c.amount;
+        const double v = wireCostH(pr, e, wb.amount);
+        usage.h[e] += c.amount;
+        double &m = wb.minH[static_cast<size_t>(t) * wb.nby + c.cross / wb.B];
+        if (v < m) {
+          m = v;
+          ++wb.lowered;
+        }
+      } else {
+        const size_t e = g.vIndex(c.cross, t, 0);
+        usage.v[e] -= c.amount;
+        const double v = wireCostV(pr, e, wb.amount);
+        usage.v[e] += c.amount;
+        double &m = wb.minV[static_cast<size_t>(t) * wb.nbx + c.cross / wb.B];
+        if (v < m) {
+          m = v;
+          ++wb.lowered;
+        }
+      }
+    }
+}
+
+// Per search: P[i] = sum of the column minima of columns x0 .. x0+i-1 over the box's rows; Q likewise for rows.
+void wallPrefix(WallBound &wb, int x0, int y0, int x1, int y1) {
+  wb.x0 = x0;
+  wb.y0 = y0;
+  const int by0 = y0 / wb.B, by1 = y1 / wb.B, bx0 = x0 / wb.B, bx1 = x1 / wb.B;
+  wb.P.assign(static_cast<size_t>(x1 - x0 + 1), 0.0);
+  for (int x = x0; x < x1; ++x) {
+    double m = std::numeric_limits<double>::infinity();
+    for (int by = by0; by <= by1; ++by)
+      m = std::min(m, wb.minH[static_cast<size_t>(x) * wb.nby + by]);
+    wb.P[x - x0 + 1] = wb.P[x - x0] + m;
+  }
+  wb.Q.assign(static_cast<size_t>(y1 - y0 + 1), 0.0);
+  for (int y = y0; y < y1; ++y) {
+    double m = std::numeric_limits<double>::infinity();
+    for (int bx = bx0; bx <= bx1; ++bx)
+      m = std::min(m, wb.minV[static_cast<size_t>(y) * wb.nbx + bx]);
+    wb.Q[y - y0 + 1] = wb.Q[y - y0] + m;
+  }
+}
+
 MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp,
                                 SearchRegion &region, const std::vector<PathNode> &sources,
                                 const std::vector<Point> &sinks, int width, int margin,
@@ -3294,7 +3388,31 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
     sy0 = std::min(sy0, s.y);
     sy1 = std::max(sy1, s.y);
   }
+  // Part 150: the wall-aware bound, when the region stage has set one up (sinks outside the box are clamped to
+  // it: the search cannot leave the box, so the bound to the box's edge is still a lower bound).
+  WallBound *const wall = gWall && gWall->B > 0 ? gWall : nullptr;
+  if (wall)
+    wallPrefix(*wall, x0, y0, x1, y1);
+  auto colSum = [&](int a, int b) { // columns between a and b (any order), within the box
+    a = std::clamp(a, x0, x1) - wall->x0;
+    b = std::clamp(b, x0, x1) - wall->x0;
+    return a < b ? wall->P[b] - wall->P[a] : wall->P[a] - wall->P[b];
+  };
+  auto rowSum = [&](int a, int b) {
+    a = std::clamp(a, y0, y1) - wall->y0;
+    b = std::clamp(b, y0, y1) - wall->y0;
+    return a < b ? wall->Q[b] - wall->Q[a] : wall->Q[a] - wall->Q[b];
+  };
   auto heuristic = [&](int x, int y) {
+    if (wall) {
+      if (boxHeuristic)
+        return (x < sx0 ? colSum(x, sx0) : x > sx1 ? colSum(sx1, x) : 0.0) +
+               (y < sy0 ? rowSum(y, sy0) : y > sy1 ? rowSum(sy1, y) : 0.0);
+      double best = std::numeric_limits<double>::infinity();
+      for (const Point &s : sinks)
+        best = std::min(best, colSum(x, s.x) + rowSum(y, s.y));
+      return best;
+    }
     if (boxHeuristic)
       return hScale * static_cast<double>(std::max({0, sx0 - x, x - sx1}) + std::max({0, sy0 - y, y - sy1}));
     int best = std::numeric_limits<int>::max();
@@ -4218,6 +4336,9 @@ struct RegionSettings {
   // r+1 .. r+cooldown.
   double damp = 0;
   int cooldown = 0;
+  // Part 150: PD39ROUTE_REGION_WALL_H=B[,from] (B 0 = off): the wall-aware heuristic with minima kept per block
+  // of B rows / columns, from region round `from` on.
+  int wallB = 0, wallFrom = 0;
   // Part 146: PD39ROUTE_REGION_ABORT=above,rounds (above 0 = off): when more than `above` units of 2D overflow
   // enter the stage and its best is still not below its start after `rounds` rounds, stop -- such a stage
   // returned its start in every run seen (Part 142), so the routes are the same, sooner.
@@ -4352,6 +4473,7 @@ struct RegionReport {
   int vcapReduction = 0;   // pd22route: capacity units taken off each
   bool cancelled = false;  // pd22route: stopped by the fallback's cancel flag
   bool aborted = false;    // Part 146: stopped early, no better than its start (PD39ROUTE_REGION_ABORT)
+  long long wallBuilds = 0, wallLowered = 0; // Part 150: the wall-aware heuristic's table
   long long evReroutes = 0, evLimited = 0, evGrew = 0; // Part 138: box evidence, summed over rounds
   double evMeanMargin = 0;                               // Part 138: members' mean margin at the end
 };
@@ -4524,6 +4646,11 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     prices.incBeta = rs.damp;
   }
   std::vector<int> lastRerouted(rs.cooldown > 0 ? members.size() : 0, -1000000);
+  // Part 150: the wall-aware heuristic's table, this stage's own (each portfolio variant on its own thread).
+  WallBound wall;
+  wall.B = rs.wallB;
+  wall.amount = 1 + g.minSpacing[0];
+  WallBound *const savedWall = gWall;
   // Part 138: per-net margins for the evidence rule (unused otherwise).
   const int evCap = rs.boxCap > 0 ? rs.boxCap : std::numeric_limits<int>::max();
   std::vector<int> evMargin(rs.evidenceStep > 0 ? members.size() : 0, std::min(rs.boxInit, evCap));
@@ -4537,6 +4664,10 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     rep.lastMargin = stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
     if (dump)
       edgeHalo(g, usage, haloUnit, haloH, haloV); // Part 140: at the round's start
+    const bool wallOn = rs.wallB > 0 && r >= rs.wallFrom; // Part 150
+    if (wallOn)
+      wallBuild(wall, g, prices);
+    gWall = wallOn ? &wall : nullptr;
     for (size_t k = 0; k < members.size(); ++k) {
       RoutedNet &rn = nets[members[k]];
       if (r > 0 && !netOverflowed(g, usage, rn))
@@ -4562,6 +4693,8 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
               incV[g.vIndex(c.cross, t, 0)] = incStamp;
           }
       }
+      if (wallOn) // Part 150: what the net's own rip-up will make cheaper
+        wallLower(wall, g, prices, usage, rn.charges);
       const int haloNow = dump ? netHalo(g, usage, rn, haloH, haloV) : 0;
       const long long popsBefore = gSearchPops;
       gBoxLimited = false;
@@ -4617,6 +4750,8 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     if (trace) {
       std::cerr << "region round " << r << ": 2D overflow " << total << " (rerouted " << rerouted << ", pops "
                 << gSearchPops - (popsAfter.empty() ? popsAtStart : popsAfter.back()) << ")";
+      if (wallOn) // Part 150
+        std::cerr << " wall-h B " << wall.B << " (lowered " << wall.lowered << ")";
       if (rs.evidenceStep > 0) {
         long long sum = 0;
         int mx = 0;
@@ -4664,6 +4799,9 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
       break;
     }
   }
+  gWall = savedWall; // Part 150
+  rep.wallBuilds = wall.builds;
+  rep.wallLowered = wall.lowered;
   for (size_t k = 0; k < members.size(); ++k) {
     nets[members[k]].charges = best[k].first;
     nets[members[k]].segs = best[k].second;
@@ -5323,6 +5461,8 @@ bool applyRegionVariant(const std::string &spec, RegionSettings &rs, std::string
       rs.damp = x;
     } else if (k == "cool") // Part 144
       ok = asInt(rs.cooldown, 0, 1000);
+    else if (k == "wall") // Part 150
+      ok = asInt(rs.wallB, 0, 100000);
     else if (k == "expand")
       ok = asInt(rs.expand, 0, 100000);
     else if (k == "lagr")
@@ -18259,6 +18399,122 @@ void testNetSpillRoundTrip() {
   check(same, "NetSpill: a spilled and re-read state equals the original");
 }
 
+// Part 150: the wall-aware heuristic. (1) On 40 present-demand fixtures with a congested wall (gaps at varied
+// rows, a decayed WL term, history), the search with the coarse bound finds exactly the cost the plain search
+// finds, and expands fewer nodes in all. (2) Consistency, checked edge by edge: h(u) <= cost(u, v) + h(v) with h =
+// max(Manhattan bound, coarse bound). (3) After coarseLower, a boundary's minimum is at most the cost its edge
+// has once the net's usage is removed. (4) The region stage with the bound clears the row fixture; the key parses.
+void testWallAwareHeuristic() {
+  std::string gr = "grid 40 40 2\nvertical capacity 0 20\nhorizontal capacity 20 0\n"
+                   "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                   "num net 1\nn0 0 2 1\n5 5 1\n15 5 1\n0\n";
+  Design d = parse("pd39route_selftest_coarseh.gr", gr.c_str());
+  const RoutingGrid &g = d.grid;
+  LayerPlan lp(g);
+  SearchRegion region;
+  int same = 0, cases = 0, consistentBad = 0;
+  long long popsPlain = 0, popsCoarse = 0;
+  for (int f = 0; f < 40; ++f) {
+    Usage u = usageFromCharges(g, std::vector<RoutedNet>{});
+    Prices pr(g);
+    CostSettings cs;
+    cs.model = CostModel::kPresentDemand;
+    configureCostModel(pr, u, cs);
+    pr.pdIter = 40;
+    pr.pdFactor = pdFactorForIter(pr.pdIter);
+    const int wx = 16 + f % 6, gap = 3 + (f * 7) % 33;
+    for (int y = 0; y < g.ny; ++y)
+      for (int x = wx; x < wx + 3; ++x) {
+        const size_t e = g.hIndex(x, y, 0);
+        if (f % 2 == 1 || std::abs(y - gap) > 1) { // odd fixtures: a wall with no gap (every route must cross it)
+          u.h[e] = u.capH[e] * (5 + f % 3) / 4;
+          pr.pdHistH[e] = 1 + (x + y + f) % 8;
+        }
+      }
+    std::vector<PathNode> src = {{3 + f % 5, 5 + (f * 3) % 30, 0}};
+    std::vector<Point> snk = {{34 + f % 4, 4 + (f * 11) % 32}};
+    WallBound wb;
+    wb.B = 4 + 4 * ((f / 2) % 2);
+    wb.amount = 2;
+    wallBuild(wb, g, pr);
+    const long long p0 = gSearchPops;
+    MSMVResult a = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 60);
+    const double ca = a.found ? region.distAt(region.idx(a.path.back().x, a.path.back().y, 0)) : -1;
+    const long long p1 = gSearchPops;
+    WallBound *saved = gWall;
+    gWall = &wb;
+    MSMVResult b = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 60);
+    const double cbst = b.found ? region.distAt(region.idx(b.path.back().x, b.path.back().y, 0)) : -2;
+    // consistency over every edge, with the distances this search used
+    auto h = [&](int x, int y) { // the box is the whole grid here (margin 60), so P / Q start at 0
+      return std::abs(wb.P[x] - wb.P[snk[0].x]) + std::abs(wb.Q[y] - wb.Q[snk[0].y]);
+    };
+    for (int y = 0; y < g.ny; ++y)
+      for (int x = 0; x + 1 < g.nx; ++x) {
+        const double c = wireCostH(pr, g.hIndex(x, y, 0), 2);
+        consistentBad += h(x, y) > c + h(x + 1, y) + 1e-9 || h(x + 1, y) > c + h(x, y) + 1e-9;
+      }
+    for (int y = 0; y + 1 < g.ny; ++y)
+      for (int x = 0; x < g.nx; ++x) {
+        const double c = wireCostV(pr, g.vIndex(x, y, 0), 2);
+        consistentBad += h(x, y) > c + h(x, y + 1) + 1e-9 || h(x, y + 1) > c + h(x, y) + 1e-9;
+      }
+    gWall = saved;
+    const long long p2 = gSearchPops;
+    ++cases;
+    same += a.found && b.found && std::abs(ca - cbst) <= 1e-9 * std::max(1.0, ca);
+    popsPlain += p1 - p0;
+    popsCoarse += p2 - p1;
+  }
+  check(cases == 40 && same == 40 && popsCoarse < popsPlain,
+        "wall-aware heuristic: the same cheapest cost on 40 walled fixtures (" + std::to_string(same) +
+            "/40), expansions " + std::to_string(popsCoarse) + " vs " + std::to_string(popsPlain));
+  check(consistentBad == 0, "wall-aware heuristic: consistent on every edge (" + std::to_string(consistentBad) + " violations)");
+  {
+    // (3) a rip-up lowers what an edge costs; coarseLower must have lowered its boundary to at most that
+    Usage u = usageFromCharges(g, std::vector<RoutedNet>{});
+    Prices pr(g);
+    CostSettings cs;
+    cs.model = CostModel::kPresentDemand;
+    configureCostModel(pr, u, cs);
+    for (int y = 0; y < g.ny; ++y)
+      u.h[g.hIndex(7, y, 0)] = u.capH[g.hIndex(7, y, 0)] * 2; // every edge crossing boundary x 7|8 over capacity
+    WallBound wb;
+    wb.B = 8;
+    wb.amount = 2;
+    wallBuild(wb, g, pr);
+    const size_t slot = static_cast<size_t>(7) * wb.nby + 3 / wb.B;
+    const double before = wb.minH[slot];
+    std::vector<ChargeRecord> net = {{true, 3, 6, 9, 0, 6}}; // a net of amount 6 crossing 7 -> 8 in row 3
+    wallLower(wb, g, pr, u, net);
+    u.h[g.hIndex(7, 3, 0)] -= 6; // the rip-up
+    const double after = wireCostH(pr, g.hIndex(7, 3, 0), 2);
+    check(wb.minH[slot] <= after + 1e-12 && wb.minH[slot] < before && u.h[g.hIndex(6, 3, 0)] == 0,
+          "wall-aware heuristic: a rip-up's boundary is lowered first, so the table stays a lower bound");
+  }
+  {
+    Design dr = parse("pd39route_selftest_coarseh_row.gr", kThreeOnOneRowGr);
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &dr.nets[i];
+      nets[i].segs = {{0, 1, 0, 7, 1, 0}};
+    }
+    prepareFor2DRefine(dr, nets);
+    RegionSettings rs;
+    rs.enabled = true;
+    rs.wallB = 2;
+    RegionReport rr = regionNegotiate(dr, nets, rs, false);
+    bool conn = true;
+    for (const RoutedNet &rn : nets)
+      conn = conn && segsConnected(rn.segs);
+    RegionSettings v;
+    std::string err;
+    check(rr.after == 0 && conn && rr.wallBuilds > 0 && gWall == nullptr && applyRegionVariant("wall=4", v, err) &&
+              v.wallB == 4,
+          "wall-aware heuristic: the region stage clears the row fixture with it (and leaves it off afterwards)");
+  }
+}
+
 // Part 148: the slow tier's plateau stop. Three nets on a one-row, one-track grid: the overflow is forced, so
 // the slow tier's best never falls. With the stop (window 3, any gain, floor 1) it ends early with the same
 // best and the same routes as the full slow budget; with the floor above the best it runs the full budget.
@@ -20045,6 +20301,7 @@ int run() {
   testRegionAbort();
   testAnnealedRefinement();
   testSlowPlateauStop();
+  testWallAwareHeuristic();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
@@ -20816,6 +21073,15 @@ int main(int argc, char **argv) {
       std::cerr << "region abort: above " << above << " units of entering overflow, no gain by round " << rounds
                 << " -> stop\n";
   }
+  if (const char *v = std::getenv("PD39ROUTE_REGION_WALL_H"); v) { // Part 150: B[,from]
+    int B = -1, from = 0;
+    char tail = 0;
+    const int n = std::sscanf(v, "%d,%d%c", &B, &from, &tail);
+    if (!(n == 1 || n == 2) || B < 0 || B > 100000 || from < 0)
+      fail(std::string("PD39ROUTE_REGION_WALL_H must be B[,from] (B 0-100000, from >= 0; got '") + v + "')");
+    region.wallB = B;
+    region.wallFrom = from;
+  }
   if (const char *v = std::getenv("PD39ROUTE_REGION_DAMP"); v) { // Part 144
     char *end = nullptr;
     const double x = std::strtod(v, &end);
@@ -20830,6 +21096,11 @@ int main(int argc, char **argv) {
       fail(std::string("PD39ROUTE_REGION_COOLDOWN must be an integer 0-1000 (got '") + v + "')");
     region.cooldown = static_cast<int>(x);
   }
+  if (region.wallB > 0 && region.damp > 0) // Part 150: damping discounts edges below the table's minimum
+    fail("PD39ROUTE_REGION_WALL_H cannot be combined with PD39ROUTE_REGION_DAMP (the bound would not hold)");
+  if (region.wallB > 0 && region.evidenceStep > 0) // Part 150: its bound covers paths inside the box only
+    fail("PD39ROUTE_REGION_WALL_H cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE (the box-limit proof "
+         "needs a bound that also holds outside the box)");
   if (region.damp > 0 || region.cooldown > 0)
     std::cerr << "region damping: route-change discount " << region.damp << ", cooldown " << region.cooldown
               << " rounds\n";
