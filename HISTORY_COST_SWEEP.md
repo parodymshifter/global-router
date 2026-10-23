@@ -11373,3 +11373,25 @@ edge of every fixture; a rip-up's block is lowered first, so the table stays a l
 clears the row fixture with it. End-to-end check added (16 of 16 pass). Runs (`p150.jobs`, portfolio off,
 against Part 124's path A): newblue1 and newblue4 at B 8 and 32. Routes are not expected to be byte-identical
 (equal-cost ties can break differently), so judged on overflow and search work.
+
+## Part 151 -- "make room" moves: scoping (not built)
+
+The idea (the user's, Part 147's discussion): free tracks at a hotspot by moving *legal* nets out of the way,
+instead of only searching harder for the overflowed ones. After the region stage's round 0, only overflowed nets
+are rerouted; a legal net that blocks the cheap way through is never asked to move, except by prices rising
+under it. Facts that bear on it: the residue on newblue1 / newblue4 is one hotspot with nets trading places
+(Part 140); room is almost always within 2 edges (the halo) but at high history cost; newblue4's residue is
+pin-bound (98.4% of its tightest cut, Part 91), newblue1's is not (LMgr reached 0 there). Five ways, cheapest
+and most local first:
+
+| | Move | How | Cost to build | Risk / evidence |
+|---|---|---|---|---|
+| 1 | **Lateral shifts** (MaizeRouter's "edge shifting", ICCAD 2007, from memory) | For straight segments of legal nets on full edges next to an overflowed one, try moving the segment 1-k rows (columns) over where the parallel edges have room; keep it if local overflow does not rise and the wire grows by <= a bound | 1-2 days; O(segment length) per try, pattern-level, deterministic | Small and safe; may only shuffle which edge is full. A cheap first probe of whether freed tracks get used. |
+| 2 | **Blocker eviction chains** | Route an overflowed net as if legal-but-full edges were free (its "wanted" path); for each legal net on those edges, reroute it with the wanted edges priced high; then reroute the overflowed net; keep the chain only if total local overflow falls, else revert all of it (supervised, per CLAUDE.md for a new move class) | 2-3 days; 2-6 extra searches per tried net; needs undo of a multi-net chain | The most direct form of the idea and new here. Under present-demand pricing the prices already push nets, but legal nets are never rerouted, so this is a genuinely new move. Best target: newblue1 (not cut-bound). |
+| 3 | **Annulus pressure** | Price edges in a ring around the hotspot higher for legal nets only, then reroute legal nets crossing the ring | ~1 day | Close to virtual capacity with a wider radius, which made newblue1 worse (radius 8: 40 vs 24-30, Part 137). Low expectation. |
+| 4 | **Window re-solve** | Rip up every net inside a window around the hotspot (legal ones too) and re-negotiate it in a new order | ~1 day (the region stage's round 0 does a version of it) | Round 0's blanket reroute multiplied overflow 1.8-30x on spread cases (Part 142); on a single hotspot it is what the stage already starts with. Low novelty. |
+| 5 | **Joint selection on the hotspot** | Generate k candidate routes for each net through the hotspot (overflowed and legal), choose one per net to minimize overflow by integer programming or branch and bound | 1-2 weeks; a solver (an allowed dependency) | The strongest in principle and closest to LMgr's result; the old joint B&B / cluster rescue accepted nothing (Part 56) but ran on a far worse starting point. A cut-bound check first tells whether the hotspot has room at all (newblue4 likely not). |
+
+Suggested order: 1 as a cheap probe (does freeing tracks change anything?), then 2 on newblue1 if 1 shows any
+movement; 5 only if 2 moves newblue1 materially, since it is the expensive one. Each is supervised and off by
+default, with an end-to-end check (Part 149) and runs judged against newblue1's 24-38 spread.
