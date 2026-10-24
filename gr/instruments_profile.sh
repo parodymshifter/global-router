@@ -32,6 +32,17 @@ out=$1
 shift
 [ "${1:-}" = "--" ] && shift
 rm -rf "$out.trace"
+# xctrace leaves its raw kernel trace behind in the temp folder after a recording (5-13 GB for a 90 s CPU Counters
+# window of an 8-thread run; ten of them filled the disk on 2026-10-24, Part 154). Remove the ones this recording
+# made, on any exit, unless some process still has one open.
+tmp=${TMPDIR:-/tmp}
+before=$(ls -d "$tmp"/instruments*.ktrace 2>/dev/null | sort || true)
+cleanup() {
+  for f in $(comm -13 <(echo "$before") <(ls -d "$tmp"/instruments*.ktrace 2>/dev/null | sort)); do
+    lsof -t "$f" >/dev/null 2>&1 || rm -rf "$f"
+  done
+}
+trap cleanup EXIT
 args=(record --template "$template" --output "$out.trace")
 [ -n "$limit" ] && args+=(--time-limit "${limit}s")
 if [ -n "$pid" ]; then

@@ -34,8 +34,12 @@ window instead of recording hours (the router process, not its `run_tracked.sh` 
 cd gr && ./instruments_profile.sh -a "$(pgrep -f '^\./pd39route' | head -1)" -l 60 ~/Code/GlobalRouterRuns/instruments/window
 ```
 
-Open `OUT.trace` in Instruments for the timeline. Traces are large (about 1 MB per second of an
-8-thread run); keep windows short and the traces in the run archive, not the repository.
+Open `OUT.trace` in Instruments for the timeline. Traces are large -- a 90 s CPU Counters window of an
+8-thread run saves 1.2-1.7 GB -- so keep windows short, keep traces in the run archive (not the repository),
+and delete them once their reports are written. While recording, xctrace also writes a raw kernel trace
+(`$TMPDIR/instruments*.ktrace`, 5-13 GB per 90 s window) that it does not remove; `instruments_profile.sh`
+deletes the ones its recording made. Calling `xctrace record` directly leaves them behind: ten of them filled
+the disk on 2026-10-24 (Part 154).
 
 ## Source lines
 
