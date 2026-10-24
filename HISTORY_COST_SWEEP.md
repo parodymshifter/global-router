@@ -11420,3 +11420,12 @@ one shift per net. Self-tests: on an 8 x 6 fixture a boxed-in net stays and the 
 (connected, +2 wire, overflow unchanged, usage equal to the charges); at k 2 the first moves two rows; with no
 overflow nothing is a candidate. End-to-end check added (17 of 17). Runs (`p152.jobs`, portfolio off, vs path A
 30 / 154): newblue1 at k 2 and 3, newblue4 at k 2.
+
+**Part 150, last run:** newblue4 B 32 **148**, fallback expansions 46.15e9 vs 45.77e9 (+0.8%). Verdict stands.
+
+**Part 152 results** (portfolio off; `status=OK`, `gr_verify` = `eval2008.pl`): newblue1 k 2: **30** (wire 4890211
+vs 4891216), k 3 radius 3: **30**, newblue4 k 2: **152** (vs 154). The pass found 1195 / 1562 / 1320 legal nets
+on full edges near the overflow but could shift only **2** in each run (+4 wire): the parallel rows beside the
+hotspot are full along the whole run, so no U fits -- the halo (Part 140: room within 2 edges) is about single
+edges, not whole parallel runs. **Lateral shifts cannot make room here**; freeing tracks needs moves that send
+blockers further away (Part 151's option 2, blocker eviction chains) or a joint choice (option 5). Not adopted.
