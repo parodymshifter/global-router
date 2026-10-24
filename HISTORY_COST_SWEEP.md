@@ -11429,3 +11429,64 @@ on full edges near the overflow but could shift only **2** in each run (+4 wire)
 hotspot are full along the whole run, so no U fits -- the halo (Part 140: room within 2 edges) is about single
 edges, not whole parallel runs. **Lateral shifts cannot make room here**; freeing tracks needs moves that send
 blockers further away (Part 151's option 2, blocker eviction chains) or a joint choice (option 5). Not adopted.
+
+## Part 153 -- the ceiling of parallel search inside one net, measured: below 1x
+
+Question: the region stage is most of a residue run (newblue7: 88%; Part 124) and nothing threads it. Its nets
+cannot be batched as freely as the slow tier's (they crowd one hotspot), so can one search -- one net's
+multi-source A* -- be parallelised instead? Candidate: delta-stepping (Meyer and Sanders), exact, nodes settled
+by buckets of width Delta, each bucket's light-edge relaxations done in parallel phases ended by a barrier.
+Measured its ceiling before building it (the Part 118 rule).
+
+**Instances.** `PD39ROUTE_SEARCH_DUMP=prefix,every,minpops` (trace only, off by default; routes unchanged) writes
+every `every`-th region-stage search with at least `minpops` expansions: the box, its 2D edge costs as the search
+saw them, sources, sinks, the found cost, its expansions and heuristic scale. End-to-end check added (18 of 18).
+Collected from newblue1 (standard + fast08, portfolio off, every 3000th search with >= 20000 pops): 56 instances
+by region round ~100, median box 52416 tiles, median 51638 A* expansions.
+
+**Simulator.** `gr/search_parallel_sim.py`: Dijkstra on each dumped instance must reproduce the found cost
+(**56 of 56 do** -- the dump is the real instance); then delta-stepping is simulated for four Delta (the median edge
+cost, 4x it, C/100, C/20), stopping when the cheapest sink settles, and timed by a model: sequential = A*
+expansions x pop-ns; parallel = per phase, ceil(edges / threads) x edge-ns + sync-us.
+
+**Calibration** (the user asked that every speed idea get Instruments attached, from now on):
+- *Sequential cost per expansion*, Instruments (CPU Counters, 150 s attached to path A's region stage at rounds
+  63-80, `~/Code/GlobalRouterRuns/p153/instr/`) plus each round's arrival time against its reported expansions:
+  **127 ns per expansion** in the window (141 ns over rounds 80-99), fit intercept ~0 s per round; the searching
+  thread spends 98% inclusive in `multiSourceDijkstra` (87.5% self, `wireCostH`/`V` 4.4% each). Two threads were
+  busy: path A and the reclaim path B on its own thread (Part 90).
+- *Where its cycles go*: **useful 24%, back-end (memory) 1%, front-end 24%, discarded (mispredicted) 51%**. The
+  search is not memory-bound -- its boxes fit in cache -- it is branch-bound: heap sift comparisons and the
+  per-neighbour tests are data-dependent and unpredictable.
+- *Parallel costs*, `perf/relax_microbench.cpp` (persistent pool, sense-reversing spin barrier, compare-and-swap
+  minimum on a shared distance array, appends to per-thread buckets; phase time fitted as a + b ceil(F / T)), 8
+  threads: a phase costs **1.3 us at minimum** (200 x 200 box; 3.2 us at 400 x 400), fit **4-6 us** per phase,
+  **15 ns** per edge per thread (200 x 200) to **29 ns** (400 x 400; contention and coherence traffic grow with
+  the array). Single-thread: 7.6-10 ns per edge.
+
+**Result** (56 instances; sequential model 0.42 s):
+
+| Delta | phases | edges | edges per phase | x speedup, optimistic (1.5 us, 15 ns) | x speedup, measured (4 us, 25 ns) |
+|---|---|---|---|---|---|
+| median edge cost | 256913 | 13.1M | 51 | 1.03 | 0.39 |
+| 4 x median | 148770 | 15.4M | 103 | **1.67** | 0.66 |
+| C / 100 | 54997 | 130.0M | 2363 | 1.29 | 0.67 |
+| C / 20 | 38940 | 361.0M | 9271 | 0.57 | 0.33 |
+
+The total edge work at small Delta is about the sequential search's own (3.1M expansions x ~4 edges = 12.5M), so
+work is not the problem; **the phases are too thin**. A phase averages 51-103 relaxations, about 13-26 expansions'
+worth of sequential time, against a barrier that alone costs as much as 10-30 expansions. A wider Delta fattens
+the phases but relaxes nodes many times over (C/20: 29x the work). Break-even for 2x at 4 x median would need a
+whole phase, barrier included, under 1.2 us with zero-cost edges -- below the measured minimum. **Even the
+optimistic calibration tops out at 1.67x on 8 threads, the measured one is a slowdown: not built.**
+
+What the measurement points to instead:
+1. **The sequential search is branch-bound (51% of its cycles discarded)**, not memory-bound. The queue is a
+   `std::priority_queue` (binary heap) under a total order (`priority`, then `index`, then `dist`; pd39route), so
+   any exact priority queue pops in the same order -- a faster one is byte-identical by construction. Candidates:
+   a 4-ary heap with branch-free child selection, or a monotone bucket queue (A* with a consistent heuristic
+   pops non-decreasing f; ties inside a bucket ordered by the same total order). Every stage that searches gains,
+   not only the region stage.
+2. **Parallelism across nets, not inside one** (track A): region-stage reroutes in snapshot batches with carried
+   conflicts, the scheme that worked for the slow tier (Part 118-119) -- its ceiling to be measured the same way
+   (conflict rate, longest task per batch) before building.
