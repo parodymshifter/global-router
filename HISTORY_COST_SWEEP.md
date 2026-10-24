@@ -11490,3 +11490,21 @@ What the measurement points to instead:
 2. **Parallelism across nets, not inside one** (track A): region-stage reroutes in snapshot batches with carried
    conflicts, the scheme that worked for the slow tier (Part 118-119) -- its ceiling to be measured the same way
    (conflict rate, longest task per batch) before building.
+
+**Whole stage.** The collection run finished (`status=OK`, overflow 30 / max 2 / wire 4891216, `gr_verify` =
+`eval2008.pl`, the same as the standard; 4093 s, 629 MB peak resident memory): 188 instances (257 MB). A sample of
+40 across the whole stage (every 4th or 5th), 40 of 40 reproducing the found cost, calibrated as above:
+
+| Delta | phases | edges | edges per A* expansion | x, optimistic (1.5 us, 15 ns) | x, measured (4 us, 25 ns) |
+|---|---|---|---|---|---|
+| median edge cost | 359067 | 68.3M | 20.1 | 0.69 | 0.28 |
+| 4 x median | 197478 | 100.0M | 29.4 | **0.95** | 0.42 |
+| C / 100 | 62151 | 527.9M | 155 | 0.42 | 0.24 |
+| C / 20 | 45088 | 1028.1M | 302 | 0.23 | 0.14 |
+
+Worse than the first 56: later in the stage the edge costs are heavy-tailed (congested edges far above the cheap
+ground around them), so even at the median Delta delta-stepping re-relaxes nodes and does 20 edges per A*
+expansion against the sequential search's ~4 -- 5x the work before any synchronisation is paid. (A* and Dijkstra
+expand the same number of nodes here, 3.40M vs 3.41M: with the WL term decayed the heuristic prunes nothing, so
+dropping it costs delta-stepping nothing; the work comes from re-relaxation.) **Ceiling over the whole stage: 0.95x
+at best, 0.28-0.44x as measured. In-net parallel search is closed for the region stage on this hardware.**
