@@ -3573,11 +3573,14 @@ void testExponentEscalationTracksStackSizeAndRelaxesWithIt() {
 
 // A 4x1 grid, one layer, purely synthetic -- no real net pins involved at
 // all, since branchAndBoundAssign takes precomputed candidates directly.
-// Base horizontal capacity 1 everywhere, with one capacity adjustment
-// raising the rightmost edge (tiles 2-3) to capacity 2.
+// Horizontal capacity 1 on edges 0-1 and 1-2 and 2 on the rightmost edge
+// (tiles 2-3). (Part 155: the format's adjustments only reduce capacity, so
+// the default is 2 and the two left edges are adjusted down to 1 -- the same
+// capacities the fixture first gave by raising the rightmost edge, which the
+// strict reader rejects. A 4x1 grid has no vertical edges.)
 const char *kJointBnbGr = R"(grid 4 1 1
-vertical capacity 1
-horizontal capacity 1
+vertical capacity 0
+horizontal capacity 2
 minimum width 1
 minimum spacing 0
 via spacing 0
@@ -3586,8 +3589,9 @@ num net 1
 dummy 0 2 1
 5 5 1
 15 5 1
-1
-2 0 1 3 0 1 2
+2
+0 0 1 1 0 1 1
+1 0 1 2 0 1 1
 )";
 
 // The decisive proof of the solve method itself: three "nets," each with

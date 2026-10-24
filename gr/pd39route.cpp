@@ -1398,6 +1398,8 @@
 #include <sstream>
 #include <tuple>
 #include <cstdio>
+#include <cstdint>
+#include <cstring>
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -2945,12 +2947,124 @@ void routeNetFast(const RoutingGrid &g, Prices &prices, Usage &usage, const Laye
 // and A* fixes that brought it from 105s to 20s per round on adaptec1).
 // ---------------------------------------------------------------------------
 
+// Part 154: the search queue. A 4-ary min-heap with decrease-key, ordered by (priority, index) -- the same total
+// order the std::priority_queue it replaces used (priority, then index, then dist) -- so the searches expand the
+// same nodes in the same order:
+//  - the old queue was lazy: an improved node was pushed again and its older, costlier entries popped later and
+//    were skipped as stale (37% of all pops on real region-stage searches). Here a node holds one entry, moved up
+//    in place when its distance improves (`pos`, kept in the SearchRegion), so the minimum entry is always the
+//    old queue's minimum live one, and stale entries never pop;
+//  - two entries with equal priority and index are the same node at the same distance; whichever pops first, the
+//    search does the same thing;
+//  - a node pushed again at an unchanged distance -- only a source listed twice; relaxations push strictly
+//    shorter distances -- gets a second entry (`ghost`, not position-tracked), as the old queue had: the search
+//    expanded it twice, and the expansion count drives the work-gated stops.
+// Why: Instruments found the search branch-bound (Part 153: 51% of its cycles discarded on mispredicted
+// branches, 1% waiting on memory), and the old queue took 58% of its time (Part 154). Here the order is one
+// integer key -- the priority's bits made order-preserving, then the index -- the smallest of four children is
+// picked by selects, not branches, and the storage is kept across searches.
+struct SearchHeap {
+  struct Item {
+    double priority, dist;
+    int index;
+  };
+  struct Entry {
+    uint64_t key; // orderedBits(priority)
+    double dist;
+    int index;
+    int ghost; // 1: a second entry for a node already in the heap at the same distance (not in pos)
+  };
+  std::vector<Entry> h;
+  int *pos = nullptr; // pos[node]: its entry's slot, -1 if none; valid for nodes the search has touched
+
+  static uint64_t orderedBits(double p) {
+    p += 0.0; // -0.0 -> +0.0: they compare equal as doubles
+    uint64_t u;
+    std::memcpy(&u, &p, sizeof u);
+    return u ^ ((0 - (u >> 63)) | 0x8000000000000000ULL); // negatives: flip all bits; others: flip the sign bit
+  }
+  static double fromOrdered(uint64_t u) {
+    u = (u >> 63) ? (u ^ 0x8000000000000000ULL) : ~u;
+    double p;
+    std::memcpy(&p, &u, sizeof p);
+    return p;
+  }
+  static bool less(const Entry &a, const Entry &b) {
+    return (a.key < b.key) | ((a.key == b.key) & (a.index < b.index));
+  }
+  bool empty() const { return h.empty(); }
+  size_t size() const { return h.size(); }
+  void start(int *positions) { // a new search: pos must read -1 for every node it has not pushed
+    h.clear();
+    pos = positions;
+  }
+  Item top() const { return {fromOrdered(h[0].key), h[0].dist, h[0].index}; }
+  void place(size_t i, const Entry &e) {
+    h[i] = e;
+    if (!e.ghost)
+      pos[e.index] = static_cast<int>(i);
+  }
+  void push(const Item &it) {
+    Entry e{orderedBits(it.priority), it.dist, it.index, 0};
+    const int at = pos[it.index];
+    size_t i;
+    if (at >= 0 && h[at].dist != it.dist) {
+      i = static_cast<size_t>(at); // decrease-key: a strictly shorter distance, so a key no larger
+    } else {
+      e.ghost = at >= 0;
+      i = h.size();
+      h.push_back(e);
+    }
+    while (i > 0) {
+      const size_t parent = (i - 1) >> 2;
+      if (!less(e, h[parent]))
+        break;
+      place(i, h[parent]);
+      i = parent;
+    }
+    place(i, e);
+  }
+  void pop() {
+    if (!h[0].ghost)
+      pos[h[0].index] = -1;
+    const Entry last = h.back();
+    h.pop_back();
+    const size_t n = h.size();
+    if (n == 0)
+      return;
+    size_t i = 0;
+    for (;;) {
+      const size_t c = 4 * i + 1;
+      if (c >= n)
+        break;
+      size_t best;
+      if (c + 4 <= n) {
+        const size_t b01 = less(h[c + 1], h[c]) ? c + 1 : c;
+        const size_t b23 = less(h[c + 3], h[c + 2]) ? c + 3 : c + 2;
+        best = less(h[b23], h[b01]) ? b23 : b01;
+      } else {
+        best = c;
+        for (size_t k = c + 1; k < n; ++k)
+          best = less(h[k], h[best]) ? k : best;
+      }
+      if (!less(h[best], last))
+        break;
+      place(i, h[best]);
+      i = best;
+    }
+    place(i, last);
+  }
+};
+
 struct SearchRegion {
   int x0 = 0, y0 = 0, w = 0, h = 0, nLayers = 0;
   std::vector<double> dist;
   std::vector<int> parent;
   std::vector<int> stamp;
   int generation = 0;
+  SearchHeap heap;               // Part 154: the search queue's storage, kept across searches
+  std::vector<int> heapPos;      // Part 154: the queue's slot of each node (-1: none), reset with dist
+  std::vector<int> sinkOf, sinkStamp; // Part 154: which sink a tile is, valid where sinkStamp == generation
 
   void reset(int x0_, int y0_, int w_, int h_, int nLayers_) {
     x0 = x0_;
@@ -2963,6 +3077,9 @@ struct SearchRegion {
       dist.resize(needed);
       parent.resize(needed);
       stamp.resize(needed, -1);
+      sinkOf.resize(needed);
+      sinkStamp.resize(needed, -1);
+      heapPos.resize(needed, -1);
     }
     ++generation;
   }
@@ -2975,12 +3092,24 @@ struct SearchRegion {
     y = y0 + rem / w;
     x = x0 + rem % w;
   }
+  // Part 154: coordsOf for a one-layer region (the 2D searches), one division
+  void coordsOf2D(int i, int &x, int &y) const {
+    const int q = i / w;
+    y = y0 + q;
+    x = x0 + (i - q * w);
+  }
+  void markSink(int i, int s) {
+    sinkOf[i] = s;
+    sinkStamp[i] = generation;
+  }
+  int sinkAt(int i) const { return sinkStamp[i] == generation ? sinkOf[i] : -1; }
 
   double distAt(int i) {
     if (stamp[i] != generation) {
       stamp[i] = generation;
       dist[i] = std::numeric_limits<double>::infinity();
       parent[i] = -1;
+      heapPos[i] = -1;
     }
     return dist[i];
   }
@@ -3015,22 +3144,10 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
   auto heuristic = [&](int x, int y) {
     return hScale * static_cast<double>(std::abs(x - p2.x) + std::abs(y - p2.y));
   };
-  struct QueueEntry {
-    double priority, dist;
-    int index;
-  };
-  struct Cmp {
-    bool operator()(const QueueEntry &a, const QueueEntry &b) const {
-      // pd39route: a total order, so ties leave the queue the same way on
-      // every standard library.
-      if (a.priority != b.priority)
-        return a.priority > b.priority;
-      if (a.index != b.index)
-        return a.index > b.index;
-      return a.dist > b.dist;
-    }
-  };
-  std::priority_queue<QueueEntry, std::vector<QueueEntry>, Cmp> pq;
+  // pd39route: a total order, so ties leave the queue the same way on every standard library; Part 154: the
+  // same order in a faster heap (SearchHeap).
+  SearchHeap &pq = region.heap;
+  pq.start(region.heapPos.data());
 
   // vroute's p1Layer<0 ("reachable at any layer") case collapses to a
   // single push at the one synthetic layer -- there is no "any layer" to
@@ -3038,6 +3155,7 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
   // own convention) no longer changes anything.
   {
     int i = region.idx(p1.x, p1.y, 0);
+    region.distAt(i); // Part 154: a node's queue slot is valid once touched
     region.setDist(i, 0.0, -1);
     pq.push({heuristic(p1.x, p1.y), 0.0, i});
   }
@@ -3046,7 +3164,7 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
   DijkstraResult result;
   int foundIdx = -1;
   while (!pq.empty()) {
-    QueueEntry top = pq.top();
+    const SearchHeap::Item top = pq.top();
     pq.pop();
     double d = top.dist;
     int i = top.index;
@@ -3382,10 +3500,10 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
   // O(1) "is this tile a sink, and which one" lookup, scoped to this call
   // only -- sinks can number in the hundreds for a large net, and a linear
   // scan per popped node would make this quadratic in the net's pin count.
-  std::unordered_map<long long, int> sinkAt;
-  auto key = [](int x, int y) { return static_cast<long long>(x) * 1000000 + y; };
+  // Part 154: a dense per-tile mark in the region instead of a hash map (later duplicates win, as they did).
   for (size_t i = 0; i < sinks.size(); ++i)
-    sinkAt[key(sinks[i].x, sinks[i].y)] = static_cast<int>(i);
+    if (region.inRegion(sinks[i].x, sinks[i].y))
+      region.markSink(region.idx(sinks[i].x, sinks[i].y, 0), static_cast<int>(i));
 
   const double hScale = heuristicScale(prices);
   // pd6route: boxHeuristic uses the Manhattan distance to the sinks'
@@ -3432,22 +3550,10 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
       best = std::min(best, std::abs(x - s.x) + std::abs(y - s.y));
     return hScale * static_cast<double>(best);
   };
-  struct QueueEntry {
-    double priority, dist;
-    int index;
-  };
-  struct Cmp {
-    bool operator()(const QueueEntry &a, const QueueEntry &b) const {
-      // pd39route: a total order, so ties leave the queue the same way on
-      // every standard library.
-      if (a.priority != b.priority)
-        return a.priority > b.priority;
-      if (a.index != b.index)
-        return a.index > b.index;
-      return a.dist > b.dist;
-    }
-  };
-  std::priority_queue<QueueEntry, std::vector<QueueEntry>, Cmp> pq;
+  // pd39route: a total order, so ties leave the queue the same way on every standard library; Part 154: the
+  // same order in a faster heap (SearchHeap).
+  SearchHeap &pq = region.heap;
+  pq.start(region.heapPos.data());
 
   for (const PathNode &s : sources) {
     if (!region.inRegion(s.x, s.y))
@@ -3457,6 +3563,7 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
     // no "any layer" to search among anymore.
     {
       int i = region.idx(s.x, s.y, 0);
+      region.distAt(i); // Part 154: a node's queue slot is valid once touched
       region.setDist(i, 0.0, -1);
       pq.push({heuristic(s.x, s.y), 0.0, i});
     }
@@ -3470,18 +3577,19 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
   const bool growX0 = x0 > 0, growX1 = x1 < g.nx - 1, growY0 = y0 > 0, growY1 = y1 < g.ny - 1;
   double minEdgeF = std::numeric_limits<double>::infinity();
   while (!pq.empty()) {
-    QueueEntry top = pq.top();
+    const SearchHeap::Item top = pq.top();
     pq.pop();
     double d = top.dist;
     int i = top.index;
     if (d > region.distAt(i))
       continue;
     ++gSearchPops;
-    int x, y, l;
-    region.coordsOf(i, x, y, l);
-    if (auto it = sinkAt.find(key(x, y)); it != sinkAt.end()) {
+    int x, y;
+    const int l = 0;
+    region.coordsOf2D(i, x, y);
+    if (const int sk = region.sinkAt(i); sk >= 0) {
       foundIdx = i;
-      result.sinkIndex = it->second;
+      result.sinkIndex = sk;
       break;
     }
     if ((x == x0 && growX0) || (x == x1 && growX1) || (y == y0 && growY0) || (y == y1 && growY1))
@@ -18697,6 +18805,111 @@ void testLateralShifts() {
 // finds, and expands fewer nodes in all. (2) Consistency, checked edge by edge: h(u) <= cost(u, v) + h(v) with h =
 // max(Manhattan bound, coarse bound). (3) After coarseLower, a boundary's minimum is at most the cost its edge
 // has once the net's usage is removed. (4) The region stage with the bound clears the row fixture; the key parses.
+// Part 154: SearchHeap expands what the old lazy std::priority_queue did. A lockstep search on random graphs: the
+// old queue (comparator: priority, then index, then dist; stale entries skipped) against SearchHeap, sharing one
+// distance array; each expansion relaxes random neighbours (strictly shorter distances only, as the searches do),
+// with priorities from a coarse random heuristic so ties are common, and sources listed twice. Fails if the
+// sequence of expanded (node, priority) pairs differs, or the count of expansions does (the work-gated stops
+// count them); also checks the priority encoding round-trips, -0.0 and negatives included.
+void testSearchHeapMatchesPriorityQueue() {
+  struct QE {
+    double priority, dist;
+    int index;
+  };
+  struct Cmp {
+    bool operator()(const QE &a, const QE &b) const {
+      if (a.priority != b.priority)
+        return a.priority > b.priority;
+      if (a.index != b.index)
+        return a.index > b.index;
+      return a.dist > b.dist;
+    }
+  };
+  uint64_t seed = 12345;
+  auto next = [&]() {
+    uint64_t z = (seed += 0x9e3779b97f4a7c15ULL);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+  };
+  int mismatches = 0;
+  long long expansions = 0;
+  for (int trial = 0; trial < 300; ++trial) {
+    const int n = 20 + static_cast<int>(next() % 400);
+    std::vector<double> hv(n), distRef(n, std::numeric_limits<double>::infinity()), distNew = distRef;
+    for (double &v : hv)
+      v = static_cast<double>(next() % 4) * 0.5;
+    std::vector<int> pos(n, -1);
+    std::priority_queue<QE, std::vector<QE>, Cmp> ref;
+    SearchHeap hp;
+    hp.start(pos.data());
+    const int ns = 1 + static_cast<int>(next() % 4);
+    for (int k = 0; k < ns; ++k) {
+      const int v = static_cast<int>(next() % std::min(n, 6)); // small range: sources repeat
+      distRef[v] = distNew[v] = 0.0;
+      ref.push({hv[v], 0.0, v});
+      hp.push({hv[v], 0.0, v});
+    }
+    long long eRef = 0, eNew = 0;
+    for (;;) {
+      QE a{0, 0, -1};
+      while (!ref.empty()) {
+        a = ref.top();
+        ref.pop();
+        if (a.dist > distRef[a.index]) {
+          a.index = -1;
+          continue;
+        }
+        break;
+      }
+      SearchHeap::Item b{0, 0, -1};
+      while (!hp.empty()) {
+        b = hp.top();
+        hp.pop();
+        if (b.dist > distNew[b.index]) {
+          b.index = -1;
+          continue;
+        }
+        break;
+      }
+      if (a.index != b.index || (a.index >= 0 && !(a.priority == b.priority))) {
+        ++mismatches;
+        break;
+      }
+      if (a.index < 0)
+        break;
+      ++eRef, ++eNew;
+      const int v = a.index;
+      const int deg = static_cast<int>(next() % 5);
+      for (int k = 0; k < deg; ++k) {
+        const int u = static_cast<int>(next() % n);
+        const double w = static_cast<double>(next() % 3); // zero-cost edges too: ties and equal f
+        const double nd = distRef[v] + w;
+        if (nd < distRef[u]) {
+          distRef[u] = distNew[u] = nd;
+          ref.push({nd + hv[u], nd, u});
+          hp.push({nd + hv[u], nd, u});
+        }
+      }
+    }
+    expansions += eNew;
+    if (eRef != eNew || !ref.empty() != !hp.empty())
+      ++mismatches;
+  }
+  int decodeBad = 0;
+  const double specials[] = {0.0, -0.0, -1.5, 1e-300, 3.0, std::numeric_limits<double>::infinity(), 1e300};
+  for (double p : specials)
+    if (SearchHeap::fromOrdered(SearchHeap::orderedBits(p)) != p)
+      ++decodeBad;
+  for (double p : specials)
+    for (double q : specials)
+      if ((SearchHeap::orderedBits(p) < SearchHeap::orderedBits(q)) != (p < q))
+        ++decodeBad;
+  check(mismatches == 0, "SearchHeap expands the old queue's nodes in its order (" + std::to_string(mismatches) +
+                             " mismatching trials, " + std::to_string(expansions) + " expansions)");
+  check(decodeBad == 0, "SearchHeap's priority key keeps the order and decodes exactly");
+}
+
 void testWallAwareHeuristic() {
   std::string gr = "grid 40 40 2\nvertical capacity 0 20\nhorizontal capacity 20 0\n"
                    "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
@@ -20595,6 +20808,7 @@ int run() {
   testAnnealedRefinement();
   testSlowPlateauStop();
   testWallAwareHeuristic();
+  testSearchHeapMatchesPriorityQueue();
   testLateralShifts();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();

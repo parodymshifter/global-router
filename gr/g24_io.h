@@ -188,10 +188,75 @@ inline void notePinTiming(Net &n, bool hasValue, double value) {
   n.timing.push_back(hasValue ? static_cast<float>(value) : std::numeric_limits<float>::quiet_NaN());
 }
 
+// Part 155 (HISTORY_COST_SWEEP.md): the strict checks both readers share, so the iostream readers (g24_verify)
+// and the FastText ones (the routers) accept exactly the same files.
+inline bool blankText(const std::string &t) {
+  for (char c : t)
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '\v' && c != '\f')
+      return false;
+  return true;
+}
+inline bool costOk(double v) { return std::isfinite(v) && v >= 0; }
+
+// The .cap values after they are read: costs and weights finite and >= 0, pitches >= 1 (a zero-width GCell has
+// no length), every layer's direction 0 or 1 (layer 0 included) and minimum length finite and >= 0.
+inline bool checkResourceHeader(const Resources &r, std::string &err) {
+  if (!costOk(r.unitLength) || !costOk(r.unitVia)) {
+    err = "bad .cap cost line (the wire and via unit costs must be finite and >= 0)";
+    return false;
+  }
+  for (int z = 0; z < r.nLayers; ++z)
+    if (!costOk(r.overflowCost[static_cast<size_t>(z)])) {
+      err = "bad .cap overflow costs (layer " + std::to_string(z) + "'s must be finite and >= 0)";
+      return false;
+    }
+  for (int k = 0; k < 4; ++k)
+    if (!std::isfinite(r.ppaWeight[k])) {
+      err = "bad .cap cost line (a PPA weight is not finite)";
+      return false;
+    }
+  return true;
+}
+inline bool checkPitch(long long p, const char *which, size_t i, std::string &err) {
+  if (p >= 1)
+    return true;
+  err = std::string("bad .cap ") + which + " pitch (" + std::to_string(p) + " at GCell " + std::to_string(i) +
+        "; pitches must be >= 1)";
+  return false;
+}
+inline bool checkLayerLine(const Layer &L, int z, std::string &err) {
+  if (L.dir != 0 && L.dir != 1) {
+    err = "bad .cap layer line for layer " + std::to_string(z) + " (direction " + std::to_string(L.dir) +
+          "; 0 horizontal or 1 vertical)";
+    return false;
+  }
+  if (!costOk(L.minLength)) {
+    err = "bad .cap layer line for layer " + std::to_string(z) + " (minimum length must be finite and >= 0)";
+    return false;
+  }
+  return true;
+}
+inline bool checkCapacity(double c, int z, int x, int y, std::string &err) {
+  if (costOk(c))
+    return true;
+  err = "bad .cap capacity on layer " + std::to_string(z) + " at GCell (" + std::to_string(x) + ", " +
+        std::to_string(y) + "): capacities must be finite and >= 0";
+  return false;
+}
+
 inline bool readResources(std::istream &in, Resources &r, std::string &err) {
   if (!(in >> r.nLayers >> r.xSize >> r.ySize) || r.nLayers < 2 || r.xSize < 1 || r.ySize < 1) {
     err = "bad .cap header (need nLayers >= 2, xSize >= 1, ySize >= 1)";
     return false;
+  }
+  {
+    std::string rest;
+    std::getline(in, rest);
+    if (!blankText(rest)) {
+      err = "bad .cap header (unexpected '" + trimEnd(rest.substr(rest.find_first_not_of(" \t"))) +
+            "' after nLayers xSize ySize)";
+      return false;
+    }
   }
   if (!(in >> r.unitLength >> r.unitVia)) {
     err = "bad .cap cost line";
@@ -206,31 +271,35 @@ inline bool readResources(std::istream &in, Resources &r, std::string &err) {
   {
     std::string rest;
     std::getline(in, rest);
-    if (!parsePpaWeights(rest, r, err))
+    if (!parsePpaWeights(rest, r, err) || !checkResourceHeader(r, err))
       return false;
   }
   r.xPitch.resize(r.xSize - 1);
   r.yPitch.resize(r.ySize - 1);
   for (long long &p : r.xPitch)
-    if (!(in >> p) || p < 0) {
+    if (!(in >> p)) {
       err = "bad .cap horizontal pitch";
       return false;
-    }
+    } else if (!checkPitch(p, "horizontal", static_cast<size_t>(&p - r.xPitch.data()), err))
+      return false;
   for (long long &p : r.yPitch)
-    if (!(in >> p) || p < 0) {
+    if (!(in >> p)) {
       err = "bad .cap vertical pitch";
       return false;
-    }
+    } else if (!checkPitch(p, "vertical", static_cast<size_t>(&p - r.yPitch.data()), err))
+      return false;
   if (!setGcellDbu(r, err))
     return false;
   r.layers.resize(r.nLayers);
   r.cap.assign(static_cast<size_t>(r.nLayers) * r.ySize * r.xSize, 0.0);
   for (int z = 0; z < r.nLayers; ++z) {
     Layer &L = r.layers[z];
-    if (!(in >> L.name >> L.dir >> L.minLength) || (z > 0 && L.dir != 0 && L.dir != 1)) {
+    if (!(in >> L.name >> L.dir >> L.minLength)) {
       err = "bad .cap layer line for layer " + std::to_string(z);
       return false;
     }
+    if (!checkLayerLine(L, z, err))
+      return false;
     for (int y = 0; y < r.ySize; ++y)
       for (int x = 0; x < r.xSize; ++x) {
         double c;
@@ -238,11 +307,173 @@ inline bool readResources(std::istream &in, Resources &r, std::string &err) {
           err = "short capacity table on layer " + std::to_string(z);
           return false;
         }
+        if (!checkCapacity(c, z, x, y, err))
+          return false;
         r.cap[(static_cast<size_t>(z) * r.ySize + y) * r.xSize + x] = c;
       }
   }
+  std::string extra;
+  if (in >> extra) {
+    err = "bad .cap: unexpected '" + extra + "' after the last layer's capacity table";
+    return false;
+  }
   return true;
 }
+
+// Part 155: the .net grammar, strict, shared by NetStream and FastNetStream (so the verifier and the routers
+// accept the same files). A net is its name on a line of its own (the evaluator's rule: no '(' or ')' and more
+// than one character), then a line "(", then one line per pin -- "[(z, x, y), ...]", after "pin_name, value, "
+// in ISPD 2025 -- then a line ")". Blank lines are allowed between records. Rejected, with the line: any other
+// line; a pin outside a net's "( )"; a net with no pins; an access list that is not exactly integer (z, x, y)
+// tuples separated by commas inside "[ ]" (the old readers stopped at the first value that did not fit and kept
+// what came before); a file ending inside a net; a net name used twice (found at the end of the file:
+// names are compared by a 128-bit hash, so a large netlist's names need not be kept).
+inline bool parseAccessList(const std::string &l, size_t i, std::vector<Access> &pin, std::string &why) {
+  const size_t n = l.size();
+  auto ws = [&]() {
+    while (i < n && (l[i] == ' ' || l[i] == '\t'))
+      ++i;
+  };
+  auto num = [&](int &v) {
+    ws();
+    bool neg = false;
+    if (i < n && (l[i] == '+' || l[i] == '-')) {
+      neg = l[i] == '-';
+      ++i;
+    }
+    if (i >= n || l[i] < '0' || l[i] > '9')
+      return false;
+    long long r = 0;
+    while (i < n && l[i] >= '0' && l[i] <= '9') {
+      r = r * 10 + (l[i++] - '0');
+      if (r > INT_MAX)
+        return false;
+    }
+    v = static_cast<int>(neg ? -r : r);
+    return true;
+  };
+  auto lit = [&](char c) {
+    ws();
+    if (i < n && l[i] == c) {
+      ++i;
+      return true;
+    }
+    return false;
+  };
+  if (!lit('[')) {
+    why = "an access list must start with '['";
+    return false;
+  }
+  if (lit(']')) {
+    why = "pin with no access points";
+    return false;
+  }
+  for (;;) {
+    int x, y, z;
+    if (!lit('(') || !num(z) || !lit(',') || !num(x) || !lit(',') || !num(y) || !lit(')')) {
+      why = "malformed access point (expected '(z, x, y)' with integers) at column " + std::to_string(i + 1);
+      return false;
+    }
+    pin.push_back({x, y, z});
+    if (lit(','))
+      continue;
+    if (lit(']'))
+      break;
+    why = "expected ',' or ']' after an access point at column " + std::to_string(i + 1);
+    return false;
+  }
+  ws();
+  if (i != n) {
+    why = "unexpected text after the access list at column " + std::to_string(i + 1);
+    return false;
+  }
+  return true;
+}
+
+class NetGrammar {
+public:
+  // One line (trailing whitespace already trimmed): 1 when `out` is complete (its ")"), 0 to go on, -1 on an
+  // error (err set).
+  int line(const std::string &l, Net &out, std::string &err) {
+    ++lineNo_;
+    size_t b = 0;
+    while (b < l.size() && (l[b] == ' ' || l[b] == '\t'))
+      ++b;
+    if (b == l.size())
+      return 0; // blank
+    const bool paren = l.find('(') != std::string::npos || l.find(')') != std::string::npos;
+    if (state_ == kName) {
+      if (paren || l.length() <= 1)
+        return fault(err, l.find('[') != std::string::npos ? "pin line before any net name"
+                                                            : "expected a net name, found '" + l + "'");
+      out.name = l;
+      out.pins.clear();
+      out.timing.clear();
+      nameLine_ = lineNo_;
+      state_ = kOpen;
+      return 0;
+    }
+    if (state_ == kOpen) {
+      if (l.compare(b, std::string::npos, "(") != 0)
+        return fault(err, "net " + out.name + ": expected '(' after the net name, found '" + l + "'");
+      state_ = kPins;
+      return 0;
+    }
+    if (l.compare(b, std::string::npos, ")") == 0) {
+      if (out.pins.empty())
+        return fault(err, "net " + out.name + " has no pins");
+      names_.push_back({hashName(out.name), nameLine_});
+      state_ = kName;
+      return 1;
+    }
+    if (l.find('[') == std::string::npos)
+      return fault(err, "net " + out.name + ": expected a pin line or ')', found '" + l + "'");
+    bool hasValue = false;
+    double value = 0;
+    const size_t from = pinLinePrefix(l, hasValue, value); // ISPD 2025: skip "name, value, "
+    std::vector<Access> pin;
+    std::string why;
+    if (!parseAccessList(l, from, pin, why))
+      return fault(err, "net " + out.name + ": " + why);
+    out.pins.push_back(std::move(pin));
+    notePinTiming(out, hasValue, value);
+    return 0;
+  }
+  // At the end of the file: false (err set) if it ends inside a net or a name was used twice.
+  bool end(const Net &out, std::string &err) {
+    if (state_ != kName) {
+      err = "line " + std::to_string(lineNo_) + ": the file ends inside net " + out.name;
+      return false;
+    }
+    std::sort(names_.begin(), names_.end());
+    for (size_t k = 1; k < names_.size(); ++k)
+      if (names_[k].first == names_[k - 1].first) {
+        err = "the net names on lines " + std::to_string(names_[k - 1].second) + " and " +
+              std::to_string(names_[k].second) + " are the same";
+        return false;
+      }
+    return true;
+  }
+
+private:
+  using Hash = std::pair<uint64_t, uint64_t>;
+  static Hash hashName(const std::string &s) {
+    uint64_t a = 1469598103934665603ULL, b = 0x9e3779b97f4a7c15ULL;
+    for (unsigned char c : s) {
+      a = (a ^ c) * 1099511628211ULL;
+      b = (b + c) * 0xff51afd7ed558ccdULL;
+      b ^= b >> 29;
+    }
+    return {a, b ^ (s.size() * 0xc4ceb9fe1a85ec53ULL)};
+  }
+  int fault(std::string &err, const std::string &what) {
+    err = "line " + std::to_string(lineNo_) + ": " + what;
+    return -1;
+  }
+  enum State { kName, kOpen, kPins } state_ = kName;
+  long long lineNo_ = 0, nameLine_ = 0;
+  std::vector<std::pair<Hash, long long>> names_;
+};
 
 // The evaluator's rule: a line with neither '(' nor ')' and more than one
 // character starts a net; a line with '[' is one pin, "(z, x, y)" access
@@ -251,60 +482,21 @@ inline bool readResources(std::istream &in, Resources &r, std::string &err) {
 class NetStream {
 public:
   explicit NetStream(std::istream &in) : in_(in) {}
-  // The next net into `out`; false at the end (err set on a format error).
+  // The next net into `out`; false at the end (err set on a format error; Part 155: NetGrammar's rules).
   bool next(Net &out, std::string &err) {
-    out.name.clear();
-    out.pins.clear();
     std::string line;
-    bool have = false;
-    if (pendingName_) {
-      out.name = std::move(pending_);
-      pendingName_ = false;
-      have = true;
-    }
     while (std::getline(in_, line)) {
-      line = trimEnd(line);
-      if (line.find('(') == std::string::npos && line.find(')') == std::string::npos && line.length() > 1) {
-        if (have) {
-          pending_ = line;
-          pendingName_ = true;
-          return true;
-        }
-        out.name = line;
-        have = true;
-      } else if (line.find('[') != std::string::npos) {
-        if (!have) {
-          err = "pin line before any net name";
-          return false;
-        }
-        bool hasValue = false;
-        double value = 0;
-        size_t from = pinLinePrefix(line, hasValue, value); // ISPD 2025: skip "name, value, "
-        if (from > 0)
-          line.erase(0, from);
-        for (char &c : line)
-          if (c == '(' || c == ')' || c == ',' || c == '[' || c == ']')
-            c = ' ';
-        std::istringstream ss(line);
-        std::vector<Access> pin;
-        int x, y, z;
-        while (ss >> z >> x >> y)
-          pin.push_back({x, y, z});
-        if (pin.empty()) {
-          err = "net " + out.name + ": pin with no access points";
-          return false;
-        }
-        out.pins.push_back(pin);
-        notePinTiming(out, hasValue, value);
-      }
+      const int r = grammar_.line(trimEnd(line), out, err);
+      if (r != 0)
+        return r > 0;
     }
-    return have;
+    grammar_.end(out, err);
+    return false;
   }
 
 private:
   std::istream &in_;
-  std::string pending_;
-  bool pendingName_ = false;
+  NetGrammar grammar_;
 };
 
 // pd37route (HISTORY_COST_SWEEP.md Part 117): readers for the same files
@@ -442,6 +634,15 @@ inline bool readResourcesFast(FastText &in, Resources &r, std::string &err) {
     err = "bad .cap header (need nLayers >= 2, xSize >= 1, ySize >= 1)";
     return false;
   }
+  {
+    std::string rest;
+    in.getline(rest);
+    if (!blankText(rest)) {
+      err = "bad .cap header (unexpected '" + trimEnd(rest.substr(rest.find_first_not_of(" \t"))) +
+            "' after nLayers xSize ySize)";
+      return false;
+    }
+  }
   if (!in.readDouble(r.unitLength) || !in.readDouble(r.unitVia)) {
     err = "bad .cap cost line";
     return false;
@@ -455,32 +656,35 @@ inline bool readResourcesFast(FastText &in, Resources &r, std::string &err) {
   {
     std::string rest;
     in.getline(rest);
-    if (!parsePpaWeights(rest, r, err))
+    if (!parsePpaWeights(rest, r, err) || !checkResourceHeader(r, err))
       return false;
   }
   r.xPitch.resize(r.xSize - 1);
   r.yPitch.resize(r.ySize - 1);
   for (long long &p : r.xPitch)
-    if (!in.readInt(p) || p < 0) {
+    if (!in.readInt(p)) {
       err = "bad .cap horizontal pitch";
       return false;
-    }
+    } else if (!checkPitch(p, "horizontal", static_cast<size_t>(&p - r.xPitch.data()), err))
+      return false;
   for (long long &p : r.yPitch)
-    if (!in.readInt(p) || p < 0) {
+    if (!in.readInt(p)) {
       err = "bad .cap vertical pitch";
       return false;
-    }
+    } else if (!checkPitch(p, "vertical", static_cast<size_t>(&p - r.yPitch.data()), err))
+      return false;
   if (!setGcellDbu(r, err))
     return false;
   r.layers.resize(r.nLayers);
   r.cap.assign(static_cast<size_t>(r.nLayers) * r.ySize * r.xSize, 0.0);
   for (int z = 0; z < r.nLayers; ++z) {
     Layer &L = r.layers[z];
-    if (!in.readToken(L.name) || !in.readInt(L.dir) || !in.readDouble(L.minLength) ||
-        (z > 0 && L.dir != 0 && L.dir != 1)) {
+    if (!in.readToken(L.name) || !in.readInt(L.dir) || !in.readDouble(L.minLength)) {
       err = "bad .cap layer line for layer " + std::to_string(z);
       return false;
     }
+    if (!checkLayerLine(L, z, err))
+      return false;
     for (int y = 0; y < r.ySize; ++y)
       for (int x = 0; x < r.xSize; ++x) {
         double c;
@@ -488,86 +692,38 @@ inline bool readResourcesFast(FastText &in, Resources &r, std::string &err) {
           err = "short capacity table on layer " + std::to_string(z);
           return false;
         }
+        if (!checkCapacity(c, z, x, y, err))
+          return false;
         r.cap[(static_cast<size_t>(z) * r.ySize + y) * r.xSize + x] = c;
       }
+  }
+  std::string extra;
+  if (in.readToken(extra)) {
+    err = "bad .cap: unexpected '" + extra + "' after the last layer's capacity table";
+    return false;
   }
   return true;
 }
 
-// NetStream over FastText: the same lines, rules and pins; a pin line's
-// access tuples are read as `while (ss >> z >> x >> y)` reads them.
+// NetStream over FastText: the same lines, through the same NetGrammar (Part 155).
 class FastNetStream {
 public:
   explicit FastNetStream(FastText &in) : in_(in) {}
   bool next(Net &out, std::string &err) {
-    out.name.clear();
-    out.pins.clear();
-    bool have = false;
-    if (pendingName_) {
-      out.name = std::move(pending_);
-      pendingName_ = false;
-      have = true;
-    }
     while (in_.getline(line_)) {
       line_ = trimEnd(std::move(line_));
-      if (line_.find('(') == std::string::npos && line_.find(')') == std::string::npos && line_.length() > 1) {
-        if (have) {
-          pending_ = line_;
-          pendingName_ = true;
-          return true;
-        }
-        out.name = line_;
-        have = true;
-      } else if (line_.find('[') != std::string::npos) {
-        if (!have) {
-          err = "pin line before any net name";
-          return false;
-        }
-        std::vector<Access> pin;
-        bool hasValue = false;
-        double value = 0;
-        size_t i = pinLinePrefix(line_, hasValue, value); // ISPD 2025: skip "name, value, "
-        const size_t n = line_.size();
-        auto sep = [](char c) {
-          return c == '(' || c == ')' || c == ',' || c == '[' || c == ']' || c == ' ' || c == '\t' || c == '\n' ||
-                 c == '\r' || c == '\v' || c == '\f';
-        };
-        auto num = [&](int &v) {
-          while (i < n && sep(line_[i]))
-            ++i;
-          bool neg = false;
-          if (i < n && (line_[i] == '+' || line_[i] == '-')) {
-            neg = line_[i] == '-';
-            ++i;
-          }
-          if (i >= n || line_[i] < '0' || line_[i] > '9')
-            return false;
-          long long r = 0;
-          while (i < n && line_[i] >= '0' && line_[i] <= '9')
-            r = r * 10 + (line_[i++] - '0');
-          if (r > INT_MAX)
-            return false;
-          v = static_cast<int>(neg ? -r : r);
-          return true;
-        };
-        int x, y, z;
-        while (num(z) && num(x) && num(y))
-          pin.push_back({x, y, z});
-        if (pin.empty()) {
-          err = "net " + out.name + ": pin with no access points";
-          return false;
-        }
-        out.pins.push_back(std::move(pin));
-        notePinTiming(out, hasValue, value);
-      }
+      const int r = grammar_.line(line_, out, err);
+      if (r != 0)
+        return r > 0;
     }
-    return have;
+    grammar_.end(out, err);
+    return false;
   }
 
 private:
   FastText &in_;
-  std::string line_, pending_;
-  bool pendingName_ = false;
+  std::string line_;
+  NetGrammar grammar_;
 };
 
 inline bool readNets(std::istream &in, std::vector<Net> &nets, std::string &err) {

@@ -140,6 +140,18 @@ jobs:
         working-directory: gr
         run: ./gr_verify --selftest
 
+  input-check-selftest:
+    name: Build + self-test input_check (strict readers, Part 155)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build input_check
+        working-directory: gr
+        run: g++ -std=c++17 -O2 -Wall -Wextra -o input_check input_check.cpp
+      - name: Run self-test
+        working-directory: gr
+        run: ./input_check --selftest
+
   benchmark:
     name: Full ISPD benchmark validation (sroute)
     runs-on: ubuntu-latest

@@ -11508,3 +11508,116 @@ expansion against the sequential search's ~4 -- 5x the work before any synchroni
 expand the same number of nodes here, 3.40M vs 3.41M: with the WL term decayed the heuristic prunes nothing, so
 dropping it costs delta-stepping nothing; the work comes from re-relaxation.) **Ceiling over the whole stage: 0.95x
 at best, 0.28-0.44x as measured. In-net parallel search is closed for the region stage on this hardware.**
+
+## Part 154 -- a faster search queue: -33% on newblue1, byte-identical
+
+Part 153's Instruments window found the search branch-bound (51% of cycles discarded on mispredicted branches,
+1% waiting on memory). With line tables (`-g`, `dsymutil`), the baseline's own profile put the
+`std::priority_queue` -- sift-down, sift-up, vector push, comparator -- at **56% of the slow tier's search time
+and 58% (inclusive) of the region stage's**, the hash-map sink lookup at 3%, distance reads and writes at 14%.
+
+**Change** (`pd39route.cpp`, no setting -- routes are byte-identical by construction):
+1. `SearchHeap`, a 4-ary min-heap ordered by one integer key (the priority's bits made order-preserving, then
+   the node index) -- the same total order the old comparator gave (priority, index, dist): two entries with
+   equal priority and index are the same node at the same distance, and the search does the same thing
+   whichever pops first. The smallest of four children is chosen by selects, not branches; storage is kept in
+   the `SearchRegion` across searches.
+2. Decrease-key: a node holds one entry (`heapPos`, reset with the region's distances), moved up in place when
+   its distance improves. On 16 dumped real region-stage searches 37% of the old queue's pops were stale
+   duplicates, skipped after paying for the pop; now they never exist. Equality of the expanded sequence: the
+   old queue's minimum live entry is always the new queue's minimum. One case kept exactly: a source listed
+   twice was expanded twice before (the expansion count drives the work-gated stops), so a push at an unchanged
+   distance gets a second, untracked entry (`ghost`).
+3. Sinks marked in a dense per-region array instead of an `unordered_map` lookup per pop; coordinates of a
+   one-layer region from one division.
+Applied to `multiSourceDijkstra` and `boundedDijkstra`.
+
+**Self-test** `testSearchHeapMatchesPriorityQueue`: a lockstep search on 300 random graphs (zero-cost edges,
+coarse heuristic values so ties are common, sources listed twice), the old lazy queue against `SearchHeap`
+sharing one distance array; fails if the expanded (node, priority) sequence or the expansion count differ.
+Checked to fail on a broken heap: a comparator without the index tie-break (24785 mismatches), and a
+decrease-key without its sift-up (255 mismatching trials). (Removing decrease-key altogether passes, correctly:
+that is the old lazy queue.)
+
+**Measured** (newblue1, standard + fast08, portfolio off, region stage capped at 120 rounds; three runs one after
+another on a quiet machine, each with the same two 90 s CPU Counters windows -- slow round 30 and region round
+60 -- recorded only, reports exported after all three; `~/Code/GlobalRouterRuns/p154b/`). All three `status=OK`,
+overflow 80 / max 2 / wire 4877292, `gr_verify` = `eval2008.pl`, **route files byte-identical**, expansions
+6436097725 in each:
+
+| stage | baseline | 4-ary heap (1 + 3) | + decrease-key (all) |
+|---|---|---|---|
+| slow tier | 466.9 s | 377.3 s (-19%) | **303.5 s (-35%)** |
+| region stage + refinement | 1072.6 s | 809.1 s (-25%) | **704.0 s (-34%)** |
+| total | 1589.4 s | 1237.1 s (-22%) | **1058.8 s (-33%)** |
+| peak resident memory | 596 MB | 618 MB | 616 MB |
+
+**Where it won and where it fell short** (Instruments, CPU Counters top-down):
+
+| window | useful | back end (data) | front end | discarded | the queue's self time |
+|---|---|---|---|---|---|
+| slow, baseline | 21% | 10% | 24% | 45% | 52% (sift-down 36, sift-up 11, push 5) |
+| slow, 4-ary | 26% | 34% | 9% | 31% | 52% (pop 20, compare 15, entry loads 10, push 7) |
+| slow, + decrease-key | 27% | 34% | 11% | 28% | 40% (pop 17, entry loads 12, compare 11) |
+| region, baseline | 24% | 2% | 24% | 51% | 58% inclusive |
+| region, 4-ary | 32% | 30% | 3% | 35% | 44% (pop 20, compare 15, entry loads 10) |
+| region, + decrease-key | 34% | 28% | 4% | 33% | 39% (pop 16, entry loads 12, compare 11) |
+
+The wins: mispredicted work fell from ~half the cycles to ~30%, the front-end stalls (instruction delivery,
+Part 128's old lead) nearly vanished, and decrease-key removed the stale pops. Where it falls short: the search
+is now waiting on data -- back-end stalls 28-34% -- in the heap's sift (each level's load depends on the last)
+and in the region's three parallel per-node arrays (`stamp`, `dist`, `parent`, plus `heapPos`), which
+`distAt`/`setDist` touch at 17-18% of self time: four cache lines per node visit. Next lead: one interleaved
+per-node record (stamp, dist, parent, slot) so a node visit touches one line. The slow tier also keeps only 3.5
+of its 8 threads busy in its windows -- a batching limit, not the search's (Parts 118-119).
+
+## Part 155 -- strict input readers: out-of-spec input stops the run, with the file and line
+
+Question (the user's): does the code check its input and abort on data that is out of spec in any way? Partly.
+Both readers rejected some malformed input before routing (a missing keyword, a non-integer, non-positive grid
+or tile sizes, a pin or adjustment tile outside the grid; for 2024/2025 a bad header, cost line, pitch or layer
+line, a short capacity table, a pin before any net, a pin without access points, an access point outside the
+grid), but a good deal was silently accepted or repaired. CLAUDE.md's verification principle -- the verifier's
+dominant catch is bad input data -- had never been exercised on the readers, because the ISPD files are clean.
+
+**What was accepted silently, now an error** (`gr/gr_io.h`, `gr/g24_io.h`):
+- ISPD 2008: a pin just left of or below the origin mapped into tile 0 -- tiles were `(x - llx) / tileW` with C++
+  truncation, the format says floor -- now tile -1, outside the grid; a net width <= 0 replaced by 1; negative
+  counts (a negative net count crashed on an unexplained exception, a negative pin count gave a net with no
+  pins); a pin count that disagreed with the pin lines shifted every later value (caught only if a name then
+  landed where a number belonged); values above 32 bits truncated; duplicate net names and ids; capacity
+  adjustments between layers or between tiles that are not neighbours skipped; adjusted capacities that are
+  negative or above the layer's default (the format reduces capacity) taken as given; an edge adjusted twice to
+  different values (the last won); text after the end of the design; negative capacities and spacings, minimum
+  widths below 1.
+- ISPD 2024/2025: text after the header's three values or after the last capacity table; negative or
+  non-finite unit costs, overflow costs, capacities and minimum lengths; zero pitches; layer 0's direction
+  unchecked; any line that was neither a net name nor a pin line skipped; a net without its "(" ... ")"; a net
+  with no pins; an access list that was not exactly integer (z, x, y) tuples (the reader kept what came before
+  the first value that did not fit); a file ending inside a net; duplicate net names.
+
+**How.** The 2008 tokenizer keeps each token's line, and the net headers, pins and adjustments must each be a
+line of exactly their own values, so a record with a missing or extra value is reported where it is, e.g.
+`t.gr:11: expected net n0: pin 2 of 2 (x y layer) (3 values on the line), found 4`. Errors are thrown as
+`gr_io::InputError` and turned into the usual `error:` exit by `readGr`, before any routing. The 2024/2025
+readers keep two implementations (iostream for `g24_verify`, FastText for the routers; Part 117); their new
+checks are shared functions, and the `.net` grammar is one class (`NetGrammar`) both streams feed line by line,
+so they cannot drift apart. Duplicate 2024 net names are found by a 128-bit hash of each name, sorted at the
+end of the file (the cluster netlists are 2 GB; names need not be kept). One warning (the run goes on): an
+identical 2008 adjustment repeated. (A first draft also warned on a layer with capacity in both directions; the
+format allows it, no benchmark has one, but self-test grids in 71 of the 104 programs do, so it was noise.)
+Not checked (a limit): a 2024 capacity row's own length -- the table's total is, so a misaligned row is caught
+at the table's end, not at the row; the 2025 pin-line prefix (pin name, timing value) is read as before.
+
+**Tests.** `gr/input_check.cpp` (new): reads a design with the strict readers and reports it, or the first rule it
+breaks; `--selftest` feeds one broken file per rule (40 checks for 2008, 25 for 2024/2025, each through both 2024
+readers, which must give the same message) and expects that rule's message, plus good files (blank lines, the
+optional adjustment block, 2025 pin lines with names and timing values) that must read without error or
+warning. New CI job `input-check-selftest`.
+
+**Real designs: nothing they contain changed.** All 16 ISPD 2008 benchmarks read with no error and no warning,
+and a hash of every pin, net and edge capacity is identical under the old and the new reader; the same for all
+23 ISPD 2024/2025 designs with netlists (FastText readers: resources, nets, pins, access points, timing values)
+and the 2025 `mempool_cluster` `.cap` files (no netlist extracted). Read time on newblue7, the largest: 2.37 s ->
+2.41 s, peak memory unchanged (3.19 GB). All 104 programs CI builds were rebuilt and self-tested against the
+new readers: 100 of 104 passed at once. The four that failed -- aroute, nroute, oroute, qroute -- share one fixture whose capacity adjustment raised an edge from the layer's default 1 to 2, which the format does not allow: exactly the kind of input the new checks exist to catch. The fixture now sets the default to 2 and adjusts the other two edges down to 1 (the same capacities); all four pass. pd39route's self-test and `gr/e2e_settings.py` (18 of 18) pass.

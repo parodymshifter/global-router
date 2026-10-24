@@ -260,6 +260,10 @@ Since 2026-10-22 (Part 146) `fast08.env` also carries the region stage's early s
 (`PD39ROUTE_REGION_ABORT=1000,20`): above 1000 units of entering 2D overflow, a region stage still no
 better than its start after 20 rounds stops there -- exact (such stages returned their start; routes
 byte-identical, runs 31-48% faster on hard variants), and it cannot act on the sixteen benchmarks.
+Since 2026-10-24 (Part 154) pd39route's searches use a 4-ary heap with decrease-key (`SearchHeap`) in place of
+`std::priority_queue`: the same expansions in the same order, routes byte-identical, newblue1 (region stage
+capped at 120 rounds) 1589 s -> 1059 s (slow tier -35%, region stage -34%). The search is now waiting on data,
+not mispredicting: the next lead is the region's per-node arrays (Part 154's table).
 
 **2026-10-14: the ISPD 2025 standard is `./pd39route @standard.env @standard24.env @fast24.env
 @standard25.env`** (Part 133). `gr/standard25.env` adds timing plus capacitance to the 2024
@@ -602,6 +606,13 @@ downloads it from ispd.cc into `gr/eval2008/` and checks its SHA-256). Total
 overflow, max overflow, and wirelength must agree. If they diverge, assume our
 code is wrong first: theirs scored an actual contest. Note that 2008-era Perl
 may fail on modern interpreters, usually `defined(@array)`, removed in 5.22.
+
+**The readers are strict** (2026-10-24, Part 155): `gr/gr_io.h` and `gr/g24_io.h` stop the run, naming the file
+and line, on anything out of spec -- malformed or misaligned records, out-of-range values, pins outside the grid
+(tile = floor((x - llx) / tileW)), duplicate names, adjustments that join layers or non-neighbours or raise
+capacity, text after the end of the design -- instead of silently repairing or skipping it. `gr/input_check`
+reads a design without routing it (`./input_check design.gr`, `./input_check design.cap design.net`); a new input
+rule gets a broken-file case in its `--selftest`.
 
 **Run the Perl evaluator every time, not just when something looks wrong.**
 After any round that produces a new result on all three ISPD benchmarks
