@@ -136,6 +136,10 @@ def main():
     head = open(prefix2 + '.A.txt').readline() if os.path.exists(prefix2 + '.A.txt') else ''
     check('PD39ROUTE_REGION_LAGRANGE reaches the region stage (its dump header)', ' lagrange 0.5 ' in head, head.strip())
     # refinement annealing: the refinement trace reports its temperature.
+    prefix3 = os.path.join(work, 'searchdump')
+    run('residue', {**off, 'PD39ROUTE_SEARCH_DUMP': prefix3 + ',1,0'}, 'searchdump')
+    nfiles = len([f for f in os.listdir(work) if f.startswith('searchdump.') and f.endswith('.bin')])
+    check('PD39ROUTE_SEARCH_DUMP writes region-stage search instances', nfiles > 0, f'{nfiles} instance files')
     b = run('residue', {**off, 'PD39ROUTE_REFINE_SHIFT': '2'}, 'shift')
     m = re.search(r'^refine shift: k 2 radius 2: (\d+) legal nets', b, re.M)
     check('PD39ROUTE_REFINE_SHIFT runs before refinement', bool(m), m.group(0) if m else 'no refine shift line')

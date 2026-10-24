@@ -3245,6 +3245,18 @@ thread_local SearchTraceStats gSearchTrace;
 thread_local bool gSearchLimitOn = false, gSearchWantedOut = false;
 thread_local int gSearchLimitX0 = 0, gSearchLimitY0 = 0, gSearchLimitX1 = -1, gSearchLimitY1 = -1;
 
+// Part 153 (trace only): PD39ROUTE_SEARCH_DUMP=prefix,every,minpops writes every `every`-th region-stage search
+// that expanded at least `minpops` nodes as a binary instance (prefix.<n>.bin) -- the box, its 2D edge costs as the
+// search saw them, sources, sinks, the cost it found and its pops -- so a parallel scheme's ceiling can be measured
+// offline on real searches (gr/search_parallel_sim.py). Never read by routing.
+struct SearchDump {
+  std::string prefix;
+  long long every = 0, minPops = 0;
+  std::atomic<long long> seen{0}, written{0};
+};
+SearchDump gSearchDump;
+thread_local bool gSearchDumpHere = false; // set by the region stage around its reroutes
+
 // Part 150: the wall-aware heuristic (PD39ROUTE_REGION_WALL_H=B[,from]). A route from (x, y) to a sink at (sx, sy)
 // crosses every column boundary between x and sx on some horizontal edge, and every row boundary between y and sy
 // on some vertical edge -- different edges -- so the sum, over those columns, of the cheapest horizontal edge in
@@ -3530,6 +3542,36 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
     result.path.push_back({x, y, l});
   }
   std::reverse(result.path.begin(), result.path.end());
+  if (gSearchDumpHere && gSearchDump.every > 0 && gSearchPops - popsAtSearchStart >= gSearchDump.minPops &&
+      gSearchDump.seen.fetch_add(1) % gSearchDump.every == 0) { // Part 153 (trace only)
+    const long long n = gSearchDump.written.fetch_add(1);
+    FILE *f = std::fopen((gSearchDump.prefix + "." + std::to_string(n) + ".bin").c_str(), "wb");
+    if (f) {
+      const int32_t hdr[6] = {x0, y0, x1 - x0 + 1, y1 - y0 + 1, static_cast<int32_t>(sources.size()),
+                              static_cast<int32_t>(sinks.size())};
+      std::fwrite(hdr, sizeof hdr, 1, f);
+      for (const PathNode &p : sources) {
+        const int32_t xy[2] = {p.x, p.y};
+        std::fwrite(xy, sizeof xy, 1, f);
+      }
+      for (const Point &p : sinks) {
+        const int32_t xy[2] = {p.x, p.y};
+        std::fwrite(xy, sizeof xy, 1, f);
+      }
+      const int amount = width + g.minSpacing[0];
+      std::vector<double> costs;
+      for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x < x1; ++x)
+          costs.push_back(lp.isH(0) ? wireCostH(prices, g.hIndex(x, y, 0), amount) : -1.0);
+      for (int y = y0; y < y1; ++y)
+        for (int x = x0; x <= x1; ++x)
+          costs.push_back(lp.isV(0) ? wireCostV(prices, g.vIndex(x, y, 0), amount) : -1.0);
+      std::fwrite(costs.data(), sizeof(double), costs.size(), f);
+      const double tail[3] = {region.distAt(foundIdx), static_cast<double>(gSearchPops - popsAtSearchStart), hScale};
+      std::fwrite(tail, sizeof tail, 1, f);
+      std::fclose(f);
+    }
+  }
   if (gSearchTraceOn) { // Part 138 (trace only)
     const PathNode &a = result.path.front(), &b = result.path.back();
     const double expect = hScale * static_cast<double>(std::abs(a.x - b.x) + std::abs(a.y - b.y));
@@ -4882,6 +4924,7 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
       }
       if (wallOn) // Part 150: what the net's own rip-up will make cheaper
         wallLower(wall, g, prices, usage, rn.charges);
+      gSearchDumpHere = true; // Part 153 (trace only)
       const int haloNow = dump ? netHalo(g, usage, rn, haloH, haloV) : 0;
       const long long popsBefore = gSearchPops;
       gBoxLimited = false;
@@ -4900,6 +4943,7 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
         routeNetSlowMSMV(g, prices, usage, lp, region, 0.0, rn);
         ++rerouted;
       }
+      gSearchDumpHere = false; // Part 153
       if (dump) // Part 140: N round net margin limited pops halo
         *dump << "N " << r << " " << members[k] << " " << margin << " " << (gBoxLimited ? 1 : 0) << " "
               << gSearchPops - popsBefore << " " << haloNow << "\n";
@@ -21363,6 +21407,17 @@ int main(int argc, char **argv) {
   if (region.damp > 0 || region.cooldown > 0)
     std::cerr << "region damping: route-change discount " << region.damp << ", cooldown " << region.cooldown
               << " rounds\n";
+  if (const char *v = std::getenv("PD39ROUTE_SEARCH_DUMP"); v && *v) { // Part 153 (trace only): prefix,every,minpops
+    const std::string sv(v);
+    const size_t c1 = sv.rfind(','), c0 = c1 == std::string::npos ? std::string::npos : sv.rfind(',', c1 - 1);
+    if (c0 == std::string::npos)
+      fail("PD39ROUTE_SEARCH_DUMP must be prefix,every,minpops (got '" + sv + "')");
+    gSearchDump.prefix = sv.substr(0, c0);
+    gSearchDump.every = std::atoll(sv.substr(c0 + 1, c1 - c0 - 1).c_str());
+    gSearchDump.minPops = std::atoll(sv.substr(c1 + 1).c_str());
+    if (gSearchDump.every <= 0 || gSearchDump.minPops < 0)
+      fail("PD39ROUTE_SEARCH_DUMP: every must be >= 1 and minpops >= 0 (got '" + sv + "')");
+  }
   if (const char *v = std::getenv("PD39ROUTE_REGION_DUMP"); v && *v) { // Part 140 (trace only)
     gRegionDumpPrefix = v;
     std::cerr << "region dump: " << gRegionDumpPrefix << ".<A|A<variant>|B>.txt\n";
