@@ -11658,3 +11658,79 @@ with 8 threads each flooding its own region, loses most: its working set grows w
 What it says about the next step: the per-node data is already laid out about as well as a flood allows; what
 is left is the heap itself (pop, entry loads and comparisons ~40% of self time) and the number of nodes a search
 touches (Part 150: late searches flood their boxes on near-ties).
+
+## Part 157 -- track A, step A1: the region stage's parallel ceiling, measured
+
+BEST_RESULTS_PLAN.md track A asks for the ceiling before any threading is built. `PD39ROUTE_REGION_A1=r1,r2,...`
+(trace only, off by default; end-to-end check added, 19 of 19): at the start of each listed round, path A's
+region stage (1) replays the round's reroutes -- the same nets, margin and prices -- through the slow tier's
+batched executor (`runSlowBatched`: every net in a batch searched against the batch-start snapshot on 8 threads,
+committed in net order, "fresh" conflicts carried to the next batch) on copies of its state, for batches of 64
+and 256, in net order and spread round-robin over 64 x 64 tiles; and (2) measures the real sequential round's
+exact dependency graph -- net j depends on an earlier net i if i's old or new route touches j's box plus the
+search margin (what j's reroute can read) -- as its longest chain, by net count and weighted by search work.
+Nothing of the replay is kept (counters restored; routes byte-identical with it on, end-to-end check).
+
+Runs (`~/Code/GlobalRouterRuns/p157/`; standard + fast08, portfolio off, each stopped one round after its last
+replay, so their final numbers are not the standard's; the three ran at once, so wall times are under shared
+load -- the counts are not). All `status=OK`, `gr_verify` = `eval2008.pl`.
+
+**An exact split is dead.** The sequential round's dependency chain is the whole round in late rounds: newblue4
+rounds 120 and 250, bigblue4 rounds 20 and 60, newblue7 round 60 -- ceiling 1.00x; early rounds at most 1.04-1.57x
+(newblue4 round 0: chain 109463 of 172313 nets). One hotspot means every reroute reads what the previous one
+wrote. Step A3 (independent hotspots on separate threads) cannot help these three designs.
+
+**Batched rounds: B 64 spread over 64-tile cells is the scheme** (B 256 carries 45-74% of nets in late rounds):
+
+| design, round | nets | carried | search work thrown away | replay on 8 threads | sequential round | one round's 2D overflow, sequential -> batched |
+|---|---|---|---|---|---|---|
+| newblue4, 0 | 172313 | 1.9% | 27% | 9.5 s | 17.5 s | 34210 -> 34058 |
+| newblue4, 20 | 4549 | 5.8% | 9% | 0.56 s | 2.6 s | 452 -> 516 |
+| newblue4, 60 | 2939 | 12.8% | 28% | 1.43 s | 9.7 s | 278 -> 316 |
+| newblue4, 120 | 2612 | 11.9% | 22% | 2.49 s | 10.9 s | 182 -> 226 |
+| newblue4, 250 | 2525 | 12.4% | 23% | 2.64 s | 13.3 s | 186 -> 234 |
+| bigblue4, 20 | 4513 | 8.4% | 17% | 1.28 s | 4.7 s | 568 -> 644 |
+| bigblue4, 60 | 4306 | 7.9% | 16% | 10.5 s | 41.4 s | 436 -> 514 |
+| newblue7, 5 | 76005 | 12.4% | 23% | 1.76 s | 6.4 s | 16668 -> 17986 |
+| newblue7, 20 | 42538 | 7.3% | 15% | 3.05 s | 14.2 s | 2794 -> 3236 |
+| newblue7, 60 | 24354 | 4.1% | 9% | 9.27 s | 68.5 s | 914 -> 1086 |
+
+(In net order instead of spread: carried 9-28%, thrown away 16-47%. The sequential round's time includes the
+dependency bookkeeping, a box scan per net, under 3% of it.)
+
+Reading: the batched round is **3.7-7.4x faster** on 8 threads -- the plan's < ~50% carried threshold is met by
+a wide margin (4-13%) -- **but one batched round ends 10-26% above the sequential round in the late rounds**
+(snapshot stampede: a batch's nets all see the same prices and pile onto the same just-freed edges). Whether the
+stage's final residue suffers over hundreds of rounds is what step A2 must measure; the slow tier's batching cost
+2008 residues a few units (Part 124: newblue4 144 -> 154) while the 2024 scores improved (Part 118). Next: A2 --
+a batched region stage behind a setting, judged on final overflow and wirelength on newblue1 and newblue4 first.
+
+## Part 158 -- a 16-byte heap entry: -8%, byte-identical
+
+Part 154 left the search waiting on data, the heap's sift loads among the largest costs. With decrease-key a heap
+entry's distance always equals its node's current one (a duplicated source's: 0), so the entry drops it and the
+search reads the node's distance after the pop: 24 -> 16 bytes, so one node's four children fill exactly one
+64-byte line -- the buffer is 64-byte aligned and the root sits at slot 3, so the children of heap position p
+(4p+1..4p+4) are slots 4p+4..4p+7 -- and the sift-down prefetches the next level's child group. Duplicates are
+now told apart by who pushes: a source pushed again gets a second entry, as the old lazy queue had (the
+search expands it twice; the expansion count drives the work-gated stops); a relaxation, which only ever pushes
+a strictly shorter distance, always lowers its node's key in place. Self-test updated (no stored distance) and
+checked to fail when relaxations add duplicates instead (267 mismatching trials). All 24 route files of the
+end-to-end suite byte-identical to before.
+
+Measured (newblue1, the Part 154 protocol, the committed router and this one back to back after the A1 runs,
+with the start gate -- every process together under 300% CPU for five minutes -- and CPU use logged;
+`~/Code/GlobalRouterRuns/p158/`). Both `status=OK`, 80 / max 2 / wire 4877292, `gr_verify` = `eval2008.pl`,
+route files byte-identical, expansions 6436097725:
+
+| stage | committed | 16-byte entry |
+|---|---|---|
+| slow tier | 300.1 s | 274.2 s (-8.6%) |
+| region stage + refinement | 687.7 s | 629.2 s (-8.5%) |
+| total | 1038.2 s | 954.9 s (-8.0%) |
+| peak resident memory | 637 MB | 606 MB |
+
+Instruments: back-end stalls fell 33% -> 30% (slow tier) and 28% -> 23% (region stage); front-end stalls rose
+10% -> 14% and 5% -> 7% (more instructions per pop: the slot offset and the prefetch). Where it falls short:
+the heap's own work -- pop, entry loads, comparisons -- is still ~40% of the search's self time, now split more
+evenly between waiting on data and the compare-and-select itself.

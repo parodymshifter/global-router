@@ -262,8 +262,11 @@ better than its start after 20 rounds stops there -- exact (such stages returned
 byte-identical, runs 31-48% faster on hard variants), and it cannot act on the sixteen benchmarks.
 Since 2026-10-24 (Part 154) pd39route's searches use a 4-ary heap with decrease-key (`SearchHeap`) in place of
 `std::priority_queue`: the same expansions in the same order, routes byte-identical, newblue1 (region stage
-capped at 120 rounds) 1589 s -> 1059 s (slow tier -35%, region stage -34%). The search is now waiting on data,
-not mispredicting: the next lead is the region's per-node arrays (Part 154's table).
+capped at 120 rounds) 1589 s -> 1059 s (slow tier -35%, region stage -34%); Part 158's 16-byte cache-aligned
+entries another -8% (1038 s -> 955 s), byte-identical. One record per node instead of parallel arrays was 6.6%
+slower (Part 156). Track A step A1 (Part 157): an exact split of the region stage is dead (its dependency chain
+is the whole round), batched rounds (64 per batch, spread over tiles) are 3.7-7.4x faster but end one round
+10-26% higher in overflow -- step A2 must measure the final residue.
 
 **2026-10-14: the ISPD 2025 standard is `./pd39route @standard.env @standard24.env @fast24.env
 @standard25.env`** (Part 133). `gr/standard25.env` adds timing plus capacitance to the 2024

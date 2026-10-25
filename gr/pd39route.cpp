@@ -2965,17 +2965,32 @@ void routeNetFast(const RoutingGrid &g, Prices &prices, Usage &usage, const Laye
 // picked by selects, not branches, and the storage is kept across searches.
 struct SearchHeap {
   struct Item {
-    double priority, dist;
+    double priority;
     int index;
   };
+  // Part 158: 16 bytes, no distance -- with decrease-key an entry's distance is always its node's current one
+  // (a duplicated source's too: 0), so the search reads it from the node. Four entries -- one node's children --
+  // fill one 64-byte line: the buffer is 64-byte aligned and the root sits at slot 3, so the children of heap
+  // position p (4p+1..4p+4) are slots 4p+4..4p+7.
   struct Entry {
     uint64_t key; // orderedBits(priority)
-    double dist;
     int index;
-    int ghost; // 1: a second entry for a node already in the heap at the same distance (not in pos)
+    int ghost; // 1: a second entry for a node already in the heap (a source listed twice; not in pos)
   };
-  std::vector<Entry> h;
+  static_assert(sizeof(Entry) == 16, "four heap entries per 64-byte line");
+  static constexpr size_t kOff = 3;
   int *pos = nullptr; // pos[node]: its entry's slot, -1 if none; valid for nodes the search has touched
+
+  SearchHeap() = default;
+  SearchHeap(const SearchHeap &) {} // scratch storage: a copy starts empty
+  SearchHeap &operator=(const SearchHeap &o) {
+    if (this != &o) {
+      n_ = 0;
+      pos = nullptr;
+    }
+    return *this;
+  }
+  ~SearchHeap() { release(); }
 
   static uint64_t orderedBits(double p) {
     p += 0.0; // -0.0 -> +0.0: they compare equal as doubles
@@ -2992,44 +3007,42 @@ struct SearchHeap {
   static bool less(const Entry &a, const Entry &b) {
     return (a.key < b.key) | ((a.key == b.key) & (a.index < b.index));
   }
-  bool empty() const { return h.empty(); }
-  size_t size() const { return h.size(); }
+  bool empty() const { return n_ == 0; }
+  size_t size() const { return n_; }
   void start(int *positions) { // a new search: pos must read -1 for every node it has not pushed
-    h.clear();
+    n_ = 0;
     pos = positions;
   }
-  Item top() const { return {fromOrdered(h[0].key), h[0].dist, h[0].index}; }
-  void place(size_t i, const Entry &e) {
-    h[i] = e;
-    if (!e.ghost)
-      pos[e.index] = static_cast<int>(i);
-  }
-  void push(const Item &it) {
-    Entry e{orderedBits(it.priority), it.dist, it.index, 0};
-    const int at = pos[it.index];
+  Item top() const { return {fromOrdered(at(0).key), at(0).index}; }
+  // A relaxation's push (a strictly shorter distance than the node had): a node already in the heap has its key
+  // lowered in place. A source's push (`source`): a node already in the heap gets a second entry, as the lazy
+  // queue had (the search expands it twice; the expansion count drives the work-gated stops).
+  void push(double priority, int index, bool source = false) {
+    Entry e{orderedBits(priority), index, 0};
+    const int at0 = pos[index];
     size_t i;
-    if (at >= 0 && h[at].dist != it.dist) {
-      i = static_cast<size_t>(at); // decrease-key: a strictly shorter distance, so a key no larger
+    if (at0 >= 0 && !source) {
+      i = static_cast<size_t>(at0); // decrease-key: a shorter distance, so a key no larger
     } else {
-      e.ghost = at >= 0;
-      i = h.size();
-      h.push_back(e);
+      e.ghost = at0 >= 0;
+      if (n_ + kOff + 4 > cap_)
+        grow();
+      i = n_++;
     }
     while (i > 0) {
       const size_t parent = (i - 1) >> 2;
-      if (!less(e, h[parent]))
+      if (!less(e, at(parent)))
         break;
-      place(i, h[parent]);
+      place(i, at(parent));
       i = parent;
     }
     place(i, e);
   }
   void pop() {
-    if (!h[0].ghost)
-      pos[h[0].index] = -1;
-    const Entry last = h.back();
-    h.pop_back();
-    const size_t n = h.size();
+    if (!at(0).ghost)
+      pos[at(0).index] = -1;
+    const Entry last = at(n_ - 1);
+    const size_t n = --n_;
     if (n == 0)
       return;
     size_t i = 0;
@@ -3039,20 +3052,48 @@ struct SearchHeap {
         break;
       size_t best;
       if (c + 4 <= n) {
-        const size_t b01 = less(h[c + 1], h[c]) ? c + 1 : c;
-        const size_t b23 = less(h[c + 3], h[c + 2]) ? c + 3 : c + 2;
-        best = less(h[b23], h[b01]) ? b23 : b01;
+        const size_t b01 = less(at(c + 1), at(c)) ? c + 1 : c;
+        const size_t b23 = less(at(c + 3), at(c + 2)) ? c + 3 : c + 2;
+        best = less(at(b23), at(b01)) ? b23 : b01;
       } else {
         best = c;
         for (size_t k = c + 1; k < n; ++k)
-          best = less(h[k], h[best]) ? k : best;
+          best = less(at(k), at(best)) ? k : best;
       }
-      if (!less(h[best], last))
+      if (!less(at(best), last))
         break;
-      place(i, h[best]);
+      if (4 * best + 1 < n)
+        __builtin_prefetch(&at(4 * best + 1)); // the next level's four children, one line
+      place(i, at(best));
       i = best;
     }
     place(i, last);
+  }
+
+private:
+  Entry *buf_ = nullptr;
+  size_t cap_ = 0, n_ = 0;
+  const Entry &at(size_t i) const { return buf_[i + kOff]; }
+  Entry &at(size_t i) { return buf_[i + kOff]; }
+  void place(size_t i, const Entry &e) {
+    at(i) = e;
+    if (!e.ghost)
+      pos[e.index] = static_cast<int>(i);
+  }
+  void grow() {
+    const size_t cap = std::max<size_t>(256, 2 * cap_);
+    Entry *nb = static_cast<Entry *>(::operator new(cap * sizeof(Entry), std::align_val_t(64)));
+    if (buf_)
+      std::memcpy(nb, buf_, (n_ + kOff) * sizeof(Entry));
+    release();
+    buf_ = nb;
+    cap_ = cap;
+  }
+  void release() {
+    if (buf_)
+      ::operator delete(buf_, std::align_val_t(64));
+    buf_ = nullptr;
+    cap_ = 0;
   }
 };
 
@@ -3157,7 +3198,7 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
     int i = region.idx(p1.x, p1.y, 0);
     region.distAt(i); // Part 154: a node's queue slot is valid once touched
     region.setDist(i, 0.0, -1);
-    pq.push({heuristic(p1.x, p1.y), 0.0, i});
+    pq.push(heuristic(p1.x, p1.y), i, /*source=*/true);
   }
   (void)p1Layer;
 
@@ -3166,10 +3207,8 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
   while (!pq.empty()) {
     const SearchHeap::Item top = pq.top();
     pq.pop();
-    double d = top.dist;
-    int i = top.index;
-    if (d > region.distAt(i))
-      continue;
+    const int i = top.index;
+    const double d = region.distAt(i); // Part 158: an entry's distance is its node's (decrease-key)
     int x, y, l;
     region.coordsOf(i, x, y, l);
     if (x == p2.x && y == p2.y) {
@@ -3188,7 +3227,7 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
         int ni = region.idx(nx, y, l);
         if (d + w < region.distAt(ni)) {
           region.setDist(ni, d + w, i);
-          pq.push({d + w + heuristic(nx, y), d + w, ni});
+          pq.push(d + w + heuristic(nx, y), ni);
         }
       }
     }
@@ -3202,7 +3241,7 @@ DijkstraResult boundedDijkstra(const RoutingGrid &g, const Prices &prices, const
         int ni = region.idx(x, ny, l);
         if (d + w < region.distAt(ni)) {
           region.setDist(ni, d + w, i);
-          pq.push({d + w + heuristic(x, ny), d + w, ni});
+          pq.push(d + w + heuristic(x, ny), ni);
         }
       }
     }
@@ -3374,6 +3413,13 @@ struct SearchDump {
 };
 SearchDump gSearchDump;
 thread_local bool gSearchDumpHere = false; // set by the region stage around its reroutes
+// Part 157 (BEST_RESULTS_PLAN.md track A, step A1; trace only): PD39ROUTE_REGION_A1=r1,r2,... -- at the start of
+// each listed round, path A's region stage replays the round's reroutes through the slow tier's batched
+// executor (runSlowBatched: snapshots, commit in net order, "fresh" conflicts carried) on copies of its state,
+// and measures the sequential round's exact dependency chain. Nothing of the replay is kept: routes are
+// byte-identical with it on.
+std::vector<int> gRegionA1Rounds;
+thread_local bool gA1Dry = false; // inside a replay: run-wide counters are left alone
 
 // Part 150: the wall-aware heuristic (PD39ROUTE_REGION_WALL_H=B[,from]). A route from (x, y) to a sink at (sx, sy)
 // crosses every column boundary between x and sx on some horizontal edge, and every row boundary between y and sy
@@ -3565,7 +3611,7 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
       int i = region.idx(s.x, s.y, 0);
       region.distAt(i); // Part 154: a node's queue slot is valid once touched
       region.setDist(i, 0.0, -1);
-      pq.push({heuristic(s.x, s.y), 0.0, i});
+      pq.push(heuristic(s.x, s.y), i, /*source=*/true);
     }
   }
 
@@ -3579,10 +3625,8 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
   while (!pq.empty()) {
     const SearchHeap::Item top = pq.top();
     pq.pop();
-    double d = top.dist;
-    int i = top.index;
-    if (d > region.distAt(i))
-      continue;
+    const int i = top.index;
+    const double d = region.distAt(i); // Part 158: an entry's distance is its node's (decrease-key)
     ++gSearchPops;
     int x, y;
     const int l = 0;
@@ -3606,7 +3650,7 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
         int ni = region.idx(nx, y, l);
         if (d + w < region.distAt(ni)) {
           region.setDist(ni, d + w, i);
-          pq.push({d + w + heuristic(nx, y), d + w, ni});
+          pq.push(d + w + heuristic(nx, y), ni);
         }
       }
     }
@@ -3620,7 +3664,7 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
         int ni = region.idx(x, ny, l);
         if (d + w < region.distAt(ni)) {
           region.setDist(ni, d + w, i);
-          pq.push({d + w + heuristic(x, ny), d + w, ni});
+          pq.push(d + w + heuristic(x, ny), ni);
         }
       }
     }
@@ -4913,6 +4957,38 @@ int netHalo(const RoutingGrid &g, const Usage &u, const RoutedNet &rn, const std
   return worst;
 }
 
+struct NetBox {
+  int x0 = 0, y0 = 0, x1 = -1, y1 = -1;
+};
+
+// Every tile a net's per-net stage reads or writes: its segments and pins,
+// one GCell around them (via demand charges a via's neighbours), clamped.
+NetBox netBoxOf(const RoutingGrid &g, const RoutedNet &rn) {
+  NetBox b{std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), std::numeric_limits<int>::min(),
+           std::numeric_limits<int>::min()};
+  auto add = [&](int x, int y) {
+    b.x0 = std::min(b.x0, x);
+    b.y0 = std::min(b.y0, y);
+    b.x1 = std::max(b.x1, x);
+    b.y1 = std::max(b.y1, y);
+  };
+  for (const Seg &sg : rn.segs) {
+    add(sg.x1, sg.y1);
+    add(sg.x2, sg.y2);
+  }
+  for (const Pin &p : rn.net->pins)
+    add(p.x, p.y);
+  if (b.x1 < b.x0)
+    return NetBox{0, 0, g.nx - 1, g.ny - 1}; // nothing to place: the whole grid, conservatively
+  return NetBox{std::max(0, b.x0 - 1), std::max(0, b.y0 - 1), std::min(g.nx - 1, b.x1 + 1),
+                std::min(g.ny - 1, b.y1 + 1)};
+}
+
+// Part 157 (trace only): the A1 replay of one region round; defined after runSlowBatched.
+void regionA1Replay(const RoutingGrid &g, const std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
+                    const Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
+                    bool pieces, int round);
+
 RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &rs,
                              bool trace, const std::atomic<bool> *cancel = nullptr) {
   const RoutingGrid &g = d.grid;
@@ -5005,11 +5081,55 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     if (wallOn)
       wallBuild(wall, g, prices);
     gWall = wallOn ? &wall : nullptr;
+    // Part 157 (trace only): the A1 measurements, on path A's own stage, in rounds without per-net state
+    const bool a1 = rs.dumpTag == "A" &&
+                    std::find(gRegionA1Rounds.begin(), gRegionA1Rounds.end(), r) != gRegionA1Rounds.end();
+    std::vector<int> a1Chain;     // per tile: the longest chain of nets whose writes reach it, this round
+    std::vector<double> a1Weight; // per tile: the same, weighted by each net's search work
+    int a1MaxChain = 0;
+    double a1MaxWeight = 0, a1Seconds = 0;
+    long long a1Nets = 0, a1Pops = 0;
+    if (a1) {
+      if (rs.evidenceStep > 0 || rs.cooldown > 0 || rs.damp > 0 || wallOn) {
+        std::cerr << "region A1 round " << r << ": skipped (evidence boxes, cooldown, damping or the wall bound "
+                     "keep per-net state the replay does not copy)\n";
+      } else {
+        std::vector<size_t> list;
+        for (size_t k = 0; k < members.size(); ++k)
+          if (r == 0 || netOverflowed(g, usage, nets[members[k]]))
+            list.push_back(members[k]);
+        regionA1Replay(g, nets, list, usage, prices, lp, stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap),
+                       r == 0 ? &rep.box : nullptr, rs.pieces, r);
+        a1Chain.assign(static_cast<size_t>(g.nx) * g.ny, 0);
+        a1Weight.assign(a1Chain.size(), 0.0);
+      }
+    }
+    const bool a1Seq = !a1Chain.empty();
+    const auto a1T0 = std::chrono::steady_clock::now();
     for (size_t k = 0; k < members.size(); ++k) {
       RoutedNet &rn = nets[members[k]];
       if (r > 0 && !netOverflowed(g, usage, rn))
         continue;
       const int margin = rs.evidenceStep > 0 ? evMargin[k] : stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
+      // Part 157: what this reroute can read -- the net's box plus the search margin -- and the chain into it
+      NetBox a1Box;
+      int a1In = 0;
+      double a1WIn = 0;
+      std::vector<ChargeRecord> a1Old;
+      if (a1Seq) {
+        a1Box = netBoxOf(g, rn);
+        a1Box.x0 = std::max(0, a1Box.x0 - margin);
+        a1Box.y0 = std::max(0, a1Box.y0 - margin);
+        a1Box.x1 = std::min(g.nx - 1, a1Box.x1 + margin);
+        a1Box.y1 = std::min(g.ny - 1, a1Box.y1 + margin);
+        for (int y = a1Box.y0; y <= a1Box.y1; ++y)
+          for (int x = a1Box.x0; x <= a1Box.x1; ++x) {
+            const size_t t = static_cast<size_t>(y) * g.nx + x;
+            a1In = std::max(a1In, a1Chain[t]);
+            a1WIn = std::max(a1WIn, a1Weight[t]);
+          }
+        a1Old = rn.charges;
+      }
       if (rs.cooldown > 0) { // Part 144: sit out the rounds after a reroute
         if (r - lastRerouted[k] <= rs.cooldown)
           continue;
@@ -5052,6 +5172,26 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
         ++rerouted;
       }
       gSearchDumpHere = false; // Part 153
+      if (a1Seq) { // Part 157: the net's writes -- every tile of its old and new routes -- carry its chain on
+        const long long p = gSearchPops - popsBefore;
+        const int c = a1In + 1;
+        const double w = a1WIn + static_cast<double>(p);
+        ++a1Nets;
+        a1Pops += p;
+        a1MaxChain = std::max(a1MaxChain, c);
+        a1MaxWeight = std::max(a1MaxWeight, w);
+        auto mark = [&](const std::vector<ChargeRecord> &cs) {
+          for (const ChargeRecord &ch : cs)
+            for (int t = ch.a; t <= ch.b; ++t) {
+              const int x = ch.horizontal ? t : ch.cross, y = ch.horizontal ? ch.cross : t;
+              const size_t i = static_cast<size_t>(y) * g.nx + x;
+              a1Chain[i] = std::max(a1Chain[i], c);
+              a1Weight[i] = std::max(a1Weight[i], w);
+            }
+        };
+        mark(a1Old);
+        mark(rn.charges);
+      }
       if (dump) // Part 140: N round net margin limited pops halo
         *dump << "N " << r << " " << members[k] << " " << margin << " " << (gBoxLimited ? 1 : 0) << " "
               << gSearchPops - popsBefore << " " << haloNow << "\n";
@@ -5066,6 +5206,14 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
           }
         }
       }
+    }
+    if (a1Seq) { // Part 157
+      a1Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - a1T0).count();
+      std::cerr << "region A1 round " << r << " sequential: " << a1Nets << " nets rerouted, " << a1Seconds
+                << " s, pops " << a1Pops << "; exact dependency chain " << a1MaxChain << " (ceiling "
+                << (a1MaxChain > 0 ? double(a1Nets) / a1MaxChain : 0.0) << "x), work-weighted critical path "
+                << a1MaxWeight << " pops (ceiling " << (a1MaxWeight > 0 ? double(a1Pops) / a1MaxWeight : 0.0)
+                << "x)\n";
     }
     rep.evLimited += roundLimited;
     rep.evGrew += roundGrew;
@@ -6596,32 +6744,6 @@ int gLaCell = 0;
 // its 2D route's tile edges. 0 (default) = lowest position first. A pure
 // schedule setting, like PD39ROUTE_LA_CELL.
 int gLaCrit = 0;
-struct NetBox {
-  int x0 = 0, y0 = 0, x1 = -1, y1 = -1;
-};
-
-// Every tile a net's per-net stage reads or writes: its segments and pins,
-// one GCell around them (via demand charges a via's neighbours), clamped.
-NetBox netBoxOf(const RoutingGrid &g, const RoutedNet &rn) {
-  NetBox b{std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), std::numeric_limits<int>::min(),
-           std::numeric_limits<int>::min()};
-  auto add = [&](int x, int y) {
-    b.x0 = std::min(b.x0, x);
-    b.y0 = std::min(b.y0, y);
-    b.x1 = std::max(b.x1, x);
-    b.y1 = std::max(b.y1, y);
-  };
-  for (const Seg &sg : rn.segs) {
-    add(sg.x1, sg.y1);
-    add(sg.x2, sg.y2);
-  }
-  for (const Pin &p : rn.net->pins)
-    add(p.x, p.y);
-  if (b.x1 < b.x0)
-    return NetBox{0, 0, g.nx - 1, g.ny - 1}; // nothing to place: the whole grid, conservatively
-  return NetBox{std::max(0, b.x0 - 1), std::max(0, b.y0 - 1), std::min(g.nx - 1, b.x1 + 1),
-                std::min(g.ny - 1, b.y1 + 1)};
-}
 
 // pd38route: PD38ROUTE_SLOW_SPREAD. The escalated nets, reordered so that
 // consecutive positions come from different tiles of `tile` x `tile`
@@ -6655,6 +6777,67 @@ std::vector<size_t> spreadByTile(const RoutingGrid &g, const std::vector<RoutedN
       if (r < l.size())
         out.push_back(l[r]);
   return out;
+}
+
+// Part 157 (trace only): one region round replayed through runSlowBatched on copies of the round's start (the
+// round's nets and the usage), for batches of 64 and 256 in net order and spread over 64 x 64 tiles (the
+// slow tier's fast08 settings). Reports the share carried as conflicts, the search work thrown away on them, the
+// replay's wall time on gThreads threads, and the overflow the batched round would end at -- against which the
+// sequential round's own line (printed after it) compares. The calling thread's search counters and trace are
+// restored, so the stage's work-gated stops see exactly the sequential work.
+void regionA1Replay(const RoutingGrid &g, const std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
+                    const Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
+                    bool pieces, int round) {
+  if (list.empty())
+    return;
+  std::vector<RoutedNet> sub;
+  sub.reserve(list.size());
+  for (size_t i : list)
+    sub.push_back(nets[i]);
+  std::vector<size_t> netOrder(sub.size());
+  for (size_t k = 0; k < sub.size(); ++k)
+    netOrder[k] = k;
+  const std::vector<size_t> spread = spreadByTile(g, sub, netOrder, 64);
+  const long long popsSaved = gSearchPops;
+  const SearchTraceStats traceSaved = gSearchTrace;
+  const long long before = totalOverflow(g, usage);
+  struct A1Out {
+    int ok = 0;
+  };
+  for (size_t B : {size_t(64), size_t(256)})
+    for (int sp = 0; sp < 2; ++sp) {
+      std::vector<RoutedNet> work = sub;
+      Usage live = usage;
+      std::vector<A1Out> outs;
+      const auto t0 = std::chrono::steady_clock::now();
+      SlowBatchReport br = runSlowBatched(
+          g, work, sp ? spread : netOrder, live, gThreads, B, outs,
+          [&](Usage &u, SearchRegion &reg, RoutedNet &rn, A1Out &o) {
+            gA1Dry = true;
+            bool done = false;
+            if (pieces)
+              done = rerouteNetPieces(g, u, prices, lp, reg, rn, margin, AcceptMode::kKeep, box).ok;
+            if (!done) {
+              rn.boxMargin = margin;
+              routeNetSlowMSMV(g, prices, u, lp, reg, 0.0, rn);
+            }
+            gA1Dry = false;
+            o.ok = 1;
+          },
+          [](size_t) {});
+      const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      const long long wasted = br.popsAll - (gSearchPops - popsSaved);
+      gSearchPops = popsSaved;
+      std::cerr << "region A1 round " << round << " batched B " << B << (sp ? " spread 64" : " net order") << ": "
+                << sub.size() << " nets, " << br.batches << " batches, committed " << br.committed << ", unchanged "
+                << br.unchanged << ", carried " << br.carried << " ("
+                << 100.0 * double(br.carried) / double(sub.size()) << "% of nets), search pops " << br.popsAll
+                << " (thrown away on carried searches " << 100.0 * double(wasted) / double(std::max(1LL, br.popsAll))
+                << "%), " << secs << " s on " << gThreads << " threads, overflow " << before << " -> "
+                << totalOverflow(g, live) << "\n";
+    }
+  gSearchPops = popsSaved;
+  gSearchTrace = traceSaved;
 }
 
 // Batches of positions 0..boxes.size()-1, taken in order: each position goes
@@ -10676,7 +10859,8 @@ PieceStats rerouteNetPieces(const RoutingGrid &g, Usage &usage, const Prices &pr
         fresh = std::move(best);
         patterned = true;
         ++st.patterned;
-        ++patternedTotal;
+        if (!gA1Dry)
+          ++patternedTotal;
       }
     }
     if (!patterned) {
@@ -10691,7 +10875,8 @@ PieceStats rerouteNetPieces(const RoutingGrid &g, Usage &usage, const Prices &pr
         fresh.push_back(p.y == q.y ? UE{true, std::min(p.x, q.x), p.y} : UE{false, p.x, std::min(p.y, q.y)});
       }
     }
-    ++piecesTotal;
+    if (!gA1Dry)
+      ++piecesTotal;
     std::vector<ChargeRecord> newCh;
     for (const UE &u : fresh) {
       newCh.push_back(charge(u));
@@ -18836,7 +19021,7 @@ void testSearchHeapMatchesPriorityQueue() {
   long long expansions = 0;
   for (int trial = 0; trial < 300; ++trial) {
     const int n = 20 + static_cast<int>(next() % 400);
-    std::vector<double> hv(n), distRef(n, std::numeric_limits<double>::infinity()), distNew = distRef;
+    std::vector<double> hv(n), distRef(n, std::numeric_limits<double>::infinity());
     for (double &v : hv)
       v = static_cast<double>(next() % 4) * 0.5;
     std::vector<int> pos(n, -1);
@@ -18846,9 +19031,9 @@ void testSearchHeapMatchesPriorityQueue() {
     const int ns = 1 + static_cast<int>(next() % 4);
     for (int k = 0; k < ns; ++k) {
       const int v = static_cast<int>(next() % std::min(n, 6)); // small range: sources repeat
-      distRef[v] = distNew[v] = 0.0;
+      distRef[v] = 0.0;
       ref.push({hv[v], 0.0, v});
-      hp.push({hv[v], 0.0, v});
+      hp.push(hv[v], v, /*source=*/true);
     }
     long long eRef = 0, eNew = 0;
     for (;;) {
@@ -18862,15 +19047,10 @@ void testSearchHeapMatchesPriorityQueue() {
         }
         break;
       }
-      SearchHeap::Item b{0, 0, -1};
-      while (!hp.empty()) {
+      SearchHeap::Item b{0, -1}; // Part 158: entries never go stale (decrease-key), so no skipping here
+      if (!hp.empty()) {
         b = hp.top();
         hp.pop();
-        if (b.dist > distNew[b.index]) {
-          b.index = -1;
-          continue;
-        }
-        break;
       }
       if (a.index != b.index || (a.index >= 0 && !(a.priority == b.priority))) {
         ++mismatches;
@@ -18886,9 +19066,9 @@ void testSearchHeapMatchesPriorityQueue() {
         const double w = static_cast<double>(next() % 3); // zero-cost edges too: ties and equal f
         const double nd = distRef[v] + w;
         if (nd < distRef[u]) {
-          distRef[u] = distNew[u] = nd;
+          distRef[u] = nd;
           ref.push({nd + hv[u], nd, u});
-          hp.push({nd + hv[u], nd, u});
+          hp.push(nd + hv[u], u);
         }
       }
     }
@@ -21631,6 +21811,18 @@ int main(int argc, char **argv) {
     gSearchDump.minPops = std::atoll(sv.substr(c1 + 1).c_str());
     if (gSearchDump.every <= 0 || gSearchDump.minPops < 0)
       fail("PD39ROUTE_SEARCH_DUMP: every must be >= 1 and minpops >= 0 (got '" + sv + "')");
+  }
+  if (const char *v = std::getenv("PD39ROUTE_REGION_A1"); v && *v) { // Part 157 (trace only): rounds r1,r2,...
+    std::stringstream ss(v);
+    std::string t;
+    while (std::getline(ss, t, ',')) {
+      char *end = nullptr;
+      const long k = std::strtol(t.c_str(), &end, 10);
+      if (t.empty() || *end || k < 0)
+        fail(std::string("PD39ROUTE_REGION_A1 must be a list of round numbers r1,r2,... (got '") + v + "')");
+      gRegionA1Rounds.push_back(static_cast<int>(k));
+    }
+    std::cerr << "region A1 replay (trace only) at rounds " << v << "\n";
   }
   if (const char *v = std::getenv("PD39ROUTE_REGION_DUMP"); v && *v) { // Part 140 (trace only)
     gRegionDumpPrefix = v;

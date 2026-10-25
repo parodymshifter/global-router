@@ -39,7 +39,10 @@ Same shape as the slow tier -- but by construction one hotspot, which is
 exactly where batched searches collide (Part 119: 78% of search work thrown
 away on collisions before batches were spread over tiles).
 
-A1. **Measure the ceiling first** (CLAUDE.md: measure a parallel scheme's
+A1. **Done, 2026-10-25 (HISTORY_COST_SWEEP.md Part 157):** exact split dead (chain = the whole round late);
+    batched B 64 spread over 64-tile cells: carried 4-13%, work thrown away 9-28%, a round 3.7-7.4x faster on
+    8 threads, but one batched round ends 10-26% higher in overflow late on. A2 next, judged on final residue.
+    Original step: **Measure the ceiling first** (CLAUDE.md: measure a parallel scheme's
     ceiling before building on it). Instrument one region round on newblue4,
     bigblue4 and newblue7: for batches of 64/256 searched against a snapshot,
     the share that would be carried as conflicts, and the longest dependency

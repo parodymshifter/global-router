@@ -140,6 +140,13 @@ def main():
     run('residue', {**off, 'PD39ROUTE_SEARCH_DUMP': prefix3 + ',1,0'}, 'searchdump')
     nfiles = len([f for f in os.listdir(work) if f.startswith('searchdump.') and f.endswith('.bin')])
     check('PD39ROUTE_SEARCH_DUMP writes region-stage search instances', nfiles > 0, f'{nfiles} instance files')
+    # PD39ROUTE_REGION_A1 (Part 157, trace only): replay lines at the listed rounds, and the routes unchanged.
+    b = run('residue', {**off, 'PD39ROUTE_REGION_A1': '0,3'}, 'a1')
+    same = open(os.path.join(work, 'residue.a1.route'), 'rb').read() == open(os.path.join(work, 'residue.base.route'), 'rb').read()
+    rep = [l for l in b.splitlines() if l.startswith('region A1 round 3 batched B 64 net order')]
+    check('PD39ROUTE_REGION_A1 replays the listed rounds and leaves the routes unchanged',
+          len(rep) == 1 and any(l.startswith('region A1 round 0 sequential') for l in b.splitlines()) and same,
+          (rep[0] if rep else 'no replay line') + ('' if same else ' -- ROUTES DIFFER'))
     b = run('residue', {**off, 'PD39ROUTE_REFINE_SHIFT': '2'}, 'shift')
     m = re.search(r'^refine shift: k 2 radius 2: (\d+) legal nets', b, re.M)
     check('PD39ROUTE_REFINE_SHIFT runs before refinement', bool(m), m.group(0) if m else 'no refine shift line')
