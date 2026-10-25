@@ -170,6 +170,25 @@ def main():
     check('PD39ROUTE_REGION_BATCH box rule carries more nets, the same routes on 1 and 8 threads',
           any(' box rule: ' in l for l in lines(b, 'region round ')) and carried(b) > carried(plain) and same,
           f'carried {carried(b)} vs {carried(plain)}' + ('' if same else ' -- 1 AND 8 THREADS DIFFER'))
+    # PD39ROUTE_REGION_BATCH_ADAPT (Part 161): a batched stage that plateaus switches to sequential rounds.
+    b = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8', 'PD39ROUTE_REGION_BATCH_ADAPT': '2',
+                        'PD12ROUTE_REGION_PLATEAU': '3'}, 'batchadapt')
+    rl = lines(b, 'region round ')
+    sw = [l for l in b.splitlines() if l.startswith('region stage: batched rounds stopped improving')]
+    k = next((i for i, l in enumerate(rl) if ' batched B ' not in l), len(rl))
+    check('PD39ROUTE_REGION_BATCH_ADAPT switches a plateaued batched stage to sequential rounds',
+          len(sw) == 1 and 0 < k < len(rl) and not any(' batched B ' in l for l in rl[k:]),
+          (sw[0][:120] if sw else 'no switch line') + f'; {k} batched then {len(rl) - k} sequential rounds')
+    # the forced-overflow report (Part 162): on by default when routes end with overflow; 0 turns it off; a path
+    # also gets the crossing nets.
+    rep = os.path.join(work, 'forced.txt')
+    b = run('hard', {**off, 'PD39ROUTE_FORCED_REPORT': rep}, 'forced')
+    c = run('hard', {**off, 'PD39ROUTE_FORCED_REPORT': '0'}, 'forcedoff')
+    ok_file = os.path.exists(rep) and any(l.startswith('hotspot 1 ') for l in open(rep))
+    check('PD39ROUTE_FORCED_REPORT reports hotspots, writes crossing nets, and 0 turns it off',
+          any(l.startswith('forced-overflow report: at least ') for l in b.splitlines()) and ok_file and
+          not any(l.startswith('forced-overflow report') for l in c.splitlines()),
+          next((l[:150] for l in b.splitlines() if l.startswith('  hotspot 1:')), 'no hotspot line'))
     # settings that cannot run together are refused at start-up (Part 159: the WALL_H / BOX_EVIDENCE guard sat
     # before BOX_EVIDENCE was parsed and could not fire)
     for combo, needle in [({'PD39ROUTE_REGION_WALL_H': '8', 'PD39ROUTE_REGION_BOX_EVIDENCE': '2'}, 'WALL_H cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE'),

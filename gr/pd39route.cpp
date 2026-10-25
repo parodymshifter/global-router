@@ -1415,6 +1415,7 @@
 
 #include "gr_io.h"
 #include "g24_io.h"
+#include "cut_bound.h" // Part 162: the forced-overflow report
 #include "gpu/pattern_kernel.h"
 #include "signpost.h"
 
@@ -4737,6 +4738,12 @@ struct RegionSettings {
   // round K, sequential from K on.
   bool batchBox = false;
   int batchUntil = 0;
+  // Part 161: PD39ROUTE_REGION_BATCH_ADAPT=F (0 = off): the stage's round budget is counted in sequential rounds,
+  // a batched round counting 1/F (a batched round costs a third to a quarter of a sequential one; Part 160: twice
+  // the rounds recovered newblue1). While batched, a stall -- its best not improved by the plateau gain within the
+  // plateau window, with no overflow floor (the standard's plateau floor, 1000, never lets the plateau rule act on
+  // a residue) -- switches it to sequential rounds for the rest of the budget, with fresh windows.
+  int batchAdapt = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4866,6 +4873,7 @@ struct RegionReport {
   int vcapReduction = 0;   // pd22route: capacity units taken off each
   bool cancelled = false;  // pd22route: stopped by the fallback's cancel flag
   bool aborted = false;    // Part 146: stopped early, no better than its start (PD39ROUTE_REGION_ABORT)
+  int switchedAt = -1;     // Part 161: the round a batched stage switched to sequential (-1: it did not)
   long long wallBuilds = 0, wallLowered = 0; // Part 150: the wall-aware heuristic's table
   long long evReroutes = 0, evLimited = 0, evGrew = 0; // Part 138: box evidence, summed over rounds
   double evMeanMargin = 0;                               // Part 138: members' mean margin at the end
@@ -5086,7 +5094,14 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   // Part 138: per-net margins for the evidence rule (unused otherwise).
   const int evCap = rs.boxCap > 0 ? rs.boxCap : std::numeric_limits<int>::max();
   std::vector<int> evMargin(rs.evidenceStep > 0 ? members.size() : 0, std::min(rs.boxInit, evCap));
-  for (int r = 0; r < rs.rounds; ++r) {
+  // Part 161: the adaptive batched stage's budget, and whether it has switched to sequential rounds
+  const bool pathA = !rs.dumpTag.empty() && rs.dumpTag[0] == 'A';
+  const bool adaptive = rs.batch > 0 && rs.batchAdapt > 0 && pathA;
+  const int roundCap = adaptive ? static_cast<int>(std::min<long long>(1000000, 1LL * rs.rounds * rs.batchAdapt))
+                                : rs.rounds;
+  bool switched = false;
+  double spent = 0; // Part 161: the budget used, in sequential rounds
+  for (int r = 0; r < roundCap && spent < rs.rounds - 1e-9; ++r) {
     if (cancel && cancel->load()) {
       rep.cancelled = true;
       break;
@@ -5125,8 +5140,9 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     }
     const bool a1Seq = !a1Chain.empty();
     const auto a1T0 = std::chrono::steady_clock::now();
-    const bool batched = rs.batch > 0 && !rs.dumpTag.empty() && rs.dumpTag[0] == 'A' && // Part 159: path A only
-                         (rs.batchUntil == 0 || r < rs.batchUntil);                         // Part 160
+    const bool batched = rs.batch > 0 && pathA &&                // Part 159: path A only
+                         (rs.batchUntil == 0 || r < rs.batchUntil) && // Part 160
+                         !switched;                                    // Part 161
     if (batched && (rs.evidenceStep > 0 || rs.cooldown > 0 || rs.damp > 0 || wallOn))
       fail("PD39ROUTE_REGION_BATCH: a batched region stage cannot run with evidence boxes, cooldown, damping or the "
            "wall bound (a portfolio variant asked for one)");
@@ -5312,11 +5328,26 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
       break;
     bestAfter.push_back(rep.after);
     popsAfter.push_back(gSearchPops);
-    if (plateauReached(bestAfter, rs.plateau, rs.plateauGain, rs.plateauMin)) {
+    spent += batched && adaptive ? 1.0 / rs.batchAdapt : 1.0; // Part 161
+    if (adaptive && batched && plateauReached(bestAfter, rs.plateau, rs.plateauGain, 0)) { // Part 161: stalled
+      switched = true;
+      rep.switchedAt = r + 1;
+      bestAfter.assign(1, rep.after);
+      popsAfter.assign(1, gSearchPops);
+      if (trace)
+        std::cerr << "region stage: batched rounds stopped improving (best " << rep.after << ", under "
+                  << 100 * rs.plateauGain << "% in " << rs.plateau << " rounds) after round " << r
+                  << "; sequential rounds from round " << r + 1 << ", " << rs.rounds - spent
+                  << " of the " << rs.rounds << "-round budget left\n";
+      continue;
+    }
+    const bool plateau = plateauReached(bestAfter, rs.plateau, rs.plateauGain, rs.plateauMin);
+    const bool workStop = !plateau && workGatedPlateau(bestAfter, popsAfter, rs.costWindow, rs.costPops, rs.plateauGain);
+    if (plateau) {
       rep.plateaued = true;
       break;
     }
-    if (workGatedPlateau(bestAfter, popsAfter, rs.costWindow, rs.costPops, rs.plateauGain)) {
+    if (workStop) {
       rep.costStopped = true;
       break;
     }
@@ -5341,6 +5372,177 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   rep.pops = gSearchPops - popsAtStart;
   rep.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - stageStart).count();
   return rep;
+}
+
+// Part 162: the forced-overflow report -- CLAUDE.md's "return to placement" exit, as information. When the final
+// 2D routes still overflow, the overflowed edges are grouped into hotspots (tiles within 2 of each other), and
+// around each of the largest (PD39ROUTE_FORCED_REPORT_HOTSPOTS, default 8) the cut condition (cut_bound.h, Part
+// 91) is checked for every rectangle up to `maxSide` tiles a side inside the hotspot's box (2 tiles around it,
+// at most 48 x 48 around its worst tile). Reported per hotspot: where, its overflow, the overflow its cuts
+// certify as forced for any router, and its tightest cut (demand of the nets that must cross / boundary
+// capacity) -- 100% or more: forced by pins inside (placement must change); 90-100%: pin-bound, nearly forced;
+// below: through-traffic, not forced by any cut checked (routing could in principle detour). The certified total
+// is a greedy pack of rectangles from all hotspots with disjoint boundaries. With a file path, the crossing nets
+// of each hotspot's tightest cut are written there too. Routes are not changed.
+struct ForcedHotspot {
+  int x0 = 0, y0 = 0, x1 = -1, y1 = -1; // the overflowed tiles' box
+  long long excess = 0, edges = 0;
+  int wx = 0, wy = 0; // its worst tile
+  long long worst = 0;
+};
+
+bool forcedOverflowReport(const Design &d, const std::vector<RoutedNet> &nets, int maxSide, int maxHotspots,
+                          const std::string &path) {
+  const RoutingGrid &g = d.grid;
+  Usage u = usageFromCharges(g, nets);
+  const size_t T = static_cast<size_t>(g.nx) * g.ny;
+  std::vector<long long> tileExcess(T, 0);
+  long long total = 0, nEdges = 0;
+  for (int y = 0; y < g.ny; ++y)
+    for (int x = 0; x + 1 < g.nx; ++x) {
+      const size_t e = g.hIndex(x, y, 0);
+      if (u.h[e] > u.capH[e]) {
+        const long long ex = u.h[e] - u.capH[e];
+        total += ex;
+        ++nEdges;
+        tileExcess[static_cast<size_t>(y) * g.nx + x] += ex;
+        tileExcess[static_cast<size_t>(y) * g.nx + x + 1] += ex;
+      }
+    }
+  for (int y = 0; y + 1 < g.ny; ++y)
+    for (int x = 0; x < g.nx; ++x) {
+      const size_t e = g.vIndex(x, y, 0);
+      if (u.v[e] > u.capV[e]) {
+        const long long ex = u.v[e] - u.capV[e];
+        total += ex;
+        ++nEdges;
+        tileExcess[static_cast<size_t>(y) * g.nx + x] += ex;
+        tileExcess[static_cast<size_t>(y + 1) * g.nx + x] += ex;
+      }
+    }
+  if (total == 0)
+    return false;
+  // hotspots: overflowed tiles within 2 of each other (breadth-first)
+  std::vector<int> label(T, -1);
+  std::vector<ForcedHotspot> hs;
+  std::vector<size_t> queue;
+  for (size_t t0 = 0; t0 < T; ++t0) {
+    if (tileExcess[t0] == 0 || label[t0] >= 0)
+      continue;
+    ForcedHotspot h;
+    h.x0 = h.x1 = static_cast<int>(t0 % g.nx);
+    h.y0 = h.y1 = static_cast<int>(t0 / g.nx);
+    const int id = static_cast<int>(hs.size());
+    queue.assign(1, t0);
+    label[t0] = id;
+    for (size_t q = 0; q < queue.size(); ++q) {
+      const int x = static_cast<int>(queue[q] % g.nx), y = static_cast<int>(queue[q] / g.nx);
+      const long long ex = tileExcess[queue[q]];
+      h.excess += ex;
+      if (ex > h.worst) {
+        h.worst = ex;
+        h.wx = x;
+        h.wy = y;
+      }
+      h.x0 = std::min(h.x0, x);
+      h.x1 = std::max(h.x1, x);
+      h.y0 = std::min(h.y0, y);
+      h.y1 = std::max(h.y1, y);
+      for (int dy = -2; dy <= 2; ++dy)
+        for (int dx = -2; dx <= 2; ++dx) {
+          const int nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= g.nx || ny >= g.ny)
+            continue;
+          const size_t t = static_cast<size_t>(ny) * g.nx + nx;
+          if (tileExcess[t] > 0 && label[t] < 0) {
+            label[t] = id;
+            queue.push_back(t);
+          }
+        }
+    }
+    h.excess /= 2; // each overflowed edge was counted at both of its tiles
+    hs.push_back(h);
+  }
+  std::sort(hs.begin(), hs.end(), [](const ForcedHotspot &a, const ForcedHotspot &b) {
+    return a.excess != b.excess ? a.excess > b.excess : (a.y0 != b.y0 ? a.y0 < b.y0 : a.x0 < b.x0);
+  });
+  const auto t0 = std::chrono::steady_clock::now();
+  std::cerr << "forced-overflow report: 2D overflow " << total << " on " << nEdges << " edges in " << hs.size()
+            << " hotspots; the " << std::min<size_t>(hs.size(), static_cast<size_t>(maxHotspots))
+            << " largest checked (cuts up to " << maxSide << " tiles a side):\n";
+  std::vector<cut::Rect> packedAll;
+  std::FILE *f = nullptr;
+  if (!path.empty()) {
+    f = std::fopen(path.c_str(), "w");
+    if (!f)
+      fail("PD39ROUTE_FORCED_REPORT: cannot write " + path);
+    std::fprintf(f, "# forced-overflow report (pd39route, Part 162): per hotspot, its tightest cut's crossing nets\n");
+  }
+  for (size_t k = 0; k < hs.size() && k < static_cast<size_t>(maxHotspots); ++k) {
+    const ForcedHotspot &h = hs[k];
+    int bx0 = std::max(0, h.x0 - 2), by0 = std::max(0, h.y0 - 2);
+    int bx1 = std::min(g.nx - 1, h.x1 + 2), by1 = std::min(g.ny - 1, h.y1 + 2);
+    if (bx1 - bx0 + 1 > 48) { // at most 48 tiles wide, around the worst tile
+      bx0 = std::clamp(h.wx - 24, 0, std::max(0, g.nx - 48));
+      bx1 = std::min(g.nx - 1, bx0 + 47);
+    }
+    if (by1 - by0 + 1 > 48) {
+      by0 = std::clamp(h.wy - 24, 0, std::max(0, g.ny - 48));
+      by1 = std::min(g.ny - 1, by0 + 47);
+    }
+    const cut::Result r = cut::analyze(d, bx0, by0, bx1, by1, maxSide);
+    for (const cut::Rect &x : r.packedSet)
+      packedAll.push_back(x);
+    const cut::Rect *tight = r.tightest.empty() ? nullptr : &r.tightest.front();
+    const double ratio = tight ? 100.0 * double(tight->demand) / double(std::max(1LL, tight->capacity)) : 0.0;
+    const char *kind = r.packed > 0 ? "forced by pins inside -- placement must change"
+                       : ratio >= 90 ? "pin-bound, nearly forced"
+                                     : "through-traffic, not forced by any cut checked";
+    std::cerr << "  hotspot " << k + 1 << ": x " << h.x0 << "-" << h.x1 << " y " << h.y0 << "-" << h.y1 << ", 2D overflow "
+              << h.excess << "; certified forced >= " << r.packed;
+    if (tight)
+      std::cerr << "; tightest cut x " << tight->x0 << "-" << tight->x1 << " y " << tight->y0 << "-" << tight->y1
+                << ": " << tight->nets << " nets must cross, demand " << tight->demand << " / capacity "
+                << tight->capacity << " = " << std::fixed << std::setprecision(1) << ratio << std::defaultfloat
+                << std::setprecision(6) << "%";
+    std::cerr << " (" << kind << ")\n";
+    if (f && tight) { // the nets with a pin inside the tightest cut and a pin outside it
+      std::fprintf(f, "hotspot %zu x %d-%d y %d-%d overflow %lld forced %lld cut x %d-%d y %d-%d demand %lld capacity %lld\n",
+                   k + 1, h.x0, h.x1, h.y0, h.y1, h.excess, r.packed, tight->x0, tight->x1, tight->y0, tight->y1,
+                   tight->demand, tight->capacity);
+      for (const Net &n : d.nets) {
+        if (n.pins.size() > 1000 || n.pins.size() < 2)
+          continue;
+        bool in = false, out = false;
+        for (const Pin &p : n.pins) {
+          const bool inside = p.x >= tight->x0 && p.x <= tight->x1 && p.y >= tight->y0 && p.y <= tight->y1;
+          in = in || inside;
+          out = out || !inside;
+        }
+        if (in && out)
+          std::fprintf(f, "  %s\n", n.name.c_str());
+      }
+    }
+  }
+  if (f && std::fclose(f) != 0)
+    fail("PD39ROUTE_FORCED_REPORT: write failed: " + path);
+  // the certified total: rectangles from every hotspot, greedily, boundaries disjoint
+  std::sort(packedAll.begin(), packedAll.end(), [](const cut::Rect &a, const cut::Rect &b) { return a.bound > b.bound; });
+  std::vector<char> usedH(T, 0), usedV(T, 0);
+  long long certified = 0;
+  for (const cut::Rect &r : packedAll) {
+    bool clash = false;
+    cut::forBoundary(g, r, [&](bool hz, int x, int y) { clash = clash || (hz ? usedH : usedV)[static_cast<size_t>(y) * g.nx + x]; });
+    if (clash)
+      continue;
+    cut::forBoundary(g, r, [&](bool hz, int x, int y) { (hz ? usedH : usedV)[static_cast<size_t>(y) * g.nx + x] = 1; });
+    certified += r.bound;
+  }
+  std::cerr << "forced-overflow report: at least " << certified << " of the 2D overflow " << total
+            << " is forced for any router (cuts checked); "
+            << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() << " s"
+            << (path.empty() ? "" : "; crossing nets written to " + path) << "\n";
+  return true;
 }
 
 // pd38route (test hook, Part 122): when non-null, the slow tier appends one
@@ -21922,11 +22124,21 @@ int main(int argc, char **argv) {
         fail(std::string("PD39ROUTE_REGION_BATCH_UNTIL must be a round number 0-1000000 (got '") + u + "')");
       region.batchUntil = static_cast<int>(k);
     }
+    if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_ADAPT"); a && *a) { // Part 161
+      char *end = nullptr;
+      const long f = std::strtol(a, &end, 10);
+      if (*end || f < 0 || f > 100)
+        fail(std::string("PD39ROUTE_REGION_BATCH_ADAPT must be a round-budget factor 0-100 (got '") + a + "')");
+      region.batchAdapt = static_cast<int>(f);
+    }
     if (B > 0)
       std::cerr << "region stage batched (path A): " << B << " nets per batch, "
                 << (sp > 0 ? "spread over " + std::to_string(sp) + "-tile cells" : std::string("net order"))
                 << (region.batchBox ? ", box conflict rule" : "")
                 << (region.batchUntil > 0 ? ", rounds before " + std::to_string(region.batchUntil) + " only"
+                                          : std::string())
+                << (region.batchAdapt > 0 ? ", adaptive: " + std::to_string(region.batchAdapt) +
+                                                "x the rounds, sequential once batched rounds stop improving"
                                           : std::string())
                 << "\n";
   }
@@ -22194,6 +22406,21 @@ int main(int argc, char **argv) {
                  std::to_string(wlRep.piecesImproved) + " pieces improved");
     std::cerr << "wl recovery: 2D wire " << wlRep.wireBefore << " -> " << wlRep.wireAfter << " ("
               << wlRep.piecesImproved << " pieces improved)\n";
+  }
+  // Part 162: the forced-overflow report, on the final 2D routes (layer assignment frees them below)
+  if (!g24Mode && !laFrom) {
+    const char *fr = std::getenv("PD39ROUTE_FORCED_REPORT");
+    if (!(fr && std::string(fr) == "0")) {
+      int side = 16, spots = 8;
+      if (const char *v = std::getenv("PD39ROUTE_FORCED_REPORT_SIDE"); v && *v)
+        side = std::atoi(v);
+      if (const char *v = std::getenv("PD39ROUTE_FORCED_REPORT_HOTSPOTS"); v && *v)
+        spots = std::atoi(v);
+      if (side < 1 || side > 64 || spots < 0 || spots > 1000)
+        fail("PD39ROUTE_FORCED_REPORT_SIDE must be 1-64 and PD39ROUTE_FORCED_REPORT_HOTSPOTS 0-1000");
+      if (forcedOverflowReport(d, rep.nets, side, spots, fr && *fr && std::string(fr) != "1" ? fr : ""))
+        gStages.mark("forced-overflow report", nullptr);
+    }
   }
   ViaNegotiationReport viaRep;
   // pd35route (memory): layer assignment and everything after it read only
