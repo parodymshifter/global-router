@@ -4731,6 +4731,12 @@ struct RegionSettings {
   // spread x spread-tile cells first (0 = net order). Deterministic, the same at any thread count; not
   // byte-identical to the sequential stage.
   int batch = 0, batchSpread = 0;
+  // Part 160: PD39ROUTE_REGION_BATCH=B,spread,1 -- the box conflict rule: a net is carried when an earlier commit
+  // in its batch touched any tile it can read (its net box plus the search margin), not only when it would push
+  // an edge an earlier commit filled. PD39ROUTE_REGION_BATCH_UNTIL=K (0 = every round): batched rounds before
+  // round K, sequential from K on.
+  bool batchBox = false;
+  int batchUntil = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4996,7 +5002,7 @@ struct RegionBatchStats {
 };
 RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
                                     Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
-                                    bool pieces, int round, int B, int spread);
+                                    bool pieces, int round, int B, int spread, bool boxRule);
 // Part 157 (trace only): the A1 replay of one region round; defined after runSlowBatched.
 void regionA1Replay(const RoutingGrid &g, const std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
                     const Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
@@ -5119,7 +5125,8 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     }
     const bool a1Seq = !a1Chain.empty();
     const auto a1T0 = std::chrono::steady_clock::now();
-    const bool batched = rs.batch > 0 && !rs.dumpTag.empty() && rs.dumpTag[0] == 'A'; // Part 159: path A only
+    const bool batched = rs.batch > 0 && !rs.dumpTag.empty() && rs.dumpTag[0] == 'A' && // Part 159: path A only
+                         (rs.batchUntil == 0 || r < rs.batchUntil);                         // Part 160
     if (batched && (rs.evidenceStep > 0 || rs.cooldown > 0 || rs.damp > 0 || wallOn))
       fail("PD39ROUTE_REGION_BATCH: a batched region stage cannot run with evidence boxes, cooldown, damping or the "
            "wall bound (a portfolio variant asked for one)");
@@ -5130,7 +5137,7 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
         if (r == 0 || netOverflowed(g, usage, nets[members[k]]))
           list.push_back(members[k]);
       bstats = regionBatchedRound(g, nets, list, usage, prices, lp, stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap),
-                                  r == 0 ? &rep.box : nullptr, rs.pieces, r, rs.batch, rs.batchSpread);
+                                  r == 0 ? &rep.box : nullptr, rs.pieces, r, rs.batch, rs.batchSpread, rs.batchBox);
       rerouted = static_cast<int>(bstats.rerouted);
     } else
     for (size_t k = 0; k < members.size(); ++k) {
@@ -5267,7 +5274,8 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
       if (wallOn) // Part 150
         std::cerr << " wall-h B " << wall.B << " (lowered " << wall.lowered << ")";
       if (batched) // Part 159
-        std::cerr << " batched B " << rs.batch << " spread " << rs.batchSpread << ": " << bstats.batches
+        std::cerr << " batched B " << rs.batch << " spread " << rs.batchSpread << (rs.batchBox ? " box rule" : "")
+                  << ": " << bstats.batches
                   << " batches, committed " << bstats.committed << ", unchanged " << bstats.unchanged << ", carried "
                   << bstats.carried;
       if (rs.evidenceStep > 0) {
@@ -6422,11 +6430,15 @@ bool sameCharges2D(const std::vector<ChargeRecord> &a, const std::vector<ChargeR
 // first, so a long search does not start last and hold the batch.
 void runOnThreads(int T, const std::function<void(size_t)> &f); // pd39route (Part 127), defined below
 
+// Part 160: `readBox` (per position in `order`, optional): the box conflict rule -- a net is carried when an
+// earlier commit in its batch touched any tile of its box (tiles of the old and new routes of every changed net).
 template <class Out, class Task, class Save>
 SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &order,
                                Usage &live, int threads, size_t B, std::vector<Out> &outs, Task task, Save save,
-                               const std::vector<double> *weight = nullptr) {
+                               const std::vector<double> *weight = nullptr,
+                               const std::vector<NetBox> *readBox = nullptr) {
   SlowBatchReport br;
+  std::vector<int> dirtyTile(readBox ? static_cast<size_t>(g.nx) * g.ny : 0, -1); // Part 160
   outs.assign(order.size(), Out{});
   if (order.empty())
     return br;
@@ -6511,6 +6523,20 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
     for (size_t k = 0; k < n; ++k) {
       size_t pos = pending[k], i = order[pos];
       RoutedNet &rn = nets[i];
+      if (readBox) { // Part 160: the box rule, before anything is kept (an unchanged result is stale too)
+        const NetBox &b = (*readBox)[pos];
+        bool touched = false;
+        for (int y = b.y0; y <= b.y1 && !touched; ++y)
+          for (int x = b.x0; x <= b.x1 && !touched; ++x)
+            touched = dirtyTile[static_cast<size_t>(y) * g.nx + x] == stamp;
+        if (touched) {
+          carried.push_back(pos);
+          ++br.carried;
+          if (gRecordCarried)
+            br.carriedNets.push_back(i);
+          continue;
+        }
+      }
       if (sameCharges2D(rn.charges, res[k].charges)) {
         save(i);
         rn = std::move(res[k]);
@@ -6579,6 +6605,11 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
             passDV[e] += sign * c.amount;
           }
       };
+      if (readBox) // Part 160: every tile of the old and the new route
+        for (const std::vector<ChargeRecord> *cs : {&dl.oldC, &dl.newC})
+          for (const ChargeRecord &c : *cs)
+            for (int t = c.a; t <= c.b; ++t)
+              dirtyTile[static_cast<size_t>(c.horizontal ? c.cross : t) * g.nx + (c.horizontal ? t : c.cross)] = stamp;
       for (const ChargeRecord &c : dl.oldC)
         bump(c, -1);
       for (const ChargeRecord &c : dl.newC) {
@@ -6873,11 +6904,21 @@ void regionA1Replay(const RoutingGrid &g, const std::vector<RoutedNet> &nets, co
 
 RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
                                     Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
-                                    bool pieces, int round, int B, int spread) {
+                                    bool pieces, int round, int B, int spread, bool boxRule) {
   RegionBatchStats st;
   if (list.empty())
     return st;
   const std::vector<size_t> order = spread > 0 ? spreadByTile(g, nets, list, spread) : list;
+  std::vector<NetBox> readBox; // Part 160: what each net's reroute can read -- its box plus the search margin
+  if (boxRule)
+    for (size_t i : order) {
+      NetBox b = netBoxOf(g, nets[i]);
+      b.x0 = std::max(0, b.x0 - margin);
+      b.y0 = std::max(0, b.y0 - margin);
+      b.x1 = std::min(g.nx - 1, b.x1 + margin);
+      b.y1 = std::min(g.ny - 1, b.y1 + margin);
+      readBox.push_back(b);
+    }
   struct Out {
     int rerouted = 0;
   };
@@ -6901,7 +6942,7 @@ RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet>
           o.rerouted = 1;
         }
       },
-      [](size_t) {});
+      [](size_t) {}, nullptr, boxRule ? &readBox : nullptr);
   for (const Out &o : outs)
     st.rerouted += o.rerouted;
   st.batches = br.batches;
@@ -21865,16 +21906,29 @@ int main(int argc, char **argv) {
     region.cooldown = static_cast<int>(x);
   }
   if (const char *v = std::getenv("PD39ROUTE_REGION_BATCH"); v && *v) { // Part 159: B[,spread]
-    int B = -1, sp = 0;
+    int B = -1, sp = 0, bx = 0;
     char tail = 0;
-    const int n = std::sscanf(v, "%d,%d%c", &B, &sp, &tail);
-    if (!(n == 1 || n == 2) || B < 0 || B > 100000 || sp < 0 || sp > 100000)
-      fail(std::string("PD39ROUTE_REGION_BATCH must be B[,spread] (B 0-100000, spread 0-100000; got '") + v + "')");
+    const int n = std::sscanf(v, "%d,%d,%d%c", &B, &sp, &bx, &tail);
+    if (!(n >= 1 && n <= 3) || B < 0 || B > 100000 || sp < 0 || sp > 100000 || (bx != 0 && bx != 1))
+      fail(std::string("PD39ROUTE_REGION_BATCH must be B[,spread[,box]] (B 0-100000, spread 0-100000, box 0 or 1; "
+                       "got '") + v + "')");
     region.batch = B;
     region.batchSpread = sp;
+    region.batchBox = bx == 1;
+    if (const char *u = std::getenv("PD39ROUTE_REGION_BATCH_UNTIL"); u && *u) { // Part 160
+      char *end = nullptr;
+      const long k = std::strtol(u, &end, 10);
+      if (*end || k < 0 || k > 1000000)
+        fail(std::string("PD39ROUTE_REGION_BATCH_UNTIL must be a round number 0-1000000 (got '") + u + "')");
+      region.batchUntil = static_cast<int>(k);
+    }
     if (B > 0)
       std::cerr << "region stage batched (path A): " << B << " nets per batch, "
-                << (sp > 0 ? "spread over " + std::to_string(sp) + "-tile cells" : std::string("net order")) << "\n";
+                << (sp > 0 ? "spread over " + std::to_string(sp) + "-tile cells" : std::string("net order"))
+                << (region.batchBox ? ", box conflict rule" : "")
+                << (region.batchUntil > 0 ? ", rounds before " + std::to_string(region.batchUntil) + " only"
+                                          : std::string())
+                << "\n";
   }
   if (const char *v = std::getenv("PD39ROUTE_SEARCH_DUMP"); v && *v) { // Part 153 (trace only): prefix,every,minpops
     const std::string sv(v);

@@ -155,6 +155,21 @@ def main():
     check('PD39ROUTE_REGION_BATCH batches the region rounds, the same routes on 1 and 8 threads',
           len(rb) > 0 and len(rb) == len(lines(b, 'region round ')) and lines(b, 'region round ') != rr0 and same,
           (rb[0][:150] if rb else 'no batched round line') + ('' if same else ' -- 1 AND 8 THREADS DIFFER'))
+    # PD39ROUTE_REGION_BATCH_UNTIL (Part 160): batched rounds before K only.
+    b = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8', 'PD39ROUTE_REGION_BATCH_UNTIL': '3'}, 'batchuntil')
+    rl = lines(b, 'region round ')
+    check('PD39ROUTE_REGION_BATCH_UNTIL batches rounds before K only',
+          len(rl) > 3 and all(' batched B ' in l for l in rl[:3]) and not any(' batched B ' in l for l in rl[3:]),
+          f'{sum(" batched B " in l for l in rl)} of {len(rl)} rounds batched')
+    # the box conflict rule (Part 160): reported, carries more than the plain rule, the same on 1 and 8 threads.
+    b = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8,1'}, 'batchbox')
+    c = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8,1', 'PD37ROUTE_THREADS': '1'}, 'batchbox1')
+    carried = lambda t: sum(int(m.group(1)) for m in re.finditer(r' carried (\d+)$', t, re.M))
+    plain = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8'}, 'batch')
+    same = open(os.path.join(work, 'residue.batchbox.route'), 'rb').read() == open(os.path.join(work, 'residue.batchbox1.route'), 'rb').read()
+    check('PD39ROUTE_REGION_BATCH box rule carries more nets, the same routes on 1 and 8 threads',
+          any(' box rule: ' in l for l in lines(b, 'region round ')) and carried(b) > carried(plain) and same,
+          f'carried {carried(b)} vs {carried(plain)}' + ('' if same else ' -- 1 AND 8 THREADS DIFFER'))
     # settings that cannot run together are refused at start-up (Part 159: the WALL_H / BOX_EVIDENCE guard sat
     # before BOX_EVIDENCE was parsed and could not fire)
     for combo, needle in [({'PD39ROUTE_REGION_WALL_H': '8', 'PD39ROUTE_REGION_BOX_EVIDENCE': '2'}, 'WALL_H cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE'),
