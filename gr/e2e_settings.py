@@ -147,6 +147,24 @@ def main():
     check('PD39ROUTE_REGION_A1 replays the listed rounds and leaves the routes unchanged',
           len(rep) == 1 and any(l.startswith('region A1 round 0 sequential') for l in b.splitlines()) and same,
           (rep[0] if rep else 'no replay line') + ('' if same else ' -- ROUTES DIFFER'))
+    # PD39ROUTE_REGION_BATCH (Part 159): the round lines report batches; the same routes on 1 thread as on 8.
+    b = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8'}, 'batch')
+    c = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8', 'PD37ROUTE_THREADS': '1'}, 'batch1')
+    rb = [l for l in lines(b, 'region round ') if ' batched B 4 spread 8: ' in l]
+    same = open(os.path.join(work, 'residue.batch.route'), 'rb').read() == open(os.path.join(work, 'residue.batch1.route'), 'rb').read()
+    check('PD39ROUTE_REGION_BATCH batches the region rounds, the same routes on 1 and 8 threads',
+          len(rb) > 0 and len(rb) == len(lines(b, 'region round ')) and lines(b, 'region round ') != rr0 and same,
+          (rb[0][:150] if rb else 'no batched round line') + ('' if same else ' -- 1 AND 8 THREADS DIFFER'))
+    # settings that cannot run together are refused at start-up (Part 159: the WALL_H / BOX_EVIDENCE guard sat
+    # before BOX_EVIDENCE was parsed and could not fire)
+    for combo, needle in [({'PD39ROUTE_REGION_WALL_H': '8', 'PD39ROUTE_REGION_BOX_EVIDENCE': '2'}, 'WALL_H cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE'),
+                          ({'PD39ROUTE_REGION_BATCH': '4', 'PD39ROUTE_REGION_DAMP': '0.5'}, 'REGION_BATCH cannot be combined')]:
+        env = dict(base)
+        env.update({**off, **combo})
+        p = subprocess.run([router, os.path.join(work, 'residue.gr'), os.path.join(work, 'refused.route')], env=env,
+                           capture_output=True, text=True)
+        check('refused at start-up: ' + ' + '.join(combo), p.returncode != 0 and needle in p.stderr,
+              f'exit {p.returncode}')
     b = run('residue', {**off, 'PD39ROUTE_REFINE_SHIFT': '2'}, 'shift')
     m = re.search(r'^refine shift: k 2 radius 2: (\d+) legal nets', b, re.M)
     check('PD39ROUTE_REFINE_SHIFT runs before refinement', bool(m), m.group(0) if m else 'no refine shift line')

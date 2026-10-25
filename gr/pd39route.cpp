@@ -4725,6 +4725,12 @@ struct RegionSettings {
   // returned its start in every run seen (Part 142), so the routes are the same, sooner.
   long long abortAbove = 0;
   int abortRounds = 20;
+  // Part 159 (track A, step A2): PD39ROUTE_REGION_BATCH=B[,spread] (B 0 = off) -- path A's rounds through the
+  // slow tier's batched executor: each batch of B nets searched against a snapshot on PD37ROUTE_THREADS threads,
+  // committed in net order, "fresh" conflicts carried to the next batch; the round's nets dealt round-robin over
+  // spread x spread-tile cells first (0 = net order). Deterministic, the same at any thread count; not
+  // byte-identical to the sequential stage.
+  int batch = 0, batchSpread = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4984,6 +4990,13 @@ NetBox netBoxOf(const RoutingGrid &g, const RoutedNet &rn) {
                 std::min(g.ny - 1, b.y1 + 1)};
 }
 
+// Part 159: one region round through runSlowBatched (PD39ROUTE_REGION_BATCH); defined after it.
+struct RegionBatchStats {
+  long long rerouted = 0, batches = 0, committed = 0, unchanged = 0, carried = 0;
+};
+RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
+                                    Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
+                                    bool pieces, int round, int B, int spread);
 // Part 157 (trace only): the A1 replay of one region round; defined after runSlowBatched.
 void regionA1Replay(const RoutingGrid &g, const std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
                     const Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
@@ -5106,6 +5119,20 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     }
     const bool a1Seq = !a1Chain.empty();
     const auto a1T0 = std::chrono::steady_clock::now();
+    const bool batched = rs.batch > 0 && !rs.dumpTag.empty() && rs.dumpTag[0] == 'A'; // Part 159: path A only
+    if (batched && (rs.evidenceStep > 0 || rs.cooldown > 0 || rs.damp > 0 || wallOn))
+      fail("PD39ROUTE_REGION_BATCH: a batched region stage cannot run with evidence boxes, cooldown, damping or the "
+           "wall bound (a portfolio variant asked for one)");
+    RegionBatchStats bstats;
+    if (batched) {
+      std::vector<size_t> list; // the round's nets: overflowed at its start (every member in round 0)
+      for (size_t k = 0; k < members.size(); ++k)
+        if (r == 0 || netOverflowed(g, usage, nets[members[k]]))
+          list.push_back(members[k]);
+      bstats = regionBatchedRound(g, nets, list, usage, prices, lp, stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap),
+                                  r == 0 ? &rep.box : nullptr, rs.pieces, r, rs.batch, rs.batchSpread);
+      rerouted = static_cast<int>(bstats.rerouted);
+    } else
     for (size_t k = 0; k < members.size(); ++k) {
       RoutedNet &rn = nets[members[k]];
       if (r > 0 && !netOverflowed(g, usage, rn))
@@ -5239,6 +5266,10 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
                 << gSearchPops - (popsAfter.empty() ? popsAtStart : popsAfter.back()) << ")";
       if (wallOn) // Part 150
         std::cerr << " wall-h B " << wall.B << " (lowered " << wall.lowered << ")";
+      if (batched) // Part 159
+        std::cerr << " batched B " << rs.batch << " spread " << rs.batchSpread << ": " << bstats.batches
+                  << " batches, committed " << bstats.committed << ", unchanged " << bstats.unchanged << ", carried "
+                  << bstats.carried;
       if (rs.evidenceStep > 0) {
         long long sum = 0;
         int mx = 0;
@@ -6838,6 +6869,46 @@ void regionA1Replay(const RoutingGrid &g, const std::vector<RoutedNet> &nets, co
     }
   gSearchPops = popsSaved;
   gSearchTrace = traceSaved;
+}
+
+RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
+                                    Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
+                                    bool pieces, int round, int B, int spread) {
+  RegionBatchStats st;
+  if (list.empty())
+    return st;
+  const std::vector<size_t> order = spread > 0 ? spreadByTile(g, nets, list, spread) : list;
+  struct Out {
+    int rerouted = 0;
+  };
+  std::vector<Out> outs;
+  SlowBatchReport br = runSlowBatched(
+      g, nets, order, usage, gThreads, static_cast<size_t>(B), outs,
+      [&](Usage &u, SearchRegion &reg, RoutedNet &rn, Out &o) {
+        if (round > 0 && !netOverflowed(g, u, rn)) // as the sequential loop: no longer overflowed, left alone
+          return;
+        bool done = false;
+        if (pieces) {
+          const PieceStats ps = rerouteNetPieces(g, u, prices, lp, reg, rn, margin, AcceptMode::kKeep, box);
+          if (ps.ok) {
+            o.rerouted = ps.pieces;
+            done = true;
+          }
+        }
+        if (!done) {
+          rn.boxMargin = margin;
+          routeNetSlowMSMV(g, prices, u, lp, reg, 0.0, rn);
+          o.rerouted = 1;
+        }
+      },
+      [](size_t) {});
+  for (const Out &o : outs)
+    st.rerouted += o.rerouted;
+  st.batches = br.batches;
+  st.committed = br.committed;
+  st.unchanged = br.unchanged;
+  st.carried = br.carried;
+  return st;
 }
 
 // Batches of positions 0..boxes.size()-1, taken in order: each position goes
@@ -21793,14 +21864,18 @@ int main(int argc, char **argv) {
       fail(std::string("PD39ROUTE_REGION_COOLDOWN must be an integer 0-1000 (got '") + v + "')");
     region.cooldown = static_cast<int>(x);
   }
-  if (region.wallB > 0 && region.damp > 0) // Part 150: damping discounts edges below the table's minimum
-    fail("PD39ROUTE_REGION_WALL_H cannot be combined with PD39ROUTE_REGION_DAMP (the bound would not hold)");
-  if (region.wallB > 0 && region.evidenceStep > 0) // Part 150: its bound covers paths inside the box only
-    fail("PD39ROUTE_REGION_WALL_H cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE (the box-limit proof "
-         "needs a bound that also holds outside the box)");
-  if (region.damp > 0 || region.cooldown > 0)
-    std::cerr << "region damping: route-change discount " << region.damp << ", cooldown " << region.cooldown
-              << " rounds\n";
+  if (const char *v = std::getenv("PD39ROUTE_REGION_BATCH"); v && *v) { // Part 159: B[,spread]
+    int B = -1, sp = 0;
+    char tail = 0;
+    const int n = std::sscanf(v, "%d,%d%c", &B, &sp, &tail);
+    if (!(n == 1 || n == 2) || B < 0 || B > 100000 || sp < 0 || sp > 100000)
+      fail(std::string("PD39ROUTE_REGION_BATCH must be B[,spread] (B 0-100000, spread 0-100000; got '") + v + "')");
+    region.batch = B;
+    region.batchSpread = sp;
+    if (B > 0)
+      std::cerr << "region stage batched (path A): " << B << " nets per batch, "
+                << (sp > 0 ? "spread over " + std::to_string(sp) + "-tile cells" : std::string("net order")) << "\n";
+  }
   if (const char *v = std::getenv("PD39ROUTE_SEARCH_DUMP"); v && *v) { // Part 153 (trace only): prefix,every,minpops
     const std::string sv(v);
     const size_t c1 = sv.rfind(','), c0 = c1 == std::string::npos ? std::string::npos : sv.rfind(',', c1 - 1);
@@ -21856,6 +21931,22 @@ int main(int argc, char **argv) {
       fail(std::string("PD39ROUTE_REGION_LAGRANGE must be a number >= 0 (got '") + v + "')");
     region.lagrange = x;
   }
+  // Settings that cannot run together -- checked after every region setting is parsed (Part 159: the
+  // WALL_H / BOX_EVIDENCE check used to sit before BOX_EVIDENCE was read, so it never fired).
+  if (region.wallB > 0 && region.damp > 0) // Part 150: damping discounts edges below the table's minimum
+    fail("PD39ROUTE_REGION_WALL_H cannot be combined with PD39ROUTE_REGION_DAMP (the bound would not hold)");
+  if (region.wallB > 0 && region.evidenceStep > 0) // Part 150: its bound covers paths inside the box only
+    fail("PD39ROUTE_REGION_WALL_H cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE (the box-limit proof "
+         "needs a bound that also holds outside the box)");
+  if (region.batch > 0 && (region.evidenceStep > 0 || region.cooldown > 0 || region.damp > 0 || region.wallB > 0))
+    fail("PD39ROUTE_REGION_BATCH cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE, _COOLDOWN, _DAMP or "
+         "_WALL_H (they keep per-net state the batched round does not carry)");
+  if (region.batch > 0 && !gRegionA1Rounds.empty())
+    fail("PD39ROUTE_REGION_BATCH cannot be combined with PD39ROUTE_REGION_A1 (the replay measures the "
+         "sequential round)");
+  if (region.damp > 0 || region.cooldown > 0)
+    std::cerr << "region damping: route-change discount " << region.damp << ", cooldown " << region.cooldown
+              << " rounds\n";
   if (const char *v = std::getenv("PD39ROUTE_PORTFOLIO"); v && *v) {
     std::stringstream ss(v);
     std::string spec;
