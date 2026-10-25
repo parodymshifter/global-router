@@ -11621,3 +11621,40 @@ and a hash of every pin, net and edge capacity is identical under the old and th
 and the 2025 `mempool_cluster` `.cap` files (no netlist extracted). Read time on newblue7, the largest: 2.37 s ->
 2.41 s, peak memory unchanged (3.19 GB). All 104 programs CI builds were rebuilt and self-tested against the
 new readers: 100 of 104 passed at once. The four that failed -- aroute, nroute, oroute, qroute -- share one fixture whose capacity adjustment raised an edge from the layer's default 1 to 2, which the format does not allow: exactly the kind of input the new checks exist to catch. The fixture now sets the default to 2 and adjusts the other two edges down to 1 (the same capacities); all four pass. pd39route's self-test and `gr/e2e_settings.py` (18 of 18) pass.
+
+## Part 156 -- one record per search node: slower (+6.6%), not adopted
+
+Part 154 left the search waiting on data (back-end stalls 28-34%), with `distAt`/`setDist` at 17-18% of its self
+time, reading and writing parallel per-node arrays (`stamp`, `dist`, `parent`, `heapPos`, sink marks). The idea:
+one 32-byte record per node, so a node visit touches one cache line instead of up to four. Routes stay
+byte-identical by construction (layout only).
+
+**Measured** (newblue1, the Part 154 protocol: standard + fast08, portfolio off, region stage capped at 120
+rounds, two 90 s CPU Counters windows recorded only; the committed router and the variant back to back,
+`~/Code/GlobalRouterRuns/p156b/`). A first variant run (`p156/`) was discarded: it overlapped macOS's search
+indexer re-scanning the disk after 81 GB were deleted (load average 43-56, `hybridsearchd` at 262% CPU). The
+rerun waited until every process together used under 300% CPU for five minutes -- the load average stayed at
+8-11 with under 2 cores busy, so it is not a usable gauge on this Mac -- and logged CPU use every 30 s. Both
+`status=OK`, overflow 80 / max 2 / wire 4877292, `gr_verify` = `eval2008.pl`, route files byte-identical,
+expansions 6436097725:
+
+| stage | committed (SearchHeap, parallel arrays) | one record per node |
+|---|---|---|
+| slow tier | 302.0 s | 340.1 s (+12.6%) |
+| region stage + refinement | 678.9 s | 708.0 s (+4.3%) |
+| total | 1030.7 s | 1098.4 s (+6.6%) |
+
+(The committed router's own time moved 1058.8 s -> 1030.7 s between Part 154's run and this one: about 3% of
+run-to-run spread, against a 6.6% loss.)
+
+**Why it lost** (Instruments): `distAt` rose from 7.3% to 13.8% of the slow tier's self time (7.8% -> 11.4% in the
+region stage), and the slow tier's back-end stalls from 34% to 39%. A search floods its box row by row, so
+consecutive nodes are visited together: in the parallel arrays one cache line holds 8 nodes' distances and 16
+nodes' stamps, parents and slots -- about 0.3 lines per node visited, all of them reused by the next nodes in
+the row -- where a 32-byte record holds 2 nodes, 0.5 lines per node, and drags every field in even when a
+visit only needs the stamp and distance. A record wins when visits jump around; these do not. The slow tier,
+with 8 threads each flooding its own region, loses most: its working set grows with the record. Reverted.
+
+What it says about the next step: the per-node data is already laid out about as well as a flood allows; what
+is left is the heap itself (pop, entry loads and comparisons ~40% of self time) and the number of nodes a search
+touches (Part 150: late searches flood their boxes on near-ties).
