@@ -11734,3 +11734,44 @@ Instruments: back-end stalls fell 33% -> 30% (slow tier) and 28% -> 23% (region 
 10% -> 14% and 5% -> 7% (more instructions per pop: the slot offset and the prefetch). Where it falls short:
 the heap's own work -- pop, entry loads, comparisons -- is still ~40% of the search's self time, now split more
 evenly between waiting on data and the compare-and-select itself.
+
+## Part 159 -- track A, step A2: a batched region stage -- 3-4x faster, newblue1 worse, newblue4 the same
+
+`PD39ROUTE_REGION_BATCH=B[,spread]` (off by default; commit 6c7d84c): path A's region rounds (portfolio variants
+included; the reclaim path is not batched) run through `runSlowBatched` -- each batch of B nets searched against
+a snapshot on 8 threads, committed in net order, "fresh" conflicts carried; the round's nets (those overflowed at
+its start, every member in round 0) dealt round-robin over spread x spread-tile cells; a net no longer
+overflowed in its batch's snapshot is left alone, as the sequential loop does. The same routes on 1 and on 8
+threads (end-to-end check). Refused with evidence boxes, cooldown, damping, the wall bound and the A1 replay.
+
+Also fixed: the setting-combination guards now run after every region setting is parsed. The WALL_H +
+BOX_EVIDENCE guard (Part 150) sat before BOX_EVIDENCE was read and never fired -- the committed router ran that
+combination unrefused; no recorded run used it. End-to-end checks added for both guards (22 of 22).
+
+**Runs** (standard + fast08, portfolio off; three at once, so the times are under shared load; vs Part 124's
+sequential runs of the same settings -- routes unchanged since, every speedup byte-identical -- whose times
+predate Parts 154 and 158). All `status=OK`, `gr_verify` = `eval2008.pl`:
+
+| design | sequential (Part 124) | B 64, spread 64 | B 32, spread 64 |
+|---|---|---|---|
+| newblue1 overflow / wire | **30** / 4891216 | 50 / 4909017 | 48 / 4900112 |
+| newblue1 region stage 282 -> | 46 | 74 | 66 |
+| newblue1 time: slow tier, fallback, total | 573 / 4463 / 5125 s | 457 / 815 / 1353 s | 461 / 852 / 1393 s |
+| newblue4 overflow / wire | 154 / 13716227 | **152** / 13767163 | -- |
+| newblue4 region stage 276 -> | 174 | 208 | -- |
+| newblue4 time: slow tier, fallback, total | 1300 / 7947 / 9424 s | 888 / 1308 / 2347 s | -- |
+
+Region-stage overflow by round (newblue1 sequential / B 64 / B 32): round 20 578 / 784 / 806, 60 190 / 320 /
+316, 120 136 / 146 / 148, 250 88 / 128 / 112, 499 50 / 94 / 100. newblue4 (sequential / B 64): 452 / 588,
+278 / 322, 182 / 272, 186 / 308, 180 / 226. Refinement then recovers much of it: newblue4 208 -> 152 (sequential
+174 -> 154), newblue1 66 -> 48 (sequential 46 -> 30).
+
+Reading: the batched fallback stage is 5.5x (newblue1) and 6.1x (newblue4) faster than Part 124's sequential one;
+against today's sequential search (Parts 154 + 158, about 40% faster) roughly 3.3x and 3.6x -- to be measured on
+a quiet machine. Quality: newblue4's final residue is no worse (152 vs 154, inside its 140-154 spread), but
+newblue1's is clearly worse (48-50 vs 30; its spread is 24-38). The region stage itself ends higher on both --
+the stampede Part 157 measured per round (10-26%) compounds -- and smaller batches (32) barely help. Not
+adopted as is. What could recover it: batched rounds for the early rounds and sequential for the late ones (the
+batched rounds' deficit opens late), more batched rounds (each costs a third to a quarter of a sequential one),
+or a stricter conflict rule (carry a net whose box saw any change this batch, not only edges pushed over
+capacity) -- each to be measured on newblue1, the design that loses.
