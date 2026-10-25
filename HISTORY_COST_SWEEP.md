@@ -11775,3 +11775,29 @@ adopted as is. What could recover it: batched rounds for the early rounds and se
 batched rounds' deficit opens late), more batched rounds (each costs a third to a quarter of a sequential one),
 or a stricter conflict rule (carry a net whose box saw any change this batch, not only edges pushed over
 capacity) -- each to be measured on newblue1, the design that loses.
+
+## Part 160 -- recovering newblue1 under the batched region stage: twice the rounds does it
+
+Part 159 left newblue1 at 48-50 under the batched region stage (sequential 30). Three ways to recover it, on
+newblue1 (standard + fast08, portfolio off, B 64 spread 64; the three at once, times under shared load; all
+`status=OK`, `gr_verify` = `eval2008.pl`; `~/Code/GlobalRouterRuns/p160/`). New settings, off by default, with
+end-to-end checks (24 of 24): `PD39ROUTE_REGION_BATCH_UNTIL=K` (batched rounds before K, sequential from K on)
+and the box conflict rule `PD39ROUTE_REGION_BATCH=B,spread,1` (a net is carried when an earlier commit in its
+batch touched any tile it can read -- its net box plus the search margin -- not only an edge pushed over
+capacity; `runSlowBatched`'s new `readBox` argument, unused by the slow tier).
+
+| newblue1 | overflow / wire | region stage 282 -> | fallback stage | total |
+|---|---|---|---|---|
+| sequential (Part 124) | 30 / 4891216 | 46 (500 rounds) | 4463 s | 5125 s |
+| batched, 500 rounds (Part 159) | 50 / 4909017 | 74 | 815 s | 1353 s |
+| batched until round 250, then sequential | 36 / 4901603 | -- | -- | 2446 s |
+| **batched, 1000 rounds** | **30 / 4905918** | **44 (1000 rounds)** | **1321 s** | **1848 s** |
+| batched, box conflict rule | 30 / 4898448 | 44 (500 rounds) | 6869 s | 7383 s |
+
+Reading: **the batched stage is not worse per unit of progress, it is slower per round** -- twice the rounds
+reach the sequential stage's own end (region 44 vs 46, final 30 vs 30, wire +0.3%) in 30% of its fallback time
+(1321 s vs 4463 s; Part 124's sequential times predate the Parts 154 and 158 search speedups, so against today's
+sequential code the gain is smaller -- to be measured on a quiet machine). The hybrid keeps less of the speedup
+and does not fully recover. The box rule is exact enough (30) but carries nearly every net (round 250: 14557
+carries against 243 commits; A1, Part 157, measured the exact dependency chain as the whole round), so it is
+slower than sequential.
