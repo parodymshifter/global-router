@@ -11922,3 +11922,28 @@ Where the remaining time goes, from the phase times summed over the 1000 rounds:
 the batches' longest tasks sum to 459 s. **Commits are not worth overlapping** (Part 163's lead): the idle time is
 stragglers, each batch waiting for its slowest search. Leads: smaller batches late (fewer long searches per
 batch, more batches), or letting a straggler's batch commit the finished nets and carry the straggler.
+
+## Part 165 -- the two fixes Part 163 asked for: an entry gate for batching, and a thread share for the portfolio
+
+Commit 87b3572 adds both of the changes Part 163 named as the conditions for adopting the batched region stage.
+
+- **`PD39ROUTE_REGION_BATCH_MAX=N`**: a region stage is batched (and given `PD39ROUTE_REGION_BATCH_ROUNDS`'
+  larger budget, and the adaptive switch) only when it enters with at most N units of 2D overflow; above N it
+  runs exactly as the sequential stage does. The region trace says which: `region stage: X units of 2D overflow
+  entering; batched rounds on T threads` or `... sequential rounds (above PD39ROUTE_REGION_BATCH_MAX N)`. With
+  N = 1000 -- the threshold the plateau floor and the region early stop already use -- newblue3 (41504 entering)
+  stays sequential and the hotspot residues (a few hundred entering) are batched.
+- **Thread share for the portfolio's variants**: variants running at the same time each give their batched
+  stages 8 / (variants running) threads rather than 8 each (a thread-local share read by `runSlowBatched`
+  through the region stage; path A's own variant 0 takes the same share). Batched results do not depend on the
+  thread count, so routes are unchanged; only oversubscription goes. On newblue3 under Part 163 this was four
+  variants at 8 threads each.
+
+Checks: self-test passes; `gr/e2e_settings.py` 29 of 29, two new -- `BATCH_MAX=1` gives a route file
+byte-identical to the sequential stage's and its trace names the gate; two variants at once each report
+`batched rounds on 4 threads`.
+
+Validation queued (`~/Code/GlobalRouterRuns/p165/`, three at once): the candidate setting
+`PD39ROUTE_REGION_BATCH=64,64 PD39ROUTE_REGION_BATCH_ROUNDS=2 PD39ROUTE_REGION_BATCH_MAX=1000` on newblue3,
+bigblue4 and newblue7. Expected: newblue3 byte-identical to the standard (38898), bigblue4 and newblue7 inside
+their spreads and no slower than Part 163.
