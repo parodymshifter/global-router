@@ -3421,6 +3421,12 @@ thread_local bool gSearchDumpHere = false; // set by the region stage around its
 // byte-identical with it on.
 std::vector<int> gRegionA1Rounds;
 thread_local bool gA1Dry = false; // inside a replay: run-wide counters are left alone
+// Part 165: the threads a batched region stage may use on this thread (0 = PD37ROUTE_THREADS). Portfolio
+// variants that run at once each get an equal share, instead of all the threads each (Part 163: four variants
+// at 8 threads each oversubscribed the machine). Results do not depend on the thread count.
+thread_local int tBatchThreads = 0;
+extern int gThreads; // PD37ROUTE_THREADS, defined with the worker pool
+int batchThreads() { return tBatchThreads > 0 ? tBatchThreads : gThreads; }
 
 // Part 150: the wall-aware heuristic (PD39ROUTE_REGION_WALL_H=B[,from]). A route from (x, y) to a sink at (sx, sy)
 // crosses every column boundary between x and sx on some horizontal edge, and every row boundary between y and sy
@@ -4748,6 +4754,10 @@ struct RegionSettings {
   // batched -- Parts 160-161's rule (newblue1 30 = sequential, newblue4 148 vs 154). Unlike raising
   // PD5ROUTE_REGION_ROUNDS, it leaves the reclaim path's sequential region stage as it is.
   int batchRounds = 0;
+  // Part 165: PD39ROUTE_REGION_BATCH_MAX=N (0 = no limit): batch only a stage entering with at most N units of 2D
+  // overflow -- the hotspot regime; a stage entering with more (newblue3's spread overflow, 41504) runs
+  // sequentially with its normal budget (Part 163: batched, it ended worse and slower).
+  long long batchMax = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -5101,8 +5111,14 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   std::vector<int> evMargin(rs.evidenceStep > 0 ? members.size() : 0, std::min(rs.boxInit, evCap));
   // Part 161: the adaptive batched stage's budget, and whether it has switched to sequential rounds
   const bool pathA = !rs.dumpTag.empty() && rs.dumpTag[0] == 'A';
-  const bool adaptive = rs.batch > 0 && rs.batchAdapt > 0 && pathA;
-  const int budget = rs.batch > 0 && pathA && rs.batchRounds > 0 // Part 163
+  const bool batchEntry = rs.batchMax <= 0 || rep.before <= rs.batchMax; // Part 165
+  if (rs.batch > 0 && pathA && trace)
+    std::cerr << "region stage: " << rep.before << " units of 2D overflow entering; "
+              << (batchEntry ? "batched rounds on " + std::to_string(batchThreads()) + " threads"
+                             : "sequential rounds (above PD39ROUTE_REGION_BATCH_MAX " + std::to_string(rs.batchMax) + ")")
+              << "\n";
+  const bool adaptive = rs.batch > 0 && rs.batchAdapt > 0 && pathA && batchEntry;
+  const int budget = rs.batch > 0 && pathA && batchEntry && rs.batchRounds > 0 // Part 163
                          ? static_cast<int>(std::min<long long>(1000000, 1LL * rs.rounds * rs.batchRounds))
                          : rs.rounds;
   const int roundCap = adaptive ? static_cast<int>(std::min<long long>(1000000, 1LL * budget * rs.batchAdapt))
@@ -5151,7 +5167,7 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     }
     const bool a1Seq = !a1Chain.empty();
     const auto a1T0 = std::chrono::steady_clock::now();
-    const bool batched = rs.batch > 0 && pathA &&                // Part 159: path A only
+    const bool batched = rs.batch > 0 && pathA && batchEntry &&  // Part 159: path A only; Part 165: entry gate
                          (rs.batchUntil == 0 || r < rs.batchUntil) && // Part 160
                          !switched;                                    // Part 161
     if (batched && (rs.evidenceStep > 0 || rs.cooldown > 0 || rs.damp > 0 || wallOn))
@@ -6283,12 +6299,16 @@ void runPortfolioVariant(const Design &d, std::vector<RoutedNet> &mine, const Re
 }
 
 // Variants 1.. on `copies` (one start state each), each on its own thread; the caller joins them.
+// `atOnce`: how many variants run concurrently (these and, ungated, variant 0 on the calling thread); each gets
+// that share of the threads for its batched stages (Part 165).
 std::vector<std::thread> startPortfolioVariants(const Design &d, std::vector<std::vector<RoutedNet>> &copies,
                                                 const std::vector<RegionSettings> &rs, const RefineSettings &refine,
-                                                std::vector<PortfolioResult> &res) {
+                                                std::vector<PortfolioResult> &res, int atOnce) {
   std::vector<std::thread> th;
+  const int share = std::max(1, gThreads / std::max(1, atOnce));
   for (size_t i = 1; i < res.size(); ++i)
-    th.emplace_back([&d, &copies, &rs, &refine, &res, i]() {
+    th.emplace_back([&d, &copies, &rs, &refine, &res, i, share]() {
+      tBatchThreads = share;
       runPortfolioVariant(d, copies[i - 1], rs[i], refine, false, res[i]);
     });
   return th;
@@ -6320,8 +6340,12 @@ void runPathA(const Design &d, std::vector<RoutedNet> &nets, const RegionSetting
   std::vector<PortfolioResult> res;
   const std::vector<RegionSettings> rs = portfolioSettings(region, res);
   std::vector<std::vector<RoutedNet>> copies(res.size() - 1, nets);
-  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res);
+  const int atOnce = static_cast<int>(res.size()); // Part 165: variant 0 here and the rest on their threads
+  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res, atOnce);
+  const int saved = tBatchThreads;
+  tBatchThreads = std::max(1, gThreads / atOnce);
   runPortfolioVariant(d, nets, rs[0], refine, trace, res[0]);
+  tBatchThreads = saved;
   for (std::thread &t : th)
     t.join();
   keepBestVariant(nets, copies, res, fr);
@@ -6421,7 +6445,7 @@ void runPathAGated(const Design &d, std::vector<RoutedNet> &nets, const RegionSe
   start.read(copies[0], d.nets.data());
   for (size_t i = 1; i < copies.size(); ++i)
     copies[i] = copies[0];
-  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res);
+  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res, static_cast<int>(res.size()) - 1);
   for (std::thread &t : th)
     t.join();
   keepBestVariant(nets, copies, res, fr);
@@ -7147,7 +7171,7 @@ RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet>
   };
   std::vector<Out> outs;
   SlowBatchReport br = runSlowBatched(
-      g, nets, order, usage, gThreads, static_cast<size_t>(B), outs,
+      g, nets, order, usage, batchThreads(), static_cast<size_t>(B), outs,
       [&](Usage &u, SearchRegion &reg, RoutedNet &rn, Out &o) {
         if (round > 0 && !netOverflowed(g, u, rn)) // as the sequential loop: no longer overflowed, left alone
           return;
@@ -22150,6 +22174,13 @@ int main(int argc, char **argv) {
         fail(std::string("PD39ROUTE_REGION_BATCH_UNTIL must be a round number 0-1000000 (got '") + u + "')");
       region.batchUntil = static_cast<int>(k);
     }
+    if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_MAX"); a && *a) { // Part 165
+      char *end = nullptr;
+      const long long m = std::strtoll(a, &end, 10);
+      if (*end || m < 0)
+        fail(std::string("PD39ROUTE_REGION_BATCH_MAX must be a number of overflow units >= 0 (got '") + a + "')");
+      region.batchMax = m;
+    }
     if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_ROUNDS"); a && *a) { // Part 163
       char *end = nullptr;
       const long f = std::strtol(a, &end, 10);
@@ -22172,6 +22203,9 @@ int main(int argc, char **argv) {
                                           : std::string())
                 << (region.batchRounds > 0 ? ", " + std::to_string(region.batchRounds) + "x the rounds"
                                            : std::string())
+                << (region.batchMax > 0 ? ", stages entering with at most " + std::to_string(region.batchMax) +
+                                              " units of overflow only"
+                                        : std::string())
                 << (region.batchAdapt > 0 ? ", adaptive: " + std::to_string(region.batchAdapt) +
                                                 "x the rounds, sequential once batched rounds stop improving"
                                           : std::string())
