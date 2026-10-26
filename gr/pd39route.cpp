@@ -5100,7 +5100,10 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   const int roundCap = adaptive ? static_cast<int>(std::min<long long>(1000000, 1LL * rs.rounds * rs.batchAdapt))
                                 : rs.rounds;
   bool switched = false;
-  double spent = 0; // Part 161: the budget used, in sequential rounds
+  double spent = 0;                 // Part 161: the budget used, in sequential rounds
+  std::vector<long long> trajBest; // Part 161: the best round total so far, per round -- the stage's own
+                                    // trajectory, not its start (round 0 throws every member up, and the stage
+                                    // takes ~50 rounds to come back below where it began)
   for (int r = 0; r < roundCap && spent < rs.rounds - 1e-9; ++r) {
     if (cancel && cancel->load()) {
       rep.cancelled = true;
@@ -5329,13 +5332,14 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     bestAfter.push_back(rep.after);
     popsAfter.push_back(gSearchPops);
     spent += batched && adaptive ? 1.0 / rs.batchAdapt : 1.0; // Part 161
-    if (adaptive && batched && plateauReached(bestAfter, rs.plateau, rs.plateauGain, 0)) { // Part 161: stalled
+    trajBest.push_back(trajBest.empty() ? total : std::min(trajBest.back(), total));
+    if (adaptive && batched && plateauReached(trajBest, rs.plateau, rs.plateauGain, 0)) { // Part 161: stalled
       switched = true;
       rep.switchedAt = r + 1;
       bestAfter.assign(1, rep.after);
       popsAfter.assign(1, gSearchPops);
       if (trace)
-        std::cerr << "region stage: batched rounds stopped improving (best " << rep.after << ", under "
+        std::cerr << "region stage: batched rounds stopped improving (best " << trajBest.back() << ", under "
                   << 100 * rs.plateauGain << "% in " << rs.plateau << " rounds) after round " << r
                   << "; sequential rounds from round " << r + 1 << ", " << rs.rounds - spent
                   << " of the " << rs.rounds << "-round budget left\n";

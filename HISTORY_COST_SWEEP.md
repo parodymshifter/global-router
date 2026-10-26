@@ -11801,3 +11801,48 @@ sequential code the gain is smaller -- to be measured on a quiet machine). The h
 and does not fully recover. The box rule is exact enough (30) but carries nearly every net (round 250: 14557
 carries against 243 commits; A1, Part 157, measured the exact dependency chain as the whole round), so it is
 slower than sequential.
+
+## Part 161 -- an adaptive batched-to-sequential switch: not worth it; doubled batched rounds win
+
+`PD39ROUTE_REGION_BATCH_ADAPT=F` (off by default): the region stage's budget counted in sequential rounds, a
+batched round counting 1/F; a batched stage that stalls -- no gain of the plateau gain (1%) within the plateau
+window (50 rounds), with no overflow floor (the standard's plateau floor, 1000, never lets the plateau rule act
+on a residue) -- switches to sequential rounds for the rest of the budget. End-to-end check (26 of 26).
+
+Runs (`~/Code/GlobalRouterRuns/p161/`; standard + fast08, portfolio off, B 64 spread 64; three at once, times
+under shared load; all `status=OK`, `gr_verify` = `eval2008.pl`):
+
+| design | sequential (Part 124) | batched, 500 rounds (Part 159) | batched, 1000 rounds | adaptive, F 2 |
+|---|---|---|---|---|
+| newblue1 overflow / total time | 30 / 5125 s | 50 / 1353 s | **30 / 1848 s** (Part 160) | 38 / 4339 s |
+| newblue4 overflow / total time | 154 / 9424 s | 152 / 2347 s | **148** / 4509 s | 146 / 6812 s |
+
+The first version's stall test was wrong: it compared against the stage's start, and a region stage first
+throws every member up (round 0: newblue1 7538, newblue4 34058 from 282 / 276) and needs ~50 rounds to come back
+below its start, so both runs "stalled" at round 49 and ran sequentially from round 50 -- the two adaptive rows
+above are in effect "50 batched rounds, then sequential". Fixed to follow the stage's own trajectory (the best
+round total so far). With that test, the doubled runs' own curves would have switched at round 290 (newblue1,
+best 90) and 185 (newblue4, best 230) -- but staying batched took newblue1 from 90 to 44, and Part 160's fixed
+switch at round 250 ended at 36: late progress comes in bursts, and a 50-round stall is not a sign that batching
+is done. **Doubled batched rounds** (`PD39ROUTE_REGION_BATCH=64,64 PD5ROUTE_REGION_ROUNDS=1000`) is the rule:
+newblue1 30 (= sequential), newblue4 148 (sequential 154, inside its 140-154 spread), wire +0.3% / +0.5%.
+Next: its runtime against today's sequential code on a quiet machine with Instruments, and all sixteen
+benchmarks (path A's region stage also runs on the zero-overflow designs) before it can enter a settings file.
+
+## Part 162 -- the forced-overflow report
+
+CLAUDE.md's "return to placement" exit, as information (Part 161's question: what could adjust options when a
+chip turns out to be difficult; a stop at the certified bound was dropped first -- the bound is too loose to act:
+newblue3's residue is 1.48x its certified floor, newblue7 1.9x, newblue4's floor 0). When the final 2D routes
+overflow, pd39route groups the overflowed edges into hotspots (tiles within 2 of each other) and checks the cut
+condition (Part 91; the code moved to `gr/cut_bound.h`, shared with `cutbound`, whose self-test passes) for every
+rectangle up to 16 tiles a side around each of the 8 largest (`PD39ROUTE_FORCED_REPORT_SIDE`, `_HOTSPOTS`):
+per hotspot its overflow, the part certified as forced for any router, and its tightest cut, classed forced by
+pins (placement must change), pin-bound and nearly forced (>= 90%), or through-traffic (routing could in
+principle detour). `PD39ROUTE_FORCED_REPORT=path` also writes each tightest cut's crossing nets; `=0` turns it
+off. Routes unchanged; end-to-end check.
+
+On the Part 161 runs (0.1-0.4 s each): **newblue4** -- one hotspot of 144 of its 146, tightest cut x 59-73 y 70-81,
+2232 nets with pins inside must cross, demand 4464 of capacity 4536 = 98.4%: pin-bound, nearly forced (Part 91's
+own finding, now in every run's output; 2447 crossing nets written). **newblue1** -- 8 hotspots of 4-10 units,
+tightest cuts 56-71%: through-traffic, nothing forced; its residue is a routing problem, not a placement one.
