@@ -11899,3 +11899,26 @@ Not adopted into a settings file yet. Two changes would make it safe to: batch o
 overflow (the hotspot regime; newblue3's spread overflow, 41504, would stay sequential -- the same 1000-unit
 threshold the plateau floor and the region early stop already use), and give the portfolio's variants a share of
 the threads (8 / variants) rather than 8 each.
+
+## Part 164 -- the batched executor: sync folded into the search, biggest searches first: -20%, byte-identical
+
+Part 163's Instruments windows had about one of the batched region stage's eight threads idle. Two exact
+changes (commit 635efdc): each worker applies the previous batch's commits to its own usage replica at the start
+of its next search phase instead of in a separate parallel pass (one barrier fewer per batch; the replica each
+search sees is the same -- the self-test's replica check still syncs explicitly); and region batches start their
+biggest searches first (the slow tier's LPT order, by box area; commits stay in net order, so results do not
+change). All 33 end-to-end route files byte-identical to the previous build; 27 of 27 end-to-end checks. The
+region round trace now carries the batch phases' times.
+
+Measured (newblue1, standard + fast08, portfolio off, batched B 64 spread 64, doubled rounds; quiet machine,
+median CPU use 147%; `~/Code/GlobalRouterRuns/p164/`): `status=OK`, overflow 30, **route file byte-identical to
+Part 163's batched run**; region stage 925 -> **703 s (-24%)**, fallback 981 -> 734 s, total 1322 -> **1055 s
+(-20%)** -- against today's sequential code (2386 s) 2.3x. The Instruments window did not survive: `xctrace`
+reached its 90 s limit and then hung, idle, without saving the trace (killed after 58 min; its 7.2 GB raw trace
+was removed by the cleanup). One window recorded, Part 163's two: a few seconds of difference at most.
+
+Where the remaining time goes, from the phase times summed over the 1000 rounds: search phases 699 s, commits
+2 s (0.26%), sync 0 (folded in); task time 4277 s, i.e. 535 s on 8 threads if perfectly spread -- 76% efficiency;
+the batches' longest tasks sum to 459 s. **Commits are not worth overlapping** (Part 163's lead): the idle time is
+stragglers, each batch waiting for its slowest search. Leads: smaller batches late (fewer long searches per
+batch, more batches), or letting a straggler's batch commit the finished nets and carry the straggler.
