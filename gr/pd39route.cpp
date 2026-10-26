@@ -4744,6 +4744,10 @@ struct RegionSettings {
   // plateau window, with no overflow floor (the standard's plateau floor, 1000, never lets the plateau rule act on
   // a residue) -- switches it to sequential rounds for the rest of the budget, with fresh windows.
   int batchAdapt = 0;
+  // Part 163: PD39ROUTE_REGION_BATCH_ROUNDS=F (0 = off): a batched (path A) stage gets F x the round budget, all
+  // batched -- Parts 160-161's rule (newblue1 30 = sequential, newblue4 148 vs 154). Unlike raising
+  // PD5ROUTE_REGION_ROUNDS, it leaves the reclaim path's sequential region stage as it is.
+  int batchRounds = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -5097,14 +5101,17 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   // Part 161: the adaptive batched stage's budget, and whether it has switched to sequential rounds
   const bool pathA = !rs.dumpTag.empty() && rs.dumpTag[0] == 'A';
   const bool adaptive = rs.batch > 0 && rs.batchAdapt > 0 && pathA;
-  const int roundCap = adaptive ? static_cast<int>(std::min<long long>(1000000, 1LL * rs.rounds * rs.batchAdapt))
-                                : rs.rounds;
+  const int budget = rs.batch > 0 && pathA && rs.batchRounds > 0 // Part 163
+                         ? static_cast<int>(std::min<long long>(1000000, 1LL * rs.rounds * rs.batchRounds))
+                         : rs.rounds;
+  const int roundCap = adaptive ? static_cast<int>(std::min<long long>(1000000, 1LL * budget * rs.batchAdapt))
+                                : budget;
   bool switched = false;
   double spent = 0;                 // Part 161: the budget used, in sequential rounds
   std::vector<long long> trajBest; // Part 161: the best round total so far, per round -- the stage's own
                                     // trajectory, not its start (round 0 throws every member up, and the stage
                                     // takes ~50 rounds to come back below where it began)
-  for (int r = 0; r < roundCap && spent < rs.rounds - 1e-9; ++r) {
+  for (int r = 0; r < roundCap && spent < budget - 1e-9; ++r) {
     if (cancel && cancel->load()) {
       rep.cancelled = true;
       break;
@@ -5341,8 +5348,8 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
       if (trace)
         std::cerr << "region stage: batched rounds stopped improving (best " << trajBest.back() << ", under "
                   << 100 * rs.plateauGain << "% in " << rs.plateau << " rounds) after round " << r
-                  << "; sequential rounds from round " << r + 1 << ", " << rs.rounds - spent
-                  << " of the " << rs.rounds << "-round budget left\n";
+                  << "; sequential rounds from round " << r + 1 << ", " << budget - spent
+                  << " of the " << budget << "-round budget left\n";
       continue;
     }
     const bool plateau = plateauReached(bestAfter, rs.plateau, rs.plateauGain, rs.plateauMin);
@@ -22128,6 +22135,13 @@ int main(int argc, char **argv) {
         fail(std::string("PD39ROUTE_REGION_BATCH_UNTIL must be a round number 0-1000000 (got '") + u + "')");
       region.batchUntil = static_cast<int>(k);
     }
+    if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_ROUNDS"); a && *a) { // Part 163
+      char *end = nullptr;
+      const long f = std::strtol(a, &end, 10);
+      if (*end || f < 0 || f > 100)
+        fail(std::string("PD39ROUTE_REGION_BATCH_ROUNDS must be a round-budget factor 0-100 (got '") + a + "')");
+      region.batchRounds = static_cast<int>(f);
+    }
     if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_ADAPT"); a && *a) { // Part 161
       char *end = nullptr;
       const long f = std::strtol(a, &end, 10);
@@ -22141,6 +22155,8 @@ int main(int argc, char **argv) {
                 << (region.batchBox ? ", box conflict rule" : "")
                 << (region.batchUntil > 0 ? ", rounds before " + std::to_string(region.batchUntil) + " only"
                                           : std::string())
+                << (region.batchRounds > 0 ? ", " + std::to_string(region.batchRounds) + "x the rounds"
+                                           : std::string())
                 << (region.batchAdapt > 0 ? ", adaptive: " + std::to_string(region.batchAdapt) +
                                                 "x the rounds, sequential once batched rounds stop improving"
                                           : std::string())

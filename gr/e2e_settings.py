@@ -179,6 +179,11 @@ def main():
     check('PD39ROUTE_REGION_BATCH_ADAPT switches a plateaued batched stage to sequential rounds',
           len(sw) == 1 and 0 < k < len(rl) and not any(' batched B ' in l for l in rl[k:]),
           (sw[0][:120] if sw else 'no switch line') + f'; {k} batched then {len(rl) - k} sequential rounds')
+    # PD39ROUTE_REGION_BATCH_ROUNDS (Part 163): the batched stage gets F x the rounds (here 2 x 40), all batched.
+    b = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8', 'PD39ROUTE_REGION_BATCH_ROUNDS': '2'}, 'batchrounds')
+    rl = lines(b, 'region round ')
+    check('PD39ROUTE_REGION_BATCH_ROUNDS doubles the batched stage\'s rounds', region_rounds(b) == 80 and
+          len(rl) == 80 and all(' batched B ' in l for l in rl), f'region rounds {region_rounds(b)}')
     # the forced-overflow report (Part 162): on by default when routes end with overflow; 0 turns it off; a path
     # also gets the crossing nets.
     rep = os.path.join(work, 'forced.txt')
