@@ -5011,6 +5011,7 @@ NetBox netBoxOf(const RoutingGrid &g, const RoutedNet &rn) {
 // Part 159: one region round through runSlowBatched (PD39ROUTE_REGION_BATCH); defined after it.
 struct RegionBatchStats {
   long long rerouted = 0, batches = 0, committed = 0, unchanged = 0, carried = 0;
+  double searchS = 0, commitS = 0, syncS = 0, taskS = 0, longestS = 0; // Part 164 (trace): the phases' times
 };
 RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
                                     Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
@@ -5303,7 +5304,9 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
         std::cerr << " batched B " << rs.batch << " spread " << rs.batchSpread << (rs.batchBox ? " box rule" : "")
                   << ": " << bstats.batches
                   << " batches, committed " << bstats.committed << ", unchanged " << bstats.unchanged << ", carried "
-                  << bstats.carried;
+                  << bstats.carried << std::fixed << std::setprecision(3) << " (search " << bstats.searchS << " s, commit "
+                  << bstats.commitS << " s, sync " << bstats.syncS << " s; task sum " << bstats.taskS
+                  << " s, batches' longest " << bstats.longestS << " s)" << std::defaultfloat << std::setprecision(6);
       if (rs.evidenceStep > 0) {
         long long sum = 0;
         int mx = 0;
@@ -6670,6 +6673,18 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
   int stamp = 0;
   size_t nextFresh = 0;
   std::vector<size_t> carried; // positions in `order`
+  // Part 164: the previous batch's commits, applied by each worker to its own replica at the start of its next
+  // search phase (one barrier fewer per batch than a separate sync pass; the replica each search sees is the
+  // same). The self-test check of the replicas syncs explicitly, as before.
+  std::vector<Delta> pendingSync;
+  auto applySync = [&](int t, const std::vector<Delta> &ds) {
+    for (const Delta &dl : ds) {
+      for (const ChargeRecord &c : dl.oldC)
+        undoCharge(g, *rep[t], c);
+      for (const ChargeRecord &c : dl.newC)
+        addCharge2D(g, *rep[t], c);
+    }
+  };
   while (nextFresh < order.size() || !carried.empty()) {
     std::vector<size_t> pending = std::move(carried);
     carried.clear();
@@ -6692,6 +6707,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
     const auto tS0 = std::chrono::steady_clock::now();
     auto work = [&](int t) {
       Usage &u = *rep[t];
+      applySync(t, pendingSync); // Part 164
       for (;;) {
         size_t kk = next.fetch_add(1);
         if (kk >= n)
@@ -6715,6 +6731,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
       }
     };
     runOnThreads(T, [&](size_t t) { work(static_cast<int>(t)); }); // pd39route: the pool, not new threads
+    pendingSync.clear();
     const auto tC0 = std::chrono::steady_clock::now();
     br.searchS += std::chrono::duration<double>(tC0 - tS0).count();
     {
@@ -6840,25 +6857,16 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
       fail("pd38route: a slow batch committed nothing (its first changed net cannot conflict)");
     const auto tY0 = std::chrono::steady_clock::now();
     br.commitS += std::chrono::duration<double>(tY0 - tC0).count();
-    auto sync = [&](int t) {
-      for (const Delta &dl : deltas) {
-        for (const ChargeRecord &c : dl.oldC)
-          undoCharge(g, *rep[t], c);
-        for (const ChargeRecord &c : dl.newC)
-          addCharge2D(g, *rep[t], c);
-      }
-    };
-    if (T == 1 || deltas.empty()) {
+    if (gSlowBatchCheck) { // self-test: sync now and check every replica against the live state
       for (int t = 0; t < T; ++t)
-        sync(t);
-    } else {
-      runOnThreads(T, [&](size_t t) { sync(static_cast<int>(t)); }); // pd39route: the pool
-    }
-    br.syncS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tY0).count();
-    if (gSlowBatchCheck)
+        applySync(t, deltas);
       for (int t = 0; t < T; ++t)
         if (rep[t]->h != live.h || rep[t]->v != live.v)
           fail("pd38route: a slow-tier usage replica diverged from the live state after a batch");
+    } else {
+      pendingSync = std::move(deltas); // Part 164: applied at the start of the next batch's searches
+    }
+    br.syncS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tY0).count();
   }
   gSlowBatchCarried += br.carried;
   return br;
@@ -7123,15 +7131,17 @@ RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet>
     return st;
   const std::vector<size_t> order = spread > 0 ? spreadByTile(g, nets, list, spread) : list;
   std::vector<NetBox> readBox; // Part 160: what each net's reroute can read -- its box plus the search margin
-  if (boxRule)
-    for (size_t i : order) {
-      NetBox b = netBoxOf(g, nets[i]);
-      b.x0 = std::max(0, b.x0 - margin);
-      b.y0 = std::max(0, b.y0 - margin);
-      b.x1 = std::min(g.nx - 1, b.x1 + margin);
-      b.y1 = std::min(g.ny - 1, b.y1 + margin);
+  std::vector<double> weight;  // Part 164: its area, the work estimate that starts the biggest searches first
+  for (size_t i : order) {
+    NetBox b = netBoxOf(g, nets[i]);
+    b.x0 = std::max(0, b.x0 - margin);
+    b.y0 = std::max(0, b.y0 - margin);
+    b.x1 = std::min(g.nx - 1, b.x1 + margin);
+    b.y1 = std::min(g.ny - 1, b.y1 + margin);
+    weight.push_back(static_cast<double>(b.x1 - b.x0 + 1) * (b.y1 - b.y0 + 1));
+    if (boxRule)
       readBox.push_back(b);
-    }
+  }
   struct Out {
     int rerouted = 0;
   };
@@ -7155,13 +7165,18 @@ RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet>
           o.rerouted = 1;
         }
       },
-      [](size_t) {}, nullptr, boxRule ? &readBox : nullptr);
+      [](size_t) {}, gSlowBatchLpt ? &weight : nullptr, boxRule ? &readBox : nullptr);
   for (const Out &o : outs)
     st.rerouted += o.rerouted;
   st.batches = br.batches;
   st.committed = br.committed;
   st.unchanged = br.unchanged;
   st.carried = br.carried;
+  st.searchS = br.searchS;
+  st.commitS = br.commitS;
+  st.syncS = br.syncS;
+  st.taskS = br.taskS;
+  st.longestS = br.longestS;
   return st;
 }
 

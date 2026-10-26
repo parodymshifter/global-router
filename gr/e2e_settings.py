@@ -164,7 +164,7 @@ def main():
     # the box conflict rule (Part 160): reported, carries more than the plain rule, the same on 1 and 8 threads.
     b = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8,1'}, 'batchbox')
     c = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8,1', 'PD37ROUTE_THREADS': '1'}, 'batchbox1')
-    carried = lambda t: sum(int(m.group(1)) for m in re.finditer(r' carried (\d+)$', t, re.M))
+    carried = lambda t: sum(int(m.group(1)) for l in lines(t, 'region round ') for m in [re.search(r' carried (\d+)', l)] if m)
     plain = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8'}, 'batch')
     same = open(os.path.join(work, 'residue.batchbox.route'), 'rb').read() == open(os.path.join(work, 'residue.batchbox1.route'), 'rb').read()
     check('PD39ROUTE_REGION_BATCH box rule carries more nets, the same routes on 1 and 8 threads',
