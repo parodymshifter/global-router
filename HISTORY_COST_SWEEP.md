@@ -11846,3 +11846,56 @@ On the Part 161 runs (0.1-0.4 s each): **newblue4** -- one hotspot of 144 of its
 2232 nets with pins inside must cross, demand 4464 of capacity 4536 = 98.4%: pin-bound, nearly forced (Part 91's
 own finding, now in every run's output; 2447 crossing nets written). **newblue1** -- 8 hotspots of 4-10 units,
 tightest cuts 56-71%: through-traffic, nothing forced; its residue is a routing problem, not a placement one.
+
+## Part 163 -- the batched region stage (doubled rounds) on all sixteen benchmarks, and a quiet timing
+
+`PD39ROUTE_REGION_BATCH_ROUNDS=F` (off by default; end-to-end check): F x the round budget for path A's batched
+region stage only -- raising `PD5ROUTE_REGION_ROUNDS` would also double the reclaim path's sequential stage, which
+the zero-overflow designs mostly keep.
+
+**Quiet timing, newblue1** (standard + fast08, portfolio off; back to back after five minutes under 300% CPU,
+CPU use logged -- median 600% during the runs, the batched run's own threads included; two 90 s CPU Counters
+windows at region rounds 60 and 400; `~/Code/GlobalRouterRuns/p163/`). Both `status=OK`, overflow 30:
+
+| stage | sequential (today's code) | batched, 1000 rounds |
+|---|---|---|
+| slow tier | 274.2 s | 288.1 s |
+| region stage | 2029 s (500 rounds) | **925 s (1000 rounds), -54%** |
+| fallback (region + refinement) | 2058.2 s | 980.6 s |
+| total | 2385.5 s | **1321.9 s, -45%** |
+| total CPU | 5357 s | 7351 s (+37%) |
+
+Instruments: busy threads 2.0 -> 6.8-6.9; region rounds per 90 s window 34-39 -> 90-120; cycles useful 34-36% ->
+30-32%, back-end (data) stalls 23-27% -> 34-36% (eight threads share the caches and memory bandwidth, each with
+its own usage replica), mispredicted 33% -> 28-29%; the search's profile unchanged (heap ~38-40% of self time,
+`distAt`/`setDist` ~21%); ~86% of CPU inside the batched executor, the rest on one thread. Where it falls short:
+less useful work per thread (memory), about one thread idle at batch boundaries, and twice the rounds -- a
+per-round ~3x becomes a stage -54%.
+
+**All sixteen** (standard + fast08 with the portfolio, + `PD39ROUTE_REGION_BATCH=64,64
+PD39ROUTE_REGION_BATCH_ROUNDS=2`; three at a time -- the times are under shared load, and the records' were run
+the same way; all `status=OK`, `gr_verify` = `eval2008.pl`; vs Part 124's runs for the zero-overflow designs and
+Part 135's for the residues):
+
+| design | overflow, standard -> batched | wire | time |
+|---|---|---|---|
+| adaptec1-5, bigblue1-3, newblue2, 5, 6 | 0 -> 0 (all eleven) | identical (0.00%) | -27% to +47% (load) |
+| newblue1 | 24 -> 26 | +0.22% | 6080 -> 3546 s (-42%) |
+| newblue4 | 140 -> 144 | +0.10% | 11663 -> 10188 s (-13%) |
+| bigblue4 | 360 -> 372 | +0.12% | 36380 -> 25913 s (-29%) |
+| newblue7 | 104 -> 106 | +0.38% | 51648 -> 37192 s (-28%) |
+| newblue3 | **38898 -> 39930** | +0.89% | 13563 -> **26954 s (+99%)** |
+
+The eleven zero-overflow designs give the same routes (wire identical: their kept result is the reclaim path's,
+which is not batched). The four hotspot residues end 2-12 units higher, each inside its own run-to-run spread
+(newblue1 24-38, newblue4 140-154, bigblue4 356-378, newblue7 100-106), 13-42% faster. **newblue3 regresses on
+both**: its overflow is spread over the whole die (41504 units entering), so the floor-gated plateau stop ends
+every variant at ~60 rounds whatever the budget, and batched rounds get there worse (region 41504 -> 40280 vs
+39028); and its portfolio ran four variants of the batched stage at once, 8 threads each -- about 32 threads on 14
+cores beside two other runs: the region stage took 8004 s for 61 rounds (sequential: 2333 s for 58), and even the
+identical slow tier ran 43% longer (15536 vs 10845 s) on the oversubscribed machine.
+
+Not adopted into a settings file yet. Two changes would make it safe to: batch only stages entering with modest
+overflow (the hotspot regime; newblue3's spread overflow, 41504, would stay sequential -- the same 1000-unit
+threshold the plateau floor and the region early stop already use), and give the portfolio's variants a share of
+the threads (8 / variants) rather than 8 each.
