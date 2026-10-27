@@ -11943,7 +11943,33 @@ Checks: self-test passes; `gr/e2e_settings.py` 29 of 29, two new -- `BATCH_MAX=1
 byte-identical to the sequential stage's and its trace names the gate; two variants at once each report
 `batched rounds on 4 threads`.
 
-Validation queued (`~/Code/GlobalRouterRuns/p165/`, three at once): the candidate setting
-`PD39ROUTE_REGION_BATCH=64,64 PD39ROUTE_REGION_BATCH_ROUNDS=2 PD39ROUTE_REGION_BATCH_MAX=1000` on newblue3,
-bigblue4 and newblue7. Expected: newblue3 byte-identical to the standard (38898), bigblue4 and newblue7 inside
-their spreads and no slower than Part 163.
+Validated (`~/Code/GlobalRouterRuns/p165/`, three at once, standard + fast08 + the candidate setting
+`PD39ROUTE_REGION_BATCH=64,64 PD39ROUTE_REGION_BATCH_ROUNDS=2 PD39ROUTE_REGION_BATCH_MAX=1000`; all legal,
+`eval2008.pl` agrees exactly):
+
+| design | overflow | route file | time | Part 163 (batched, no gate, no share) | standard |
+|---|---|---|---|---|---|
+| newblue3 | 38898 (max 364) | **byte-identical to the standard** (Parts 135, 141, 146) | 15576 s | 39930, 26954 s | 38898, 13563-21550 s |
+| bigblue4 | 372 (max 2) | byte-identical to Part 163's | **18737 s** (-28%) | 372, 25914 s | 360, 36380 s |
+| newblue7 | 106 (max 2) | byte-identical to Part 163's | **42875 s (+15%)** | 106, 37192 s | 104, 51648 s |
+
+**The gate does what it was built for**: newblue3's region stage entered at 41504 and ran sequentially, and its
+routes are the standard's exactly, in a standard run's time -- Part 163's regression is gone. bigblue4 and
+newblue7, entering at 406 and 694, were batched as before and gave Part 163's routes.
+
+**The thread share falls short.** bigblue4 ran 28% faster, but newblue7 ran 15% slower: its slow tier halved
+(16724 -> 8208 s; Part 163's ran beside a full machine) while its fallback grew 20159 -> 34369 s. newblue7's path
+A ends above 10, so its other three portfolio variants then run together, each on 8 / 3 = 2 threads, and the kept
+variant (754 rounds) took 23568 s instead of 12171 s. By then the other two runs had finished: the machine had
+14 cores and the router used 1.2-3.6 of them. Two faults: the share is fixed when the variants start, so threads
+freed by a finished variant are not handed on (CPU use fell to ~120% with one variant left); and it divides the
+run's 8 threads, not the machine's cores. Under the gate it is no longer needed where it was found (newblue3's
+variants are sequential now), so the fix is either a share that is recomputed each round over the variants still
+running, out of the machine's core count, or no share by default.
+
+Instruments (CPU Counters, 90 s windows, `p165/instr/`; record one at a time -- two at once fail with "could not
+lock kperf"): newblue7's batched region stage (variant 0, 8 threads) had 5.45 busy threads, bigblue4's 4.55 (only
+2.1 s of its window was captured), the same straggler picture as Part 164; newblue3's sequential portfolio
+variants 2.23 busy threads of 3. In all three the search is 95% of the time (`multiSourceDijkstra` 33-37% self,
+`SearchHeap::pop` 32-33%, push 9-11%, wire costs 13-16%), and `_tlv_get_addr` -- a thread-local lookup on the
+search path -- 1.2-1.7%, which Part 163's batched profile already had at 1.7% (not new).
