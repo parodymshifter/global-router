@@ -11973,3 +11973,42 @@ lock kperf"): newblue7's batched region stage (variant 0, 8 threads) had 5.45 bu
 variants 2.23 busy threads of 3. In all three the search is 95% of the time (`multiSourceDijkstra` 33-37% self,
 `SearchHeap::pop` 32-33%, push 9-11%, wire costs 13-16%), and `_tlv_get_addr` -- a thread-local lookup on the
 search path -- 1.2-1.7%, which Part 163's batched profile already had at 1.7% (not new).
+
+### Part 165b -- the share recomputed every round, out of the machine's cores
+
+Commit aa7b51a replaces the fixed share with the fix Part 165 named: before each batched round a portfolio
+variant takes (machine cores) / (variants still running) threads, at most `PD37ROUTE_THREADS`, so a finished
+variant's threads go to the rest. Each variant's portfolio line now gives the range it ran on. Self-test passes
+(a new check: none running -> 8, three running -> min(8, cores / 3), one -> min(8, cores)); `gr/e2e_settings.py`
+29 of 29, its share check now expecting two concurrent variants on min(8, cores / 2) threads (7 on this Mac).
+
+newblue7 rerun alone (`~/Code/GlobalRouterRuns/p165b/`, the same setting as Part 165): legal, `eval2008.pl`
+agrees exactly, overflow 106 (max 2), wirelength 36265564, route file **byte-identical to Part 165's** (and so
+Part 163's); every variant's rounds, overflow, wire and the fallback's 271422017847 expansions are the same.
+
+| | total | slow tier | fallback | kept variant's region stage | threads per variant |
+|---|---|---|---|---|---|
+| Part 163 (no share; ran beside other jobs) | 37192 s | 16724 s | 20159 s | 12171 s | 8 each (24 on 14 cores) |
+| Part 165 (fixed 8 / 3) | 42875 s | 8208 s | 34369 s | 23568 s | 2 |
+| **Part 165b (per-round share)** | **26880 s** | 5108 s | **21478 s** | **13800 s** | 4 -> 8 as variants finish |
+| standard (sequential region stage) | 51648 s | | | | |
+
+Variant ranges: variant 1 (finished first) 4-4, variant 3 4-7, variant 2 (the kept one, last) 4-8; variant 0
+runs before the others, alone, on 8-8. The fallback is back to Part 163's time (+6.5%) without its
+oversubscription, and 62% of Part 165's. The total is -37% against Part 165 and -48% against the standard, but
+part of that is the slow tier, which ran on an idle machine here (5108 s) and beside the other two residues in
+Part 165 (8208 s) -- that difference is load, not this change.
+
+CPU use while variants 1-3 ran together (`top`, every minute, `p165b/cpu_top.log`): 870-1046% for about three
+hours, so ~10 of the 12 threads offered were busy (stragglers, as in Part 164), then 660% and ~90% as variants
+finished and the final stages ran. **`ps -o %cpu` misreads this phase** (`cpu.log`: ~270%): it sums only living
+threads, and a variant's 4 threads are not the run's 8, so `runOnThreads` starts fresh threads every round
+rather than using the pool -- a 15 s `sample` saw 998 short-lived threads (median 80 ms) next to the 11
+persistent ones. Use `top` for a run's CPU use from here on. Those fresh threads are also a cost the pool would
+avoid (thread start-up every round, each new thread's thread-local data cold), a small lead for later; the
+variant's own thread spent ~37% of the window searching and the rest waiting for its round's stragglers.
+
+Instruments: the CPU Counters window for this phase did not save -- `xctrace` stalled writing it (16 GB, against
+1-1.5 GB for Part 165's windows, likely the ~65 thread starts a second), the 690 s watchdog stopped it and the
+trace has no readable data. The `sample` profile (`p165b/instr/variants.sample.txt`) stands in for it: all three
+variants were in `regionBatchedRound` -> `runOnThreads` -> `multiSourceDijkstra`, as expected.
