@@ -191,11 +191,17 @@ def main():
     check('PD39ROUTE_REGION_BATCH_MAX runs a stage entering above it sequentially (the sequential routes)',
           'sequential rounds (above PD39ROUTE_REGION_BATCH_MAX 1)' in b and
           not any(' batched B ' in l for l in lines(b, 'region round ')) and same, '' if same else 'ROUTES DIFFER')
-    # portfolio variants running at once share the threads (Part 165): two at once on 8 threads -> 4 each.
+    # portfolio variants running at once share the machine's cores (Part 165): two at once -> cores / 2 each (at
+    # most the 8 threads), asked again every round; each variant's line gives the range it ran on.
     b = run('residue', {'PD39ROUTE_PORTFOLIO': 'lagr=0.2', 'PD39ROUTE_PORTFOLIO_WHEN': 'always',
                         'PD39ROUTE_REGION_BATCH': '4,8'}, 'batchpf')
-    check('portfolio variants share the threads of their batched stages', 'batched rounds on 4 threads' in b,
-          next((l for l in b.splitlines() if 'batched rounds on' in l), 'no batched-stage line'))
+    two = max(1, min(8, (os.cpu_count() or 1) // 2))
+    pl = lines(b, 'late-stage portfolio: variant ')
+    rng = [re.search(r'batched on (\d+)-(\d+) threads', l) for l in pl]
+    check('portfolio variants share the machine\'s cores in their batched stages',
+          f'batched rounds on {two} threads' in b and len(pl) == 2 and all(rng) and
+          all(int(m.group(1)) == two and two <= int(m.group(2)) <= 8 for m in rng),
+          f'expected {two} at the start; ' + '; '.join(l[-60:] for l in pl))
     # the forced-overflow report (Part 162): on by default when routes end with overflow; 0 turns it off; a path
     # also gets the crossing nets.
     rep = os.path.join(work, 'forced.txt')

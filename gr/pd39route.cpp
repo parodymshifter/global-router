@@ -3424,9 +3424,24 @@ thread_local bool gA1Dry = false; // inside a replay: run-wide counters are left
 // Part 165: the threads a batched region stage may use on this thread (0 = PD37ROUTE_THREADS). Portfolio
 // variants that run at once each get an equal share, instead of all the threads each (Part 163: four variants
 // at 8 threads each oversubscribed the machine). Results do not depend on the thread count.
-thread_local int tBatchThreads = 0;
+// Part 165: the late-stage portfolio's variants running at the same time share the machine's cores. Every
+// batched round asks again: cores / (variants still running), at most PD37ROUTE_THREADS -- so the threads of a
+// variant that has finished go to the ones still running. Batched results do not depend on the thread count.
+struct ThreadShare {
+  std::atomic<int> running{0};
+};
+thread_local ThreadShare *tShare = nullptr;
 extern int gThreads; // PD37ROUTE_THREADS, defined with the worker pool
-int batchThreads() { return tBatchThreads > 0 ? tBatchThreads : gThreads; }
+int shareCores() {
+  static const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+  return cores;
+}
+int batchThreads() {
+  if (!tShare)
+    return gThreads;
+  const int running = std::max(1, tShare->running.load(std::memory_order_relaxed));
+  return std::max(1, std::min(gThreads, shareCores() / running));
+}
 
 // Part 150: the wall-aware heuristic (PD39ROUTE_REGION_WALL_H=B[,from]). A route from (x, y) to a sink at (sx, sy)
 // crosses every column boundary between x and sx on some horizontal edge, and every row boundary between y and sy
@@ -4888,6 +4903,7 @@ struct RegionReport {
   bool cancelled = false;  // pd22route: stopped by the fallback's cancel flag
   bool aborted = false;    // Part 146: stopped early, no better than its start (PD39ROUTE_REGION_ABORT)
   int switchedAt = -1;     // Part 161: the round a batched stage switched to sequential (-1: it did not)
+  int threadsMin = 0, threadsMax = 0; // Part 165: the fewest and most threads a batched round ran on
   long long wallBuilds = 0, wallLowered = 0; // Part 150: the wall-aware heuristic's table
   long long evReroutes = 0, evLimited = 0, evGrew = 0; // Part 138: box evidence, summed over rounds
   double evMeanMargin = 0;                               // Part 138: members' mean margin at the end
@@ -5022,6 +5038,7 @@ NetBox netBoxOf(const RoutingGrid &g, const RoutedNet &rn) {
 struct RegionBatchStats {
   long long rerouted = 0, batches = 0, committed = 0, unchanged = 0, carried = 0;
   double searchS = 0, commitS = 0, syncS = 0, taskS = 0, longestS = 0; // Part 164 (trace): the phases' times
+  int threads = 0;                                                      // Part 165: the round's thread count
 };
 RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &list,
                                     Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
@@ -5182,6 +5199,8 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
       bstats = regionBatchedRound(g, nets, list, usage, prices, lp, stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap),
                                   r == 0 ? &rep.box : nullptr, rs.pieces, r, rs.batch, rs.batchSpread, rs.batchBox);
       rerouted = static_cast<int>(bstats.rerouted);
+      rep.threadsMin = rep.threadsMin > 0 ? std::min(rep.threadsMin, bstats.threads) : bstats.threads;
+      rep.threadsMax = std::max(rep.threadsMax, bstats.threads);
     } else
     for (size_t k = 0; k < members.size(); ++k) {
       RoutedNet &rn = nets[members[k]];
@@ -6298,18 +6317,19 @@ void runPortfolioVariant(const Design &d, std::vector<RoutedNet> &mine, const Re
   r.wire = totalWire2D(mine);
 }
 
-// Variants 1.. on `copies` (one start state each), each on its own thread; the caller joins them.
-// `atOnce`: how many variants run concurrently (these and, ungated, variant 0 on the calling thread); each gets
-// that share of the threads for its batched stages (Part 165).
+// Variants 1.. on `copies` (one start state each), each on its own thread; the caller joins them. `share`
+// counts every variant running (these, and ungated variant 0 on the calling thread, which the caller adds);
+// each variant leaves it when it finishes (Part 165).
 std::vector<std::thread> startPortfolioVariants(const Design &d, std::vector<std::vector<RoutedNet>> &copies,
                                                 const std::vector<RegionSettings> &rs, const RefineSettings &refine,
-                                                std::vector<PortfolioResult> &res, int atOnce) {
+                                                std::vector<PortfolioResult> &res, ThreadShare &share) {
   std::vector<std::thread> th;
-  const int share = std::max(1, gThreads / std::max(1, atOnce));
+  share.running.fetch_add(static_cast<int>(res.size()) - 1);
   for (size_t i = 1; i < res.size(); ++i)
-    th.emplace_back([&d, &copies, &rs, &refine, &res, i, share]() {
-      tBatchThreads = share;
+    th.emplace_back([&d, &copies, &rs, &refine, &res, &share, i]() {
+      tShare = &share;
       runPortfolioVariant(d, copies[i - 1], rs[i], refine, false, res[i]);
+      share.running.fetch_sub(1);
     });
   return th;
 }
@@ -6340,12 +6360,14 @@ void runPathA(const Design &d, std::vector<RoutedNet> &nets, const RegionSetting
   std::vector<PortfolioResult> res;
   const std::vector<RegionSettings> rs = portfolioSettings(region, res);
   std::vector<std::vector<RoutedNet>> copies(res.size() - 1, nets);
-  const int atOnce = static_cast<int>(res.size()); // Part 165: variant 0 here and the rest on their threads
-  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res, atOnce);
-  const int saved = tBatchThreads;
-  tBatchThreads = std::max(1, gThreads / atOnce);
+  ThreadShare share; // Part 165: variant 0 here and the rest on their threads
+  share.running.store(1);
+  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res, share);
+  ThreadShare *const saved = tShare;
+  tShare = &share;
   runPortfolioVariant(d, nets, rs[0], refine, trace, res[0]);
-  tBatchThreads = saved;
+  share.running.fetch_sub(1);
+  tShare = saved;
   for (std::thread &t : th)
     t.join();
   keepBestVariant(nets, copies, res, fr);
@@ -6445,7 +6467,8 @@ void runPathAGated(const Design &d, std::vector<RoutedNet> &nets, const RegionSe
   start.read(copies[0], d.nets.data());
   for (size_t i = 1; i < copies.size(); ++i)
     copies[i] = copies[0];
-  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res, static_cast<int>(res.size()) - 1);
+  ThreadShare share; // Part 165
+  std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res, share);
   for (std::thread &t : th)
     t.join();
   keepBestVariant(nets, copies, res, fr);
@@ -7170,8 +7193,9 @@ RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet>
     int rerouted = 0;
   };
   std::vector<Out> outs;
+  st.threads = batchThreads();
   SlowBatchReport br = runSlowBatched(
-      g, nets, order, usage, batchThreads(), static_cast<size_t>(B), outs,
+      g, nets, order, usage, st.threads, static_cast<size_t>(B), outs,
       [&](Usage &u, SearchRegion &reg, RoutedNet &rn, Out &o) {
         if (round > 0 && !netOverflowed(g, u, rn)) // as the sequential loop: no longer overflowed, left alone
           return;
@@ -20714,6 +20738,25 @@ void testLagrangeAndPortfolio() {
   check(pickPortfolio(pr) == 2, "portfolio pick: least overflow, then least wire");
   pr[2].wire = 120;
   check(pickPortfolio(pr) == 1, "portfolio pick: a full tie goes to the earliest");
+  {
+    // Part 165: a variant's batched rounds take the machine's cores over the variants still running, at most
+    // PD37ROUTE_THREADS, and get more as the others finish; outside a portfolio, PD37ROUTE_THREADS.
+    const int savedT = gThreads;
+    gThreads = 8;
+    ThreadShare sh;
+    ThreadShare *const savedS = tShare;
+    const int none = batchThreads();
+    tShare = &sh;
+    sh.running.store(3);
+    const int three = batchThreads();
+    sh.running.store(1);
+    const int one = batchThreads();
+    tShare = savedS;
+    gThreads = savedT;
+    const int c = shareCores();
+    check(none == 8 && three == std::max(1, std::min(8, c / 3)) && one == std::min(8, c) && one >= three,
+          "portfolio thread share: cores / variants running, at most the thread setting, more as variants finish");
+  }
 
   Design d = parse("pd39route_selftest_lagrange.gr", kThreeOnOneRowGr);
   auto fresh = [&]() {
@@ -22382,7 +22425,12 @@ int main(int argc, char **argv) {
       std::cerr << "late-stage portfolio: variant " << i << " (" << fr.portfolio[i].spec << "): region "
                 << fr.portfolio[i].region.before << " -> " << fr.portfolio[i].region.after << " in "
                 << fr.portfolio[i].region.roundsRun << " rounds, then 2D overflow " << fr.portfolio[i].overflow
-                << ", wire " << fr.portfolio[i].wire << (i == fr.portfolioPick ? "  <- kept" : "") << "\n";
+                << ", wire " << fr.portfolio[i].wire
+                << (fr.portfolio[i].region.threadsMax > 0
+                        ? ", batched on " + std::to_string(fr.portfolio[i].region.threadsMin) + "-" +
+                              std::to_string(fr.portfolio[i].region.threadsMax) + " threads"
+                        : std::string())
+                << (i == fr.portfolioPick ? "  <- kept" : "") << "\n";
     if (region.vcapTracks > 0)
       std::cerr << "region virtual capacity: path A " << fr.regionA.vcapEdges << " edges, path B "
                 << fr.regionB.vcapEdges << " edges, " << region.vcapTracks << " tracks (" << fr.regionA.vcapReduction
