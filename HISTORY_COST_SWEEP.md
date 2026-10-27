@@ -12012,3 +12012,8 @@ Instruments: the CPU Counters window for this phase did not save -- `xctrace` st
 1-1.5 GB for Part 165's windows, likely the ~65 thread starts a second), the 690 s watchdog stopped it and the
 trace has no readable data. The `sample` profile (`p165b/instr/variants.sample.txt`) stands in for it: all three
 variants were in `regionBatchedRound` -> `runOnThreads` -> `multiSourceDijkstra`, as expected.
+
+Adopted into `gr/speed08.env` (the user's decision, 2026-10-27): `PD39ROUTE_REGION_BATCH=64,64
+PD39ROUTE_REGION_BATCH_ROUNDS=2 PD39ROUTE_REGION_BATCH_MAX=1000`. The validation above ran with the standard +
+fast08 only, so `speed08.env`'s region box cap of 100 has not yet run together with batching; the standard
+itself is unchanged.

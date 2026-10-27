@@ -256,6 +256,10 @@ it: the region stage's box capped at 100 (the reclaim path kept at 200) cuts the
 13 of 16 designs identical and newblue1 / newblue4 4 units worse (inside their spreads). Since 2026-10-23 it
 also carries the slow tier's plateau stop (`PD39ROUTE_SLOW_PLATEAU=25,1,1000`, Part 148): exact where the best
 has stopped moving, at most +0.56% overflow elsewhere, for 14-45% less time on runs that never converge.
+Since 2026-10-27 it also carries the batched region stage, gated (`PD39ROUTE_REGION_BATCH=64,64`, `_ROUNDS=2`,
+`_MAX=1000`, Parts 163-165b): region stages entering at <= 1000 units of 2D overflow run in parallel batches,
+portfolio variants sharing the cores round by round -- newblue3 byte-identical, bigblue4 372 and newblue7 106
+(standard 360 / 104) at about half the standard's time; measured with the standard, not yet with the box cap.
 Since 2026-10-22 (Part 146) `fast08.env` also carries the region stage's early stop
 (`PD39ROUTE_REGION_ABORT=1000,20`): above 1000 units of entering 2D overflow, a region stage still no
 better than its start after 20 rounds stops there -- exact (such stages returned their start; routes
