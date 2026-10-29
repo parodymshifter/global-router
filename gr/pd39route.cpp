@@ -4773,6 +4773,12 @@ struct RegionSettings {
   // overflow -- the hotspot regime; a stage entering with more (newblue3's spread overflow, 41504) runs
   // sequentially with its normal budget (Part 163: batched, it ended worse and slower).
   long long batchMax = 0;
+  // Part 167: PD39ROUTE_REGION_BATCH_FALLBACK=G (0 = off): a batched stage that ends having improved on its start
+  // by less than G units (1: never beat its start -- Part 166's bigblue4, 406 -> 406 in 150 batched rounds where
+  // sequential rounds reach 396) puts its members back on their entry routes and runs again as the sequential
+  // stage, with its normal budget. The rerun is the sequential stage exactly: the stage builds its usage and
+  // prices from the routes it is given.
+  long long batchFallback = 0;
 };
 
 // pd22route: PD22ROUTE_VCAP (tracks, 0-1000) and PD22ROUTE_VCAP_RADIUS
@@ -4904,6 +4910,10 @@ struct RegionReport {
   bool aborted = false;    // Part 146: stopped early, no better than its start (PD39ROUTE_REGION_ABORT)
   int switchedAt = -1;     // Part 161: the round a batched stage switched to sequential (-1: it did not)
   int threadsMin = 0, threadsMax = 0; // Part 165: the fewest and most threads a batched round ran on
+  bool fallbackDue = false;    // Part 167: a batched stage short of PD39ROUTE_REGION_BATCH_FALLBACK, routes reset
+  int fallbackFrom = -1;       // Part 167: the batched rounds run before the sequential rerun (-1: none)
+  long long fallbackBest = 0;  // Part 167: the batched rounds' best
+  double fallbackSeconds = 0;  // Part 167: their time (included in `seconds`)
   long long wallBuilds = 0, wallLowered = 0; // Part 150: the wall-aware heuristic's table
   long long evReroutes = 0, evLimited = 0, evGrew = 0; // Part 138: box evidence, summed over rounds
   double evMeanMargin = 0;                               // Part 138: members' mean margin at the end
@@ -5048,8 +5058,9 @@ void regionA1Replay(const RoutingGrid &g, const std::vector<RoutedNet> &nets, co
                     const Usage &usage, Prices &prices, const LayerPlan &lp, int margin, const TileBox *box,
                     bool pieces, int round);
 
-RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &rs,
-                             bool trace, const std::atomic<bool> *cancel = nullptr) {
+// One region stage as configured; regionNegotiate (below) adds Part 167's sequential rerun.
+RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &rs,
+                                 bool trace, const std::atomic<bool> *cancel) {
   const RoutingGrid &g = d.grid;
   RegionReport rep;
   auto stageStart = std::chrono::steady_clock::now();
@@ -5141,6 +5152,13 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   const int roundCap = adaptive ? static_cast<int>(std::min<long long>(1000000, 1LL * budget * rs.batchAdapt))
                                 : budget;
   bool switched = false;
+  // Part 167: the members' entry routes, for a sequential rerun if the batched rounds fall short
+  std::vector<RoutedNet> entryRoutes;
+  if (rs.batchFallback > 0 && rs.batch > 0 && pathA && batchEntry) {
+    entryRoutes.reserve(members.size());
+    for (size_t i : members)
+      entryRoutes.push_back(nets[i]);
+  }
   double spent = 0;                 // Part 161: the budget used, in sequential rounds
   std::vector<long long> trajBest; // Part 161: the best round total so far, per round -- the stage's own
                                     // trajectory, not its start (round 0 throws every member up, and the stage
@@ -5412,6 +5430,12 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
     nets[members[k]].charges = best[k].first;
     nets[members[k]].segs = best[k].second;
   }
+  if (!entryRoutes.empty() && !switched && !rep.cancelled && rep.before - rep.after < rs.batchFallback) {
+    for (size_t k = 0; k < members.size(); ++k) // Part 167: back to the entry routes for the sequential rerun
+      nets[members[k]] = std::move(entryRoutes[k]);
+    rep.fallbackDue = true;
+    rep.fallbackBest = trajBest.empty() ? rep.before : trajBest.back();
+  }
   if (!evMargin.empty()) {
     long long sum = 0;
     for (int m : evMargin)
@@ -5420,6 +5444,28 @@ RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, cons
   }
   rep.pops = gSearchPops - popsAtStart;
   rep.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - stageStart).count();
+  return rep;
+}
+
+RegionReport regionNegotiate(const Design &d, std::vector<RoutedNet> &nets, const RegionSettings &rs,
+                             bool trace, const std::atomic<bool> *cancel = nullptr) {
+  RegionReport first = regionNegotiateOnce(d, nets, rs, trace, cancel);
+  if (!first.fallbackDue)
+    return first;
+  if (trace)
+    std::cerr << "region stage: " << first.roundsRun << " batched rounds improved on the entering " << first.before
+              << " by less than PD39ROUTE_REGION_BATCH_FALLBACK " << rs.batchFallback << " (best "
+              << first.fallbackBest << "); rerunning the stage with sequential rounds from its entry routes\n";
+  RegionSettings seq = rs;
+  seq.batch = 0;
+  RegionReport rep = regionNegotiateOnce(d, nets, seq, trace, cancel);
+  rep.fallbackFrom = first.roundsRun;
+  rep.fallbackBest = first.fallbackBest;
+  rep.fallbackSeconds = first.seconds;
+  rep.seconds += first.seconds;
+  rep.pops += first.pops;
+  rep.threadsMin = first.threadsMin;
+  rep.threadsMax = first.threadsMax;
   return rep;
 }
 
@@ -17360,6 +17406,56 @@ void testBoxLimitSignalAndEvidenceRule() {
     check(rr.after == 0, "region stage with a WL floor of 0.2: zero overflow on the row fixture");
   }
   {
+    // Part 167: the batched stage's sequential rerun. On the row fixture as path A: with a fallback gain no
+    // batched stage can reach, the batched rounds run, the members go back to their entry routes, and the
+    // result is the sequential stage's exactly; with a gain of 1, a batched stage that beats its start keeps
+    // its own result (no rerun).
+    auto runRow = [&](int batch, long long fallback, std::vector<std::vector<Seg>> &out) {
+      Design d = parse("pd39route_selftest_fallback_row.gr", kThreeOnOneRowGr);
+      std::vector<RoutedNet> nets(3);
+      for (int i = 0; i < 3; ++i) {
+        nets[i].net = &d.nets[i];
+        nets[i].segs = {{0, 1, 0, 7, 1, 0}};
+      }
+      prepareFor2DRefine(d, nets);
+      RegionSettings rs;
+      rs.enabled = true;
+      rs.dumpTag = "A";
+      rs.batch = batch;
+      rs.batchFallback = fallback;
+      RegionReport rr = regionNegotiate(d, nets, rs, false);
+      out.clear();
+      for (const RoutedNet &rn : nets)
+        out.push_back(rn.segs);
+      return rr;
+    };
+    auto sameSegs = [](const std::vector<std::vector<Seg>> &a, const std::vector<std::vector<Seg>> &b) {
+      if (a.size() != b.size())
+        return false;
+      for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i].size() != b[i].size())
+          return false;
+        for (size_t k = 0; k < a[i].size(); ++k)
+          if (a[i][k].x1 != b[i][k].x1 || a[i][k].y1 != b[i][k].y1 || a[i][k].x2 != b[i][k].x2 ||
+              a[i][k].y2 != b[i][k].y2 || a[i][k].l1 != b[i][k].l1 || a[i][k].l2 != b[i][k].l2)
+            return false;
+      }
+      return true;
+    };
+    std::vector<std::vector<Seg>> seqSegs, batchSegs, forcedSegs, keptSegs;
+    const RegionReport seqR = runRow(0, 0, seqSegs);
+    const RegionReport batchR = runRow(2, 0, batchSegs);
+    const RegionReport forcedR = runRow(2, 1LL << 40, forcedSegs);
+    const RegionReport keptR = runRow(2, 1, keptSegs);
+    check(seqR.after == 0 && seqR.fallbackFrom == -1 && batchR.threadsMax > 0 && batchR.after < batchR.before &&
+              forcedR.fallbackFrom == batchR.roundsRun && forcedR.threadsMax > 0 && sameSegs(forcedSegs, seqSegs) &&
+              forcedR.after == seqR.after && forcedR.roundsRun == seqR.roundsRun &&
+              forcedR.seconds >= forcedR.fallbackSeconds && keptR.fallbackFrom == -1 && sameSegs(keptSegs, batchSegs),
+          "batched region stage short of PD39ROUTE_REGION_BATCH_FALLBACK reruns as the sequential stage exactly (" +
+              std::to_string(forcedR.fallbackFrom) + " batched rounds first); one that beats its start keeps "
+              "its own routes");
+  }
+  {
     // Part 140: the halo. A 6 x 3 grid, one-track horizontal edges (capacity 2, a net needs 2), all full but
     // edge (4,1): its distances run 0 at (4,1), 1 beside it, ...; the vertical edges all have room (0).
     const char *gr6 = "grid 6 3 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
@@ -22238,6 +22334,14 @@ int main(int argc, char **argv) {
         fail(std::string("PD39ROUTE_REGION_BATCH_ADAPT must be a round-budget factor 0-100 (got '") + a + "')");
       region.batchAdapt = static_cast<int>(f);
     }
+    if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_FALLBACK"); a && *a) { // Part 167
+      char *end = nullptr;
+      const long long gmin = std::strtoll(a, &end, 10);
+      if (*end || gmin < 0)
+        fail(std::string("PD39ROUTE_REGION_BATCH_FALLBACK must be a number of overflow units >= 0 (got '") + a +
+             "')");
+      region.batchFallback = gmin;
+    }
     if (B > 0)
       std::cerr << "region stage batched (path A): " << B << " nets per batch, "
                 << (sp > 0 ? "spread over " + std::to_string(sp) + "-tile cells" : std::string("net order"))
@@ -22252,6 +22356,9 @@ int main(int argc, char **argv) {
                 << (region.batchAdapt > 0 ? ", adaptive: " + std::to_string(region.batchAdapt) +
                                                 "x the rounds, sequential once batched rounds stop improving"
                                           : std::string())
+                << (region.batchFallback > 0 ? ", rerun sequentially if the batched rounds gain less than " +
+                                                   std::to_string(region.batchFallback) + " units"
+                                             : std::string())
                 << "\n";
   }
   if (const char *v = std::getenv("PD39ROUTE_SEARCH_DUMP"); v && *v) { // Part 153 (trace only): prefix,every,minpops
@@ -22424,7 +22531,13 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < fr.portfolio.size(); ++i) // Part 135
       std::cerr << "late-stage portfolio: variant " << i << " (" << fr.portfolio[i].spec << "): region "
                 << fr.portfolio[i].region.before << " -> " << fr.portfolio[i].region.after << " in "
-                << fr.portfolio[i].region.roundsRun << " rounds, then 2D overflow " << fr.portfolio[i].overflow
+                << fr.portfolio[i].region.roundsRun << " rounds"
+                << (fr.portfolio[i].region.fallbackFrom >= 0 // Part 167
+                        ? " (sequential, after " + std::to_string(fr.portfolio[i].region.fallbackFrom) +
+                              " batched rounds that reached only " +
+                              std::to_string(fr.portfolio[i].region.fallbackBest) + ")"
+                        : std::string())
+                << ", then 2D overflow " << fr.portfolio[i].overflow
                 << ", wire " << fr.portfolio[i].wire
                 << (fr.portfolio[i].region.threadsMax > 0
                         ? ", batched on " + std::to_string(fr.portfolio[i].region.threadsMin) + "-" +
@@ -22436,7 +22549,12 @@ int main(int argc, char **argv) {
                 << fr.regionB.vcapEdges << " edges, " << region.vcapTracks << " tracks (" << fr.regionA.vcapReduction
                 << " units), radius " << region.vcapRadius << "\n";
     std::cerr << "reclaim fallback: path A (standard) region " << fr.regionA.before << " -> " << fr.regionA.after
-              << " (" << fr.regionA.roundsRun << " rounds, " << fr.regionA.seconds << "s), refinement -> "
+              << " (" << fr.regionA.roundsRun << " rounds, " << fr.regionA.seconds << "s"
+              << (fr.regionA.fallbackFrom >= 0 // Part 167
+                      ? "; sequential after " + std::to_string(fr.regionA.fallbackFrom) + " batched rounds, " +
+                            std::to_string(static_cast<long long>(fr.regionA.fallbackSeconds)) + "s"
+                      : std::string())
+              << "), refinement -> "
               << fr.refineA.after << "; path B (reclaim " << fr.reclaim.kept << " of " << fr.reclaim.candidates
               << ", 2D overflow " << fr.reclaim.overflowBefore << " -> " << fr.reclaim.overflowAfter << ") region "
               << fr.regionB.before << " -> " << fr.regionB.after << " (" << fr.regionB.roundsRun << " rounds, "

@@ -191,6 +191,20 @@ def main():
     check('PD39ROUTE_REGION_BATCH_MAX runs a stage entering above it sequentially (the sequential routes)',
           'sequential rounds (above PD39ROUTE_REGION_BATCH_MAX 1)' in b and
           not any(' batched B ' in l for l in lines(b, 'region round ')) and same, '' if same else 'ROUTES DIFFER')
+    # PD39ROUTE_REGION_BATCH_FALLBACK (Part 167): a batched stage that gains less than G reruns sequentially --
+    # with a G no stage can reach, the plain sequential routes; with G 1 a stage that beats its start keeps its
+    # own (the batched routes).
+    b = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8', 'PD39ROUTE_REGION_BATCH_FALLBACK': '1000000000'},
+            'batchfb')
+    c = run('residue', {**off, 'PD39ROUTE_REGION_BATCH': '4,8', 'PD39ROUTE_REGION_BATCH_FALLBACK': '1'}, 'batchfb1')
+    rerun = [l for l in b.splitlines() if l.startswith('region stage: ') and 'rerunning the stage with sequential' in l]
+    same = open(os.path.join(work, 'residue.batchfb.route'), 'rb').read() == open(os.path.join(work, 'residue.base.route'), 'rb').read()
+    kept = open(os.path.join(work, 'residue.batchfb1.route'), 'rb').read() == open(os.path.join(work, 'residue.batch.route'), 'rb').read()
+    check('PD39ROUTE_REGION_BATCH_FALLBACK reruns a short batched stage sequentially (the sequential routes)',
+          len(rerun) == 1 and any(' batched B ' in l for l in lines(b, 'region round ')) and same and kept and
+          'rerunning the stage' not in c,
+          (rerun[0][:140] if rerun else 'no rerun line') + ('' if same else ' -- NOT THE SEQUENTIAL ROUTES') +
+          ('' if kept else ' -- G 1 CHANGED THE BATCHED ROUTES'))
     # portfolio variants running at once share the machine's cores (Part 165): two at once -> cores / 2 each (at
     # most the 8 threads), asked again every round; each variant's line gives the range it ran on.
     b = run('residue', {'PD39ROUTE_PORTFOLIO': 'lagr=0.2', 'PD39ROUTE_PORTFOLIO_WHEN': 'always',
