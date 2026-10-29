@@ -12056,7 +12056,7 @@ wire costs 15%), the cycles 34% useful, 32% back-end stalls (memory), 29% discar
 (13 GB, no readable data) -- the second large trace in a row to fail this way, both taken while many threads
 start and stop; 90 s windows on the long residues need a shorter limit.
 
-## Part 167 -- the batched stage's sequential rerun (running)
+## Part 167 -- the batched stage's sequential rerun
 
 Part 166 found bigblue4's batched region stage makes no progress: every variant ends its 150 batched rounds at
 its entering 406 (best round 418), where sequential rounds first beat 406 at round 92 and reach 396, then 360
@@ -12074,5 +12074,25 @@ forced rerun gives the sequential stage's routes exactly and G 1 leaves a succes
 `gr/e2e_settings.py` 30 of 30 (new: the same two properties on the synthetic residue, through the environment).
 
 Validation (`~/Code/GlobalRouterRuns/p167/`, started 2026-10-28 22:03, both at once, standard + fast08 +
-speed08 + `PD39ROUTE_REGION_BATCH_FALLBACK=1`): bigblue4 (expected: every variant reruns; Part 141's 360 if
-nothing else differs) and newblue7 (expected: no rerun, byte-identical to Part 166's 102).
+speed08 + `PD39ROUTE_REGION_BATCH_FALLBACK=1`; both legal, `eval2008.pl` agrees exactly):
+
+| run | overflow | max | wirelength | wall s | CPU s | peak RSS MB |
+|---|---|---|---|---|---|---|
+| bigblue4, Part 167 (fallback) | 360 | 2 | 24934483 | 22752 | 60630 | 2895 |
+| bigblue4, Part 166 (batched, no fallback) | 372 | 2 | 24975922 | 10008 | 44097 | 2730 |
+| bigblue4, Part 141 (sequential, box cap 100) | 360 | 2 | 24934483 | 29100 | 59987 | 2556 |
+| bigblue4, Part 135 (standard + portfolio) | 360 | 2 | 24946873 | 36381 | 127351 | 2959 |
+| newblue7, Part 167 (fallback) | 102 | 2 | 35947752 | 18985 | 125043 | 4408 |
+| newblue7, Part 166 | 102 | 2 | 35947752 | 18915 | 125029 | 4897 |
+
+- **bigblue4: every variant reran, and the route is byte-identical to Part 141's.** The batched rounds reached
+  only 418 / 420 / 428 / 426 against the entering 406; the sequential reruns then went 406 -> 396 / 394 / 404 /
+  402, exactly Part 141's portfolio lines, and variant 0 was kept at 360. Path A's batched attempt cost 753 s of
+  its 7017 s. The run is 22% faster than Part 141 (later speedups: the slow tier's plateau stop, Part 148, and
+  the search heap, Parts 154 and 158) but 2.3x Part 166's, since the sequential stage is now what it pays for.
+- **newblue7: no rerun, route byte-identical to Part 166's** (every variant beat 694: 186 / 172 / 198 / 186),
+  same time within noise. The fallback costs nothing where batching works.
+
+So `FALLBACK=1` turns speed08's bigblue4 loss (+12 units) back into the standard's 360, at +12744 s (3.5 h) over
+the batched-only run; newblue7 keeps its 102 and its time. The trade is a choice for `speed08.env`, not a free win:
+on bigblue4 it buys 12 units for 3.5 h, the same 360 the sequential setting gives, 1.8 h sooner.
