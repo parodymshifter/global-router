@@ -12017,3 +12017,41 @@ Adopted into `gr/speed08.env` (the user's decision, 2026-10-27): `PD39ROUTE_REGI
 PD39ROUTE_REGION_BATCH_ROUNDS=2 PD39ROUTE_REGION_BATCH_MAX=1000`. The validation above ran with the standard +
 fast08 only, so `speed08.env`'s region box cap of 100 has not yet run together with batching; the standard
 itself is unchanged.
+
+## Part 166 -- the full speed08.env on bigblue4 and newblue7
+
+The check Part 165b left open: `speed08.env` now carries the region box cap 100, the slow tier's plateau stop and
+the gated batched region stage, but the batching had only run without the box cap. Both designs at once
+(`~/Code/GlobalRouterRuns/p166/`, `./pd39route.p165b @standard.env @fast08.env @speed08.env`, the router source
+of aa7b51a), started 2026-10-27 17:35. Both legal, `eval2008.pl` agrees exactly.
+
+| design | overflow (max) | wirelength | time | speed08 before batching (Part 141) | standard |
+|---|---|---|---|---|---|
+| bigblue4 | 372 (2) | 24975922 | **10008 s** (2 h 47 min) | 360, 29100 s | 360, 36380 s |
+| newblue7 | **102** (2) | 35947752 | **18915 s** (5 h 15 min) | 104, 42800 s | 104, 51648 s |
+
+(The plateau stop does not act on either design -- their slow tiers end below its floor of 1000 -- so Part 141
+is the right "before".)
+
+**newblue7: faster and better.** -56% against Part 141, -63% against the standard, and 102 is the lowest
+newblue7 has reached (the standard's 104 was its best). The portfolio kept variant 1 (lagr 0.05: region 694 ->
+172, then 102); all four variants ran the full 1000 batched rounds (500 x `BATCH_ROUNDS=2`). Fallback 11307 s
+against Part 165b's 21478 s at box cap 200 -- the cap keeps cutting the batched stage's work as it did the
+sequential one's (expansions 1.15e11 vs 2.71e11).
+
+**bigblue4: much faster, 12 units worse.** -66% against Part 141, -72% against the standard, but 372 against
+360 -- the same 372 as Part 165 without the box cap, so the box cap is not the cause. On bigblue4 the batched
+region stage does nothing: every variant ends its 150 rounds at its starting 406 (the region early stop's
+floor is 1000, so it cannot end them sooner), refinement then takes all four to the same 372, and the portfolio
+keeps variant 0. The sequential region stage (Part 141) took variant 0 from 406 to 396 in 256 rounds (9687 s), and refinement
+then reached 360 (the other variants 364-366). So the batched rounds
+lose bigblue4's last 12 units: 3.3%, small against the 2.9x speed-up, but a real difference, not noise (bigblue4
+has been 356-372 across all settings, and 372 only under batching).
+
+Instruments (CPU Counters, 90 s at region round 60, `p166/instr/`): bigblue4's batched region stage (variant 0,
+8 threads) kept **6.67 threads busy of 8** (Part 165's 2-second capture: 4.55), 16 rounds in the window
+(5.7 s each); the search is 97% of the time (`multiSourceDijkstra` 37% self, `SearchHeap::pop` 32%, push 8%,
+wire costs 15%), the cycles 34% useful, 32% back-end stalls (memory), 29% discarded (mispredicted branches),
+`_tlv_get_addr` 1.8%. newblue7's window did not save: `xctrace` crashed (segmentation fault) while writing it
+(13 GB, no readable data) -- the second large trace in a row to fail this way, both taken while many threads
+start and stop; 90 s windows on the long residues need a shorter limit.

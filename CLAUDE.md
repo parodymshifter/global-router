@@ -259,7 +259,8 @@ has stopped moving, at most +0.56% overflow elsewhere, for 14-45% less time on r
 Since 2026-10-27 it also carries the batched region stage, gated (`PD39ROUTE_REGION_BATCH=64,64`, `_ROUNDS=2`,
 `_MAX=1000`, Parts 163-165b): region stages entering at <= 1000 units of 2D overflow run in parallel batches,
 portfolio variants sharing the cores round by round -- newblue3 byte-identical, bigblue4 372 and newblue7 106
-(standard 360 / 104) at about half the standard's time; measured with the standard, not yet with the box cap.
+(standard 360 / 104) at about half the standard's time; with the whole file (Part 166) bigblue4 372 in 10008 s
+and newblue7 102 (its best yet) in 18915 s, against 29100 s / 42800 s before batching.
 Since 2026-10-22 (Part 146) `fast08.env` also carries the region stage's early stop
 (`PD39ROUTE_REGION_ABORT=1000,20`): above 1000 units of entering 2D overflow, a region stage still no
 better than its start after 20 rounds stops there -- exact (such stages returned their start; routes
