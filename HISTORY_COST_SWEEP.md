@@ -12096,3 +12096,5 @@ speed08 + `PD39ROUTE_REGION_BATCH_FALLBACK=1`; both legal, `eval2008.pl` agrees 
 So `FALLBACK=1` turns speed08's bigblue4 loss (+12 units) back into the standard's 360, at +12744 s (3.5 h) over
 the batched-only run; newblue7 keeps its 102 and its time. The trade is a choice for `speed08.env`, not a free win:
 on bigblue4 it buys 12 units for 3.5 h, the same 360 the sequential setting gives, 1.8 h sooner.
+
+Adopted into `gr/speed08.env` (the user's decision, 2026-10-29 06:46): `PD39ROUTE_REGION_BATCH_FALLBACK=1`.
