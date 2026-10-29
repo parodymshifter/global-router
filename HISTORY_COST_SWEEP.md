@@ -12124,3 +12124,22 @@ Validation (`~/Code/GlobalRouterRuns/p168/`, started 2026-10-29 14:31, all three
 commits, standard + fast08 + speed08): bigblue4 speculative (expected: byte-identical to Part 167's 360, and the
 variants' refinement traces), adaptec5 gated and speculative side by side (expected: byte-identical; the cost of
 cancelled variants on a zero-overflow design).
+
+### Results, step 1 (finished 2026-10-29 18:40)
+
+| design | setting | overflow (max) | wirelength | wall s | CPU s | peak RSS MB | routes |
+|---|---|---|---|---|---|---|---|
+| adaptec5 | gated (`after`) | 0 (0) | 15650286 | 2427 | 7881 | 1660 | -- |
+| adaptec5 | speculative | 0 (0) | 15650286 | 2432 | 8556 | 3137 | byte-identical to gated |
+| bigblue4 | gated (Part 167) | 360 (2) | 24934483 | 22752 | 60630 | 2895 | -- |
+| bigblue4 | speculative | 360 (2) | 24934483 | **13095** | 54640 | 2673 | byte-identical to Part 167 |
+
+All legal, `eval2008.pl` agrees exactly. bigblue4: -42% wall time; the fallback stage 18564 s -> 8577 s (-54%), the
+other stages unchanged (the slow tier 3935 -> 4264 s, three runs on the machine against two). One variant was still
+running when path A ended; the other two had finished beside it. adaptec5: the three variants ran during path A's
+region stage (175 s) and were cancelled ("3 still running"); wall time the same, CPU +8.6%, but peak memory
++1477 MB -- the variants' three copies of the routes held from the start. That is the price on every zero-overflow
+design (about 1.9x peak memory on adaptec5; on a design the size of newblue7 several GB).
+
+Refinement traces, bigblue4, all four variants (stop off): 60 iterations each, last gain at iteration 1, 0, 1, 0,
+longest wait before a gain 0. Path A's refinement 1121 s of the fallback's 8577 s.
