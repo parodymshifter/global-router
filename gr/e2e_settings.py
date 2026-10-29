@@ -104,6 +104,17 @@ def main():
     c = run('light', {'PD39ROUTE_PORTFOLIO': 'lagr=0.2', 'PD39ROUTE_PORTFOLIO_WHEN': 'always'}, 'pfalways')
     check('PD39ROUTE_PORTFOLIO_WHEN gates the variants', 'variants not run' in b and
           'late-stage portfolio: variant 1 (lagr=0.2)' in c)
+    # Part 168: speculative -- the variants run beside path A: cancelled on the light design (path A at or below
+    # the threshold, the gated routes kept), kept and the same as gated on the residue design.
+    d = run('light', {'PD39ROUTE_PORTFOLIO': 'lagr=0.2', 'PD39ROUTE_PORTFOLIO_WHEN': 'speculative'}, 'pfspec')
+    e = run('residue', {'PD39ROUTE_PORTFOLIO': 'lagr=0.2', 'PD39ROUTE_PORTFOLIO_WHEN': 'speculative'}, 'pfspecres')
+    same_light = open(os.path.join(work, 'light.pfspec.route'), 'rb').read() == open(os.path.join(work, 'light.pfafter.route'), 'rb').read()
+    same_res = open(os.path.join(work, 'residue.pfspecres.route'), 'rb').read() == open(os.path.join(work, 'residue.pf.route'), 'rb').read()
+    check('PD39ROUTE_PORTFOLIO_WHEN=speculative runs the variants beside path A, the gated routes',
+          'speculative variants cancelled' in d and same_light and 'variants ran beside path A' in e and
+          'late-stage portfolio: variant 1 (lagr=0.2)' in e and same_res,
+          'light cancelled %s same %s; residue %s same %s' % ('speculative variants cancelled' in d, same_light,
+                                                             'variants ran beside path A' in e, same_res))
     # region-stage settings on the residue design: each changes the region stage's own trace.
     base_res = run('residue', off, 'base')
     rr0 = lines(base_res, 'region round ')

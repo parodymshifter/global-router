@@ -3429,8 +3429,10 @@ thread_local bool gA1Dry = false; // inside a replay: run-wide counters are left
 // variant that has finished go to the ones still running. Batched results do not depend on the thread count.
 struct ThreadShare {
   std::atomic<int> running{0};
+  std::atomic<int> primary{0}; // Part 168: 1 while path A's own variant runs beside speculative ones
 };
 thread_local ThreadShare *tShare = nullptr;
+thread_local bool tPrimary = false; // Part 168: this thread runs path A's own variant
 extern int gThreads; // PD37ROUTE_THREADS, defined with the worker pool
 int shareCores() {
   static const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
@@ -3440,6 +3442,14 @@ int batchThreads() {
   if (!tShare)
     return gThreads;
   const int running = std::max(1, tShare->running.load(std::memory_order_relaxed));
+  // Part 168: while path A's own variant runs, it keeps its full share and the speculative variants beside it
+  // split what is left; the routes are the same at any thread count, so this changes only the time.
+  if (tShare->primary.load(std::memory_order_relaxed) > 0) {
+    const int own = std::max(1, std::min(gThreads, shareCores()));
+    if (tPrimary)
+      return own;
+    return std::max(1, std::min(gThreads, (shareCores() - own) / std::max(1, running - 1)));
+  }
   return std::max(1, std::min(gThreads, shareCores() / running));
 }
 
@@ -4253,6 +4263,7 @@ struct RefineReport {
   int lastMargin = 0;     // pd13route: the margin of the last round run
   long long annealWorse = 0, annealKept = 0; // Part 147: worse reroutes seen / kept by annealing
   long long shiftCandidates = 0, shiftShifted = 0, shiftWire = 0; // Part 152: the lateral-shift probe
+  bool cancelled = false; // Part 168: stopped by a cancel flag
 };
 
 // pd12route: the plateau rule. bestAfter[k] is the best overflow after k
@@ -4510,7 +4521,7 @@ ShiftOutcome shiftLegalPieces(const RoutingGrid &g, Usage &usage, std::vector<Ro
 
 
 RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const RefineSettings &rs,
-                      bool trace) {
+                      bool trace, const std::atomic<bool> *cancel = nullptr) {
   const RoutingGrid &g = d.grid;
   RefineReport rep;
   Usage usage = usageFromCharges(g, nets);
@@ -4542,6 +4553,10 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
     gAnneal.rng = 0x51ED2701ULL ^ (static_cast<uint64_t>(rs.seed) << 32);
   }
   for (int it = 0; it < rs.iters && total > 0; ++it) {
+    if (cancel && cancel->load()) { // Part 168: a speculative variant no longer needed
+      rep.cancelled = true;
+      break;
+    }
     std::vector<long long> ov(nets.size(), 0);
     std::vector<int> bbox(nets.size(), 0);
     for (size_t i = 0; i < nets.size(); ++i) {
@@ -6304,6 +6319,10 @@ std::vector<std::string> gPortfolio; // PD39ROUTE_PORTFOLIO's variants (empty = 
 // PD39ROUTE_PORTFOLIO_WHEN: after (default) = the variants run only once path A ends above the fallback's
 // threshold, from path A's saved start state; always = alongside path A from the start (Part 135's runs).
 bool gPortfolioAfter = true;
+// Part 168: PD39ROUTE_PORTFOLIO_WHEN=speculative -- the gated rule (variants count only if path A ends above the
+// threshold), but the variants start beside path A from the same start state and are cancelled if it does not:
+// the same results as after, without waiting for path A first.
+bool gPortfolioSpec = false;
 
 struct PortfolioResult {
   std::string spec;
@@ -6334,6 +6353,8 @@ struct FallbackReport {
   std::vector<PortfolioResult> portfolio; // Part 135: path A's variants (empty = off)
   size_t portfolioPick = 0;
   bool portfolioSkipped = false; // gated portfolio: path A ended at or below the threshold, no variants run
+  bool portfolioCancelled = false; // Part 168: speculative variants were running and were cancelled
+  size_t portfolioRunning = 0;     // Part 168: speculative variants still running when path A ended
 };
 
 // Part 135: the portfolio's region settings (variant 0 = the run's own) and result slots.
@@ -6354,11 +6375,14 @@ std::vector<RegionSettings> portfolioSettings(const RegionSettings &region, std:
 }
 
 void runPortfolioVariant(const Design &d, std::vector<RoutedNet> &mine, const RegionSettings &rs,
-                         const RefineSettings &refine, bool tr, PortfolioResult &r) {
+                         const RefineSettings &refine, bool tr, PortfolioResult &r,
+                         const std::atomic<bool> *cancel = nullptr) {
   if (rs.enabled)
-    r.region = regionNegotiate(d, mine, rs, tr);
+    r.region = regionNegotiate(d, mine, rs, tr, cancel);
+  if (cancel && cancel->load())
+    return; // Part 168: cancelled; the result is discarded
   if (refine.enabled)
-    r.refine = refine2D(d, mine, refine, tr);
+    r.refine = refine2D(d, mine, refine, tr, cancel);
   r.overflow = totalOverflow(d.grid, usageFromCharges(d.grid, mine));
   r.wire = totalWire2D(mine);
 }
@@ -6368,13 +6392,17 @@ void runPortfolioVariant(const Design &d, std::vector<RoutedNet> &mine, const Re
 // each variant leaves it when it finishes (Part 165).
 std::vector<std::thread> startPortfolioVariants(const Design &d, std::vector<std::vector<RoutedNet>> &copies,
                                                 const std::vector<RegionSettings> &rs, const RefineSettings &refine,
-                                                std::vector<PortfolioResult> &res, ThreadShare &share) {
+                                                std::vector<PortfolioResult> &res, ThreadShare &share,
+                                                const std::atomic<bool> *cancel = nullptr,
+                                                std::atomic<int> *done = nullptr) {
   std::vector<std::thread> th;
   share.running.fetch_add(static_cast<int>(res.size()) - 1);
   for (size_t i = 1; i < res.size(); ++i)
-    th.emplace_back([&d, &copies, &rs, &refine, &res, &share, i]() {
+    th.emplace_back([&d, &copies, &rs, &refine, &res, &share, cancel, done, i]() {
       tShare = &share;
-      runPortfolioVariant(d, copies[i - 1], rs[i], refine, false, res[i]);
+      runPortfolioVariant(d, copies[i - 1], rs[i], refine, false, res[i], cancel);
+      if (done)
+        done->fetch_add(1);
       share.running.fetch_sub(1);
     });
   return th;
@@ -6500,6 +6528,45 @@ void runPathAGated(const Design &d, std::vector<RoutedNet> &nets, const RegionSe
                    const std::function<void()> &onAbove = {}) {
   std::vector<PortfolioResult> res;
   const std::vector<RegionSettings> rs = portfolioSettings(region, res);
+  if (gPortfolioSpec) {
+    // Part 168: the variants start now, from the same start state, beside variant 0 (which keeps its full
+    // thread share); each is deterministic, so they end exactly as they would have after it.
+    std::vector<std::vector<RoutedNet>> copies(res.size() - 1);
+    start.read(copies[0], d.nets.data());
+    for (size_t i = 1; i < copies.size(); ++i)
+      copies[i] = copies[0];
+    ThreadShare share;
+    share.running.store(1);
+    share.primary.store(1);
+    std::atomic<bool> cancel{false};
+    std::atomic<int> done{0};
+    std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res, share, &cancel, &done);
+    ThreadShare *const saved = tShare;
+    tShare = &share;
+    tPrimary = true;
+    runPortfolioVariant(d, nets, rs[0], refine, trace, res[0]);
+    tPrimary = false;
+    tShare = saved;
+    share.primary.store(0);
+    share.running.fetch_sub(1);
+    const bool above = !(res[0].overflow <= aMax || res[0].region.aborted);
+    fr.portfolioRunning = res.size() - 1 - static_cast<size_t>(done.load());
+    if (!above)
+      cancel.store(true);
+    else if (onAbove)
+      onAbove();
+    for (std::thread &t : th)
+      t.join();
+    if (!above) {
+      fr.regionA = res[0].region;
+      fr.refineA = res[0].refine;
+      fr.portfolioSkipped = true;
+      fr.portfolioCancelled = true;
+      return;
+    }
+    keepBestVariant(nets, copies, res, fr);
+    return;
+  }
   runPortfolioVariant(d, nets, rs[0], refine, trace, res[0]);
   if (res[0].overflow <= aMax || res[0].region.aborted) { // Part 146: an aborted stage gave its start back
     fr.regionA = res[0].region;
@@ -20062,11 +20129,53 @@ void testLowMemFallbackMatches() {
   gPortfolio = {"lagr=0.2", "rounds=3"};
   run(false, 0, q1, t1);
   run(true, 0, q2, t2);
+  // Part 168: the speculative portfolio -- variants started beside path A -- gives the gated portfolio's
+  // results exactly: above the threshold the same variant results, pick and routes; at it, the variants are
+  // cancelled and the no-portfolio routes kept.
+  gPortfolioSpec = true;
+  FallbackReport v0, v1, w1, w2;
+  std::vector<std::vector<Seg>> sv0, sv1, tw1, tw2;
+  runRow(false, v0, sv0);
+  runRow(true, v1, sv1);
+  run(false, 0, w1, tw1);
+  run(true, 0, w2, tw2);
+  gPortfolioSpec = false;
+  bool sameSpec = v0.portfolio.size() == 3 && v1.portfolio.size() == 3;
+  for (size_t i = 0; sameSpec && i < 3; ++i)
+    sameSpec = v0.portfolio[i].overflow == p0.portfolio[i].overflow && v0.portfolio[i].wire == p0.portfolio[i].wire &&
+               v1.portfolio[i].overflow == p0.portfolio[i].overflow && v1.portfolio[i].wire == p0.portfolio[i].wire;
+  check(sameSpec && v0.portfolioPick == p0.portfolioPick && v1.portfolioPick == p0.portfolioPick &&
+            !v0.portfolioSkipped && !v0.portfolioCancelled && sameSegs(s0, sv0) && sameSegs(s0, sv1),
+        "speculative portfolio, A above the threshold: the same variant results, pick and routes as gated");
+  check(w1.portfolioSkipped && w1.portfolioCancelled && w2.portfolioCancelled && w1.portfolio.empty() && w1.ranB &&
+            w1.tookB == q0.tookB && sameSegs(t0, tw1) && sameSegs(t0, tw2),
+        "speculative portfolio, A at the threshold: the variants cancelled, B runs, the no-portfolio routes kept");
   gPortfolio = savedPf;
   gPortfolioAfter = savedAfter;
   check(q1.portfolioSkipped && q2.portfolioSkipped && q1.portfolio.empty() && q1.ranB && q1.tookB == q0.tookB &&
             sameSegs(t0, t1) && sameSegs(t0, t2),
         "gated portfolio, A at the threshold: no variants run, B runs, the no-portfolio routes kept");
+  // Part 168: while path A's own variant runs it keeps its full thread share; the variants beside it split the rest.
+  {
+    ThreadShare share;
+    share.running.store(4);
+    share.primary.store(1);
+    ThreadShare *const savedShare = tShare;
+    tShare = &share;
+    tPrimary = true;
+    const int own = batchThreads();
+    tPrimary = false;
+    const int other = batchThreads();
+    share.primary.store(0);
+    share.running.store(3);
+    const int after = batchThreads();
+    tShare = savedShare;
+    const int cores = shareCores();
+    check(own == std::max(1, std::min(gThreads, cores)) &&
+              other == std::max(1, std::min(gThreads, (cores - own) / 3)) &&
+              after == std::max(1, std::min(gThreads, cores / 3)),
+          "thread share: path A's own variant keeps its share beside speculative variants, which split the rest");
+  }
 }
 
 // pd36route: the incremental pattern-stage refresh gives exactly the routes
@@ -22444,14 +22553,17 @@ int main(int argc, char **argv) {
     }
     if (const char *w = std::getenv("PD39ROUTE_PORTFOLIO_WHEN"); w) {
       const std::string sw(w);
-      if (sw != "after" && sw != "always")
-        fail("PD39ROUTE_PORTFOLIO_WHEN must be after or always (got '" + sw + "')");
-      gPortfolioAfter = sw == "after";
+      if (sw != "after" && sw != "always" && sw != "speculative")
+        fail("PD39ROUTE_PORTFOLIO_WHEN must be after, always or speculative (got '" + sw + "')");
+      gPortfolioAfter = sw != "always";
+      gPortfolioSpec = sw == "speculative";
     }
     std::cerr << "late-stage portfolio: path A runs as " << gPortfolio.size() + 1
               << " variants on their own threads (variant 0 = the run's own settings)"
-              << (gPortfolioAfter ? ", the others only if path A ends above the fallback threshold"
-                                  : ", all from the start")
+              << (gPortfolioSpec ? ", the others started beside it and kept only if path A ends above the "
+                                   "fallback threshold (cancelled otherwise)"
+                  : gPortfolioAfter ? ", the others only if path A ends above the fallback threshold"
+                                    : ", all from the start")
               << (gLowMem ? "; low-memory mode keeps a copy per variant while they run" : "") << "\n";
   }
   // pd23route: PD23ROUTE_VCAP_B (0 | 1; unset = 1).
@@ -22522,12 +22634,20 @@ int main(int argc, char **argv) {
                                             bFirst, aMax, fallbackParallel, vcapB);
     if (fr.parallel)
       std::cerr << "reclaim fallback: path B ran on a second thread (its per-round trace suppressed)\n";
+    // Part 168: speculative variants were started and are cancelled rather than never run
+    const std::string notRun = fr.portfolioCancelled ? "speculative variants cancelled (" +
+                                                           std::to_string(fr.portfolioRunning) +
+                                                           " still running when path A ended)"
+                                                     : std::string("variants not run");
     if (fr.portfolioSkipped && fr.regionA.aborted)
       std::cerr << "late-stage portfolio: path A's region stage stopped without gain (PD39ROUTE_REGION_ABORT), "
-                   "variants not run\n";
+                << notRun << "\n";
     else if (fr.portfolioSkipped)
-      std::cerr << "late-stage portfolio: path A ended at " << fr.overflowA << " <= " << aMax
-                << ", variants not run\n";
+      std::cerr << "late-stage portfolio: path A ended at " << fr.overflowA << " <= " << aMax << ", " << notRun
+                << "\n";
+    if (gPortfolioSpec && !fr.portfolio.empty())
+      std::cerr << "late-stage portfolio: variants ran beside path A (" << fr.portfolioRunning
+                << " still running when path A ended)\n";
     for (size_t i = 0; i < fr.portfolio.size(); ++i) // Part 135
       std::cerr << "late-stage portfolio: variant " << i << " (" << fr.portfolio[i].spec << "): region "
                 << fr.portfolio[i].region.before << " -> " << fr.portfolio[i].region.after << " in "
