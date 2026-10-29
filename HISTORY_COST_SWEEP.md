@@ -12098,3 +12098,29 @@ the batched-only run; newblue7 keeps its 102 and its time. The trade is a choice
 on bigblue4 it buys 12 units for 3.5 h, the same 360 the sequential setting gives, 1.8 h sooner.
 
 Adopted into `gr/speed08.env` (the user's decision, 2026-10-29 06:46): `PD39ROUTE_REGION_BATCH_FALLBACK=1`.
+
+## Part 168 -- track A: the portfolio beside path A, and refinement's stop below the floor (running)
+
+Part 167's bigblue4 run spent 18564 s of 22752 in the fallback: path A's region stage 7017 s and refinement 1566 s,
+then the three portfolio variants, about 9980 s, which start only once path A has ended above the threshold.
+Refinement gained at iteration 1 and ran 58 more iterations without gain (PD12ROUTE_PLATEAU_MIN=1000 keeps its
+plateau stop off below 1000). Two exact steps, the user's order (2026-10-29):
+
+1. **`PD39ROUTE_PORTFOLIO_WHEN=speculative`** (commit 9393140): the variants start beside path A, from the same
+   start state, and are cancelled (at their next region round or refinement iteration) if path A ends at or below
+   the threshold or its region stage aborts. Each variant is deterministic and the same at any thread count, so the
+   results are the gated portfolio's exactly; only the waiting goes. While path A's own variant runs it keeps its
+   full thread share (min(threads, cores)) and the variants split the rest; after it, cores / variants as before.
+   Self-test: on the row fixture the same variant results, pick and routes as gated above the threshold, cancelled
+   with the no-portfolio routes at it, and the thread share; `gr/e2e_settings.py` (light design cancelled with the
+   gated routes, residue design the gated routes). The cost lands on the zero-overflow designs: variants run for the
+   length of path A's region stage (2-141 s in Part 163, path B runs longer beside it) and are thrown away.
+2. **`PD39ROUTE_REFINE_STOP=W`** (commit fd1101a, off by default): below PD12ROUTE_PLATEAU_MIN, refinement stops
+   after W iterations in a row without gain. Refinement's overflow never rises (revert rule), so once W exceeds the
+   longest wait before any gain, the stop is exact. Every refinement now reports its last gain and its longest wait
+   before a gain (portfolio and fallback lines) -- the evidence for choosing W, from runs with the stop off.
+
+Validation (`~/Code/GlobalRouterRuns/p168/`, started 2026-10-29 14:31, all three at once, binary with both
+commits, standard + fast08 + speed08): bigblue4 speculative (expected: byte-identical to Part 167's 360, and the
+variants' refinement traces), adaptec5 gated and speculative side by side (expected: byte-identical; the cost of
+cancelled variants on a zero-overflow design).
