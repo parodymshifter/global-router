@@ -12055,3 +12055,24 @@ wire costs 15%), the cycles 34% useful, 32% back-end stalls (memory), 29% discar
 `_tlv_get_addr` 1.8%. newblue7's window did not save: `xctrace` crashed (segmentation fault) while writing it
 (13 GB, no readable data) -- the second large trace in a row to fail this way, both taken while many threads
 start and stop; 90 s windows on the long residues need a shorter limit.
+
+## Part 167 -- the batched stage's sequential rerun (running)
+
+Part 166 found bigblue4's batched region stage makes no progress: every variant ends its 150 batched rounds at
+its entering 406 (best round 418), where sequential rounds first beat 406 at round 92 and reach 396, then 360
+after refinement. A fixed stall window cannot tell this apart from useful batching (Part 161: late progress comes
+in bursts; newblue7's batched rounds first beat their start at round 77), but the end of the stage can: a stage
+that never beat its start returned its start and contributed nothing.
+
+`PD39ROUTE_REGION_BATCH_FALLBACK=G` (commit 12b964e, off by default): a batched path-A stage that ends having
+improved on its start by less than G units puts its members back on their entry routes (a copy taken at entry)
+and runs again as the sequential stage with its normal budget. The stage builds its usage and prices from the
+routes it is given, so the rerun is the sequential stage exactly. Trace: `region stage: N batched rounds improved
+on the entering X by less than ... (best Y); rerunning the stage with sequential rounds from its entry routes`;
+portfolio lines say `(sequential, after N batched rounds that reached only Y)`. Self-test: on the row fixture a
+forced rerun gives the sequential stage's routes exactly and G 1 leaves a successful batched stage alone;
+`gr/e2e_settings.py` 30 of 30 (new: the same two properties on the synthetic residue, through the environment).
+
+Validation (`~/Code/GlobalRouterRuns/p167/`, started 2026-10-28 22:03, both at once, standard + fast08 +
+speed08 + `PD39ROUTE_REGION_BATCH_FALLBACK=1`): bigblue4 (expected: every variant reruns; Part 141's 360 if
+nothing else differs) and newblue7 (expected: no rerun, byte-identical to Part 166's 102).
