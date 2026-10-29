@@ -252,6 +252,14 @@ def main():
     check('PD39ROUTE_REFINE_SHIFT runs before refinement', bool(m), m.group(0) if m else 'no refine shift line')
     b = run('residue', {**off, 'PD39ROUTE_REFINE_ANNEAL': '5,0.9'}, 'anneal')
     check('PD39ROUTE_REFINE_ANNEAL runs in refinement', any(' anneal T ' in l for l in lines(b, 'refine iter ')))
+    # Part 168: PD39ROUTE_REFINE_STOP=1 -- refinement stops at its first iteration without gain (residue design,
+    # below PD12ROUTE_PLATEAU_MIN): its summary line says so and it runs fewer iterations than without.
+    b = run('residue', {**off, 'PD39ROUTE_REFINE_STOP': '1'}, 'refstop')
+    stop_line = [l for l in lines(b, 'refinement: 2D overflow')]
+    base_line = [l for l in lines(base_res, 'refinement: 2D overflow')]
+    check('PD39ROUTE_REFINE_STOP stops refinement without gain',
+          bool(stop_line) and 'PD39ROUTE_REFINE_STOP' in stop_line[0] and bool(base_line) and
+          'PD39ROUTE_REFINE_STOP' not in base_line[0], (stop_line or [''])[0] + ' | ' + (base_line or [''])[0])
     # the reclaim path's own box cap: on the light design path B runs a region stage of its own.
     a = run('light', {**off}, 'base')
     b = run('light', {**off, 'PD39ROUTE_REGION_BOX_CAP_B': '1'}, 'capb')

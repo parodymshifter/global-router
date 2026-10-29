@@ -4054,6 +4054,10 @@ struct RefineSettings {
   // straight pieces on full edges within `radius` parallel rows (columns) of an overflowed edge are shifted
   // sideways by up to k rows (columns) where every new edge has room -- making room for the overflowed nets.
   int shiftK = 0, shiftRadius = 2;
+  // Part 168: PD39ROUTE_REFINE_STOP=W (0 = off): below PD12ROUTE_PLATEAU_MIN, where the plateau rule does not
+  // apply, refinement stops after W iterations in a row without any gain. Its overflow never rises (the revert
+  // rule), and on every residue run traced its last gain came by iteration 9.
+  int lowStop = 0;
 };
 
 // pd5route: parses PD5ROUTE_REFINE_ORDER (nthu | shuffle; unset = nthu) and
@@ -4264,7 +4268,18 @@ struct RefineReport {
   long long annealWorse = 0, annealKept = 0; // Part 147: worse reroutes seen / kept by annealing
   long long shiftCandidates = 0, shiftShifted = 0, shiftWire = 0; // Part 152: the lateral-shift probe
   bool cancelled = false; // Part 168: stopped by a cancel flag
+  bool lowStopped = false; // Part 168: stopped by PD39ROUTE_REFINE_STOP
+  int lastGain = -1;       // Part 168 (trace): the last iteration that lowered the best (-1: none)
+  int longestWait = 0;     // Part 168 (trace): the most iterations without gain that a later gain ended
 };
+
+// Part 168 (trace): how a refinement's gains were spread over its iterations.
+std::string refineGains(const RefineReport &r) {
+  return std::to_string(r.itersRun) + " iterations, last gain at " +
+         (r.lastGain >= 0 ? "iteration " + std::to_string(r.lastGain) : std::string("none")) +
+         ", longest wait before a gain " + std::to_string(r.longestWait) +
+         (r.lowStopped ? ", PD39ROUTE_REFINE_STOP" : r.plateaued ? ", plateau stop" : "");
+}
 
 // pd12route: the plateau rule. bestAfter[k] is the best overflow after k
 // rounds (bestAfter[0] = the stage's starting overflow). With window N > 0,
@@ -4628,10 +4643,17 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
     if (total < rep.after) {
       rep.after = total;
       best.mark();
+      rep.longestWait = std::max(rep.longestWait, it - rep.lastGain - 1); // Part 168 (trace)
+      rep.lastGain = it;
     }
     bestAfter.push_back(rep.after);
     if (total > 0 && plateauReached(bestAfter, rs.plateau, rs.plateauGain, rs.plateauMin)) {
       rep.plateaued = true;
+      break;
+    }
+    if (total > 0 && rs.lowStop > 0 && rep.after < rs.plateauMin && // Part 168
+        plateauReached(bestAfter, rs.lowStop, 0.0, 0)) {
+      rep.lowStopped = true;
       break;
     }
   }
@@ -18171,6 +18193,63 @@ void testStageMarginCap() {
         "negative or non-numeric caps rejected");
 }
 
+// Part 168: PD39ROUTE_REFINE_STOP. On the stuck one-row fixture (no gain is possible) refinement stops after W
+// iterations without gain and returns what all 40 iterations return; with the best at or above the floor the rule
+// does not act; on the clearing fixture it changes nothing. The gain trace: no gain -> -1, else the last one.
+void testRefineLowStop() {
+  const char *row = "grid 8 1 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                    "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                    "num net 3\nnA 0 2 1\n5 5 1\n75 5 1\nnB 1 2 1\n5 5 1\n75 5 1\n"
+                    "nC 2 2 1\n5 5 1\n75 5 1\n0\n";
+  auto runOn = [](const char *name, const char *text, int y, int lowStop, long long floor, RefineReport &rr) {
+    Design d = parse(name, text);
+    std::vector<RoutedNet> nets(3);
+    for (int i = 0; i < 3; ++i) {
+      nets[i].net = &d.nets[i];
+      nets[i].segs = {{0, y, 0, 7, y, 0}};
+    }
+    prepareFor2DRefine(d, nets);
+    RefineSettings rs;
+    rs.iters = 40;
+    rs.accept = AcceptMode::kRevert;
+    rs.lowStop = lowStop;
+    rs.plateauMin = floor;
+    rr = refine2D(d, nets, rs, false);
+    std::vector<std::vector<Seg>> out;
+    for (const RoutedNet &rn : nets)
+      out.push_back(rn.segs);
+    return out;
+  };
+  auto same = [](const std::vector<std::vector<Seg>> &a, const std::vector<std::vector<Seg>> &b) {
+    if (a.size() != b.size())
+      return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+      if (a[i].size() != b[i].size())
+        return false;
+      for (size_t k = 0; k < a[i].size(); ++k)
+        if (a[i][k].x1 != b[i][k].x1 || a[i][k].y1 != b[i][k].y1 || a[i][k].x2 != b[i][k].x2 ||
+            a[i][k].y2 != b[i][k].y2 || a[i][k].l1 != b[i][k].l1 || a[i][k].l2 != b[i][k].l2)
+          return false;
+    }
+    return true;
+  };
+  RefineReport full, stop, above;
+  const auto sFull = runOn("pd39route_selftest_lowstop.gr", row, 0, 0, 1000, full);
+  const auto sStop = runOn("pd39route_selftest_lowstop.gr", row, 0, 5, 1000, stop);
+  const auto sAbove = runOn("pd39route_selftest_lowstop.gr", row, 0, 5, 0, above);
+  check(full.itersRun == 40 && full.after == full.before && full.lastGain == -1 && !full.lowStopped,
+        "stuck fixture, no stop: all 40 iterations, no gain (trace: last gain -1)");
+  check(stop.itersRun == 5 && stop.lowStopped && stop.after == full.after && same(sFull, sStop),
+        "PD39ROUTE_REFINE_STOP 5 below the floor: stops after 5 iterations without gain, the same routes as 40");
+  check(above.itersRun == 40 && !above.lowStopped, "PD39ROUTE_REFINE_STOP does not act at or above the floor");
+  RefineReport cFull, cStop;
+  const auto tFull = runOn("pd39route_selftest_lowstop_clear.gr", kThreeOnOneRowGr, 1, 0, 1000, cFull);
+  const auto tStop = runOn("pd39route_selftest_lowstop_clear.gr", kThreeOnOneRowGr, 1, 1, 1000, cStop);
+  check(cFull.after == 0 && cFull.lastGain >= 0 && cStop.after == 0 && !cStop.lowStopped && same(tFull, tStop),
+        "clearing fixture: PD39ROUTE_REFINE_STOP 1 changes nothing (trace: last gain at iteration " +
+            std::to_string(cFull.lastGain) + ")");
+}
+
 // pd14route: the work-gated rule itself, the expansion counter, and the
 // region stage on the stuck fixture: no window -> all 40 rounds; window 5
 // with a work threshold the rounds clear -> exactly 5; the same window with
@@ -21555,6 +21634,7 @@ int run() {
   testPatternStageSeparatesTwoNetsOntoTheTwoLs();
   testPlateauStop();
   testStageMarginCap();
+  testRefineLowStop();
   testWorkGatedPlateau();
   testDetMathAccuracy();
   testBuiltWithoutContraction();
@@ -21835,6 +21915,16 @@ int main(int argc, char **argv) {
         fail(std::string("PD39ROUTE_REFINE_SHIFT must be k[,radius] (0-1000 each; got '") + v + "')");
       refine.shiftK = k;
       refine.shiftRadius = r;
+    }
+    if (const char *v = std::getenv("PD39ROUTE_REFINE_STOP"); v) { // Part 168: W
+      char *end = nullptr;
+      const long x = std::strtol(v, &end, 10);
+      if (!*v || *end || x < 0 || x > 1000000)
+        fail(std::string("PD39ROUTE_REFINE_STOP must be an integer >= 0 (got '") + v + "')");
+      refine.lowStop = static_cast<int>(x);
+      if (x > 0)
+        std::cerr << "refinement: below PD12ROUTE_PLATEAU_MIN, stop after " << x
+                  << " iterations in a row without gain (PD39ROUTE_REFINE_STOP)\n";
     }
     if (const char *v = std::getenv("PD39ROUTE_REFINE_ANNEAL"); v) { // Part 147: T0,alpha
       double t0 = -1, alpha = -1;
@@ -22658,6 +22748,7 @@ int main(int argc, char **argv) {
                               std::to_string(fr.portfolio[i].region.fallbackBest) + ")"
                         : std::string())
                 << ", then 2D overflow " << fr.portfolio[i].overflow
+                << " (refinement: " << refineGains(fr.portfolio[i].refine) << ")"
                 << ", wire " << fr.portfolio[i].wire
                 << (fr.portfolio[i].region.threadsMax > 0
                         ? ", batched on " + std::to_string(fr.portfolio[i].region.threadsMin) + "-" +
@@ -22675,10 +22766,11 @@ int main(int argc, char **argv) {
                             std::to_string(static_cast<long long>(fr.regionA.fallbackSeconds)) + "s"
                       : std::string())
               << "), refinement -> "
-              << fr.refineA.after << "; path B (reclaim " << fr.reclaim.kept << " of " << fr.reclaim.candidates
+              << fr.refineA.after << " (" << refineGains(fr.refineA) << "); path B (reclaim " << fr.reclaim.kept << " of " << fr.reclaim.candidates
               << ", 2D overflow " << fr.reclaim.overflowBefore << " -> " << fr.reclaim.overflowAfter << ") region "
               << fr.regionB.before << " -> " << fr.regionB.after << " (" << fr.regionB.roundsRun << " rounds, "
-              << fr.regionB.seconds << "s), refinement -> " << fr.refineB.after << "\n";
+              << fr.regionB.seconds << "s), refinement -> " << fr.refineB.after << " ("
+              << refineGains(fr.refineB) << ")\n";
     if (!fr.ranB)
       std::cerr << "reclaim fallback: A overflow " << fr.overflowA << " wire " << fr.wireA
                 << " above PD21ROUTE_FALLBACK_A_MAX -> kept A (standard); B not run\n";
@@ -22847,8 +22939,10 @@ int main(int argc, char **argv) {
   }
   if (refine.enabled)
     std::cerr << "refinement: 2D overflow " << refRep.before << " -> " << refRep.after << " ("
-              << refRep.itersRun << " iterations run" << (refRep.plateaued ? ", plateau stop" : "") << ", "
-              << refRep.seconds << "s)\n";
+              << refRep.itersRun << " iterations run" << (refRep.plateaued ? ", plateau stop" : "")
+              << (refRep.lowStopped ? ", PD39ROUTE_REFINE_STOP" : "") << ", last gain at iteration "
+              << refRep.lastGain << ", longest wait before a gain " << refRep.longestWait << ", " << refRep.seconds
+              << "s)\n";
  if (piecesTotal > 0)
     std::cerr << "piece reroutes: " << piecesTotal << ", by L/Z pattern (no maze): " << patternedTotal << "\n";
   if (!twoDOnly) {
