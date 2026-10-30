@@ -26,6 +26,11 @@
 # MAX_JOBS. Plain bash 3.2 (macOS /bin/bash): no wait -n, so it polls every
 # 20s, and waits 5s after each launch so the new job's process is visible
 # before the next count.
+#
+# Jobs run at the lowest CPU priority (nice 20; GR_NICE=<n> to change, 0 for
+# none, added 2026-10-29) so the Mac's own apps stay responsive while three
+# routers run. It changes nothing on an otherwise idle machine; real_s from a
+# run that shared the machine with busy apps is not a clean timing either way.
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 <jobfile> <out_dir>" >&2
@@ -35,6 +40,7 @@ fi
 jobfile="$1"
 outdir="$2"
 max_jobs="${MAX_JOBS:-3}"
+nice_level="${GR_NICE:-20}"
 here=$(cd "$(dirname "$0")" && pwd)
 summary="${jobfile}.summary"
 mkdir -p "$outdir"
@@ -64,7 +70,7 @@ run_one() { # name bench router [VAR=value ...]
         *) export "$kv" ;;
       esac
     done
-    "$here/run_checked.sh" "$outdir/$name" "$bench" "$router"
+    nice -n "$nice_level" "$here/run_checked.sh" "$outdir/$name" "$bench" "$router"
   )
   cat "$outdir/$name.summary" >> "$summary"
 }
