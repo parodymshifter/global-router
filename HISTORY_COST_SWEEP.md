@@ -12099,7 +12099,7 @@ on bigblue4 it buys 12 units for 3.5 h, the same 360 the sequential setting give
 
 Adopted into `gr/speed08.env` (the user's decision, 2026-10-29 06:46): `PD39ROUTE_REGION_BATCH_FALLBACK=1`.
 
-## Part 168 -- track A: the portfolio beside path A, and refinement's stop below the floor (running)
+## Part 168 -- track A: the portfolio beside path A, and refinement's stop below the floor
 
 Part 167's bigblue4 run spent 18564 s of 22752 in the fallback: path A's region stage 7017 s and refinement 1566 s,
 then the three portfolio variants, about 9980 s, which start only once path A has ended above the threshold.
@@ -12143,3 +12143,34 @@ design (about 1.9x peak memory on adaptec5; on a design the size of newblue7 sev
 
 Refinement traces, bigblue4, all four variants (stop off): 60 iterations each, last gain at iteration 1, 0, 1, 0,
 longest wait before a gain 0. Path A's refinement 1121 s of the fallback's 8577 s.
+
+### Results, the residues (finished 2026-10-30 02:25)
+
+Runs from 18:41 on 2026-10-29, three at a time; from 22:47 every run was lowered to nice 20 (the user's apps were
+slowed), so wall times after that are not clean. All legal, `eval2008.pl` agrees exactly.
+
+| design | setting | overflow (max) | wall s | CPU s | peak RSS MB | routes |
+|---|---|---|---|---|---|---|
+| newblue1 | gated (`after`) | 26 (2) | 3503 | 11805 | 882 | -- |
+| newblue1 | speculative | 26 (2) | 2563 | 11358 | 915 | byte-identical to gated |
+| newblue1 | speculative + `REFINE_STOP=10` | 26 (2) | 1650 | 11168 | 1031 | byte-identical to gated |
+| newblue4 | gated | 146 (2) | 7506 | 33268 | 2053 | -- |
+| newblue4 | speculative | 146 (2) | 6748 | 33327 | 2398 | byte-identical to gated |
+| newblue4 | speculative + `REFINE_STOP=10` | 146 (2) | 5756 | 31687 | 2893 | byte-identical to gated |
+| newblue7 | gated (Part 167) | 102 (2) | 18985 | 125043 | 4408 | -- |
+| newblue7 | speculative | 102 (2) | 24597 | 129853 | 4516 | byte-identical to Part 167 |
+
+newblue7's wall time is not a comparison: it ran beside two other routers the whole way and at nice 20 for its last
+3.6 h (its fallback stage 9732 s against Part 167's 12117 s; its slow tier, untouched by either step, is where the
+time went). newblue4's gated run also ran last, after the user's slowdown.
+
+Refinement, every variant, stop off (last gain, longest wait before a gain): bigblue4 1/0, 0/0, 1/0, 0/0; newblue1
+2/0, 0/0, 2/1, 0/0; newblue4 3/1, 1/0, 1/0, 2/0; newblue7 5/2, 12/5, 9/7, 6/4. The stop is exact while W exceeds
+every wait; newblue7's 7 leaves W=10 a thin margin, so the adopted value is **W=20** (bigblue4's refinement then
+runs 21 iterations, not 60). Zero-overflow designs never refine above 0 (both regions end at 0 in every Part 163
+run), so the stop cannot act on them; newblue3 refines above PD12ROUTE_PLATEAU_MIN, where the old plateau rule
+holds.
+
+Adopted into `speed08.env` (the user, 2026-10-29, "add both to speed08.env when newblue7 confirms"):
+`PD39ROUTE_PORTFOLIO_WHEN=speculative`, `PD39ROUTE_REFINE_STOP=20`. Instruments was not attached: both are exact
+scheduling changes, measured by the stage report's per-stage time.
