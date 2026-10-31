@@ -12223,7 +12223,7 @@ bigblue4's to Part 141's and Part 167's (360). bigblue4 took 19627 s here agains
 the batched region stage's per-thread usage replicas (Part 163, same designs: 975-2288 MB) and Part 168's
 speculative copies (adaptec3 1985 -> 4467 MB, newblue5 2288 -> 5334, adaptec5 1620 -> 3735). Part 170's delay
 removes the second on every design whose path A ends within the delay (adaptec3: 4467 -> 1900 MB, routes
-byte-identical). The largest peak, newblue5's 5.3 GB, is well inside the 48 GB Mac's memory.
+byte-identical). The largest peak, newblue5's 5.3 GB, fits the 24 GB Mac, but three such runs at once would not leave the user's apps much.
 
 ## Part 170 -- the speculative variants' copies wait for path A
 
