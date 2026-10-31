@@ -12188,3 +12188,22 @@ A note for the bigblue4 step, from Part 168's trace: its slow tier is flat from 
 oscillating 408-476, with every rerouted net at the box cap of 200 -- which on a 403 x 405 grid already covers
 most of the die, so breadth is not the limit; the slow tier's plateau stop does not act below 1000. Its region
 stage then gains 406 -> 396 and refinement 396 -> 360.
+
+## Part 170 -- the speculative variants' copies wait for path A (running)
+
+The user's question (2026-10-31): can the variant copies wait until path A needs them? Part 169's first nine
+designs showed the cost of Part 168: adaptec3's peak 4467 MB (Part 163: 1985 MB), the three copies made at path
+A's start and thrown away 55 s later. The variants start from path A's saved start state (a spill file) and are
+deterministic, so when they start changes only memory and time, never a route. Path A's region stage reached zero
+on the eleven zero-overflow designs in 2-197 s (Part 169 and Part 163); on the residues it runs 630-9000 s. The
+user chose a 300 s delay.
+
+`PD39ROUTE_PORTFOLIO_DELAY=S` (commit 4c30cbb, needs `PD39ROUTE_PORTFOLIO_WHEN=speculative`, off by default): a
+launcher thread waits up to S seconds from path A's start; if path A has not ended by then it reads the copies and
+starts the variants; if path A ends first at or below the threshold, no copies are ever made ("speculative variants
+not started"); if it ends first above the threshold, the variants start then (the gated portfolio). Self-test: at
+delays of 1e9 and 1e-9 s, the same variant results, pick and routes as gated above the threshold, never started
+(1e9) at it; `gr/e2e_settings.py` (33 of 33): light design not started with the gated routes, residue design
+started after path A with the gated routes. Validation (`~/Code/GlobalRouterRuns/p170/`, sharing the three slots
+with Part 169): adaptec3 and newblue1 at 300 s, expected byte-identical to Part 169 with adaptec3's peak back near
+2 GB.
