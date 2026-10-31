@@ -12291,3 +12291,28 @@ the only one to move the region stage itself (388, the lowest seen), though refi
 usual 36. Wirelength: wider regions shorten the routes at equal overflow, 15148190 -> 14969699 -> 14618052 (2D,
 expand 5 / 15 / 40) -- monotone on three points, but Part 78's spread is 1.6-3.6%, so it needs repeating before it
 means anything.
+
+## Part 172 -- track B2: around Part 171's leads; wider regions shorten bigblue4's routes
+
+Two runs at once, started 2026-10-31 14:38, finished 17:29 and 17:45, scored by 18:15; `pd39route.p170`, the same
+settings as Part 171, `~/Code/GlobalRouterRuns/p172/`. Both legal, `eval2008.pl` agrees; variant 0 reproduced 396 /
+360 / wire 15148190 in both.
+
+| variant | region 406 -> | rounds | 2D overflow after refinement | 2D wire |
+|---|---|---|---|---|
+| vcap=16,vcapr=8 | 390 | 293 | 358 | 15151851 |
+| vcap=24,vcapr=12 | 404 | 150 | 366 | 15155948 |
+| vcap=16,vcapr=16 | 396 | 259 | 368 | 15149104 |
+| expand=80 | 392 | 296 | **354** | **13696128** (-9.6%) |
+| expand=120 | 394 | 277 | 360 | **12755414** (-15.8%) |
+| expand=40,vcap=16,vcapr=12 | 398 | 292 | 362 | 14618515 |
+
+Scored: pair run 358, wire 24942891, 10236 s, 3169 MB; **wide run 354 (the lowest bigblue4 overflow yet, by 2), wire
+24047336 (-3.56% vs 24934483)**, 11186 s, 3593 MB. Against NTHU-Route 2.0's 22.80M: +9.4% -> +5.5%.
+
+2D wire falls steadily with the region's margin (expand 5 / 15 / 40 / 80 / 120: 15.15 / 14.97 / 14.62 / 13.70 /
+12.76M) with no overflow cost, well outside Part 78's spread. The scored gain is smaller than the 2D gain because
+wirelength recovery, later, already takes much of what the wider region took (Part 172's expand=80: 13.70M -> 12.74M).
+expand=120's route was not kept (360 ties variant 0 but loses to 354), so its scored wire is not measured yet. The
+virtual capacity lead did not repeat: neighbours of Part 171's 388 gave 390-404 and residues 358-368, noise. Nothing
+added to the settings files.
