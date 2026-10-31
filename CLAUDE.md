@@ -269,6 +269,9 @@ Since 2026-10-30 it also carries the speculative portfolio and refinement's low-
 are cancelled if it ends <= 10, and refinement below 1000 stops after 20 iterations without gain -- byte-identical on
 every residue checked, bigblue4 22752 -> 13095 s, newblue1 3503 -> 1650 s; peak memory up to ~1.9x on designs that
 end at zero.
+Since 2026-10-31 it also carries the variants' start delay (`PD39ROUTE_PORTFOLIO_DELAY=300`, Part 170): the variants
+and their copies wait until path A has run 300 s, so a design whose path A ends sooner never holds them -- routes
+byte-identical, adaptec3's peak 4467 -> 1900 MB, newblue1 +62 s.
 Since 2026-10-22 (Part 146) `fast08.env` also carries the region stage's early stop
 (`PD39ROUTE_REGION_ABORT=1000,20`): above 1000 units of entering 2D overflow, a region stage still no
 better than its start after 20 rounds stops there -- exact (such stages returned their start; routes

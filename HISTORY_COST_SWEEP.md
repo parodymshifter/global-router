@@ -12257,4 +12257,4 @@ compared with Part 169's by md5):
 The delay does what it was built for: adaptec3's peak falls 57% to the gated portfolio's level (Part 163: 1985 MB)
 at the same time. newblue1 pays 62 s (+3.7%) because its variants start 300 s later; its peak moved by +94 MB,
 within what sharing the machine moves it. Both runs had the machine shared with Part 169's bigblue4 and newblue3,
-at nice 20, so the times are indicative only. Not yet in `speed08.env`: adopting it is the user's call.
+at nice 20, so the times are indicative only. Adopted into `speed08.env` on the user's word (2026-10-31).
