@@ -12175,7 +12175,7 @@ Adopted into `speed08.env` (the user, 2026-10-29, "add both to speed08.env when 
 `PD39ROUTE_PORTFOLIO_WHEN=speculative`, `PD39ROUTE_REFINE_STOP=20`. Instruments was not attached: both are exact
 scheduling changes, measured by the stage report's per-stage time.
 
-## Part 169 -- all sixteen on the current speed08.env, then track B on bigblue4 (running)
+## Part 169 -- all sixteen on the current speed08.env, then track B on bigblue4
 
 The user's order (2026-10-30): "run the sixteen, then bigblue4". `speed08.env` now stacks five changes each
 validated on a few designs (the region box cap 100, the slow tier's plateau stop, the gated batched region stage,
@@ -12188,6 +12188,42 @@ A note for the bigblue4 step, from Part 168's trace: its slow tier is flat from 
 oscillating 408-476, with every rerouted net at the box cap of 200 -- which on a 403 x 405 grid already covers
 most of the die, so breadth is not the limit; the slow tier's plateau stop does not act below 1000. Its region
 stage then gains 406 -> 396 and refinement 396 -> 360.
+
+Results (finished 2026-10-31 07:59; `~/Code/GlobalRouterRuns/runs/p169/`; all sixteen legal, `gr_verify` =
+`eval2008.pl` on overflow, max overflow and wirelength; three at a time at nice 20, so the times are under shared
+load, as Part 141's were). Against Part 141, the first all-sixteen run on `speed08.env` (bigblue2 from its
+`PD39ROUTE_REGION_BOX_CAP_B=200` rerun, the setting the file carries):
+
+| design | overflow 141 -> 169 | scored wire 141 -> 169 | wall s 141 -> 169 | peak RSS MB 141 -> 169 |
+|---|---|---|---|---|
+| newblue2 | 0 -> 0 | identical | 91 -> 108 | 932 -> 1501 |
+| adaptec2 | 0 -> 0 | identical | 521 -> 342 | 587 -> 1485 |
+| adaptec4 | 0 -> 0 | identical | 422 -> 373 | 1256 -> 1950 |
+| bigblue3 | 0 -> 0 | identical | 679 -> 592 | 1708 -> 2136 |
+| adaptec3 | 0 -> 0 | identical | 1091 -> 1112 | 1580 -> 4467 |
+| bigblue2 | 0 -> 0 | identical | 1065 -> 1205 | 1358 -> 2387 |
+| adaptec1 | 0 -> 0 | identical | 1493 -> 1303 | 697 -> 1815 |
+| bigblue1 | 0 -> 0 | identical | 1967 -> 1668 | 622 -> 2274 |
+| adaptec5 | 0 -> 0 | identical | 2402 -> 2041 | 1566 -> 3735 |
+| newblue6 | 0 -> 0 | identical | 2428 -> 2288 | 1931 -> 3303 |
+| newblue5 | 0 -> 0 | identical | 2661 -> 3257 | 2285 -> 5334 |
+| newblue1 | 28 -> 26 | 4885637 -> 4903356 (+0.36%) | 4272 -> **1690** | 789 -> 1143 |
+| newblue4 | 144 -> 146 | 13707234 -> 13761218 (+0.39%) | 8601 -> **5256** | 2418 -> 3028 |
+| newblue3 | 38898 -> 38924 | 10806526 -> 10806648 | 18788 -> **13615** | 2479 -> 2243 |
+| newblue7 | 104 -> 102 | 35876771 -> 35947752 (+0.20%) | 42800 -> **23394** | 3391 -> 4257 |
+| bigblue4 | 360 -> 360 | identical (byte-identical routes) | 29100 -> **19627** | 2556 -> 2909 |
+
+The eleven zero-overflow designs keep their routes (wire identical) and their time (14820 -> 14289 s, inside
+shared-load noise); the five residues move -2 to +26 units, each inside its spread, and take 103562 -> 63582 s
+(-39%); the whole suite 118381 -> 77871 s (-34%). newblue7's route is byte-identical to Part 167's (102), and
+bigblue4's to Part 141's and Part 167's (360). bigblue4 took 19627 s here against 13095 s in Part 168, and newblue7
+23394 s against 18915 s in Part 166: both shared the machine with two other large designs at nice 20 the whole way.
+
+**Memory is the cost.** Peak RSS on the zero-overflow designs rose 1.2-3.3x since Part 141, from two sources:
+the batched region stage's per-thread usage replicas (Part 163, same designs: 975-2288 MB) and Part 168's
+speculative copies (adaptec3 1985 -> 4467 MB, newblue5 2288 -> 5334, adaptec5 1620 -> 3735). Part 170's delay
+removes the second on every design whose path A ends within the delay (adaptec3: 4467 -> 1900 MB, routes
+byte-identical). The largest peak, newblue5's 5.3 GB, is well inside the 48 GB Mac's memory.
 
 ## Part 170 -- the speculative variants' copies wait for path A
 
