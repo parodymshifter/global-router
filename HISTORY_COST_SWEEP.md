@@ -12258,3 +12258,36 @@ The delay does what it was built for: adaptec3's peak falls 57% to the gated por
 at the same time. newblue1 pays 62 s (+3.7%) because its variants start 300 s later; its peak moved by +94 MB,
 within what sharing the machine moves it. Both runs had the machine shared with Part 169's bigblue4 and newblue3,
 at nice 20, so the times are indicative only. Adopted into `speed08.env` on the user's word (2026-10-31).
+
+## Part 171 -- track B2: nine region-stage variants on bigblue4
+
+The user's order (2026-10-30): "run the sixteen, then bigblue4". All 360 of bigblue4's residue sits in one hotspot
+(x 204-212, y 132-148, 147 edges; tightest cut 89.3%, through-traffic), and the region-stage experiments of Parts
+138, 144 and 150 were run on newblue1 and newblue4, not here. The portfolio tests three region settings per run
+from one slow tier. Three runs at once, started 2026-10-31 08:07, `pd39route.p170`, `@standard.env @fast08.env
+@speed08.env PD39ROUTE_REGION_BATCH_MAX=1` (sequential region stage; the batched rounds never helped bigblue4, Part
+167), nice 20, `~/Code/GlobalRouterRuns/p171/`. All three legal, `eval2008.pl` agrees; each run's kept variant is
+the one scored; variant 0 reproduced 396 / 360 / wire 15148190 in all three.
+
+| variant | region 406 -> | rounds | 2D overflow after refinement | 2D wire |
+|---|---|---|---|---|
+| own (vcap 8, radius 5, expand 5) | 396 | 256 | 360 | 15148190 |
+| vcap=4 | 402 | 150 | 368 | 15145148 |
+| vcap=16 | 398 | 249 | 362 | 15147283 |
+| vcap=32 | 406 | 150 | 372 | 15206066 |
+| vcapr=12 | 398 | 234 | 360 | 15144117 |
+| vcapr=25 | 406 | 150 | 372 | 15206066 |
+| vcap=16,vcapr=12 | **388** | 298 | **358** | 15154801 |
+| expand=15 | 404 | 150 | 362 | 14969699 |
+| expand=40 | 396 | 283 | 360 | **14618052** |
+| expand=15,boxinit=40 | 402 | 150 | 366 | 14968833 |
+
+Scored: vcapr run 358, wire 24936031, 12211 s; expand run 360, wire 24626487 (**-1.24%** vs 24934483), 12482 s; vcap
+run 360, 11126 s. Peak RSS 2861-3427 MB.
+
+Overflow: nothing moved it beyond bigblue4's spread (356-378); 358 is a tie with noise, and far from the published
+166. No variant is a big swing, so region-stage coefficients are not what holds bigblue4 at 360. vcap=16,vcapr=12 is
+the only one to move the region stage itself (388, the lowest seen), though refinement then gained 30 against the
+usual 36. Wirelength: wider regions shorten the routes at equal overflow, 15148190 -> 14969699 -> 14618052 (2D,
+expand 5 / 15 / 40) -- monotone on three points, but Part 78's spread is 1.6-3.6%, so it needs repeating before it
+means anything.
