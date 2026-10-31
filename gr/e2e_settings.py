@@ -115,6 +115,18 @@ def main():
           'late-stage portfolio: variant 1 (lagr=0.2)' in e and same_res,
           'light cancelled %s same %s; residue %s same %s' % ('speculative variants cancelled' in d, same_light,
                                                              'variants ran beside path A' in e, same_res))
+    # Part 170: PD39ROUTE_PORTFOLIO_DELAY -- a long delay: on the light design the variants never start (no copies),
+    # on the residue design they start after path A, the gated routes both ways.
+    spec = {'PD39ROUTE_PORTFOLIO': 'lagr=0.2', 'PD39ROUTE_PORTFOLIO_WHEN': 'speculative', 'PD39ROUTE_PORTFOLIO_DELAY': '100000'}
+    d = run('light', spec, 'pfdelay')
+    e = run('residue', spec, 'pfdelayres')
+    same_light = open(os.path.join(work, 'light.pfdelay.route'), 'rb').read() == open(os.path.join(work, 'light.pfafter.route'), 'rb').read()
+    same_res = open(os.path.join(work, 'residue.pfdelayres.route'), 'rb').read() == open(os.path.join(work, 'residue.pf.route'), 'rb').read()
+    check('PD39ROUTE_PORTFOLIO_DELAY holds the variants back until path A has run that long, the gated routes',
+          'speculative variants not started' in d and same_light and 'started after it ended' in e and
+          'late-stage portfolio: variant 1 (lagr=0.2)' in e and same_res,
+          'light not started %s same %s; residue after %s same %s' % ('speculative variants not started' in d,
+                                                                     same_light, 'started after it ended' in e, same_res))
     # region-stage settings on the residue design: each changes the region stage's own trace.
     base_res = run('residue', off, 'base')
     rr0 = lines(base_res, 'region round ')

@@ -6345,6 +6345,11 @@ bool gPortfolioAfter = true;
 // threshold), but the variants start beside path A from the same start state and are cancelled if it does not:
 // the same results as after, without waiting for path A first.
 bool gPortfolioSpec = false;
+// Part 170 (PD39ROUTE_PORTFOLIO_DELAY, seconds; 0 = at once): the speculative variants' copies are made and the
+// variants started only once path A has run this long without ending -- a design whose path A ends sooner never
+// holds them. The variants start from the same saved state whenever they start, so only the memory and the time
+// change, never a route.
+double gPortfolioDelay = 0.0;
 
 struct PortfolioResult {
   std::string spec;
@@ -6377,6 +6382,8 @@ struct FallbackReport {
   bool portfolioSkipped = false; // gated portfolio: path A ended at or below the threshold, no variants run
   bool portfolioCancelled = false; // Part 168: speculative variants were running and were cancelled
   size_t portfolioRunning = 0;     // Part 168: speculative variants still running when path A ended
+  bool portfolioNotStarted = false; // Part 170: path A ended within PD39ROUTE_PORTFOLIO_DELAY; no copies made
+  double portfolioStartedAt = -1.0; // Part 170: seconds into path A when the variants started (-1: after it)
 };
 
 // Part 135: the portfolio's region settings (variant 0 = the run's own) and result slots.
@@ -6551,32 +6558,74 @@ void runPathAGated(const Design &d, std::vector<RoutedNet> &nets, const RegionSe
   std::vector<PortfolioResult> res;
   const std::vector<RegionSettings> rs = portfolioSettings(region, res);
   if (gPortfolioSpec) {
-    // Part 168: the variants start now, from the same start state, beside variant 0 (which keeps its full
-    // thread share); each is deterministic, so they end exactly as they would have after it.
+    // Part 168: the variants start beside variant 0 (which keeps its full thread share), from the same start
+    // state; each is deterministic, so they end exactly as they would have after it. Part 170: with
+    // PD39ROUTE_PORTFOLIO_DELAY, a launcher thread starts them (and makes their copies) only once path A has run
+    // that long; if path A ends first and above the threshold, they start here instead.
     std::vector<std::vector<RoutedNet>> copies(res.size() - 1);
-    start.read(copies[0], d.nets.data());
-    for (size_t i = 1; i < copies.size(); ++i)
-      copies[i] = copies[0];
     ThreadShare share;
     share.running.store(1);
     share.primary.store(1);
     std::atomic<bool> cancel{false};
     std::atomic<int> done{0};
-    std::vector<std::thread> th = startPortfolioVariants(d, copies, rs, refine, res, share, &cancel, &done);
+    std::vector<std::thread> th;
+    bool started = false;
+    const auto t0 = std::chrono::steady_clock::now();
+    auto launch = [&]() {
+      start.read(copies[0], d.nets.data());
+      for (size_t i = 1; i < copies.size(); ++i)
+        copies[i] = copies[0];
+      th = startPortfolioVariants(d, copies, rs, refine, res, share, &cancel, &done);
+      started = true;
+    };
+    std::mutex mu;
+    std::condition_variable cv;
+    bool aDone = false;
+    std::thread launcher;
+    if (gPortfolioDelay > 0.0)
+      launcher = std::thread([&]() {
+        std::unique_lock<std::mutex> lk(mu);
+        if (cv.wait_for(lk, std::chrono::duration<double>(gPortfolioDelay), [&]() { return aDone; }))
+          return;
+        lk.unlock();
+        fr.portfolioStartedAt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        launch();
+      });
+    else {
+      fr.portfolioStartedAt = 0.0;
+      launch();
+    }
     ThreadShare *const saved = tShare;
     tShare = &share;
     tPrimary = true;
     runPortfolioVariant(d, nets, rs[0], refine, trace, res[0]);
     tPrimary = false;
     tShare = saved;
+    if (launcher.joinable()) {
+      {
+        std::lock_guard<std::mutex> lk(mu);
+        aDone = true;
+      }
+      cv.notify_all();
+      launcher.join();
+    }
     share.primary.store(0);
     share.running.fetch_sub(1);
     const bool above = !(res[0].overflow <= aMax || res[0].region.aborted);
-    fr.portfolioRunning = res.size() - 1 - static_cast<size_t>(done.load());
+    if (!started && !above) {
+      fr.regionA = res[0].region;
+      fr.refineA = res[0].refine;
+      fr.portfolioSkipped = true;
+      fr.portfolioNotStarted = true;
+      return;
+    }
+    fr.portfolioRunning = started ? res.size() - 1 - static_cast<size_t>(done.load()) : res.size() - 1;
     if (!above)
       cancel.store(true);
     else if (onAbove)
       onAbove();
+    if (!started)
+      launch(); // path A ended above the threshold before the delay: the gated portfolio from here
     for (std::thread &t : th)
       t.join();
     if (!above) {
@@ -20229,6 +20278,34 @@ void testLowMemFallbackMatches() {
   check(w1.portfolioSkipped && w1.portfolioCancelled && w2.portfolioCancelled && w1.portfolio.empty() && w1.ranB &&
             w1.tookB == q0.tookB && sameSegs(t0, tw1) && sameSegs(t0, tw2),
         "speculative portfolio, A at the threshold: the variants cancelled, B runs, the no-portfolio routes kept");
+  // Part 170: with PD39ROUTE_PORTFOLIO_DELAY the variants start late (or, above the threshold, after path A) and
+  // give the same results; at the threshold they never start and no copies are made.
+  bool sameDelay = true;
+  for (const double delay : {1e9, 1e-9}) {
+    gPortfolioSpec = true;
+    gPortfolioDelay = delay;
+    FallbackReport x0, x1, y1, y2;
+    std::vector<std::vector<Seg>> sx0, sx1, ty1, ty2;
+    runRow(false, x0, sx0);
+    runRow(true, x1, sx1);
+    run(false, 0, y1, ty1);
+    run(true, 0, y2, ty2);
+    gPortfolioSpec = false;
+    gPortfolioDelay = 0.0;
+    bool same = x0.portfolio.size() == 3 && x1.portfolio.size() == 3;
+    for (size_t i = 0; same && i < 3; ++i)
+      same = x0.portfolio[i].overflow == p0.portfolio[i].overflow && x0.portfolio[i].wire == p0.portfolio[i].wire &&
+             x1.portfolio[i].overflow == p0.portfolio[i].overflow && x1.portfolio[i].wire == p0.portfolio[i].wire;
+    same = same && x0.portfolioPick == p0.portfolioPick && x1.portfolioPick == p0.portfolioPick &&
+           sameSegs(s0, sx0) && sameSegs(s0, sx1) && (delay > 1.0 ? x0.portfolioStartedAt < 0.0 : true);
+    const bool atThr = delay > 1.0 ? y1.portfolioNotStarted && y2.portfolioNotStarted && !y1.portfolioCancelled
+                                   : y1.portfolioSkipped && (y1.portfolioCancelled || y1.portfolioNotStarted);
+    same = same && atThr && y1.portfolio.empty() && y1.ranB && y1.tookB == q0.tookB && sameSegs(t0, ty1) &&
+           sameSegs(t0, ty2);
+    sameDelay = sameDelay && same;
+  }
+  check(sameDelay, "PD39ROUTE_PORTFOLIO_DELAY: variants started late or after path A give the same results, pick "
+                   "and routes; at the threshold within the delay they never start");
   gPortfolio = savedPf;
   gPortfolioAfter = savedAfter;
   check(q1.portfolioSkipped && q2.portfolioSkipped && q1.portfolio.empty() && q1.ranB && q1.tookB == q0.tookB &&
@@ -22648,10 +22725,24 @@ int main(int argc, char **argv) {
       gPortfolioAfter = sw != "always";
       gPortfolioSpec = sw == "speculative";
     }
+    if (const char *w = std::getenv("PD39ROUTE_PORTFOLIO_DELAY"); w) { // Part 170
+      char *end = nullptr;
+      const double x = std::strtod(w, &end);
+      if (end == w || *end != '\0' || !(x >= 0.0) || x > 1e9)
+        fail(std::string("PD39ROUTE_PORTFOLIO_DELAY must be a number of seconds >= 0 (got '") + w + "')");
+      if (x > 0.0 && !gPortfolioSpec)
+        fail("PD39ROUTE_PORTFOLIO_DELAY needs PD39ROUTE_PORTFOLIO_WHEN=speculative");
+      gPortfolioDelay = x;
+    }
     std::cerr << "late-stage portfolio: path A runs as " << gPortfolio.size() + 1
               << " variants on their own threads (variant 0 = the run's own settings)"
               << (gPortfolioSpec ? ", the others started beside it and kept only if path A ends above the "
-                                   "fallback threshold (cancelled otherwise)"
+                                   "fallback threshold (cancelled otherwise)" +
+                                   (gPortfolioDelay > 0.0
+                                        ? ", once path A has run " +
+                                              std::to_string(static_cast<long long>(gPortfolioDelay + 0.5)) +
+                                              " s (PD39ROUTE_PORTFOLIO_DELAY)"
+                                        : std::string())
                   : gPortfolioAfter ? ", the others only if path A ends above the fallback threshold"
                                     : ", all from the start")
               << (gLowMem ? "; low-memory mode keeps a copy per variant while they run" : "") << "\n";
@@ -22728,7 +22819,10 @@ int main(int argc, char **argv) {
     const std::string notRun = fr.portfolioCancelled ? "speculative variants cancelled (" +
                                                            std::to_string(fr.portfolioRunning) +
                                                            " still running when path A ended)"
-                                                     : std::string("variants not run");
+                               : fr.portfolioNotStarted // Part 170
+                                   ? std::string("speculative variants not started (path A ended within "
+                                                 "PD39ROUTE_PORTFOLIO_DELAY; no copies made)")
+                                   : std::string("variants not run");
     if (fr.portfolioSkipped && fr.regionA.aborted)
       std::cerr << "late-stage portfolio: path A's region stage stopped without gain (PD39ROUTE_REGION_ABORT), "
                 << notRun << "\n";
@@ -22736,8 +22830,11 @@ int main(int argc, char **argv) {
       std::cerr << "late-stage portfolio: path A ended at " << fr.overflowA << " <= " << aMax << ", " << notRun
                 << "\n";
     if (gPortfolioSpec && !fr.portfolio.empty())
-      std::cerr << "late-stage portfolio: variants ran beside path A (" << fr.portfolioRunning
-                << " still running when path A ended)\n";
+      std::cerr << "late-stage portfolio: variants ran beside path A ("
+                << (fr.portfolioStartedAt < 0.0 ? std::string("started after it ended, ")
+                    : gPortfolioDelay > 0.0       ? "started " + std::to_string(static_cast<long long>(fr.portfolioStartedAt + 0.5)) + " s into it, "
+                                                  : std::string())
+                << fr.portfolioRunning << " still running when path A ended)\n";
     for (size_t i = 0; i < fr.portfolio.size(); ++i) // Part 135
       std::cerr << "late-stage portfolio: variant " << i << " (" << fr.portfolio[i].spec << "): region "
                 << fr.portfolio[i].region.before << " -> " << fr.portfolio[i].region.after << " in "
