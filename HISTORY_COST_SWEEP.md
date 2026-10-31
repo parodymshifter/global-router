@@ -12174,3 +12174,17 @@ holds.
 Adopted into `speed08.env` (the user, 2026-10-29, "add both to speed08.env when newblue7 confirms"):
 `PD39ROUTE_PORTFOLIO_WHEN=speculative`, `PD39ROUTE_REFINE_STOP=20`. Instruments was not attached: both are exact
 scheduling changes, measured by the stage report's per-stage time.
+
+## Part 169 -- all sixteen on the current speed08.env, then track B on bigblue4 (running)
+
+The user's order (2026-10-30): "run the sixteen, then bigblue4". `speed08.env` now stacks five changes each
+validated on a few designs (the region box cap 100, the slow tier's plateau stop, the gated batched region stage,
+its sequential rerun, and Part 168's speculative portfolio and refinement stop); this run refreshes the table and
+measures every design's memory under the speculative portfolio. Binary `gr/pd39route.p169`, built fresh from
+aee9c6b (self-test pass), `@standard.env @fast08.env @speed08.env`, jobs at nice 20 (run_batch.sh's new default),
+`~/Code/GlobalRouterRuns/p169/res.jobs`, newblue7 first (longest), then shortest first; started 2026-10-30 23:26.
+
+A note for the bigblue4 step, from Part 168's trace: its slow tier is flat from round ~75 (418) to round 149 (410),
+oscillating 408-476, with every rerouted net at the box cap of 200 -- which on a 403 x 405 grid already covers
+most of the die, so breadth is not the limit; the slow tier's plateau stop does not act below 1000. Its region
+stage then gains 406 -> 396 and refinement 396 -> 360.
