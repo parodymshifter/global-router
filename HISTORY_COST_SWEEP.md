@@ -12189,7 +12189,7 @@ oscillating 408-476, with every rerouted net at the box cap of 200 -- which on a
 most of the die, so breadth is not the limit; the slow tier's plateau stop does not act below 1000. Its region
 stage then gains 406 -> 396 and refinement 396 -> 360.
 
-## Part 170 -- the speculative variants' copies wait for path A (running)
+## Part 170 -- the speculative variants' copies wait for path A
 
 The user's question (2026-10-31): can the variant copies wait until path A needs them? Part 169's first nine
 designs showed the cost of Part 168: adaptec3's peak 4467 MB (Part 163: 1985 MB), the three copies made at path
@@ -12207,3 +12207,18 @@ delays of 1e9 and 1e-9 s, the same variant results, pick and routes as gated abo
 started after path A with the gated routes. Validation (`~/Code/GlobalRouterRuns/p170/`, sharing the three slots
 with Part 169): adaptec3 and newblue1 at 300 s, expected byte-identical to Part 169 with adaptec3's peak back near
 2 GB.
+
+Results (2026-10-31; `~/Code/GlobalRouterRuns/runs/p170/`, both legal, `eval2008.pl` agrees; decompressed routes
+compared with Part 169's by md5):
+
+| design | delay | overflow | wire (scored) | wall s | peak RSS MB | routes vs Part 169 | portfolio |
+|---|---|---|---|---|---|---|---|
+| adaptec3 | none (Part 169) | 0 | 13142021 | 1112 | 4467 | -- | started, cancelled |
+| adaptec3 | 300 s | 0 | 13142021 | 1116 | 1900 | identical | not started, no copies |
+| newblue1 | none (Part 169) | 26 | 4903356 | 1690 | 1143 | -- | started beside path A |
+| newblue1 | 300 s | 26 | 4903356 | 1752 | 1237 | identical | started 300 s into path A |
+
+The delay does what it was built for: adaptec3's peak falls 57% to the gated portfolio's level (Part 163: 1985 MB)
+at the same time. newblue1 pays 62 s (+3.7%) because its variants start 300 s later; its peak moved by +94 MB,
+within what sharing the machine moves it. Both runs had the machine shared with Part 169's bigblue4 and newblue3,
+at nice 20, so the times are indicative only. Not yet in `speed08.env`: adopting it is the user's call.
