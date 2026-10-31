@@ -12311,8 +12311,10 @@ Scored: pair run 358, wire 24942891, 10236 s, 3169 MB; **wide run 354 (the lowes
 24047336 (-3.56% vs 24934483)**, 11186 s, 3593 MB. Against NTHU-Route 2.0's 22.80M: +9.4% -> +5.5%.
 
 2D wire falls steadily with the region's margin (expand 5 / 15 / 40 / 80 / 120: 15.15 / 14.97 / 14.62 / 13.70 /
-12.76M) with no overflow cost, well outside Part 78's spread. The scored gain is smaller than the 2D gain because
-wirelength recovery, later, already takes much of what the wider region took (Part 172's expand=80: 13.70M -> 12.74M).
+12.76M) with no overflow cost. The scored gain is smaller than the 2D gain because
+wirelength recovery, later, already takes much of what the wider region took (after recovery 13.44M -> 12.74M, -5.3%;
+vias 11.50M -> 11.31M). So the 2D fall is well outside Part 78's 1.6-3.6%, but the scored -3.56% sits at its top edge:
+one run, to be repeated before it counts.
 expand=120's route was not kept (360 ties variant 0 but loses to 354), so its scored wire is not measured yet. The
 virtual capacity lead did not repeat: neighbours of Part 171's 388 gave 390-404 and residues 358-368, noise. Nothing
 added to the settings files.
