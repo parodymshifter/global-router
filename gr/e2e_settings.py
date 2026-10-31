@@ -88,6 +88,14 @@ def main():
     na, nb = len(lines(a, 'slow round ')), len(lines(b, 'slow round '))
     check('PD39ROUTE_SLOW_PLATEAU stops the slow tier', 'PD39ROUTE_SLOW_PLATEAU), after round' in b and nb < na,
           f'slow rounds {nb} vs {na}')
+    # PD39ROUTE_SLOW_CUT (Part 173): the cut's own line while the slow tier runs, and the rounds after it differ.
+    for full in '01':
+        b = run('hard', {'PD39ROUTE_SLOW_CUT': f'4,3,1000000000,0,{full}'}, 'slowcut' + full)
+        la, lb = lines(a, 'slow round '), lines(b, 'slow round ')
+        strip = lambda l: l.split(' overflow ')[1].split(',')[0]
+        check(f'PD39ROUTE_SLOW_CUT acts in the slow tier (full {full})',
+              any(l.startswith('slow tier capacity cut: after round 0,') for l in b.splitlines()) and
+              [strip(l) for l in la[:8]] != [strip(l) for l in lb[:8]], lb[3][:70] if len(lb) > 3 else 'no rounds')
     # PD39ROUTE_REGION_ABORT (Part 146): on the hard design the region stage cannot beat its start.
     a = run('hard', {**off, 'PD39ROUTE_REGION_ABORT': '0,20'}, 'abortoff')
     b = run('hard', {**off, 'PD39ROUTE_REGION_ABORT': '1000,5'}, 'abort5')

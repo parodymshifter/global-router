@@ -5726,6 +5726,7 @@ struct RunReport {
   bool convergedToZero = false;
   bool stalled = false;
   bool slowPlateaued = false; // Part 148: stopped by PD39ROUTE_SLOW_PLATEAU
+  int slowCutRound = -1;      // Part 173: the round PD39ROUTE_SLOW_CUT started after (-1: it did not)
 };
 
 // nproute's post-convergence cleanup pass, unmodified: one supervised sweep
@@ -6046,6 +6047,83 @@ struct SlowPlateau {
   long long floor = 0;
 };
 SlowPlateau gSlowPlateau;
+
+// Part 173: the slow tier's capacity cut (PD39ROUTE_SLOW_CUT=tracks,radius,below,every,full; tracks 0 = off). The
+// region stage's virtual capacity, moved up to the slow tier, whose late rounds are flat (bigblue4: 440 from round
+// 80 to round 135 of 150). Once a round ends at real 2D overflow <= below, every 2D edge within `radius` tiles of
+// the real overflow loses `tracks` tracks (virtualCap's floor applies); every > 0 rebuilds that zone around the
+// overflow of that round every `every` rounds, 0 keeps the first zone.
+//   full 0: the cost only, as in the region stage. Only nets already overflowed move, so only they see it.
+//   full 1: Usage's own capacities, so a full-but-legal edge in the zone counts as overflowed everywhere the slow
+//     tier asks: its nets are ripped up (netOverflowed), its pieces rerouted, and its history grows.
+// Overflow is always judged against real capacity: the best round, the stop checks and the routes returned.
+struct SlowCutSettings {
+  int tracks = 0;
+  int radius = 5;
+  long long below = 0;
+  int every = 0;
+  bool full = false;
+};
+SlowCutSettings gSlowCut;
+
+class SlowCut {
+public:
+  bool on() const { return on_; }
+  int startRound() const { return start_; }
+  long long edges() const { return edges_; }
+  // The round boundary: start the cut, or rebuild its zone, as the settings say. `overflow` is the real 2D overflow.
+  void step(const RoutingGrid &g, Usage &u, Prices &pr, int round, long long overflow, bool trace) {
+    if (gSlowCut.tracks <= 0)
+      return;
+    if (on_ ? (gSlowCut.every <= 0 || (round - start_) % gSlowCut.every != 0) : overflow > gSlowCut.below)
+      return;
+    if (!on_) {
+      on_ = true;
+      start_ = round;
+      realH_ = u.capH;
+      realV_ = u.capV;
+      if (!gSlowCut.full) {
+        pr.vredH = &redH_;
+        pr.vredV = &redV_;
+      }
+    }
+    u.capH = realH_;
+    u.capV = realV_;
+    const int reduction = gSlowCut.tracks * (1 + g.minSpacing[0]);
+    edges_ = virtualCapZone(g, u, reduction, gSlowCut.radius, redH_, redV_);
+    reapply(u);
+    if (trace)
+      std::cerr << "slow tier capacity cut: after round " << round << ", real 2D overflow " << overflow << ", "
+                << edges_ << " edges within " << gSlowCut.radius << " tiles of it " << reduction
+                << " capacity units lower (" << gSlowCut.tracks << " tracks, "
+                << (gSlowCut.full ? "full" : "price only") << ")\n";
+  }
+  // The cut on a Usage rebuilt from the charges (real capacities).
+  void reapply(Usage &u) const {
+    if (!on_ || !gSlowCut.full)
+      return;
+    for (size_t i = 0; i < u.capH.size(); ++i)
+      u.capH[i] = virtualCap(realH_[i], redH_[i]);
+    for (size_t i = 0; i < u.capV.size(); ++i)
+      u.capV[i] = virtualCap(realV_[i], redV_[i]);
+  }
+  long long realOverflow(const RoutingGrid &g, const Usage &u) const {
+    if (!on_ || !gSlowCut.full)
+      return totalOverflow(g, u);
+    long long total = 0;
+    for (size_t i = 0; i < u.h.size(); ++i)
+      total += std::max(0, u.h[i] - realH_[i]);
+    for (size_t i = 0; i < u.v.size(); ++i)
+      total += std::max(0, u.v[i] - realV_[i]);
+    return total;
+  }
+
+private:
+  bool on_ = false;
+  int start_ = -1;
+  long long edges_ = 0;
+  std::vector<int> realH_, realV_, redH_, redV_;
+};
 
 struct ReclaimReport {
   long long candidates = 0, kept = 0;
@@ -8783,6 +8861,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   bool reclaimedAtStop = false; // pd18route
   int slowReclaims = 0;         // pd18route
   std::vector<long long> slowBestAfter; // Part 148: the best after each slow round
+  SlowCut slowCut;                      // Part 173
   for (int round = 0; round < maxSlowRounds; ++round) {
     int accepted = 0, rejected = 0, keptWorse = 0;
     const long long popsRound0 = gSearchPops; // pd38route: trace
@@ -9134,7 +9213,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     // point, so this is the settled state to judge "over capacity" against.
     updateHistory(g, prices, usage, histStep, histMode, histFactor, streakThreshold, scaleByOverflow, relaxEnabled, ratioExponent, exponentEscalation);
     advancePresentDemand(prices, usage);
-    long long overflow = totalOverflow(g, usage);
+    long long overflow = slowCut.realOverflow(g, usage); // Part 173: real capacity, cut or not
     rep.roundsRun += 1;
     grprof::event("slow round", round); // Part 126: Instruments marker
     if (gSlowHistory) // pd38route: test hook (Part 122)
@@ -9166,6 +9245,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
                   << std::chrono::duration<double>(std::chrono::steady_clock::now() - tRound0).count() << " s";
       if (prices.model == CostModel::kPresentDemand)
         std::cerr << " (pd next iter " << prices.pdIter << ", wl " << pdWl(prices) << ")";
+      if (slowCut.on() && gSlowCut.full) // Part 173
+        std::cerr << " (against the cut " << totalOverflow(g, usage) << ")";
       std::cerr << "\n";
     }
     if (overflow < rep.bestOverflow) {
@@ -9205,6 +9286,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
         slowBest.saveAll(nets); // reclaim may change any net
       ReclaimReport rr = reclaimDetours(d, nets, gSlowReclaim.settings);
       usage = usageFromCharges(g, nets);
+      slowCut.reapply(usage); // Part 173
       rep.bestOverflow = std::numeric_limits<long long>::max(); // post-reclaim states are what counts
       ++slowReclaims;
       if (trace)
@@ -9229,7 +9311,9 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
         break;
       }
     }
+    slowCut.step(g, usage, prices, round, overflow, trace); // Part 173
   }
+  rep.slowCutRound = slowCut.startRound();
   if (deltaBest) { // the best state, from the delta
     slowBest.restore(nets);
     rep.nets = std::move(nets);
@@ -19913,6 +19997,65 @@ void testSlowPlateauStop() {
             std::to_string(full.roundsRun) + " rounds) with the same best and routes; not below its floor");
 }
 
+// Part 173: the slow tier's capacity cut. A one-row grid, 3 nets on 1 track per edge: full cut (1 track, floored at
+// half of 2 units -> 1): an edge at capacity beside an overflowed one counts as overflowed, price only it does not.
+// Through route(): the reported best and the returned routes are real overflow, cut or not, in both modes.
+void testSlowCut() {
+  const char *row = "grid 8 1 2\nvertical capacity 0 2\nhorizontal capacity 4 0\n"
+                    "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                    "num net 5\nnA 0 2 1\n5 5 1\n75 5 1\nnB 1 2 1\n5 5 1\n75 5 1\n"
+                    "nC 2 2 1\n5 5 1\n75 5 1\nnD 3 2 1\n5 5 1\n75 5 1\nnE 4 2 1\n5 5 1\n75 5 1\n0\n";
+  Design d = parse("pd39route_selftest_slowcut.gr", row);
+  const RoutingGrid &g = d.grid;
+  const SlowCutSettings saved = gSlowCut;
+  const size_t hot = g.hIndex(3, 0, 0), side = g.hIndex(4, 0, 0), far = g.hIndex(0, 0, 0);
+  auto boundary = [&](bool full, int every, long long below) {
+    gSlowCut = SlowCutSettings{1, 1, below, every, full};
+    Usage u(g);
+    Prices pr(g);
+    u.h[hot] = u.capH[hot] + 2; // overflowed
+    u.h[side] = u.capH[side];   // at capacity, legal
+    u.h[far] = u.capH[far];     // at capacity, outside the zone
+    SlowCut c;
+    const int realSide = u.capH[side], realFar = u.capH[far];
+    c.step(g, u, pr, 0, 2, false);
+    bool started = c.on() && c.startRound() == 0;
+    bool capsFull = u.capH[side] == virtualCap(realSide, 2) && u.capH[side] < realSide && u.capH[far] == realFar;
+    bool capsPrice = u.capH[side] == realSide && pr.vredH != nullptr;
+    long long real = c.realOverflow(g, u);
+    bool sideOver = u.h[side] > u.capH[side];
+    return std::make_tuple(started, capsFull, capsPrice, real, sideOver);
+  };
+  auto [sf, capsF, unusedF, realF, overF] = boundary(true, 0, 10);
+  auto [sp, unusedP, capsP, realP, overP] = boundary(false, 0, 10);
+  (void)unusedF;
+  (void)unusedP;
+  auto [sn, a1, a2, a3, a4] = boundary(true, 0, 1); // 2 > below: not yet
+  (void)a1;
+  (void)a2;
+  (void)a3;
+  (void)a4;
+  check(sf && capsF && realF == 2 && overF, "slow cut, full: a zone edge at capacity counts as overflowed, an edge "
+                                            "outside keeps its capacity, and real overflow stays 2");
+  check(sp && capsP && realP == 2 && !overP, "slow cut, price only: capacities untouched, the cost seam set");
+  check(!sn, "slow cut: does not start above `below`");
+  CostSettings cs;
+  cs.model = CostModel::kPresentDemand;
+  auto run = [&](const SlowCutSettings &c) {
+    gSlowCut = c;
+    return route(d, 2, 12, 0.02, 1.0, HistMode::kAdditive, 1.0, 1, false, true, 1.0, 0.0, true, true, true, 8,
+                 BoxGrowth{}, cs, AcceptMode::kKeep, false, -1);
+  };
+  RunReport none = run(SlowCutSettings{});
+  RunReport price = run(SlowCutSettings{1, 1, 1000000, 0, false});
+  RunReport full = run(SlowCutSettings{1, 1, 1000000, 2, true});
+  gSlowCut = saved;
+  check(none.slowCutRound == -1 && price.slowCutRound == 0 && full.slowCutRound == 0, "slow cut: starts at the first boundary");
+  check(none.bestOverflow > 0 && price.bestOverflow == totalOverflow(g, usageFromCharges(g, price.nets)) &&
+            full.bestOverflow == totalOverflow(g, usageFromCharges(g, full.nets)) && full.bestOverflow == none.bestOverflow,
+        "slow cut: the best reported is the returned routes' real overflow (" + std::to_string(full.bestOverflow) + ")");
+}
+
 // Part 147: annealed refinement. The acceptance rule: off -> a worse reroute is always reverted; on at a
 // very high temperature nearly always kept, at a very low one never; a better or equal reroute is never
 // reverted; the same seed draws the same decisions. The stage with annealing on the row fixture still ends
@@ -21756,6 +21899,7 @@ int run() {
   testRegionAbort();
   testAnnealedRefinement();
   testSlowPlateauStop();
+  testSlowCut();
   testWallAwareHeuristic();
   testSearchHeapMatchesPriorityQueue();
   testLateralShifts();
@@ -22420,6 +22564,19 @@ int main(int argc, char **argv) {
     gSlowPlateau.floor = fl;
     if (w > 0)
       std::cerr << "slow tier plateau stop: best down < " << gp << "% over " << w << " rounds while >= " << fl << "\n";
+  }
+  if (const char *v = std::getenv("PD39ROUTE_SLOW_CUT"); v) { // Part 173: tracks,radius,below,every,full
+    SlowCutSettings c;
+    int full = -1;
+    char tail = 0;
+    if (std::sscanf(v, "%d,%d,%lld,%d,%d%c", &c.tracks, &c.radius, &c.below, &c.every, &full, &tail) != 5 ||
+        c.tracks < 0 || c.tracks > 1000 || c.radius < 0 || c.radius > 1000 || c.below < 0 || c.every < 0 ||
+        (full != 0 && full != 1))
+      fail(std::string("PD39ROUTE_SLOW_CUT must be tracks,radius,below,every,full (tracks and radius 0-1000, below "
+                       "and every >= 0, full 0 or 1; got '") +
+           v + "')");
+    c.full = full == 1;
+    gSlowCut = c;
   }
   if (const char *v = std::getenv("PD9ROUTE_STOP_AT"); v) {
     char *end = nullptr;
