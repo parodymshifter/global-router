@@ -12364,7 +12364,7 @@ and vias both differ); the near-equal total is a coincidence of the sum. Not yet
 the kept variant, and any margin on another design.
 Nothing added to the settings files.
 
-## Part 174 -- track B2: margin 120 on the four sequential residues; a wire gain on all four, big only on bigblue4
+## Part 174 -- track B2: margin 120 on four residues; a wire gain on all four, big only on bigblue4
 
 The user's order (2026-11-01): "run margin 120 on those four designs", after Part 173's -6.21% on bigblue4 with the
 cut on. Here margin 120 is the run's own setting (`PD5ROUTE_REGION_EXPAND=120`), no cut, so all four portfolio
@@ -12386,11 +12386,11 @@ Each variant's 2D overflow after refinement, own / lagr 0.05 / 0.2 / 1:
 |---|---|---|
 | newblue1 | 26 / 28 / 36 / 34 | 38 / 36 / **26** / 42 |
 | newblue4 | 150 / 156 / **146** / 154 | 154 / 152 / 162 / **148** |
-| bigblue4 | 360 / 368 / - / - | 360 / 368 / 362 / **356** |
+| bigblue4 | **360** / 364 / 364 / 366 | 360 / 368 / 362 / **356** |
 | newblue7 | 106 / **102** / 120 / 106 | 120 / 112 / **108** / 114 |
 
 Wire: four of four shorter, but against Part 78's 1.6-3.6% only bigblue4 is clear of the noise, and it now has three
-runs (23386478, 23386631, 23387506), bold in Parts 173-174, +2.6% vs NTHU-Route 2.0's 22.80M. newblue4 sits at the
+runs (23386478, 23386631, 23387506), +2.6% vs NTHU-Route 2.0's 22.80M. newblue4 sits at the
 top of the spread, newblue1 at the bottom, newblue7 inside it. The fall after the region stage is large everywhere
 (4-16%), and wirelength recovery takes much of it back, most of all on newblue7 and newblue1.
 
