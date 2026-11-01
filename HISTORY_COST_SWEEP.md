@@ -12363,3 +12363,40 @@ four readings: 358, 358, 360, 364; expand=80: 354, 358, 368, 368. The two -6.21%
 and vias both differ); the near-equal total is a coincidence of the sum. Not yet measured: expand=120 with no cut as
 the kept variant, and any margin on another design.
 Nothing added to the settings files.
+
+## Part 174 -- track B2: margin 120 on the four sequential residues; a wire gain on all four, big only on bigblue4
+
+The user's order (2026-11-01): "run margin 120 on those four designs", after Part 173's -6.21% on bigblue4 with the
+cut on. Here margin 120 is the run's own setting (`PD5ROUTE_REGION_EXPAND=120`), no cut, so all four portfolio
+variants carry it and whichever is kept is margin 120. Binary `pd39route.p173`, `@standard.env @fast08.env
+@speed08.env`, bigblue4 with `PD39ROUTE_REGION_BATCH_MAX=1` as in Parts 171-173, `~/Code/GlobalRouterRuns/p174/`,
+nice 20. Started 2026-11-01 00:47 EDT; newblue1 ended 01:24 EDT, newblue4 01:11 EST, bigblue4 04:51 EST, newblue7
+05:00 EST; scored by 05:52 EST. All four legal, `eval2008.pl` agrees. Baselines are Part 169's, not rerun.
+
+| design | overflow 169 -> 174 | scored wire 169 -> 174 | 2D wire after fallback | after recovery | wall s | peak RSS MB |
+|---|---|---|---|---|---|---|
+| newblue1 | 26 -> 26 | 4903356 -> 4822950 (-1.64%) | -8.3% | -2.3% | 1690 -> 2215 | 1143 -> 1421 |
+| newblue4 | 146 -> 148 | 13761218 -> 13260422 (**-3.64%**) | -8.5% | -4.3% | 5256 -> 5064 | 3028 -> 3167 |
+| bigblue4 | 360 -> 356 | 24934483 -> 23387506 (**-6.20%**) | -15.8% | -9.1% | 19627 -> 16061 | 2909 -> 3281 |
+| newblue7 | 102 -> 108 | 35947752 -> 35625349 (-0.90%) | -4.1% | -1.3% | 23394 -> 18819 | 4257 -> 6615 |
+
+Each variant's 2D overflow after refinement, own / lagr 0.05 / 0.2 / 1:
+
+| design | margin 5 (Part 169) | margin 120 |
+|---|---|---|
+| newblue1 | 26 / 28 / 36 / 34 | 38 / 36 / **26** / 42 |
+| newblue4 | 150 / 156 / **146** / 154 | 154 / 152 / 162 / **148** |
+| bigblue4 | 360 / 368 / - / - | 360 / 368 / 362 / **356** |
+| newblue7 | 106 / **102** / 120 / 106 | 120 / 112 / **108** / 114 |
+
+Wire: four of four shorter, but against Part 78's 1.6-3.6% only bigblue4 is clear of the noise, and it now has three
+runs (23386478, 23386631, 23387506), bold in Parts 173-174, +2.6% vs NTHU-Route 2.0's 22.80M. newblue4 sits at the
+top of the spread, newblue1 at the bottom, newblue7 inside it. The fall after the region stage is large everywhere
+(4-16%), and wirelength recovery takes much of it back, most of all on newblue7 and newblue1.
+
+Overflow: bigblue4 356 ties its sequential lows, one design equal, newblue4 +2, newblue7 +6 -- 108 is above its
+100-106 range, and on newblue1 three of the four variants got worse too, so margin 120 may cost a little on the
+batched designs; the one best draw hides that. Peak footprint on newblue7 reached 10.3 GB (RSS 6615 MB, +55%); the
+cause is not measured. Wall times are not like for like: Part 169 shared the machine with larger jobs.
+Zero-overflow designs are not measured at any margin but 5, so `PD5ROUTE_REGION_EXPAND=120` as a global setting is
+not validated. Nothing added to the settings files.
