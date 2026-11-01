@@ -12318,3 +12318,48 @@ one run, to be repeated before it counts.
 expand=120's route was not kept (360 ties variant 0 but loses to 354), so its scored wire is not measured yet. The
 virtual capacity lead did not repeat: neighbours of Part 171's 388 gave 390-404 and residues 358-368, noise. Nothing
 added to the settings files.
+
+## Part 173 -- track B2: the region stage's capacity cut in the slow tier; it does not help, and margin 120 is scored
+
+The user's order (2026-10-31): "build the slow-tier capacity cut around the hotspot". bigblue4's slow tier sits near
+440 from round 80 to 135 while the region stage's nets keep walking back into one hotspot, so the idea was to give the
+slow tier what virtual capacity gives the region stage. `PD39ROUTE_SLOW_CUT=tracks,radius,below,every,full` (off by
+default): once real 2D overflow falls to `below`, edges within `radius` tiles of it lose `tracks`. With full 0 only
+the prices see it, and because the slow tier reroutes only overflowed nets, only those nets do. With full 1 the
+usage's capacities drop, so which nets count as overflowed, which pieces are ripped and the history term all see it;
+overflow is still measured and reported against the real capacities. `every` > 0 moves the cut to the current
+overflow every so many rounds. Self-test (`testSlowCut`) and `gr/e2e_settings.py` (35 of 35) pass.
+
+Three runs at once, started 2026-10-31 18:13, routers ended 21:48 / 21:54 / 22:09, scored by 22:38; `pd39route.p173`,
+Part 171's settings, region variants expand=80, expand=120 and vcap=16,vcapr=8, `~/Code/GlobalRouterRuns/p173/`. All
+three legal, `eval2008.pl` agrees. All three cut 8 tracks at radius 5, starting at overflow 500 (round 47), and every
+slow round up to the cut matches Part 172 exactly.
+
+| form | `PD39ROUTE_SLOW_CUT` | slow-tier best (none: 406) | own | expand=80 | expand=120 | vcap=16,vcapr=8 |
+|---|---|---|---|---|---|---|
+| price | 8,5,500,0,0 | 412 | 376 | **358** | 364 | 362 |
+| full | 8,5,500,0,1 | 424 | 368 | 368 | **358** | 374 |
+| track | 8,5,500,10,1 | 416 | 364 | 368 | **358** | 362 |
+| none (Parts 171-172) | - | 406 | 360 | 354 | 360 | 358 |
+
+(Columns from own on are 2D overflow after refinement; bold is the variant each run kept.)
+
+| run | kept variant | overflow | 2D wire after region | after recovery | vias | scored wire | vs 24934483 | vs NTHU-Route 2.0 | time | peak RSS |
+|---|---|---|---|---|---|---|---|---|---|---|
+| price | expand=80 | 358 | 13686685 | 12721045 | 11314790 | 24035835 | -3.60% | +5.4% | 12880 s | 3248 MB |
+| full | expand=120 | 358 | 12768264 | 12214101 | 11172377 | 23386478 | **-6.21%** | **+2.6%** | 13245 s | 3372 MB |
+| track | expand=120 | 358 | 12763843 | 12212418 | 11174213 | 23386631 | **-6.21%** | **+2.6%** | 14114 s | 3788 MB |
+
+The cut does not help: every form left the slow tier higher than without it (412-424 vs 406), the full forms ending
+near 500 real overflow, and all three finished at 358, inside the 354-378 spread and above Part 172's 354, for
+15-26% more time than the wide run's 11186 s. Nets left the cut zone without the overflow leaving the design, which
+is what the through-traffic cut of Part 171 predicts. The setting stays off.
+
+What the runs did measure is the margin. expand=120 had no scored wirelength (Part 172); now it has two, 23386478 and
+23386631, both -6.21%, outside Part 78's 1.6-3.6% and bigblue4's closest yet to NTHU-Route 2.0's 22.80M. Part 172's
+expand=80 repeated as well (-3.56% -> -3.60%). The gain belongs to the margin, not the cut: 2D wire after the region
+stage is 12.76-12.77M with or without the cut at expand=120, 13.69-13.70M at expand=80. Overflow at expand=120 over
+four readings: 358, 358, 360, 364; expand=80: 354, 358, 368, 368. The two -6.21% runs differ in their routes (2D wire
+and vias both differ); the near-equal total is a coincidence of the sum. Not yet measured: expand=120 with no cut as
+the kept variant, and any margin on another design.
+Nothing added to the settings files.
