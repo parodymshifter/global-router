@@ -272,6 +272,10 @@ end at zero.
 Since 2026-10-31 it also carries the variants' start delay (`PD39ROUTE_PORTFOLIO_DELAY=300`, Part 170): the variants
 and their copies wait until path A has run 300 s, so a design whose path A ends sooner never holds them -- routes
 byte-identical, adaptec3's peak 4467 -> 1900 MB, newblue1 +62 s.
+Since 2026-11-02 it also carries a six-variant portfolio (`PD39ROUTE_PORTFOLIO=...;expand=120,lagr=0.2;expand=120,lagr=1`,
+Parts 172-175): the region stage's margin at 120 tiles beside fast08's Lagrangian variants, kept by (overflow, 2D
+wire) -- bigblue4 360 -> 356 and wire -6.20% (+2.6% vs NTHU-Route 2.0), newblue1 wire -1.64%, newblue4 and newblue7
+unchanged; newblue7's peak 7.4 -> 11.5 GB.
 Since 2026-10-22 (Part 146) `fast08.env` also carries the region stage's early stop
 (`PD39ROUTE_REGION_ABORT=1000,20`): above 1000 units of entering 2D overflow, a region stage still no
 better than its start after 20 rounds stops there -- exact (such stages returned their start; routes
