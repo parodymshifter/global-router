@@ -12430,3 +12430,33 @@ but Part 169 shared the machine with larger jobs, so none of the times is like f
 designs the variants are cancelled when path A ends <= 10, so routes are unchanged, but those whose path A runs past
 the 300 s delay hold the variants' copies until then -- two more copies than today, not measured. Nothing added to the
 settings files.
+
+## Part 176 -- the eleven zero-overflow designs on the six-variant portfolio
+
+The user's order (2026-11-02): "yes, add it to speed08.env and run the eleven" (adopted in 045d5ef). The eleven,
+`@standard.env @fast08.env @speed08.env` as committed, binary `pd39route.p173` (code unchanged since fd80bcd), three
+at a time at nice 20, `~/Code/GlobalRouterRuns/p176/`; started 2026-11-02 09:02 EST, last router ended 10:30, scored
+by 10:46. All eleven legal at 0 / 0, `eval2008.pl` agrees.
+
+Every route is byte-identical to Part 169's (decompressed route files, same md5 on all eleven), and on every design
+path A ended at 0 within the 300 s delay, so the variants never started and no copies were made: the two extra
+variants cost the zero-overflow designs nothing. Against Part 169 (which predates Part 170's delay), peak RSS fell on
+all eleven, 758-2691 MB against 1485-5334 (newblue5 5334 -> 2691, adaptec3 4467 -> 1935); that is the delay's doing,
+not this change. Wall time 14289 -> 13397 s in total (shared load both times).
+
+| design | wall s 169 -> 176 | peak RSS MB 169 -> 176 |
+|---|---|---|
+| newblue2 | 108 -> 107 | 1501 -> 987 |
+| adaptec2 | 342 -> 309 | 1485 -> 758 |
+| adaptec4 | 373 -> 378 | 1950 -> 1566 |
+| bigblue3 | 592 -> 582 | 2136 -> 1479 |
+| adaptec3 | 1112 -> 1206 | 4467 -> 1935 |
+| bigblue2 | 1205 -> 1242 | 2387 -> 1337 |
+| adaptec1 | 1303 -> 1287 | 1815 -> 887 |
+| bigblue1 | 1668 -> 1781 | 2274 -> 1070 |
+| adaptec5 | 2041 -> 2223 | 3735 -> 1917 |
+| newblue6 | 2288 -> 2361 | 3303 -> 2247 |
+| newblue5 | 3257 -> 1921 | 5334 -> 2691 |
+
+With Part 175, fifteen of the sixteen are measured on the current `speed08.env`. Not yet: newblue3, a residue
+(38924 in Part 169) whose portfolio runs all six variants, so its route and memory can change.
