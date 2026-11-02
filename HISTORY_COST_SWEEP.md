@@ -12409,7 +12409,7 @@ The user's order (2026-11-01): "run the six-variant portfolio on these 4". Part 
 5). The portfolio keeps the best by (overflow, 2D wire). Binary `pd39route.p173`, `@standard.env @fast08.env
 @speed08.env`, bigblue4 with `PD39ROUTE_REGION_BATCH_MAX=1`, `~/Code/GlobalRouterRuns/p175/`, nice 20, newblue7 last
 so its peak would not meet newblue4's. Started 2026-11-01 20:06 EST; newblue1 ended 20:56, newblue4 22:12, bigblue4
-00:31, newblue7 03:42 (2026-11-02); scored by 04:04. All four legal, `eval2008.pl` agrees.
+00:31, newblue7 03:12 (2026-11-02); scored by 04:04. All four legal, `eval2008.pl` agrees.
 
 Every variant reproduced its earlier run: variants 0-3 give Part 169's overflow on all four designs, variants 4-5 give
 Part 174's (newblue1 26 / 42, newblue4 162 / 148, bigblue4 362 / 356, newblue7 108 / 114). Six variants on the
