@@ -12400,3 +12400,33 @@ batched designs; the one best draw hides that. Peak footprint on newblue7 reache
 cause is not measured. Wall times are not like for like: Part 169 shared the machine with larger jobs.
 Zero-overflow designs are not measured at any margin but 5, so `PD5ROUTE_REGION_EXPAND=120` as a global setting is
 not validated. Nothing added to the settings files.
+
+## Part 175 -- track B2: the six-variant portfolio on the four residues
+
+The user's order (2026-11-01): "run the six-variant portfolio on these 4". Part 174's kept routes all came from margin
+120 at lagr 0.2 or 1, so this adds those two as variants beside the standard three:
+`PD39ROUTE_PORTFOLIO=lagr=0.05;lagr=0.2;lagr=1;expand=120,lagr=0.2;expand=120,lagr=1`, own settings unchanged (margin
+5). The portfolio keeps the best by (overflow, 2D wire). Binary `pd39route.p173`, `@standard.env @fast08.env
+@speed08.env`, bigblue4 with `PD39ROUTE_REGION_BATCH_MAX=1`, `~/Code/GlobalRouterRuns/p175/`, nice 20, newblue7 last
+so its peak would not meet newblue4's. Started 2026-11-01 20:06 EST; newblue1 ended 20:56, newblue4 22:12, bigblue4
+00:31, newblue7 03:42 (2026-11-02); scored by 04:04. All four legal, `eval2008.pl` agrees.
+
+Every variant reproduced its earlier run: variants 0-3 give Part 169's overflow on all four designs, variants 4-5 give
+Part 174's (newblue1 26 / 42, newblue4 162 / 148, bigblue4 362 / 356, newblue7 108 / 114). Six variants on the
+machine's cores change no variant's route.
+
+| design | kept | overflow 169 -> 175 | scored wire 169 -> 175 | wall s 169 -> 175 | peak RSS MB 169 -> 175 |
+|---|---|---|---|---|---|
+| newblue1 | expand=120,lagr=0.2 (ties 26, shorter) | 26 -> 26 | 4903356 -> 4822950 (-1.64%) | 1690 -> 2992 | 1143 -> 1535 |
+| newblue4 | lagr=0.2 (146 beats 148) | 146 -> 146 | 13761218 -> identical | 5256 -> 7545 | 3028 -> 3718 |
+| bigblue4 | expand=120,lagr=1 | 360 -> **356** | 24934483 -> 23387506 (**-6.20%**) | 19627 -> 15900 | 2909 -> 2883 |
+| newblue7 | lagr=0.05 (102 beats 108) | 102 -> 102 | 35947752 -> identical | 23394 -> 22553 | 4257 -> 8465 |
+
+The portfolio does what it was built for: no residue is worse on overflow than today, bigblue4 keeps all of Part 174's
+gain (356, -6.20%, +2.6% vs NTHU-Route 2.0), newblue1 takes the shorter of two equal routes, and newblue4 and newblue7
+keep today's routes, giving up Part 174's -3.64% and -0.90% for 2 and 6 units of overflow. The cost: newblue7's peak
+footprint 7.4 -> 11.5 GB (RSS about 2x), and newblue1 / newblue4 +77% / +44% wall time (bigblue4 and newblue7 faster,
+but Part 169 shared the machine with larger jobs, so none of the times is like for like). On the eleven zero-overflow
+designs the variants are cancelled when path A ends <= 10, so routes are unchanged, but those whose path A runs past
+the 300 s delay hold the variants' copies until then -- two more copies than today, not measured. Nothing added to the
+settings files.
