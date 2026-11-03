@@ -12502,3 +12502,54 @@ footprint 4557 MB (Part 177: 3304 / 4576).
 
 So more region budget does not move newblue3; B1's second step -- a marginal cost for edges already past capacity
 that matches the score -- is what remains of it.
+
+## Part 179 -- track B1: the over-capacity cost; newblue3 38910 -> 34326
+
+The user's order (2026-11-03): "build the over-capacity cost for newblue3" -- BEST_RESULTS_PLAN.md B1's second step.
+The ISPD 2008 score charges every unit beyond capacity the same, wherever it lands; the present-demand cost
+`hist * cong^5` charges an edge 50 units over far more than a just-full one, so in the region stage it keeps pushing
+nets off edges that stay over capacity whatever happens (newblue3: >= 26264 of its overflow is forced, Part 91) onto
+detours that overflow other edges.
+
+**Mechanism** (`pd39route.cpp`, `overClampDemand`): with slack s >= 0 the region stage's cost reads each edge's
+demand capped at capacity + floor(s x capacity), so past that point one more net costs what it costs at the cap; the
+history term still multiplies it, so an edge over capacity round after round stays dear. s = 0 prices every full or
+over-full edge like a just-full one; larger s keeps cong^5's gradient up to that much excess. Setting
+`PD39ROUTE_REGION_OVER=<s>` (0-1000; unset = off), portfolio key `over=`; the region dump header ends with
+` over <s>`. Self-test `testOverCapacityCost` (clamp off and cap <= 0, s = 0 / 0.25 / 1, huge values, an edge 4x over
+pricing like a just-full one at s = 0 -- 5033.83 -> 8.58 --, an under-capacity edge unchanged, the portfolio key);
+`e2e_settings.py` checks the setting changes the region stage and reaches the dump header (37 of 37 pass).
+
+**Off, it changes nothing**: adaptec2 on the new binary (`pd39route.p179`), Part 176's setting, route md5
+`1e7e2c33...` identical to Part 176's (0 overflow, wire 5242781, 295 s, RSS 815 MB).
+
+**newblue3**: Part 177's setting (`@standard.env @fast08.env @speed08.env`) with the portfolio replaced for this run by
+`over=0;over=0.25;over=1;expand=120,lagr=0.2,over=0` -- variant 0 the run's own settings (cost off), so the run
+carries its own control. Alone at nice 20, `~/Code/GlobalRouterRuns/p179/`; started 2026-11-03 15:35:17 EST, router
+ended 17:29, scored 17:34 (6827 s). Legal, `eval2008.pl` agrees exactly.
+
+| variant | region best (rounds) | 2D after refinement | 2D wire |
+|---|---|---|---|
+| 0: own settings (off) | 39062 (59) | 38928 | 7866714 |
+| 1: over=0 | 38390 (71) | 37344 (-4.1%) | 7927422 |
+| 2: over=0.25 | 34502 (59) | **34326 (-11.8%)** | 7854151 (kept) |
+| 3: over=1 | 38054 (59) | 37910 (-2.6%) | 7858987 |
+| 4: expand=120, lagr=0.2, over=0 | 38728 (64) | 37726 (-3.1%) | 7750109 |
+
+Variant 0 reproduced Part 177's variant 0 exactly (39062 -> 38928). Every setting of the cost beat it; s = 0.25 by
+far the most. Part 177's best (expand=120, lagr=0.2) was 38910; the same variant with s = 0 is 37726.
+
+| run | total overflow | max | scored wire | wall s | peak RSS MB | peak footprint MB |
+|---|---|---|---|---|---|---|
+| Part 177 (six variants, cost off) | 38910 | 366 | 10789932 | 6335 | 3304 | 4576 |
+| Part 179 (over=0.25 kept) | **34326 (-11.8%)** | 474 | 10785659 (-0.04%) | 6827 | 3243 | 3837 |
+
+Max overflow rose 366 -> 474: overflow concentrates on the forced edges instead of spreading, as intended (max is the
+score's tiebreak only). The run's slow tier is unchanged (41778, 4459 s); the fallback stage took 2212 s (Part 177:
+1860, with six variants). The machine was short of memory during the run (swap 3.6 of 4 GB, ~2.4 GB of the router's
+footprint held compressed; no swap-outs sampled), which lowers RSS against the footprint.
+
+Against the bound and the field: the overflow above the cut bound (>= 26264) falls 12646 -> 8062 (-36%), and the
+gap to every published router's ~31000 from +25% to +10.6%. Not yet adopted: one run, s = 0.25 is the only middle
+value tried, and the cost has not been run on the other residues (newblue1, newblue4, bigblue4, newblue7) or as a
+portfolio variant beside the six.

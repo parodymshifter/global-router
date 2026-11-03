@@ -141,7 +141,8 @@ def main():
     # (a Lagrangian step of 0.5 changes nothing on this small design in 40 rounds -- the region stage did receive
     # it, per its dump header -- so the check uses a strong step; the dump-header check below covers arrival)
     for var, val in [('PD39ROUTE_REGION_LAGRANGE', '20'), ('PD39ROUTE_REGION_DAMP', '0.5'),
-                     ('PD39ROUTE_REGION_COOLDOWN', '1'), ('PD39ROUTE_REGION_WL_FLOOR', '0.2')]:
+                     ('PD39ROUTE_REGION_COOLDOWN', '1'), ('PD39ROUTE_REGION_WL_FLOOR', '0.2'),
+                     ('PD39ROUTE_REGION_OVER', '0')]:
         b = run('residue', {**off, var: val}, var.lower())
         check(f'{var} changes the region stage', lines(b, 'region round ') != rr0 and len(rr0) > 0)
     b = run('residue', {**off, 'PD39ROUTE_REGION_WALL_H': '8'}, 'wallh')
@@ -166,6 +167,11 @@ def main():
     run('residue', {**off, 'PD39ROUTE_REGION_DUMP': prefix2, 'PD39ROUTE_REGION_LAGRANGE': '0.5'}, 'dumplag')
     head = open(prefix2 + '.A.txt').readline() if os.path.exists(prefix2 + '.A.txt') else ''
     check('PD39ROUTE_REGION_LAGRANGE reaches the region stage (its dump header)', ' lagrange 0.5 ' in head, head.strip())
+    # Part 179: the over-capacity cost reaches the region stage (its dump header), from the setting and from a variant
+    prefix4 = os.path.join(work, 'dumpover')
+    run('residue', {**off, 'PD39ROUTE_REGION_DUMP': prefix4, 'PD39ROUTE_REGION_OVER': '0.25'}, 'dumpover')
+    head = open(prefix4 + '.A.txt').readline() if os.path.exists(prefix4 + '.A.txt') else ''
+    check('PD39ROUTE_REGION_OVER reaches the region stage (its dump header)', head.rstrip().endswith(' over 0.25'), head.strip())
     # refinement annealing: the refinement trace reports its temperature.
     prefix3 = os.path.join(work, 'searchdump')
     run('residue', {**off, 'PD39ROUTE_SEARCH_DUMP': prefix3 + ',1,0'}, 'searchdump')

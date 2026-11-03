@@ -84,6 +84,8 @@ B1. **newblue3 (+25%)**: most of its overflow is forced (>= 26264). There the
     past capacity (as the 2024 score-aware cost does for its own score) is
     the principled test. Also: the floor-gated plateau stopped its region
     stage at round 59 -- rerun with the stop off.
+    (2026-11-03: the stop off changed nothing, Part 178; the over-capacity
+    cost at slack 0.25 took 38910 -> 34326, Part 179 -- not yet adopted.)
 B2. **bigblue4 (2.1x the best)**: not cut-bound (tightest cut 89.3%), so
     breadth and budget: longer region budgets, wider boxes, virtual capacity
     tuned for it, the portfolio (A6).

@@ -1668,6 +1668,9 @@ struct Prices {
   const std::vector<uint32_t> *incH = nullptr, *incV = nullptr;
   uint32_t incStamp = 0;
   double incBeta = 0;
+  // Part 179: the region stage's over-capacity cost (PD39ROUTE_REGION_OVER, portfolio key over=). >= 0: the demand
+  // the present-demand cost reads is capped at capacity + floor(overSlack x capacity) (see overClampDemand); < 0 = off.
+  double overSlack = -1;
 };
 
 // `threshold` is a parameter, not a fixed static lookup, specifically so
@@ -1779,6 +1782,21 @@ int virtualCap(int cap, int red) {
   return std::max(cap - red, (cap + 1) / 2);
 }
 
+// Part 179 (BEST_RESULTS_PLAN.md B1): the over-capacity cost. The ISPD 2008 score charges every unit beyond
+// capacity the same, wherever it lands, but cong^5 charges an edge 50 units over far more than a just-full one,
+// so the present-demand cost pushes nets off edges that stay over capacity whatever happens (newblue3: >= 26264 of
+// its overflow is forced, Part 91) onto detours that overflow other edges. With slack s >= 0 the cost reads demand
+// capped at capacity + floor(s x capacity): at s = 0 one more net on any full or over-full edge costs what it
+// costs on a just-full one -- one more unit of overflow, as the score sees it; larger s keeps cong^5's gradient up
+// to that much excess. The history term still multiplies it, so an edge over capacity round after round stays
+// dear. `cap` is the real capacity (overflow is scored against it); s < 0 or cap <= 0 leaves demand unchanged.
+long long overClampDemand(long long demand, int cap, double slack) {
+  if (slack < 0 || cap <= 0)
+    return demand;
+  const long long lim = static_cast<long long>(cap) + static_cast<long long>(std::floor(slack * cap));
+  return std::min(demand, lim);
+}
+
 // pd34route: the score-aware 2D cost (see the file header).
 struct Score2D {
   bool on = false;
@@ -1821,7 +1839,8 @@ double wireCostH(const Prices &pr, size_t e, int amount) {
     return score2dCost(gScore2D.wlH[e], gScore2D.capH[e], gScore2D.nH[e], gScore2D.w, lv->h[e], amount,
                        pr.pdHistH[e]);
   int cap = pr.vredH ? virtualCap(lv->capH[e], (*pr.vredH)[e]) : lv->capH[e];
-  const double c = presentDemandCost(lv->h[e], cap, amount, pr.pdHistH[e], pr.pdIter, pr.pdFactor, pdWl(pr));
+  const long long d = pr.overSlack < 0 ? lv->h[e] : overClampDemand(lv->h[e], lv->capH[e], pr.overSlack); // Part 179
+  const double c = presentDemandCost(d, cap, amount, pr.pdHistH[e], pr.pdIter, pr.pdFactor, pdWl(pr));
   const double t = pr.lagH ? c + (*pr.lagH)[e] * amount : c;
   if (pr.incH && (*pr.incH)[e] == pr.incStamp) { // Part 144: damping on the net's previous route
     const double wl = pdWl(pr);
@@ -1839,7 +1858,8 @@ double wireCostV(const Prices &pr, size_t e, int amount) {
     return score2dCost(gScore2D.wlV[e], gScore2D.capV[e], gScore2D.nV[e], gScore2D.w, lv->v[e], amount,
                        pr.pdHistV[e]);
   int cap = pr.vredV ? virtualCap(lv->capV[e], (*pr.vredV)[e]) : lv->capV[e];
-  const double c = presentDemandCost(lv->v[e], cap, amount, pr.pdHistV[e], pr.pdIter, pr.pdFactor, pdWl(pr));
+  const long long d = pr.overSlack < 0 ? lv->v[e] : overClampDemand(lv->v[e], lv->capV[e], pr.overSlack); // Part 179
+  const double c = presentDemandCost(d, cap, amount, pr.pdHistV[e], pr.pdIter, pr.pdFactor, pdWl(pr));
   const double t = pr.lagV ? c + (*pr.lagV)[e] * amount : c;
   if (pr.incV && (*pr.incV)[e] == pr.incStamp) { // Part 144: damping on the net's previous route
     const double wl = pdWl(pr);
@@ -4759,6 +4779,7 @@ struct RegionSettings {
   int vcapTracks = 0;         // pd22route: PD22ROUTE_VCAP (0 = off)
   int vcapRadius = 5;         // pd22route: PD22ROUTE_VCAP_RADIUS
   double lagrange = 0;        // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE, the multipliers' step (0 = off)
+  double overSlack = -1;      // Part 179: PD39ROUTE_REGION_OVER, the over-capacity cost's slack (< 0 = off)
   // Part 138: PD39ROUTE_REGION_BOX_EVIDENCE = step (0 = off): each net keeps its own margin, from boxInit,
   // grown by `step` (to boxCap) after a reroute whose search was box-limited and left the net overflowed,
   // instead of every net's margin being boxInit + boxGrow x round.
@@ -5138,6 +5159,9 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
     prices.lagH = &lagH;
     prices.lagV = &lagV;
   }
+  prices.overSlack = rs.overSlack; // Part 179
+  if (rs.overSlack >= 0 && trace)
+    std::cerr << "region over-capacity cost: demand priced at most capacity + " << rs.overSlack << " x capacity\n";
   LayerPlan lp(g);
   SearchRegion region;
   std::vector<std::pair<std::vector<ChargeRecord>, std::vector<Seg>>> best;
@@ -5153,7 +5177,7 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
     if (!*dump)
       fail("PD39ROUTE_REGION_DUMP: cannot write " + gRegionDumpPrefix + "." + rs.dumpTag + ".txt");
     *dump << "G " << g.nx << " " << g.ny << " members " << members.size() << " start " << rep.before
-          << " lagrange " << rs.lagrange << " vcap " << rs.vcapTracks << "\n";
+          << " lagrange " << rs.lagrange << " vcap " << rs.vcapTracks << " over " << rs.overSlack << "\n";
   }
   // Part 144: damping state.
   std::vector<uint32_t> incH, incV;
@@ -6345,8 +6369,8 @@ long long totalWire2D(const std::vector<RoutedNet> &nets) {
 // each on its own thread and its own copy of the routes, and the best is kept: least overflow, then least
 // 2D wire, then the earliest listed (variant 0 is the run's own settings) -- deterministic whatever the
 // threads' timing. A variant is a comma-separated list of key=value overrides of the region settings:
-// vcap (tracks), vcapr (radius), boxinit, boxgrow, boxcap, rounds, expand, lagr (the Lagrangian step);
-// variants are separated by ';'.
+// vcap (tracks), vcapr (radius), boxinit, boxgrow, boxcap, rounds, expand, lagr (the Lagrangian step), over
+// (Part 179: the over-capacity cost's slack); variants are separated by ';'.
 bool applyRegionVariant(const std::string &spec, RegionSettings &rs, std::string &err) {
   std::stringstream ss(spec);
   std::string kv;
@@ -6405,6 +6429,8 @@ bool applyRegionVariant(const std::string &spec, RegionSettings &rs, std::string
       ok = asInt(rs.expand, 0, 100000);
     else if (k == "lagr")
       rs.lagrange = x;
+    else if (k == "over") // Part 179
+      rs.overSlack = x;
     else {
       err = "portfolio variant '" + spec + "': unknown key '" + k + "'";
       return false;
@@ -18844,6 +18870,48 @@ void testVirtualCapCostSeam() {
         "an edge with reduction 0 costs exactly what it would without the mechanism");
 }
 
+// Part 179: the over-capacity cost. overClampDemand caps demand at cap + floor(s x cap) and leaves it alone when
+// off or at zero capacity; through the cost seam, every full or over-full edge then costs what a just-full one
+// does at s = 0, an edge below the cap is priced exactly as before, and the portfolio key and dump reach it.
+void testOverCapacityCost() {
+  check(overClampDemand(50, 10, -1) == 50 && overClampDemand(50, 0, 0) == 50 && overClampDemand(50, -3, 0) == 50,
+        "over-capacity cost off (slack < 0) or capacity <= 0: demand unchanged");
+  check(overClampDemand(50, 10, 0) == 10 && overClampDemand(7, 10, 0) == 7 && overClampDemand(10, 10, 0) == 10,
+        "slack 0: demand capped at the capacity, below it unchanged");
+  check(overClampDemand(50, 10, 0.25) == 12 && overClampDemand(50, 10, 1) == 20 && overClampDemand(11, 10, 1) == 11,
+        "slack 0.25 / 1: capped at cap + floor(s x cap)");
+  check(overClampDemand(4000000000LL, 2000000000, 1000) == 4000000000LL,
+        "a huge slack on a huge capacity does not overflow the limit");
+  Design d = parse("pd1route_selftest_basic.gr", kBasicGr);
+  const RoutingGrid &g = d.grid;
+  Prices pr(g);
+  Usage u(g);
+  CostSettings cs;
+  cs.model = CostModel::kPresentDemand;
+  configureCostModel(pr, u, cs);
+  size_t eh = g.hIndex(1, 0, 0), ev = g.vIndex(0, 0, 0);
+  const int capH = u.capH[eh], capV = u.capV[ev];
+  check(capH > 0 && capV > 0, "the fixture's edges have capacity");
+  u.h[eh] = capH;
+  const double fullOff = wireCostH(pr, eh, 1);
+  u.h[eh] = 5 * capH;
+  const double overOff = wireCostH(pr, eh, 1);
+  u.v[ev] = capV / 2;
+  const double halfOff = wireCostV(pr, ev, 1);
+  pr.overSlack = 0;
+  const double overOn = wireCostH(pr, eh, 1);
+  u.h[eh] = capH;
+  check(overOff > fullOff && overOn == fullOff && wireCostH(pr, eh, 1) == fullOff,
+        "slack 0: an edge 4 x capacity over costs what a just-full one does (" + std::to_string(overOff) + " -> " +
+            std::to_string(overOn) + ")");
+  check(wireCostV(pr, ev, 1) == halfOff, "an edge below capacity is priced exactly as without the mechanism");
+  RegionSettings rs;
+  std::string err;
+  check(applyRegionVariant("over=0.5,lagr=0.2", rs, err) && rs.overSlack == 0.5 && rs.lagrange == 0.2,
+        "portfolio key over= sets the region stage's slack");
+  check(!applyRegionVariant("over=-1", rs, err), "portfolio key over= refuses a negative slack");
+}
+
 // pd22route: the zone. One overflowed horizontal edge (10,10)-(11,10) on a
 // 20 x 20 grid, radius 2: hot tiles x 8..13, y 8..12. Horizontal edges with
 // an end hot: rows 8..12 x left ends 7..13 = 5 x 7 = 35. Vertical edges:
@@ -21867,6 +21935,7 @@ int run() {
   testFallbackBFirst();
   testFallbackAFirstThreshold();
   testVirtualCapArithmetic();
+  testOverCapacityCost();
   testVirtualCapCostSeam();
   testVirtualCapZone();
   testVirtualCapSteersSearch();
@@ -22848,6 +22917,13 @@ int main(int argc, char **argv) {
     if (!*v || *end || !std::isfinite(x) || x < 0)
       fail(std::string("PD39ROUTE_REGION_LAGRANGE must be a number >= 0 (got '") + v + "')");
     region.lagrange = x;
+  }
+  if (const char *v = std::getenv("PD39ROUTE_REGION_OVER"); v) { // Part 179: the over-capacity cost's slack
+    char *end = nullptr;
+    const double x = std::strtod(v, &end);
+    if (!*v || *end || !std::isfinite(x) || x < 0 || x > 1000)
+      fail(std::string("PD39ROUTE_REGION_OVER must be a number 0-1000 (got '") + v + "')");
+    region.overSlack = x;
   }
   // Settings that cannot run together -- checked after every region setting is parsed (Part 159: the
   // WALL_H / BOX_EVIDENCE check used to sit before BOX_EVIDENCE was read, so it never fired).
