@@ -12482,3 +12482,23 @@ peak RSS +47% (2243 -> 3304 MB), footprint 3340 -> 4576 MB, from the two extra v
 
 With this, all sixteen are measured on the current `speed08.env`: eleven at 0 (Part 176), newblue1 26, newblue4 146,
 bigblue4 356, newblue7 102 (Part 175), newblue3 38910.
+
+## Part 178 -- track B1: newblue3 with the region stage's plateau stop off; nothing after round 13
+
+The user's order (2026-11-03): "run newblue3 with the region plateau stop off" -- the first step of
+BEST_RESULTS_PLAN.md B1, which noted the floor-gated stop (Part 74) ending newblue3's region stage at round 59.
+Part 177's setting plus `PD12ROUTE_REGION_PLATEAU=0` (standard 50; confirmed in the running router's environment),
+all six variants inheriting it; refinement's own stop and the work-gated stop (Part 80: 150 flat rounds costing
+>= 3.2e10 expansions) unchanged. Binary `pd39route.p173`, alone at nice 20, `~/Code/GlobalRouterRuns/p178/`;
+started 2026-11-03 08:35:07 EST, ended and scored 11:59. Legal, `eval2008.pl` agrees.
+
+**The route is byte-identical to Part 177's** (same md5): 38910, max 366, scored wire 10789932. Every variant ran
+158-159 region rounds instead of 58-59, and every one ended exactly where it had in Part 177 (region best 39062 /
+39044 / 39068 / 39092 / 39050 / 39058, then 38928 / 38924 / 38946 / 38948 / 38910 / 38914 after refinement). Path A's
+region best came at round 13, as before; the 145 rounds after it never beat it, drifting to 39400-39500 by round 75
+and 40050 by round 158, when the work-gated stop ended the stage. The plateau stop was not cutting off progress: it
+fired because there was none. Cost: the fallback stage 1860 -> 7221 s, the run 6335 -> 11968 s; peak RSS 3239 MB,
+footprint 4557 MB (Part 177: 3304 / 4576).
+
+So more region budget does not move newblue3; B1's second step -- a marginal cost for edges already past capacity
+that matches the score -- is what remains of it.
