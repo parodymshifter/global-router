@@ -12460,3 +12460,25 @@ not this change. Wall time 14289 -> 13397 s in total (shared load both times).
 
 With Part 175, fifteen of the sixteen are measured on the current `speed08.env`. Not yet: newblue3, a residue
 (38924 in Part 169) whose portfolio runs all six variants, so its route and memory can change.
+
+## Part 177 -- newblue3 on the six-variant portfolio
+
+The user's order (2026-11-02): "run newblue3". `@standard.env @fast08.env @speed08.env` as committed (045d5ef), binary
+`pd39route.p173`, alone at nice 20, `~/Code/GlobalRouterRuns/p177/`; started 2026-11-02 18:51:35 EST, ended and scored
+20:42. Legal, `eval2008.pl` agrees exactly.
+
+| run | total overflow | max | scored wire | wall s | peak RSS MB | peak footprint MB |
+|---|---|---|---|---|---|---|
+| Part 169 (three variants) | 38924 | 364 | 10806648 | 13615 | 2243 | 3340 |
+| Part 177 (six variants) | 38910 | 366 | 10789932 (-0.15%) | 6335 | 3304 | 4576 |
+
+Variants 0-3 reproduced Part 169's numbers exactly (region 41778 -> 39062 / 39044 / 39068 / 39092, 2D overflow 38928 /
+38924 / 38946 / 38948). The two margin-120 variants ended lowest on both counts -- expand=120 with lagr 0.2 at 38910 and
+wire 7781999 (kept), lagr 1 at 38914 / 7777841 -- so the route changed: overflow -14 (-0.04%), max +2, scored wire
+-0.15%, all inside noise. The run's speed is not this change: the escalation + slow tier, which runs before the
+portfolio and gave the same result (2D 41778, wire 9318069), took 4325 s here against 11126 s in Part 169, which ran
+three at a time beside the rest of the sixteen. The fallback stage took 1860 s against 2239. The cost is memory:
+peak RSS +47% (2243 -> 3304 MB), footprint 3340 -> 4576 MB, from the two extra variants' copies.
+
+With this, all sixteen are measured on the current `speed08.env`: eleven at 0 (Part 176), newblue1 26, newblue4 146,
+bigblue4 356, newblue7 102 (Part 175), newblue3 38910.
