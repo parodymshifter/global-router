@@ -12553,3 +12553,43 @@ Against the bound and the field: the overflow above the cut bound (>= 26264) fal
 gap to every published router's ~31000 from +25% to +10.6%. Not yet adopted: one run, s = 0.25 is the only middle
 value tried, and the cost has not been run on the other residues (newblue1, newblue4, bigblue4, newblue7) or as a
 portfolio variant beside the six.
+
+## Part 180 -- the over-capacity cost on the other four residues: slack 0 wins on all, newblue4 136, bigblue4 318, newblue7 92
+
+The user's order (2026-11-04): "run the over-capacity cost on newblue1, newblue4, bigblue4, newblue7". Binary
+`pd39route.p179` (= 611ed41), `@standard.env @fast08.env @speed08.env` with the portfolio replaced per design by own
+settings (cost off, the control) + `over=0;over=0.05;over=0.25` + slack 0 on the variant Part 175 kept; order and
+gating as in Part 175 (three at a time, newblue7 last, bigblue4 `PD39ROUTE_REGION_BATCH_MAX=1`), nice 20,
+`~/Code/GlobalRouterRuns/p180/`. Started 2026-11-04 00:52 EST; newblue1 scored 01:34, newblue4 02:27, bigblue4 05:25,
+newblue7 06:58. All legal, `eval2008.pl` agrees exactly on all four. Slack 0.05 was added because these residues are 1-2
+units over per edge: at 0.25 the cap sits several tracks above any edge's excess.
+
+Every control reproduced Part 175's variant 0 exactly (region best and 2D after refinement). 2D overflow after
+refinement, per variant (kept marked *):
+
+| design | control (off) | over=0 | over=0.05 | over=0.25 | Part 175's kept variant + over=0 |
+|---|---|---|---|---|---|
+| newblue1 | 26 | 26 * | 36 | 30 | expand=120,lagr=0.2: 32 |
+| newblue4 | 150 | 136 | 156 | 150 | lagr=0.2: 136 * |
+| bigblue4 | 360 | 318 * | 362 | 358 | expand=120,lagr=1: 332 |
+| newblue7 | 106 | 92 * | 102 | 124 | lagr=0.05: 96 |
+
+| design | Part 175 (six-variant portfolio) | Part 180 | scored wire | wall s | peak RSS / footprint MB |
+|---|---|---|---|---|---|
+| newblue1 | 26, wire 4822950 | 26 | 4906255 (+1.7%) | 2281 | 1221 / 1375 |
+| newblue4 | 146 | **136 (-6.8%)** | 13717149 (-0.3%) | 5222 | 2664 / 4514 |
+| bigblue4 | 356 | **318 (-10.7%)**, max 4 | 24921431 (+6.6%) | 16343 | 3383 / 4442 |
+| newblue7 | 102 | **92 (-9.8%)** | 35935215 (-0.03%) | 16575 | 5485 / 7786 |
+
+Each is the design's best result so far (newblue4 before: 140, Part 135; bigblue4 356; newblue7 102). Slack 0 is the
+setting on all four -- the opposite of newblue3, where 0.25 was best and 0 gave -4.1% (Part 179): newblue3's excess is
+hundreds of units per forced edge, these are 1-2. newblue1's wire is longer only because this portfolio lacked Part
+175's margin-120 variant (its 26 at wire 4822950); with the cost added that variant ended at 32. bigblue4's wire is
+the cost of its gain: Part 175 kept the short margin-120 route (2D wire 12.79M class), here the plain slack-0 route
+(15.15M) beat the margin-120 + slack-0 one (332) on overflow. Both slack-0 variants on bigblue4 ran into the region
+stage's 500-round cap (`PD5ROUTE_REGION_ROUNDS`) still improving (406 -> 332 and 342), where the control stopped at 256.
+
+Memory: newblue7's peak footprint 7786 MB with five variants (Part 175, six: 11456). The machine had 24 GB with the
+user's apps holding ~10 GB; swap peaked near 5.4 of 6.1 GB while bigblue4 and newblue7 overlapped, no stall.
+
+Not adopted. The five residues sum 39540 -> 34898 against Parts 175/177 (newblue3 34326 from Part 179).
