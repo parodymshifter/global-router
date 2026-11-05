@@ -12614,13 +12614,13 @@ also not comparable with earlier parts: three eight-variant runs shared 14 cores
 
 | design | own | lagr=0.05 | lagr=0.2 | lagr=1 | x120,lagr=0.2 | x120,lagr=1 | over=0 | over=0.25 |
 |---|---|---|---|---|---|---|---|---|
-| newblue1 | 26 | 30 | 30 | 28 | 26 * | 28 | 26 | 30 |
+| newblue1 | 26 | 28 | 36 | 34 | 26 * | 42 | 26 | 30 |
 | newblue4 | 150 | 156 | 146 | 154 | 162 | 148 | 136 * | 150 |
 | bigblue4 | 360 | 364 | 364 | 366 | 362 | 356 | 318 * | 358 |
 | newblue7 | 106 | 102 | 120 | 106 | 108 | 114 | 92 * | 124 |
 | newblue3 | 38928 | 38924 | 38946 | 38948 | 38910 | 38914 | 37344 | 34326 * |
 
-(newblue1's non-kept entries are from the run's variant lines as read at 09:26; the kept row is the scored result.)
+(newblue1: three variants tie at 26; the margin-120 one is kept on 2D wire, 2655860 against 2895882 for slack 0.)
 
 | design | result | max | scored wire | best before (part) | wall s | CPU s | peak RSS / footprint MB |
 |---|---|---|---|---|---|---|---|
