@@ -12593,3 +12593,53 @@ Memory: newblue7's peak footprint 7786 MB with five variants (Part 175, six: 114
 user's apps holding ~10 GB; swap peaked near 5.4 of 6.1 GB while bigblue4 and newblue7 overlapped, no stall.
 
 Not adopted. The five residues sum 39540 -> 34898 against Parts 175/177 (newblue3 34326 from Part 179).
+
+## Part 181 -- the eight-variant portfolio on the five residues: every design at its best, newblue7's peak 14.9 GB
+
+The user's order (2026-11-04): "run the eight-variant portfolio on the five residues". Binary `pd39route.p179`
+(= 611ed41), `@standard.env @fast08.env @speed08.env` with `PD39ROUTE_PORTFOLIO=lagr=0.05;lagr=0.2;lagr=1;
+expand=120,lagr=0.2;expand=120,lagr=1;over=0;over=0.25` -- speed08's six variants plus the over-capacity cost at
+slack 0 (Part 180's winner on four designs) and 0.25 (Part 179's on newblue3). newblue1, newblue4, bigblue4
+(`PD39ROUTE_REGION_BATCH_MAX=1`, as before) and newblue3 three at a time; newblue7 alone afterwards so its peak met no
+other run. Nice 20, `~/Code/GlobalRouterRuns/p181/`. Started 2026-11-04 07:51 EST; newblue1 scored 09:26, newblue4
+12:58, newblue3 14:48, bigblue4 15:44, newblue7 (started 15:44) 22:34. All legal, `eval2008.pl` agrees exactly on
+all five.
+
+The laptop slept 08:46-09:18 (lid closed on battery). The stop rules count rounds and work, not seconds, so the routes
+are unaffected; newblue1's, newblue4's and bigblue4's wall times include the 32 minutes. Batch A's wall times are
+also not comparable with earlier parts: three eight-variant runs shared 14 cores (newblue3 19346 s against Part 179's
+6827 s).
+
+2D overflow after refinement, per variant (kept marked *):
+
+| design | own | lagr=0.05 | lagr=0.2 | lagr=1 | x120,lagr=0.2 | x120,lagr=1 | over=0 | over=0.25 |
+|---|---|---|---|---|---|---|---|---|
+| newblue1 | 26 | 30 | 30 | 28 | 26 * | 28 | 26 | 30 |
+| newblue4 | 150 | 156 | 146 | 154 | 162 | 148 | 136 * | 150 |
+| bigblue4 | 360 | 364 | 364 | 366 | 362 | 356 | 318 * | 358 |
+| newblue7 | 106 | 102 | 120 | 106 | 108 | 114 | 92 * | 124 |
+| newblue3 | 38928 | 38924 | 38946 | 38948 | 38910 | 38914 | 37344 | 34326 * |
+
+(newblue1's non-kept entries are from the run's variant lines as read at 09:26; the kept row is the scored result.)
+
+| design | result | max | scored wire | best before (part) | wall s | CPU s | peak RSS / footprint MB |
+|---|---|---|---|---|---|---|---|
+| newblue1 | 26 | 2 | 4822950 | 26, 4822950 (175) -- identical | 5386 (sleep) | 19441 | 1794 / 2307 |
+| newblue4 | 136 | 2 | 13722578 | 136, 13717149 (180) | 13228 (sleep) | 53906 | 3880 / 7369 |
+| newblue3 | 34326 | 474 | 10785659 | 34326, 10785659 (179) -- identical | 19346 | 42471 | 3044 / 5641 |
+| bigblue4 | 318 | 4 | 24921431 | 318, 24921431 (180) -- identical | 26583 (sleep) | 64592 | 4586 / 6712 |
+| newblue7 | 92 | 2 | 35935215 | 92, 35935215 (180) -- identical | 21446 | 204852 | 7937 / 14905 |
+
+One setting reaches every design's best overflow: the five sum to 34898 (Parts 175/177's six-variant portfolio:
+39540, -11.7%). Each variant reproduced its earlier result where it had run before (the portfolio is deterministic
+whatever the thread count); newblue4's wire differs from Part 180 by +0.04% only because Part 180 kept
+`lagr=0.2,over=0` (also 136), a variant this portfolio lacks. Neither new variant is redundant: slack 0 wins four
+designs, slack 0.25 wins newblue3 (by 3018 over slack 0).
+
+The cost is newblue7, the only clean comparison (it ran alone, as in Part 180): CPU 114439 -> 204852 s (+79%), wall
+16575 -> 21446 s (+29%), peak footprint 7786 MB (five variants, Part 180) / 11456 MB (six, Part 175) -> 14905 MB. With
+the user's apps the machine's swap grew from 7.2 to 9.2 GB during its run (8.4 GB used at the peak), no stall. The
+eleven zero-overflow designs would not see the change: their path A ends inside the 300 s delay, so no variant starts
+(Part 175).
+
+Not adopted into `speed08.env` -- the user decides.
