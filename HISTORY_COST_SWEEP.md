@@ -12643,3 +12643,23 @@ eleven zero-overflow designs would not see the change: their path A ends inside 
 (Part 175).
 
 Not adopted into `speed08.env` -- the user decides.
+
+## Part 182 -- newblue7 on the adopted three-variant portfolio: identical route, half the CPU and memory
+
+The user's order (2026-11-05): "run the confirmation on newblue7". Binary `pd39route.p179` (= 611ed41), the committed
+`@standard.env @fast08.env @speed08.env` (8b72b1a: `PD39ROUTE_PORTFOLIO=expand=120,lagr=0.2;over=0;over=0.25`), alone,
+nice 20, AC power, `~/Code/GlobalRouterRuns/p182/`. Started 2026-11-05 08:09 EST, route written 11:46, scored 12:38.
+Legal, `eval2008.pl` agrees exactly.
+
+The four variants (path A + three) reproduced Part 181's lines exactly: own 106, margin 120 + lagr 0.2 108, slack 0 92
+(kept), slack 0.25 124.
+
+| newblue7 | Part 181 (eight variants) | Part 182 (three) | change |
+|---|---|---|---|
+| overflow / max / scored wire | 92 / 2 / 35935215 | 92 / 2 / 35935215 | identical |
+| wall s | 21446 | 13029 | -39% |
+| CPU s | 204852 | 103441 | -50% |
+| peak RSS / footprint MB | 7937 / 14905 | 5308 / 7964 | -33% / -47% |
+
+Against the six-variant portfolio it replaces (Part 175: newblue7 102, peak footprint 11456 MB), the adopted setting
+is 10 units lower and 3.5 GB smaller.
