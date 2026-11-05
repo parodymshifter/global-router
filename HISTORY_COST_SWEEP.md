@@ -12663,3 +12663,26 @@ The four variants (path A + three) reproduced Part 181's lines exactly: own 106,
 
 Against the six-variant portfolio it replaces (Part 175: newblue7 102, peak footprint 11456 MB), the adopted setting
 is 10 units lower and 3.5 GB smaller.
+
+## Part 183 -- bigblue4's region round limit: 1000 rounds give the same 318 as 500
+
+The user's order (2026-11-05): "run the region round limit test on bigblue4". Part 180 had read bigblue4's slack-0
+variant (406 -> 332 at the 500-round cap, `PD5ROUTE_REGION_ROUNDS`) as still improving at the cap. Binary
+`pd39route.p179` (= 611ed41), `@standard.env @fast08.env @speed08.env PD39ROUTE_REGION_BATCH_MAX=1`, path A unchanged,
+the portfolio replaced by slack 0 at 500 (control) and at 1000 rounds (portfolio key `rounds=`) in one job, and slack 0
+at 2000 rounds in a second; both at nice 20, AC power, `~/Code/GlobalRouterRuns/p183/`. Started 2026-11-05 12:36 EST.
+
+| variant | region stage | 2D after refinement | 2D wire |
+|---|---|---|---|
+| own settings (path A) | 406 -> 396 in 256 rounds | 360 | 15148190 |
+| over=0 (500 rounds, control) | 406 -> 332 in 500 | 318 (kept) | 15146123 |
+| over=0, rounds=1000 | 406 -> 332 in 1000 | 318 | 15146123 |
+
+Scored 318, max 4, wire 24921431 -- identical to Parts 180-181; legal, `eval2008.pl` agrees exactly. 18263 s wall
+(with the 2000-round job beside it), peak footprint 3000 MB. The region stage's best did not move in rounds 501-1000:
+the variant had stopped improving before the cap, so "still improving" in Part 180 was a misreading -- a variant's
+line gives only its start, best and round count, not when the best was found.
+
+The 2000-round job was stopped at the user's order at 18:08 (its path A had ended at 360; its variant's first 1000
+rounds are the 1000-round variant's, which had already sat at 332 for 500 rounds). Not a lever for bigblue4: its gap
+(318 vs 166) needs something other than more of the same rounds.
