@@ -5751,6 +5751,7 @@ struct RunReport {
   bool stalled = false;
   bool slowPlateaued = false; // Part 148: stopped by PD39ROUTE_SLOW_PLATEAU
   int slowCutRound = -1;      // Part 173: the round PD39ROUTE_SLOW_CUT started after (-1: it did not)
+  int slowOverRound = -1;     // Part 186: the first slow round PD39ROUTE_SLOW_OVER priced (-1: none)
 };
 
 // nproute's post-convergence cleanup pass, unmodified: one supervised sweep
@@ -6089,6 +6090,19 @@ struct SlowCutSettings {
   bool full = false;
 };
 SlowCutSettings gSlowCut;
+
+// Part 186 (BEST_RESULTS_PLAN.md B1): the over-capacity cost (Part 179, overClampDemand) in the slow tier
+// (PD39ROUTE_SLOW_OVER=slack[,below]). The region stage alone took newblue3 41778 -> 33702 with it, but the slow
+// tier before it still priced over-full edges with cong^5's full gradient, and that is where newblue3's overflow
+// takes its shape. With slack >= 0 the slow tier's searches read demand capped at capacity + floor(slack x
+// capacity), from the first slow round that starts at or below `below` units of real 2D overflow (omitted: from
+// round 0) to the end of the tier. Only the cost changes: escalation, the best round and every stop are judged on
+// real demand, and the later stages build their own prices (the region stage's own over= is separate).
+struct SlowOverSettings {
+  double slack = -1; // < 0: off
+  long long below = LLONG_MAX;
+};
+SlowOverSettings gSlowOver;
 
 class SlowCut {
 public:
@@ -8888,6 +8902,17 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   int slowReclaims = 0;         // pd18route
   std::vector<long long> slowBestAfter; // Part 148: the best after each slow round
   SlowCut slowCut;                      // Part 173
+  // Part 186: the slow tier's over-capacity cost; `next` is the round it starts pricing.
+  auto slowOverStep = [&](int next, long long overflow) {
+    if (gSlowOver.slack < 0 || rep.slowOverRound >= 0 || overflow > gSlowOver.below)
+      return;
+    prices.overSlack = gSlowOver.slack;
+    rep.slowOverRound = next;
+    if (trace)
+      std::cerr << "slow tier over-capacity cost: from round " << next << " (2D overflow " << overflow
+                << "), demand priced at most capacity + " << gSlowOver.slack << " x capacity\n";
+  };
+  slowOverStep(0, slowCut.realOverflow(g, usage));
   for (int round = 0; round < maxSlowRounds; ++round) {
     int accepted = 0, rejected = 0, keptWorse = 0;
     const long long popsRound0 = gSearchPops; // pd38route: trace
@@ -9338,6 +9363,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       }
     }
     slowCut.step(g, usage, prices, round, overflow, trace); // Part 173
+    slowOverStep(round + 1, overflow);                      // Part 186
   }
   rep.slowCutRound = slowCut.startRound();
   if (deltaBest) { // the best state, from the delta
@@ -20124,6 +20150,44 @@ void testSlowCut() {
         "slow cut: the best reported is the returned routes' real overflow (" + std::to_string(full.bestOverflow) + ")");
 }
 
+// Part 186: the slow tier's over-capacity cost. The row fixture of testSlowCut (5 nets on 2 tracks: overflow is
+// forced): with no gate it prices from round 0; gated below the forced overflow it never starts and the routes are
+// the run without it, net for net; on, the best reported is the returned routes' real overflow.
+void testSlowOver() {
+  const char *row = "grid 8 1 2\nvertical capacity 0 2\nhorizontal capacity 4 0\n"
+                    "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                    "num net 5\nnA 0 2 1\n5 5 1\n75 5 1\nnB 1 2 1\n5 5 1\n75 5 1\n"
+                    "nC 2 2 1\n5 5 1\n75 5 1\nnD 3 2 1\n5 5 1\n75 5 1\nnE 4 2 1\n5 5 1\n75 5 1\n0\n";
+  Design d = parse("pd39route_selftest_slowover.gr", row);
+  const RoutingGrid &g = d.grid;
+  const SlowOverSettings saved = gSlowOver;
+  CostSettings cs;
+  cs.model = CostModel::kPresentDemand;
+  auto run = [&](const SlowOverSettings &o) {
+    gSlowOver = o;
+    return route(d, 2, 12, 0.02, 1.0, HistMode::kAdditive, 1.0, 1, false, true, 1.0, 0.0, true, true, true, 8,
+                 BoxGrowth{}, cs, AcceptMode::kKeep, false, -1);
+  };
+  RunReport none = run(SlowOverSettings{});
+  RunReport on = run(SlowOverSettings{0, LLONG_MAX});
+  RunReport gated = run(SlowOverSettings{0, 1});
+  gSlowOver = saved;
+  bool same = none.nets.size() == gated.nets.size();
+  for (size_t i = 0; same && i < none.nets.size(); ++i) {
+    same = none.nets[i].segs.size() == gated.nets[i].segs.size();
+    for (size_t k = 0; same && k < none.nets[i].segs.size(); ++k)
+      same = none.nets[i].segs[k].x1 == gated.nets[i].segs[k].x1 && none.nets[i].segs[k].y1 == gated.nets[i].segs[k].y1 &&
+             none.nets[i].segs[k].x2 == gated.nets[i].segs[k].x2 && none.nets[i].segs[k].y2 == gated.nets[i].segs[k].y2;
+  }
+  check(none.slowOverRound == -1 && on.slowOverRound == 0 && gated.slowOverRound == -1,
+        "slow over-capacity cost: from round 0 ungated, never above its gate, never when off");
+  check(none.bestOverflow > 0 && same && gated.bestOverflow == none.bestOverflow,
+        "slow over-capacity cost: gated off, the run is the run without it");
+  check(on.bestOverflow == totalOverflow(g, usageFromCharges(g, on.nets)),
+        "slow over-capacity cost: the best reported is the returned routes' real overflow (" +
+            std::to_string(on.bestOverflow) + ")");
+}
+
 // Part 147: annealed refinement. The acceptance rule: off -> a worse reroute is always reverted; on at a
 // very high temperature nearly always kept, at a very low one never; a better or equal reroute is never
 // reverted; the same seed draws the same decisions. The stage with annealing on the row fixture still ends
@@ -21969,6 +22033,7 @@ int run() {
   testAnnealedRefinement();
   testSlowPlateauStop();
   testSlowCut();
+  testSlowOver();
   testWallAwareHeuristic();
   testSearchHeapMatchesPriorityQueue();
   testLateralShifts();
@@ -22646,6 +22711,20 @@ int main(int argc, char **argv) {
            v + "')");
     c.full = full == 1;
     gSlowCut = c;
+  }
+  if (const char *v = std::getenv("PD39ROUTE_SLOW_OVER"); v) { // Part 186: slack[,below]
+    SlowOverSettings o;
+    long long below = -1;
+    char tail = 0;
+    const int n = std::sscanf(v, "%lf,%lld%c", &o.slack, &below, &tail);
+    if (!((n == 1 && std::strchr(v, ',') == nullptr) || n == 2) || !(o.slack >= 0 && o.slack <= 1000) ||
+        (n == 2 && below < 0))
+      fail(std::string("PD39ROUTE_SLOW_OVER must be slack[,below] (slack 0-1000, below >= 0; got '") + v + "')");
+    if (n == 2)
+      o.below = below;
+    gSlowOver = o;
+    std::cerr << "slow tier over-capacity cost set: slack " << o.slack << ", from the first slow round at or below "
+              << (n == 2 ? std::to_string(below) : std::string("any")) << " units of 2D overflow\n";
   }
   if (const char *v = std::getenv("PD9ROUTE_STOP_AT"); v) {
     char *end = nullptr;

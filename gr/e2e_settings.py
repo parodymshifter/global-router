@@ -96,6 +96,18 @@ def main():
         check(f'PD39ROUTE_SLOW_CUT acts in the slow tier (full {full})',
               any(l.startswith('slow tier capacity cut: after round 0,') for l in b.splitlines()) and
               [strip(l) for l in la[:8]] != [strip(l) for l in lb[:8]], lb[3][:70] if len(lb) > 3 else 'no rounds')
+    # PD39ROUTE_SLOW_OVER (Part 186): its own line from round 0, and the slow rounds after it differ; gated below
+    # the hard design's forced overflow it never starts.
+    b = run('hard', {'PD39ROUTE_SLOW_OVER': '0'}, 'slowover')
+    c = run('hard', {'PD39ROUTE_SLOW_OVER': '0,1'}, 'slowovergated')
+    la, lb, lc = lines(a, 'slow round '), lines(b, 'slow round '), lines(c, 'slow round ')
+    strip = lambda l: l.split(' overflow ')[1].split(' (')[0]
+    check('PD39ROUTE_SLOW_OVER acts in the slow tier',
+          any(l.startswith('slow tier over-capacity cost: from round 0 ') for l in b.splitlines()) and
+          [strip(l) for l in la[:8]] != [strip(l) for l in lb[:8]], lb[3][:70] if len(lb) > 3 else 'no rounds')
+    check('PD39ROUTE_SLOW_OVER waits for its gate',
+          not any(l.startswith('slow tier over-capacity cost: from round') for l in c.splitlines()) and
+          [strip(l) for l in la] == [strip(l) for l in lc], f'slow rounds {len(lc)} vs {len(la)}')
     # PD39ROUTE_REGION_ABORT (Part 146): on the hard design the region stage cannot beat its start.
     a = run('hard', {**off, 'PD39ROUTE_REGION_ABORT': '0,20'}, 'abortoff')
     b = run('hard', {**off, 'PD39ROUTE_REGION_ABORT': '1000,5'}, 'abort5')
