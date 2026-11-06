@@ -12736,3 +12736,46 @@ sweep would buy tens of units at most. Adopted (the user's "both"): `speed08.env
 `expand=120,lagr=0.2;over=0;over=0.075`. In Part 181 the slack-0.25 variant was kept only on newblue3 (newblue1 kept
 the margin-120 variant, the other three slack 0), and each variant's result is independent of the others, so the
 other four residues are unchanged and newblue3 moves 34326 -> 33492 (-2.4%): residues sum 34898 -> 34064.
+
+## Part 186 -- track B1: the over-capacity cost in the slow tier; a lower slow tier, a worse end on both designs
+
+The user's order (2026-11-05, "do 4 and start 1"): the over-capacity cost (Part 179) moved up into the slow tier.
+Part 185's region stage took newblue3 41778 -> 33702 with it, but the slow tier before it still priced over-full edges
+with cong^5's full gradient.
+
+**Mechanism** (`pd39route.cpp`, 39275d6): `PD39ROUTE_SLOW_OVER=slack[,below]` sets the slow tier's `Prices.overSlack`
+(the same `overClampDemand` as the region stage) from the first slow round that starts at or below `below` units of
+real 2D overflow (omitted: round 0) to the end of the tier. Escalation, the best round and every stop stay on real
+demand; later stages build their own prices. Off by default (routes unchanged). Self-test `testSlowOver` (row fixture,
+forced overflow: ungated it starts at round 0; gated below the forced overflow it never starts and the routes equal
+the run without it; the best reported is the returned routes' real overflow) and an `e2e_settings.py` check (its own
+trace line from round 0 and changed slow rounds; gated, identical slow rounds); 39 of 39 pass.
+
+**Runs**: binary `pd39route.p186` (= 39275d6), the committed `@standard.env @fast08.env @speed08.env` (portfolio
+`expand=120,lagr=0.2;over=0;over=0.075`), nice 20, `~/Code/GlobalRouterRuns/p186/` (three at once, started 2026-11-06
+00:00) and `p186b/` (started 02:35 and 03:29). All five legal, `eval2008.pl` agrees exactly. Wall times under shared
+load. Gates from the slow tiers' own trajectories: bigblue4 falls 1.6M -> ~430 by round 45, so slack 0 from 1000
+(round 31); newblue3 sits at 42-63K, mostly forced, so 0.075 from round 0 and from 60000 (round 12).
+
+| run | slow-tier best | region stage (kept variant) | scored overflow / max | scored wire | wall s | peak RSS / footprint MB |
+|---|---|---|---|---|---|---|
+| newblue3 baseline (Part 185) | 41778 | 41778 -> 33702 (over=0.075) | **33492** / 472 | 10776373 | 6640 | 1998 / 2710 |
+| newblue3, slow 0.075 from round 0 | 35856 | aborted at 20 rounds, portfolio cancelled | 35306 / 526 | 13360163 | 9202 | 2957 / 3185 |
+| newblue3, slow 0.075 from 60000 | 36128 | aborted at 20 rounds, portfolio cancelled | 35246 / 490 | 13314117 | 8931 | 2708 / 3266 |
+| ... + `PD39ROUTE_REGION_OVER=0.075` (path A too) | 36128 | 36128 -> 34194 (own) | 33962 / 466 | 10779459 | 8926 | 2960 / 3268 |
+| ... + `PD39ROUTE_REGION_ABORT=0,20` (abort off) | 36128 | 36128 -> 34194 (over=0.075) | 33962 / 466 | 10779459 | 8647 | 3162 / 3415 |
+| bigblue4 baseline (Parts 181/183) | 406 | 406 -> 332 (over=0) | **318** / -- | 24921431 | -- | -- |
+| bigblue4, slow 0 from 1000 | 390 | 390 -> 344 (over=0) | 336 / 6 | 24956840 | 12538 | 2598 / 3607 |
+
+**The confound in the first two newblue3 runs**: path A's own region stage (no over-capacity cost) could not improve on
+the slow tier's 36128 in 20 rounds, so `fast08.env`'s region abort (Part 146) stopped it and, by design, cancelled the
+speculative variants -- including the over=0.075 one. Both fixes (path A at the same cost; the abort off) end at the
+same route, 33962: the abort was hiding nothing better.
+
+**Result: negative on both designs.** The slow tier ends 13% lower on newblue3 (41778 -> 36128) and 4% lower on
+bigblue4 (406 -> 390), but the region stage then gains far less (newblue3 -1934 against -8076, bigblue4 -46 against
+-74) and the end is worse: newblue3 +1.4% (33962 vs 33492), bigblue4 +5.7% (336 vs 318). Pricing the slow tier the same
+way spends the moves the region stage would otherwise find, and settles in a slightly worse place; the region stage's
+wider, overflow-centred search is where this cost pays. The slow tier's routes under it are ~26% longer in 2D (9.92M
+vs 7.85M), but that is transient: a region stage at the same cost brings the scored wire back to the baseline's
+(10779459 vs 10776373). Not adopted; the setting stays (off) for later tests.
