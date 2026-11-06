@@ -12710,3 +12710,29 @@ The curve is smooth and one-humped: the best lies between 0 and 0.15 (0 is 11% w
 been bracketed. The other four residues have excess of 1-2 units per edge, where slack 0 won and 0.05 lost (Part 180).
 Not adopted -- the portfolio keeps the best by (overflow, 2D wire), so replacing 0.25 by 0.1 in `speed08.env` cannot
 make any design worse on overflow, but that is the user's decision.
+
+## Part 185 -- newblue3's slack bracketed: 0.075 gives 33492; adopted in place of 0.25
+
+The user's order (2026-11-05, "both"): try slack 0.05 and 0.075 on newblue3, then put the winner into `speed08.env`.
+Binary `pd39route.p179` (= 611ed41), `@standard.env @fast08.env @speed08.env PD39ROUTE_PORTFOLIO=over=0.05;over=0.075`,
+path A unchanged, alone, nice 20, `~/Code/GlobalRouterRuns/p185/`. Started 2026-11-05 21:45 EST, finished 23:36,
+scored 23:41. Legal, `eval2008.pl` agrees exactly. Path A reproduced Parts 179/184 (39062 region best, 38928 after
+refinement).
+
+2D overflow after refinement by slack (earlier parts' values marked):
+
+| slack | 0 (179) | 0.05 | 0.075 | 0.1 (184) | 0.15 (184) | 0.25 (179) | 0.4 (184) | 0.5 (184) | 1 (179) |
+|---|---|---|---|---|---|---|---|---|---|
+| region best | 38390 | 33824 | 33702 | 33710 | 33816 | 34502 | 35500 | 36332 | -- |
+| after refinement | 37344 | 33568 | **33492** | 33516 | 33642 | 34326 | 35388 | 36184 | 37910 |
+| 2D wire | 7927422 | 7851164 | 7847423 | 7850511 | 7852851 | 7854151 | 7856403 | 7860577 | -- |
+
+Scored 33492, max 472, wire 10776373 (Part 184's 0.1: 33516, 478, 10782876; Part 179's 0.25: 34326, 474, 10785659).
+6640 s wall, 23045 s CPU, peak RSS 1998 MB / footprint 2710 MB. Against the best published (~31024, NTUgr) the gap is
++8.0%; at least 26264 is forced (Part 91).
+
+Bracketed now: 0.05-0.15 lie within 150 units (0.45%) of each other, with 0.075 lowest -- a flat bottom, so a finer
+sweep would buy tens of units at most. Adopted (the user's "both"): `speed08.env`'s portfolio becomes
+`expand=120,lagr=0.2;over=0;over=0.075`. In Part 181 the slack-0.25 variant was kept only on newblue3 (newblue1 kept
+the margin-120 variant, the other three slack 0), and each variant's result is independent of the others, so the
+other four residues are unchanged and newblue3 moves 34326 -> 33492 (-2.4%): residues sum 34898 -> 34064.
