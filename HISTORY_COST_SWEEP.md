@@ -12686,3 +12686,27 @@ line gives only its start, best and round count, not when the best was found.
 The 2000-round job was stopped at the user's order at 18:08 (its path A had ended at 360; its variant's first 1000
 rounds are the 1000-round variant's, which had already sat at 332 for 500 rounds). Not a lever for bigblue4: its gap
 (318 vs 166) needs something other than more of the same rounds.
+
+## Part 184 -- newblue3's over-capacity slack: 0.1 gives 33516 (-2.4% vs 0.25)
+
+The user's order (2026-11-05): "run the newblue3 slack values". Binary `pd39route.p179` (= 611ed41),
+`@standard.env @fast08.env @speed08.env PD39ROUTE_PORTFOLIO=over=0.1;over=0.15;over=0.4;over=0.5`, path A unchanged,
+alone, nice 20, `~/Code/GlobalRouterRuns/p184/`. Started 2026-11-05 18:09 EST, route written 20:07, scored 20:11.
+Legal, `eval2008.pl` agrees exactly. Path A reproduced Part 179's control (39062 region best, 38928 after refinement).
+
+2D overflow after refinement by slack (Part 179's values marked 179):
+
+| slack | 0 (179) | 0.1 | 0.15 | 0.25 (179) | 0.4 | 0.5 | 1 (179) |
+|---|---|---|---|---|---|---|---|
+| region best | 38390 | 33710 | 33816 | 34502 | 35500 | 36332 | -- |
+| after refinement | 37344 | **33516** | 33642 | 34326 | 35388 | 36184 | 37910 |
+| 2D wire | 7927422 | 7850511 | 7852851 | 7854151 | 7856403 | 7860577 | -- |
+
+Scored 33516, max 478, wire 10782876 (Part 179: 34326, 474, 10785659): -2.4% overflow, wire -0.03%. 7048 s, peak RSS
+2365 MB / footprint 3675 MB. Against the best published (~31024, NTUgr) the gap is now +8.0% (was +10.6%); at least
+26264 is forced (Part 91).
+
+The curve is smooth and one-humped: the best lies between 0 and 0.15 (0 is 11% worse than 0.1), so 0.05-0.1 has not
+been bracketed. The other four residues have excess of 1-2 units per edge, where slack 0 won and 0.05 lost (Part 180).
+Not adopted -- the portfolio keeps the best by (overflow, 2D wire), so replacing 0.25 by 0.1 in `speed08.env` cannot
+make any design worse on overflow, but that is the user's decision.
