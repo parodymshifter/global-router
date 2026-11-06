@@ -206,10 +206,10 @@ def refine(d, name, work, b, best, measured, w, n, rounds):
                        'replace' if best['src'] == 'r' else 'min'), src=best['src'])
         sta(d, name, [c])
         c['delta'] = delta(c, b, w, n)
-        c['slack_nets'] = sum(1 for _ in open(merged)) - 1
+        c['classed'] = sum(1 for _ in open(merged)) - 1  # nets in its classes (its own slack_nets is set if measured)
         out.append(c)
         print(f"{name}: refine {it}: {c['tag']} delta {c['delta']:+.4f} (from {cur['tag']} {cur['delta']:+.4f}, "
-              f"{c['slack_nets']} nets classed)", flush=True)
+              f"{c['classed']} nets classed)", flush=True)
         if c['delta'] >= cur['delta'] or filecmp.cmp(c['route'], cur['route'], shallow=False):
             break
         cur = c
@@ -218,10 +218,10 @@ def refine(d, name, work, b, best, measured, w, n, rounds):
 
 def write_tsv(path, allc, best, w, n, t0):
     with open(path, 'w') as f:
-        f.write('tag\tk3\tkp\twns\ttns\tpower\tof\topens\tdelta\tslack_nets\tunmatched\n')
+        f.write('tag\tk3\tkp\twns\ttns\tpower\tof\topens\tdelta\tslack_nets\tunmatched\tclassed\n')
         for c in allc:
             f.write(f"{c['tag']}\t{c['k3']}\t{c['kp']}\t{c['wns']}\t{c['tns']}\t{c['power']}\t{c['of']}\t{c['opens']}"
-                    f"\t{c['delta']:+.4f}\t{c.get('slack_nets', '')}\t{c.get('slack_unmatched', '')}\n")
+                    f"\t{c['delta']:+.4f}\t{c.get('slack_nets', '')}\t{c.get('slack_unmatched', '')}\t{c.get('classed', '')}\n")
         f.write(f"# best {best['tag']} delta {best['delta']:+.4f}; weights {w}; endpoints {n}; "
                 f"{time.time() - t0:.0f} s for {len(allc)} candidates\n")
 

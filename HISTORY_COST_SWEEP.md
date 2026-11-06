@@ -12816,7 +12816,7 @@ saturated at any budget (Part 137 at one knob each, now at all of them, past twi
 adopted, nothing changed in the settings. B5's next item is the post-pass over candidate trees (LP /
 column generation, GRIP), not more of this pass.
 
-## Part 188 -- ISPD 2025: sticky re-classification from the best route's own slack (running)
+## Part 188 -- ISPD 2025: sticky re-classification from the best route's own slack -- ten designs -23.97 -> -25.11
 
 Track D's next step. Part 134 found that classing nets from one biased route's slack drops the nets
 the bias had fixed (visible ariane -1.53 against -2.90 from the unbiased route's slack): those nets pass
@@ -12833,3 +12833,40 @@ Run (`~/Code/GlobalRouterRuns/p188/run.sh`, `pd39route.p186` = 39275d6): a parit
 ariane k540r re-routed with Part 134's base.slack must match Part 134's route byte for byte, so the new
 candidates compare exactly against Part 134's), then `--reuse` on the ten Part 134 loops (`bt.*`) with
 `--refine 2`, smallest designs first. Router runs share the three slots with Part 187's batch.
+
+**Results** (2026-11-06 09:14-13:36; the parity check passed -- visible ariane k540r byte-identical to Part 134's;
+every candidate legal, 0 open nets; score change against the unbiased route, lower is better, each design's
+weights and endpoint count; raw: `~/Code/GlobalRouterRuns/p188/rf.*/refine.tsv`, `run.txt`):
+
+| design | Part 134 best | refine 1 | refine 2 | kept | nets classed (unbiased -> merged) | time |
+|---|---|---|---|---|---|---|
+| visible ariane | k540r -3.3085 | -3.9413 | **-4.0542** | m2 | 12903 -> 14923 -> 15799 | 200 s |
+| visible bsg_chip | k540r -1.6886 | -1.8945 | **-1.9862** | m2 | -> 74908 -> 76974 | 817 s |
+| visible mempool_tile_wrap | k180rp1 -0.8717 | -0.8798 | **-0.9260** | m2 | 14050 -> 15223 -> 15427 | 1683 s |
+| visible mempool_group | k180ip4 -7.4778 | -7.5169 | **-7.5202** | m2 | -> 297265 -> 300733 | 5092 s |
+| blind ariane | k180i -0.2541 | -0.2551 | same route | m1 | 1338 -> 1360 | 325 s |
+| visible NV_NVDLA | k540r -6.2887 | same route | -- | -- | 16520 -> 16568 | 723 s |
+| blind NV_NVDLA | k20r -1.4391 | same | -- | -- | 2 -> 2 (best fails on none) | 274 s |
+| blind mempool_tile_wrap | k20ip1 -1.1491 | same route | -- | -- | 665 -> 665 | 2236 s |
+| blind bsg_chip | k180i -0.2351 | -0.2350 | -- | Part 134's | -> 1044 | 353 s |
+| blind mempool_group | k20ip1 -1.2559 | -1.2508 | -- | Part 134's | -> 285667 | 2407 s |
+
+(Times share the machine with Part 187 until 10:50; the two runs marked "same route" in round 2 were before
+the stop rule of ac1838d.) **Sum over the ten: -25.11, against Part 134's -23.97** (input-slack loop -22.86,
+`standard25.env` -14.41). Visible ariane gains 0.75 (its score 0.14 -> about -0.6 against 1st place's 0.90,
+if Part 133's mapping holds), visible bsg_chip 0.30; the rest 0.00-0.05. No design is worse: the loop keeps
+the best candidate, so a refinement that loses (blind bsg_chip, blind mempool_group) costs only time.
+
+Where it acts: only where the bias made *new* nets fail, by a fraction of the worst slack large enough to
+fall into a class (classes are slack / worst >= 0.1 / 0.4 / 0.7). Visible NV_NVDLA's best route adds 48
+failing nets, all near zero slack, and re-routes byte-identically; the blind designs' biased routes fail on
+few nets (2-1360) that the unbiased route mostly already failed on. On the four visible designs that gained,
+the second round still improved, so a third round may pay; not tried. Cost: 1-2 routes and 1-2 OpenROAD
+sessions per design (200 s on ariane, 85 min on visible mempool_group) -- against the contest's +-20% runtime
+factor, a submission would keep it on the small designs at least.
+
+Also fixed: `--reuse` read Part 134's changes at the 4 decimals `loop.tsv` prints, so a tie looked like a gain
+and ran an extra round (ac1838d: recomputed at full precision; refinement stops when the merged classes or the
+route do not change); `loop.tsv` gains a `classed` column (nets in a refined candidate's classes), separate
+from `slack_nets` (failing nets measured on that route). Not adopted into the standard flow: `--refine`
+stays off by default until the user decides.
