@@ -88,7 +88,8 @@ B1. **newblue3 (+25%)**: most of its overflow is forced (>= 26264). There the
     stage at round 59 -- rerun with the stop off.
     (2026-11-03: the stop off changed nothing, Part 178; the over-capacity
     cost at slack 0.25 took 38910 -> 34326, Part 179; adopted 2026-11-04 in a three-variant portfolio, Part 181;
-    slack 0.075 gives 33492, adopted 2026-11-05, Parts 184-185.)
+    slack 0.075 gives 33492, adopted 2026-11-05, Parts 184-185;
+    the same cost in the slow tier ends worse on newblue3 and bigblue4, Part 186.)
 B2. **bigblue4 (2.1x the best)**: not cut-bound (tightest cut 89.3%), so
     breadth and budget: longer region budgets, wider boxes, virtual capacity
     tuned for it, the portfolio (A6).
