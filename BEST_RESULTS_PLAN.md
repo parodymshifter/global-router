@@ -8,12 +8,14 @@ legal and cross-checked against the contest's own evaluator.
 
 ## Where we stand
 
+(Updated 2026-11-05; the rest of the scope below is as written on 2026-10-12.)
+
 | set | designs | ours | best known | gap |
 |---|---|---|---|---|
-| ISPD 2008 | 16 | 11 at zero overflow; newblue1 24-54, newblue4 144, newblue7 108, bigblue4 356, newblue3 38916 | newblue1 0 (LMgr), newblue4 144, newblue7 68, bigblue4 166, newblue3 ~31024 (NTUgr) | newblue3 +25% (at least 26264 is forced, Part 91), bigblue4 2.1x, newblue7 +40 (>= 54 forced), newblue1 +24-54; wirelength +0.3% to +9% vs NTHU-Route 2.0 before the reclaim pass |
+| ISPD 2008 | 16 | 11 at zero overflow; newblue1 26, newblue4 136, newblue7 92, bigblue4 318, newblue3 33492 (`speed08.env`, Parts 176-185) | newblue1 0 (LMgr), newblue4 144, newblue7 68, bigblue4 166, newblue3 ~31024 (NTUgr) | newblue4 already 8 below the best; newblue3 +8.0% (at least 26264 forced, Part 91), bigblue4 1.9x, newblue7 +24 (>= 54 forced), newblue1 +26; wirelength on the eleven -0.05% to +2.3% vs NTHU-Route 2.0 (Part 87; later speed settings moved it +-0.2%), bigblue4 +9.3% (its kept slack-0 route, Part 183) |
 | ISPD 2007 | 8 (3D) + 8 (2D) | the 3D designs are the 2008 contest's adaptec1-5, newblue1-3 | -- | the 2D (single-layer) variants are not yet run |
 | ISPD 2024 | 13 | all six hidden designs beat the contest's best raw score, 12-38x faster (Parts 115-120) | contest #1 | already ahead; what remains is the score's own terms (overflow cost, vias) |
-| ISPD 2025 | 6 visible + 6 blind | not started | contest winners (Hippo, PKU) | new problem: timing (WNS/TNS) and power, scored by OpenROAD |
+| ISPD 2025 | 6 visible + 6 blind | `gr/timing_loop.py` with the contest's OpenROAD in the loop (Part 134): ten scored designs sum -22.86 against our unbiased routes, none worse; ariane 0.14 against 1st place's 0.90 (lower is better) | contest winners (Hippo, PKU) | mempool_group, mempool_cluster and the blind designs not yet scored with timing; next is per-net reclassification from routed slack |
 
 Comparisons for 2008 are to published results through ~2013 (LMgr's re-run
 table, Part 75); newer routers report on the 2018/2019/2024 sets instead.
