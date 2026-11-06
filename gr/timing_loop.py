@@ -22,7 +22,7 @@ term at KP_LADDER with the same classes. Every candidate is logged to WORK_DIR/l
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
-import os, re, shutil, subprocess, sys, time
+import filecmp, os, re, shutil, subprocess, sys, time
 
 GR = os.path.dirname(os.path.abspath(__file__))
 EVAL_DIR = os.path.expanduser('~/Code/GlobalRouterRuns/ispd25eval')       # NanGate45 libraries, setRC.tcl
@@ -198,6 +198,10 @@ def refine(d, name, work, b, best, measured, w, n, rounds):
             if abs(cur[k] - v) > 1e-6 * max(1.0, abs(v)):
                 raise SystemExit(f"timing_loop.py: {cur['tag']} {k} {v} re-measured as {cur[k]}")
         merged = merge_slack(measured, os.path.join(work, f'merged{it}.slack'))
+        if it > 1 and open(merged).read().split('\n', 1)[1] == \
+                open(os.path.join(work, f'merged{it - 1}.slack')).read().split('\n', 1)[1]:
+            print(f"{name}: refine {it}: the classes did not change, stopped", flush=True)
+            break
         c = dict(route(d, name, work, tag_of(best, it), best['k3'], best['kp'], merged,
                        'replace' if best['src'] == 'r' else 'min'), src=best['src'])
         sta(d, name, [c])
@@ -206,7 +210,7 @@ def refine(d, name, work, b, best, measured, w, n, rounds):
         out.append(c)
         print(f"{name}: refine {it}: {c['tag']} delta {c['delta']:+.4f} (from {cur['tag']} {cur['delta']:+.4f}, "
               f"{c['slack_nets']} nets classed)", flush=True)
-        if c['delta'] >= cur['delta']:
+        if c['delta'] >= cur['delta'] or filecmp.cmp(c['route'], cur['route'], shallow=False):
             break
         cur = c
     return out
@@ -236,6 +240,9 @@ def reuse(d, name, work, src, rounds, t0):
                  'power': float(f[5]), 'of': float(f[6]), 'opens': int(f[7]), 'delta': float(f[8]),
                  'src': m.group(1) if m else '', 'route': os.path.join(work, f[0] + '.route')}
             rows.append(c)
+    w = weights(os.path.join(d, name + '.cap'))
+    for c in rows:  # loop.tsv prints the change to 4 decimals; recompute it from the full-precision terms
+        c['delta'] = delta(c, rows[0], w, n)
     b, best = rows[0], min(rows, key=lambda c: c['delta'])
     for c in (b, best):
         if not os.path.exists(c['route']):
@@ -245,7 +252,6 @@ def reuse(d, name, work, src, rounds, t0):
     measured = [base_slack] if os.path.exists(base_slack) else []
     if best['src'] == 'r' and not measured:
         raise SystemExit('timing_loop.py: --reuse: routed classes but no base.slack in ' + src)
-    w = weights(os.path.join(d, name + '.cap'))
     new = refine(d, name, work, b, best, measured, w, n, rounds)
     allc = rows + new
     top = min(allc, key=lambda c: c['delta'])
