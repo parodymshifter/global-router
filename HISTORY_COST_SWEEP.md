@@ -12853,8 +12853,8 @@ weights and endpoint count; raw: `~/Code/GlobalRouterRuns/p188/rf.*/refine.tsv`,
 
 (Times share the machine with Part 187 until 10:50; the two runs marked "same route" in round 2 were before
 the stop rule of ac1838d.) **Sum over the ten: -25.11, against Part 134's -23.97** (input-slack loop -22.86,
-`standard25.env` -14.41). Visible ariane gains 0.75 (its score 0.14 -> about -0.6 against 1st place's 0.90,
-if Part 133's mapping holds), visible bsg_chip 0.30; the rest 0.00-0.05. No design is worse: the loop keeps
+`standard25.env` -14.41). Visible ariane gains 0.75 (its contest score: unbiased 2.30 - 4.05 = about -1.75,
+against `standard25.env`'s 0.14 and 1st place's 0.90), visible bsg_chip 0.30; the rest 0.00-0.05. No design is worse: the loop keeps
 the best candidate, so a refinement that loses (blind bsg_chip, blind mempool_group) costs only time.
 
 Where it acts: only where the bias made *new* nets fail, by a fraction of the worst slack large enough to
