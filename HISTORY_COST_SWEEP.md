@@ -12780,6 +12780,42 @@ wider, overflow-centred search is where this cost pays. The slow tier's routes u
 vs 7.85M), but that is transient: a region stage at the same cost brings the scored wire back to the baseline's
 (10779459 vs 10776373). Not adopted; the setting stays (off) for later tests.
 
+## Part 187 -- B5: larger reclaim budgets on all eleven zero-overflow designs -- saturated; not adopted
+
+Part 137 tried each reclaim knob alone on four of the eleven (0.00-0.06%). This batch
+(`~/Code/GlobalRouterRuns/p187`, `pd39route.p186` = 39275d6, `@standard.env @fast08.env @speed08.env`,
+2026-11-06 07:42-10:50, three at a time) tries them together and much further, on all eleven: **combined** =
+Part 137's three together (`PD16ROUTE_RECLAIM_PASSES=2`, `_RATIO=1.2`, `_MU=2`); **large** = passes 3, ratio
+1.1, `_MIN_EXCESS=2`, mu 0.5, `_MARGIN=32`. Baselines: Part 176's routes (a parity run of newblue2 on this
+binary reproduced its 7618810 exactly). All 23 runs `status=OK`, overflow 0 / max 0, `gr_verify` =
+`eval2008.pl` on every one. Scored wirelength (change vs Part 176), wall seconds / peak RSS:
+
+| design | Part 176 WL | Part 176 s | combined | s / MB | large | s / MB |
+|---|---|---|---|---|---|---|
+| newblue2 | 7618810 | 106 | 7613411 (-0.07%) | 95 / 1001 | 7611394 (-0.10%) | 95 / 999 |
+| adaptec2 | 5242781 | 308 | 5237943 (-0.09%) | 401 / 688 | 5233433 (-0.18%) | 402 / 892 |
+| adaptec4 | 12204261 | 378 | 12199102 (-0.04%) | 449 / 1394 | 12196345 (-0.06%) | 440 / 1262 |
+| bigblue3 | 13165027 | 581 | 13161083 (-0.03%) | 569 / 1473 | 13152404 (-0.10%) | 590 / 1463 |
+| adaptec3 | 13142021 | 1206 | 13121365 (-0.16%) | 1094 / 2097 | 13106464 (-0.27%) | 1105 / 2121 |
+| bigblue2 | 9190777 | 1241 | 9561740 (**+4.04%**) | 1488 / 1176 | 9561740 (**+4.04%**) | 1655 / 1196 |
+| adaptec1 | 5407378 | 1287 | 5401593 (-0.11%) | 1392 / 970 | 5400295 (-0.13%) | 1494 / 1065 |
+| bigblue1 | 5701837 | 1780 | 5698056 (-0.07%) | 1831 / 878 | 5693111 (-0.15%) | 1842 / 940 |
+| newblue5 | 23325404 | 1920 | 23300512 (-0.11%) | 2896 / 2828 | 23280760 (-0.19%) | 2721 / 2814 |
+| adaptec5 | 15650286 | 2223 | 15633603 (-0.11%) | 2194 / 2114 | 15602022 (-0.31%) | 2291 / 2032 |
+| newblue6 | 17941409 | 2360 | 17920319 (-0.12%) | 2310 / 2173 | 17910573 (-0.17%) | 2101 / 2548 |
+
+(Times are three runs sharing the machine; Part 176's were not, so they are not comparable.) Ten designs
+shorten by 0.03-0.31% -- monotone in budget, but a tenth of the 1.6-3.6% run-to-run spread (Part 78) and
+of the 0.7-2.4% these designs trail NTHU-Route 2.0 by. **bigblue2 loses its whole reclaim gain**: the larger
+budgets reroute 42907 / 71764 candidates' worth (default 18480) and inject 60200 / 97388 units of 2D
+overflow (default 20734); path B's region stage ends at 2 / 4 after its 500 rounds, refinement at 2, so the
+fallback keeps path A (5875164 2D wire) over a path B that was shorter in 2D (4980350 / 4947084 against the
+default's 5030576) but not legal. A larger reclaim budget buys at most a few tenths of a percent and can
+throw away the default's gain where the region stage cannot clear what it injects. The reclaim pass is
+saturated at any budget (Part 137 at one knob each, now at all of them, past twice the budget); not
+adopted, nothing changed in the settings. B5's next item is the post-pass over candidate trees (LP /
+column generation, GRIP), not more of this pass.
+
 ## Part 188 -- ISPD 2025: sticky re-classification from the best route's own slack (running)
 
 Track D's next step. Part 134 found that classing nets from one biased route's slack drops the nets

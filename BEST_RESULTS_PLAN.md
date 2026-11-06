@@ -100,7 +100,9 @@ B3. **newblue1 (24-54 vs 0)**: through-traffic, not pin-bound. LMgr reached
 B4. **newblue7 (108 vs 68; >= 54 forced)**: as B2, after A makes it cheap
     enough to iterate (currently ~20 h a run).
 B5. **Wirelength on the 11 zero-overflow designs**: longer reclaim budgets
-    first; then an LP/column-generation post-pass over candidate trees with
+    first (done, saturated: 0.03-0.31% at up to 3 passes / mu 0.5, and bigblue2
+    +4.0% when its region stage cannot clear what the larger budget injects --
+    Parts 137, 187); then an LP/column-generation post-pass over candidate trees with
     capacity constraints (GRIP reported 9% better wirelength than the best
     published routers on the 2007/2008 sets) -- builds on `gr/lpbound.cpp`.
 
