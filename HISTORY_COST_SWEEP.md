@@ -12779,3 +12779,21 @@ way spends the moves the region stage would otherwise find, and settles in a sli
 wider, overflow-centred search is where this cost pays. The slow tier's routes under it are ~26% longer in 2D (9.92M
 vs 7.85M), but that is transient: a region stage at the same cost brings the scored wire back to the baseline's
 (10779459 vs 10776373). Not adopted; the setting stays (off) for later tests.
+
+## Part 188 -- ISPD 2025: sticky re-classification from the best route's own slack (running)
+
+Track D's next step. Part 134 found that classing nets from one biased route's slack drops the nets
+the bias had fixed (visible ariane -1.53 against -2.90 from the unbiased route's slack): those nets pass
+on the biased route, fall out of the classes, and fail again. The negotiated-congestion answer is a
+history that only grows. `gr/timing_loop.py --refine N` (new; off by default) adds that after stage 2:
+OpenROAD measures the best candidate's own failing-path slack, it is merged with every slack measured so
+far (per net, the worst -- a net that failed on any route stays classed), and the design is re-routed at
+the best's strength and power term with the merged classes (routed source: replace; input source: the
+input slack lowered by them, `_MODE=min`). It repeats while the new route beats the best, up to N times.
+`--reuse DIR` refines an earlier loop's result from its `loop.tsv`, route files and `base.slack` without
+re-running stages 0-2; `--router PATH` picks the binary; `--selftest` checks the merge and the tags.
+
+Run (`~/Code/GlobalRouterRuns/p188/run.sh`, `pd39route.p186` = 39275d6): a parity check first (visible
+ariane k540r re-routed with Part 134's base.slack must match Part 134's route byte for byte, so the new
+candidates compare exactly against Part 134's), then `--reuse` on the ten Part 134 loops (`bt.*`) with
+`--refine 2`, smallest designs first. Router runs share the three slots with Part 187's batch.
