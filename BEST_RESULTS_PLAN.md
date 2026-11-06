@@ -15,7 +15,7 @@ legal and cross-checked against the contest's own evaluator.
 | ISPD 2008 | 16 | 11 at zero overflow; newblue1 26, newblue4 136, newblue7 92, bigblue4 318, newblue3 33492 (`speed08.env`, Parts 176-185) | newblue1 0 (LMgr), newblue4 144, newblue7 68, bigblue4 166, newblue3 ~31024 (NTUgr) | newblue4 already 8 below the best; newblue3 +8.0% (at least 26264 forced, Part 91), bigblue4 1.9x, newblue7 +24 (>= 54 forced), newblue1 +26; wirelength on the eleven -0.05% to +2.3% vs NTHU-Route 2.0 (Part 87; later speed settings moved it +-0.2%), bigblue4 +9.3% (its kept slack-0 route, Part 183) |
 | ISPD 2007 | 8 (3D) + 8 (2D) | the 3D designs are the 2008 contest's adaptec1-5, newblue1-3 | -- | the 2D (single-layer) variants are not yet run |
 | ISPD 2024 | 13 | all six hidden designs beat the contest's best raw score, 12-38x faster (Parts 115-120) | contest #1 | already ahead; what remains is the score's own terms (overflow cost, vias) |
-| ISPD 2025 | 6 visible + 6 blind | `gr/timing_loop.py` with the contest's OpenROAD in the loop (Part 134): ten scored designs sum -23.97 against our unbiased routes with classes from the input or the unbiased route's slack, none worse; ariane 0.14 under `standard25.env` (Part 133) against 1st place's 0.90 (lower is better) | contest winners (Hippo, PKU) | mempool_cluster (visible and blind) not yet scored with timing; sticky re-classification from the best route's own slack in test (Part 188) |
+| ISPD 2025 | 6 visible + 6 blind | `gr/timing_loop.py` with the contest's OpenROAD in the loop (Part 134): ten scored designs sum -23.97 against our unbiased routes with classes from the input or the unbiased route's slack, none worse; ariane 0.14 under `standard25.env` (Part 133) against 1st place's 0.90 (lower is better) | contest winners (Hippo, PKU) | mempool_cluster (visible and blind) not yet scored with timing; sticky re-classification (Part 188, the loop's default since 2026-11-06: ten designs -25.11); a third round in test |
 
 Comparisons for 2008 are to published results through ~2013 (LMgr's re-run
 table, Part 75); newer routers report on the 2018/2019/2024 sets instead.
@@ -190,7 +190,8 @@ Order (runs: at most 3 at once; one long 2008 residue run plus short 2024 / 2025
    *Status 2026-10-16: D3a done; D3b's weight rule did not transfer to the blind designs (Part 133);
    the standard flow is now `gr/timing_loop.py` -- the contest's OpenROAD scores candidate strengths
    (Part 134: ten designs -22.86 vs -14.41; -23.97 with classes from the unbiased route's slack as a
-   second source). Next: sticky re-classification from the best route's own slack (Part 188).*
+   second source). Sticky re-classification from the best route's own slack (Part 188): -25.11, the default since
+   2026-11-06. Next: a third round; mempool_cluster with timing.*
    D3a: from the evaluator's OpenSTA on our ariane route, the critical nets and how much of their
    delay is wire (vs. cell). D3b: those nets get a priority weight `w_i` (CLAUDE.md "Core cost
    model": priority divides the congestion price) and an upper-layer bias in layer assignment;

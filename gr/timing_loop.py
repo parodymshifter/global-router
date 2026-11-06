@@ -8,6 +8,7 @@ candidate with the contest's own OpenROAD (timing, power -- one session for all 
 evaluator, and keep the best by the contest score's change against the unbiased route.
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
+      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -18,7 +19,10 @@ endpoint's worst path. Stage 1 runs the ladder twice: classes from that routed s
 replace mode: other nets unclassed; tag suffix r) and from the input pin slack (suffix i) -- neither wins
 everywhere (routed: visible ariane -3.31 vs -2.27; input: blind mempool_tile_wrap -1.15 vs -0.21, whose
 unbiased route fails on only 665 nets). `--classes routed|input` runs one. Stage 2: at the best, the power
-term at KP_LADDER with the same classes. Every candidate is logged to WORK_DIR/loop.tsv.
+term at KP_LADDER with the same classes. Stage 3 (Part 188, default since 2026-11-06; `--refine N`, 0 = off,
+default 2): sticky re-classification -- the best route's own failing-path slack merged with every slack
+measured before (per net, the worst), and a re-route at the best's setting, while it gains (ten designs
+-23.97 -> -25.11, none worse). Every candidate is logged to WORK_DIR/loop.tsv.
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
@@ -182,14 +186,15 @@ def tag_of(best, it):
     return f"k{best['k3']}{best['src']}" + (f"p{best['kp']}" if best['kp'] else '') + f'm{it}'
 
 
-def refine(d, name, work, b, best, measured, w, n, rounds):
+def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
     """Part 188, sticky re-classification: measure the best route's own failing-path slack, merge it
     with every slack measured so far (per net, the worst), and re-route at the best's strength and power
     term with those classes (routed source: replace; input source: the input slack lowered by them).
-    Repeat while the new route beats the best, up to `rounds` times. Returns the new candidates."""
+    Repeat while the new route beats the best, up to `rounds` times (numbered from `start`). Returns the
+    new candidates."""
     idx = net_index(os.path.join(d, name + '.net'))
     measured, out, cur = list(measured), [], best
-    for it in range(1, rounds + 1):
+    for it in range(start, start + rounds):
         if cur is b:
             break
         keep = {k: cur[k] for k in ('tns', 'wns', 'power')}
@@ -198,8 +203,9 @@ def refine(d, name, work, b, best, measured, w, n, rounds):
             if abs(cur[k] - v) > 1e-6 * max(1.0, abs(v)):
                 raise SystemExit(f"timing_loop.py: {cur['tag']} {k} {v} re-measured as {cur[k]}")
         merged = merge_slack(measured, os.path.join(work, f'merged{it}.slack'))
-        if it > 1 and open(merged).read().split('\n', 1)[1] == \
-                open(os.path.join(work, f'merged{it - 1}.slack')).read().split('\n', 1)[1]:
+        prev = os.path.join(work, f'merged{it - 1}.slack')
+        if os.path.exists(prev) and open(merged).read().split('\n', 1)[1] == \
+                open(prev).read().split('\n', 1)[1]:
             print(f"{name}: refine {it}: the classes did not change, stopped", flush=True)
             break
         c = dict(route(d, name, work, tag_of(best, it), best['k3'], best['kp'], merged,
@@ -228,9 +234,11 @@ def write_tsv(path, allc, best, w, n, t0):
 
 def reuse(d, name, work, src, rounds, t0):
     """--reuse SRC: refine an earlier loop's result (SRC/loop.tsv, its route files and base.slack) instead
-    of re-running stages 0-2. Writes WORK/refine.tsv."""
+    of re-running stages 0-2. Writes WORK/refine.tsv. SRC may itself be a refined loop (its refine.tsv and
+    its latest mergedK.slack, which holds every slack measured there): rounds then continue from K + 1."""
     rows, n = [], None
-    for line in open(os.path.join(src, 'loop.tsv')):
+    tsv = os.path.join(src, 'refine.tsv')
+    for line in open(tsv if os.path.exists(tsv) else os.path.join(src, 'loop.tsv')):
         if line.startswith('# best'):
             n = int(re.search(r'endpoints (\d+)', line).group(1))
         elif not line.startswith('tag\t') and line.strip():
@@ -244,15 +252,18 @@ def reuse(d, name, work, src, rounds, t0):
     for c in rows:  # loop.tsv prints the change to 4 decimals; recompute it from the full-precision terms
         c['delta'] = delta(c, rows[0], w, n)
     b, best = rows[0], min(rows, key=lambda c: c['delta'])
-    for c in (b, best):
+    for c in (best,):
         if not os.path.exists(c['route']):
             with open(c['route'], 'wb') as g:
                 subprocess.run(['xz', '-dc', os.path.join(src, c['tag'] + '.route.xz')], stdout=g, check=True)
     base_slack = os.path.join(src, 'base.slack')
-    measured = [base_slack] if os.path.exists(base_slack) else []
+    ks = [int(m.group(1)) for f in os.listdir(src) for m in [re.match(r'merged(\d+)\.slack$', f)] if m]
+    measured = ([os.path.join(src, f'merged{max(ks)}.slack')] if ks else
+                [base_slack] if os.path.exists(base_slack) else [])
     if best['src'] == 'r' and not measured:
         raise SystemExit('timing_loop.py: --reuse: routed classes but no base.slack in ' + src)
-    new = refine(d, name, work, b, best, measured, w, n, rounds)
+    m = re.search(r'm(\d+)$', best['tag'])
+    new = refine(d, name, work, b, best, measured, w, n, rounds, int(m.group(1)) + 1 if m else 1)
     allc = rows + new
     top = min(allc, key=lambda c: c['delta'])
     write_tsv(os.path.join(work, 'refine.tsv'), allc, top, w, n, t0)
@@ -297,7 +308,8 @@ def main():
     global ROUTER
     if '--router' in sys.argv:
         ROUTER = os.path.abspath(sys.argv[sys.argv.index('--router') + 1])
-    rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else 0
+    # Part 188 (the user, 2026-11-06): two rounds of sticky re-classification by default; --refine 0 turns it off
+    rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else 2
     if '--reuse' in sys.argv:
         top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), max(rounds, 1), t0)
         if out:

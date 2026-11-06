@@ -312,7 +312,12 @@ unbiased and at top-class timing strengths 20 / 180 / 540, scores each with the 
 and OpenROAD (one session), tries the power term (kp 1, 4) at the best, and keeps the best by the
 contest score's change. Ten scored designs sum -22.86 against the unbiased routes (`standard25.env`
 alone -14.41), no design worse; 6 routes and two OpenROAD sessions per design (3 min to ~1.5 h).
-`@standard25.env` stays as the one-route fallback where OpenROAD is not available. Part 133 found why
+`@standard25.env` stays as the one-route fallback where OpenROAD is not available.
+Since 2026-11-06 (Part 188) the loop ends with two rounds of sticky re-classification (`--refine 2`, the
+default; `--refine 0` turns it off): OpenROAD measures the best route's own failing-path slack, it is merged
+with every slack measured before (per net, the worst, so a net the bias fixed stays classed), and the design
+is re-routed at the best's setting while that gains -- ten designs -23.97 -> -25.11, none worse (visible
+ariane -3.31 -> -4.05), for 1-2 more routes and OpenROAD sessions per design. Part 133 found why
 a fixed rule fails: the best strength (20-540) and whether the power term helps depend on each
 design's timing paths, which neither its score weights nor its wire geometry reveal.
 
