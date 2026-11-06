@@ -12816,7 +12816,7 @@ saturated at any budget (Part 137 at one knob each, now at all of them, past twi
 adopted, nothing changed in the settings. B5's next item is the post-pass over candidate trees (LP /
 column generation, GRIP), not more of this pass.
 
-## Part 188 -- ISPD 2025: sticky re-classification from the best route's own slack -- ten designs -23.97 -> -25.11
+## Part 188 -- ISPD 2025: sticky re-classification from the best route's own slack -- ten designs -23.97 -> -25.11 (third round -25.19)
 
 Track D's next step. Part 134 found that classing nets from one biased route's slack drops the nets
 the bias had fixed (visible ariane -1.53 against -2.90 from the unbiased route's slack): those nets pass
@@ -12868,5 +12868,22 @@ factor, a submission would keep it on the small designs at least.
 Also fixed: `--reuse` read Part 134's changes at the 4 decimals `loop.tsv` prints, so a tie looked like a gain
 and ran an extra round (ac1838d: recomputed at full precision; refinement stops when the merged classes or the
 route do not change); `loop.tsv` gains a `classed` column (nets in a refined candidate's classes), separate
-from `slack_nets` (failing nets measured on that route). Not adopted into the standard flow: `--refine`
-stays off by default until the user decides.
+from `slack_nets` (failing nets measured on that route). Adopted at the user's decision: `--refine 2` is the
+loop's default since 2026-11-06 (5cbcc96; `--refine 0` turns it off).
+
+**Part 188c -- a third round** (2026-11-06 14:02-15:07, 65 min; `--reuse` of each Part 188 loop with
+`--refine 1`, starting at round 3, on the four visible designs whose round 2 still gained; raw:
+`~/Code/GlobalRouterRuns/p188c/rf3.visible.*/refine.tsv`, `run.txt`; every candidate legal, 0 open nets):
+
+| design | round 1 gain | round 2 gain | round 3 | round 3 gain | nets classed | time |
+|---|---|---|---|---|---|---|
+| visible ariane | -0.6328 | -0.1129 | -4.0584 | -0.0042 | 15799 -> 16232 | 67 s |
+| visible bsg_chip | -0.2059 | -0.0917 | -2.0415 | -0.0553 | 76974 -> 77982 | 441 s |
+| visible mempool_tile_wrap | -0.0081 | -0.0462 | -0.9427 | -0.0167 | 15427 -> 15483 | 88 s |
+| visible mempool_group | -0.0391 | -0.0033 | same route as m2 | 0 | 300733 -> 300860 | 2676 s |
+
+Sum over the ten: -25.11 -> -25.19 (-0.08, 0.3%); no design worse. The gains shrink by round (ten designs:
+round 1 -0.89, round 2 -0.25, round 3 -0.08) except on bsg_chip, which still gains about half its previous step.
+A third round costs one more route and OpenROAD session only on designs whose round 2 gained (the stop rules end
+the rest earlier); here 54 min, 45 of them on mempool_group for nothing. Not adopted: the default stays
+`--refine 2` unless the user decides otherwise.
