@@ -12932,4 +12932,20 @@ designs' netlists (Part 130 skipped them: not unpacked), one at a time under `/u
 `routability.cpp` (31dcdef): self-test passes, and on visible ariane all 58 fields it shares with Part 130's
 line are identical (its 11 extra fields are Part 139's spectrum measures, `spec_*` / `xs_*`).
 
+**Progress and a disk relief** (visible, 2026-11-07; `p189/guard.log`, `openroad.time`, `relieve.log`). The
+unbiased route's slack session took 7887 s (01:22-03:33; peak footprint 109.5 GB, resident 7.6 GB, swap
+peak 50.8 GB -- 4 GB under the guard, in the band walk that stopped the unbanded test). The routed-class
+group (k20r, k180r, k540r) was routed 03:33-03:53 (11.0-11.4 GB each) and scored in one session 03:55-07:14
+(12031 s, peak footprint 97.8 GB, swap ~41 GB); k20r kept, the other two compressed. The input-class group
+(k20i, k180i, k540i; 11.2-12.3 GB) was routed 07:14-07:36 and its session started 07:38. With swap on the
+same disk, free disk tracks ~106 GB minus swap minus uncompressed routes: at 08:36 it was 28 GB one hour
+into the session, and the previous session's swap had grown ~8 GB more after that point -- a projected
+~20 GB, the guard's stop, which would have ended the loop. So at 08:37 `p189/relieve.sh` compressed
+`k20r.route` (not read by this session; 11.0 -> 0.66 GB, 39 s; free disk 28 -> 38 GB), the same lossless
+step `--lean` takes. `refine` reads the best route uncompressed and does not unpack it, so once this session
+ends and the loop has pruned, the script restores `k20r.route` if no input-class route was kept (k20r or
+base best); a restored k20r that is not best is compressed again by stage 2's prune. The guard's limits
+are unchanged. For a rerun: `--lean` should keep at most three routes uncompressed on this design (the best
+packed while a group it is not part of is scored, restored before refine).
+
 Results: pending.
