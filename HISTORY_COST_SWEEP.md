@@ -12919,9 +12919,10 @@ stage 1 alone: 76 GB).
 
 **Checks** (`p189/eq/eq.txt`, `p189/chain.txt`): `SLACK_BANDS=16` against the single call on the Part 188
 best routes -- visible ariane (10431 nets, 35 s each) and mempool_tile_wrap (11888 nets, 47 s) byte-identical
-slack files and identical tns / wns / power; bsg_chip (56374 nets) running. Then `--lean` with 16 bands, end
-to end on visible ariane (`--refine 1`): its base.slack must equal Part 134's and its ten candidates
-(tag through score change) Parts 134 / 188's. Only if all pass does the visible loop start (`p189/chain.sh`:
+slack files and identical tns / wns / power, and bsg_chip (56374 nets, 239 s single call, 243 s in bands) too.
+Then `--lean` with 16 bands, end to end on visible ariane (`--refine 1`, 01:07-01:13, 342 s): base.slack
+identical to Part 134's, and all ten candidates (tag through score change) identical to Parts 134 / 188's
+(best k540rm1 -3.9413). All passed; the visible loop started 2026-11-07 01:13:32 (`p189/chain.sh`:
 `--lean`, `SLACK_BANDS=16`, `--refine 2`, a guard that stops OpenROAD at swap > 55 GB or free disk < 20 GB,
 OpenROAD under `/usr/bin/time -l`); the blind loop follows if visible ends cleanly (`then_blind.sh`).
 
