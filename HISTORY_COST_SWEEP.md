@@ -12948,4 +12948,18 @@ base best); a restored k20r that is not best is compressed again by stage 2's pr
 are unchanged. For a rerun: `--lean` should keep at most three routes uncompressed on this design (the best
 packed while a group it is not part of is scored, restored before refine).
 
+**Disk cleanup and a temporary-files folder** (2026-11-07 09:03-12:28; `~/Code/GlobalRouterRuns/CLEANUP_2026-11-07.log`,
+`p189/to_temp.log`). With the user's approval: the raw Instruments traces of Parts 153, 163 and 164 were deleted
+(12.1 GB; their reports kept), the unzipped 2025 mempool_group `.def` / `.net` (8.4 GB; in the zip) and
+`p189/vis/base.route.xz` (cmp-identical to `loop.visible`'s), and 93 old dumps and small routes compressed
+losslessly (5060 -> 631 MB, `xz -t` clean). Free disk did not move until five Time Machine local snapshots
+(2026-11-02 .. 2026-11-06 19:32), which held the deleted files, were deleted too (user's choice): free disk 38 ->
+100 GB. A snapshot taken while a big route is uncompressed keeps its space after `--lean` compresses it, so
+temporary files now live in one folder excluded from Time Machine, `~/Code/GlobalRouterTemp` (README inside):
+`p189/loop.blind` is a symlink into it, and the blind mempool_cluster `.def` / `.net` were unzipped there
+(62 s) with file symlinks at the old paths (the loop's unzip check sees them; a test did not write through a
+directory symlink). The visible loop's folder and design files, in use, were excluded directly; `to_temp.sh`
+moves them into the folder once the blind loop starts and copies each loop's small result files (`loop.tsv`,
+slack files, logs) to `p189/results.<set>/`, which stays backed up.
+
 Results: pending.
