@@ -8,7 +8,7 @@ candidate with the contest's own OpenROAD (timing, power -- one session for all 
 evaluator, and keep the best by the contest score's change against the unbiased route.
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
-      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] | --selftest
+      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -23,6 +23,9 @@ term at KP_LADDER with the same classes. Stage 3 (Part 188, default since 2026-1
 default 2): sticky re-classification -- the best route's own failing-path slack merged with every slack
 measured before (per net, the worst), and a re-route at the best's setting, while it gains (ten designs
 -23.97 -> -25.11, none worse). Every candidate is logged to WORK_DIR/loop.tsv.
+`--lean` (Part 189, for designs whose routes are ~11 GB each, mempool_cluster): every route that can no
+longer be the best is compressed (xz) once scored, and stage 1 is scored one class source at a time, so at
+most four routes sit uncompressed (the scores are the same: each route is scored on its own in a session).
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
@@ -43,6 +46,7 @@ SLACK_TCL = os.path.join(GR, 'timing_slack.tcl')
 K3_LADDER = [20, 180, 540]
 KP_LADDER = [1, 4]
 ROUTER = os.path.join(GR, 'pd39route')  # --router PATH to use another build
+LEAN = False  # --lean (Part 189)
 
 
 def env_file(path):
@@ -96,6 +100,25 @@ def route(d, name, work, tag, k3, kp, slack_file=None, slack_mode='replace'):
     opens = re.search(r'open nets : (\d+)', ev)
     return {'tag': tag, 'k3': k3, 'kp': kp, 'route': sol, 'of': float(m.group(1)) if m else float('nan'),
             'opens': int(opens.group(1)) if opens else -1}
+
+
+def pack(c):
+    """--lean: compress a scored candidate's route (it can be unpacked again)."""
+    if LEAN and os.path.exists(c['route']):
+        subprocess.run(['xz', '-T8', '-2', '-f', c['route']], check=True)
+
+
+def unpack(c):
+    if not os.path.exists(c['route']) and os.path.exists(c['route'] + '.xz'):
+        with open(c['route'], 'wb') as g:
+            subprocess.run(['xz', '-dc', c['route'] + '.xz'], stdout=g, check=True)
+
+
+def prune(cands, keep):
+    """--lean: compress every scored candidate but `keep` (the best so far)."""
+    for c in cands:
+        if c is not keep:
+            pack(c)
 
 
 def sta(d, name, cands):
@@ -217,7 +240,9 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
         print(f"{name}: refine {it}: {c['tag']} delta {c['delta']:+.4f} (from {cur['tag']} {cur['delta']:+.4f}, "
               f"{c['classed']} nets classed)", flush=True)
         if c['delta'] >= cur['delta'] or filecmp.cmp(c['route'], cur['route'], shallow=False):
+            pack(c)
             break
+        pack(cur)
         cur = c
     return out
 
@@ -285,6 +310,15 @@ def selftest():
     ok = got == {3: -1.0e-10, 7: -5.0e-10, 9: -3.0e-10}
     ok &= tag_of({'k3': 540, 'src': 'r', 'kp': 0}, 1) == 'k540rm1'
     ok &= tag_of({'k3': 180, 'src': 'i', 'kp': 4}, 2) == 'k180ip4m2'
+    global LEAN  # --lean: a pruned route is compressed, the kept one is not, and unpack restores it exactly
+    r1, r2 = os.path.join(t, 'x.route'), os.path.join(t, 'y.route')
+    open(r1, 'w').write('net0\n(\n0 0 1 0 5 1\n)\n'); shutil.copyfile(r1, r2)
+    LEAN, c1, c2 = True, {'route': r1}, {'route': r2}
+    prune([c1, c2], c2)
+    ok &= not os.path.exists(r1) and os.path.exists(r1 + '.xz') and os.path.exists(r2)
+    unpack(c1)
+    ok &= filecmp.cmp(r1, r2, shallow=False)
+    LEAN = False
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got}')
     shutil.rmtree(t)
     return ok
@@ -305,7 +339,8 @@ def main():
     mode = sys.argv[sys.argv.index('--classes') + 1] if '--classes' in sys.argv else 'both'
     if mode not in ('both', 'routed', 'input'):
         raise SystemExit('timing_loop.py: --classes must be both, routed or input')
-    global ROUTER
+    global ROUTER, LEAN
+    LEAN = '--lean' in sys.argv
     if '--router' in sys.argv:
         ROUTER = os.path.abspath(sys.argv[sys.argv.index('--router') + 1])
     # Part 188 (the user, 2026-11-06): two rounds of sticky re-classification by default; --refine 0 turns it off
@@ -313,6 +348,7 @@ def main():
     if '--reuse' in sys.argv:
         top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), max(rounds, 1), t0)
         if out:
+            unpack(top)
             shutil.copyfile(top['route'], out)
         return
     b = route(d, name, work, 'base', 0, 0)
@@ -321,12 +357,28 @@ def main():
         srcs['r'] = sta_slack(d, name, b, work, net_index(os.path.join(d, name + '.net')))
     if mode in ('both', 'input'):
         srcs['i'] = None  # the input pin slack
-    s1 = [dict(route(d, name, work, f'k{k}{t}', k, 0, sf), src=t) for t, sf in srcs.items() for k in K3_LADDER]
-    n = sta(d, name, s1 if 'r' in srcs else [b] + s1)
+    if 'r' in srcs:
+        pack(b)  # --lean: the unbiased route is not read again
     b['delta'], b['src'] = 0.0, ''
-    for c in s1:
-        c['delta'] = delta(c, b, w, n)
-    best = min([b] + s1, key=lambda c: c['delta'])
+    if LEAN:  # one class source per session; the best so far stays unpacked
+        s1, n, best = [], None, b
+        for t, sf in srcs.items():
+            g = [dict(route(d, name, work, f'k{k}{t}', k, 0, sf), src=t) for k in K3_LADDER]
+            m = sta(d, name, g if 'r' in srcs or n is not None else [b] + g)
+            if n is not None and m != n:
+                raise SystemExit(f'timing_loop.py: endpoint count {m} != {n}')
+            n = m
+            for c in g:
+                c['delta'] = delta(c, b, w, n)
+            s1 += g
+            best = min([b] + s1, key=lambda c: c['delta'])
+            prune([b] + s1, best)
+    else:
+        s1 = [dict(route(d, name, work, f'k{k}{t}', k, 0, sf), src=t) for t, sf in srcs.items() for k in K3_LADDER]
+        n = sta(d, name, s1 if 'r' in srcs else [b] + s1)
+        for c in s1:
+            c['delta'] = delta(c, b, w, n)
+        best = min([b] + s1, key=lambda c: c['delta'])
     sf = srcs.get(best['src']) if best['src'] else srcs.get('r')
     s2 = [dict(route(d, name, work, f'k{best["k3"]}{best["src"]}p{kp}', best['k3'], kp, sf), src=best['src'])
           for kp in KP_LADDER]
@@ -335,11 +387,13 @@ def main():
         c['delta'] = delta(c, b, w, n)
     allc = [b] + s1 + s2
     best = min(allc, key=lambda c: c['delta'])
+    prune(allc, best)
     if rounds > 0:  # Part 188: sticky re-classification from the best route's own slack
         allc += refine(d, name, work, b, best, [srcs['r']] if srcs.get('r') else [], w, n, rounds)
         best = min(allc, key=lambda c: c['delta'])
     write_tsv(os.path.join(work, 'loop.tsv'), allc, best, w, n, t0)
     if out:
+        unpack(best)
         shutil.copyfile(best['route'], out)
     print(f"{name}: best {best['tag']} (k3 {best['k3']}, kp {best['kp']}) delta {best['delta']:+.4f}, "
           f"{len(allc)} candidates, {time.time() - t0:.0f} s")

@@ -77,8 +77,9 @@ report_wns
 report_power
 set worst [dict create]
 set skipped 0
-foreach p [find_timing_paths -path_delay max -group_count 100000000 -endpoint_count 1 -slack_max 0.0] {
+proc take_path {p} {
   # a path or point without an object (mempool_tile_wrap has some) is skipped and counted
+  upvar #0 worst worst skipped skipped
   if {[catch {
     set s [get_property $p slack]
     foreach pt [get_property $p points] {
@@ -88,6 +89,37 @@ foreach p [find_timing_paths -path_delay max -group_count 100000000 -endpoint_co
       if {![dict exists $worst $nm] || $s < [dict get $worst $nm]} { dict set worst $nm $s }
     }
   }]} { incr skipped }
+}
+# Part 189: SLACK_BANDS=K walks the failing paths in K slack bands, worst first (edges wns/2, wns/4, ...,
+# wns/2^(K-1), 0), so OpenSTA holds one band's path ends at a time instead of all of them (mempool_cluster:
+# ~35-40 GB on a 24 GB Mac). OpenSTA keeps, per endpoint and path group, the worst end *inside* the band,
+# so an endpoint can also show a better end in a later band: only its first (worst) end, keyed by endpoint
+# and endpoint clock, is taken -- the same ends as the single call (checked on the small designs, Part 189).
+set wns_ui [sta::time_sta_ui [sta::worst_slack_cmd max]]
+if {[info exists ::env(SLACK_BANDS)] && $::env(SLACK_BANDS) > 1 && $wns_ui < 0.0} {
+  set K $::env(SLACK_BANDS)
+  set edges [list -1e+30]
+  for {set k 1} {$k < $K} {incr k} { lappend edges [expr {$wns_ui / pow(2.0, $k)}] }
+  lappend edges 0.0
+  set seen [dict create]
+  set taken 0
+  for {set i 0} {$i < $K} {incr i} {
+    set paths [find_timing_paths -path_delay max -group_count 100000000 -endpoint_count 1 \
+                 -slack_min [lindex $edges $i] -slack_max [lindex $edges [expr {$i + 1}]]]
+    foreach p $paths {
+      set key "[get_full_name [get_property $p endpoint]] [get_property $p endpoint_clock]"
+      if {[dict exists $seen $key]} { continue }
+      dict set seen $key 1
+      incr taken
+      take_path $p
+    }
+    unset paths
+  }
+  puts "SLACKBANDS $K paths $taken"
+} else {
+  foreach p [find_timing_paths -path_delay max -group_count 100000000 -endpoint_count 1 -slack_max 0.0] {
+    take_path $p
+  }
 }
 puts "SKIPPEDPATHS $skipped"
 set f [open $::env(SLACK_OUT) w]
