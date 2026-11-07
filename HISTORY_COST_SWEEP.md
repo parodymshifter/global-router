@@ -12926,4 +12926,10 @@ identical to Part 134's, and all ten candidates (tag through score change) ident
 `--lean`, `SLACK_BANDS=16`, `--refine 2`, a guard that stops OpenROAD at swap > 55 GB or free disk < 20 GB,
 OpenROAD under `/usr/bin/time -l`); the blind loop follows if visible ends cleanly (`then_blind.sh`).
 
+**Predictors for the Atlas** (queued, `p189/then_features.sh`): after the blind loop, `routability` on both
+designs' netlists (Part 130 skipped them: not unpacked), one at a time under `/usr/bin/time -l`, into
+`p189/features_cluster.txt`, for Atlas v7. The build is `gr/routability.p189`, fresh from the current
+`routability.cpp` (31dcdef): self-test passes, and on visible ariane all 58 fields it shares with Part 130's
+line are identical (its 11 extra fields are Part 139's spectrum measures, `spec_*` / `xs_*`).
+
 Results: pending.
