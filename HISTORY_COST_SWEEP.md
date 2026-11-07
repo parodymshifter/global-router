@@ -12886,4 +12886,43 @@ Sum over the ten: -25.11 -> -25.19 (-0.08, 0.3%); no design worse. The gains shr
 round 1 -0.89, round 2 -0.25, round 3 -0.08) except on bsg_chip, which still gains about half its previous step.
 A third round costs one more route and OpenROAD session only on designs whose round 2 gained (the stop rules end
 the rest earlier); here 54 min, 45 of them on mempool_group for nothing. Not adopted: the default stays
-`--refine 2` unless the user decides otherwise.
+`--refine 2` (the user, 2026-11-06: keep it at 2).
+
+## Part 189 -- ISPD 2025: mempool_cluster with timing on a 24 GB Mac -- `--lean`, slack bands (running)
+
+**Why.** mempool_cluster (visible and blind) was the last 2025 design without a timing score: Part 130
+noted its OpenROAD session would load a 9.7 GB DEF on 24 GB of RAM, and disk was short then. Disk now
+has ~120 GB free, so the open question was OpenROAD's memory. The user: score it with timing; then (after
+the measurement below) run the full loop on swap.
+
+**Measured** (2026-11-06; visible; raw: `~/Code/GlobalRouterRuns/p189/feas.txt`, `guard.log`,
+`openroad.time`). Unpacking the netlist and DEF from the local zip took 52 s (18 GB). The unbiased route
+(the 2024 standard, `pd39route.p186`, 8 threads): 491 s, peak memory footprint 18.3 GB, legal (0 open
+nets), overflow cost 178597927.0813, and a **10.9 GB route file**. One OpenROAD slack session on it
+(19:45-21:18): design load ~10 min (swap 8 -> 23 GB), parasitics, timing and power to ~21:15 with swap
+~34 GB and resident memory only 3-5.5 GB -- about **35-40 GB of footprint on a 24 GB machine**. It printed
+tns -82910.21, wns -0.92890584, power 23.667 W, then was killed by the run's own guard (swap > 40 GB) inside
+the failing-path walk, minutes from the end. A full loop at that cost: ~7 OpenROAD sessions and 9 routes,
+~15 h per design; and as written the loop keeps every candidate's route on disk at once (base plus six in
+stage 1 alone: 76 GB).
+
+**Two changes** (9f2ffb6; both off unless asked for, and then exactly as before otherwise):
+- `timing_loop.py --lean`: every scored route that can no longer be the best is compressed (`xz -2`), and
+  stage 1 is scored one class source per OpenROAD session, so at most four routes sit uncompressed (~44 GB).
+  The scores cannot change: each route is scored on its own within a session (Part 188's re-measure check,
+  1e-6, has held on every design). The self-test covers compress / restore.
+- `timing_slack.tcl` with `SLACK_BANDS=K`: the failing paths are walked in K slack bands, worst first (edges
+  wns/2, wns/4, ..., wns/2^(K-1), 0), so OpenSTA holds one band's path ends at a time. OpenSTA's filter
+  (`PathGroup::savable`, then `MakePathEnds1`) keeps the worst end per endpoint and path group *inside* a
+  band, so an endpoint whose worst end lies in an earlier band can show a better end in a later one; only
+  each endpoint's first end, keyed by endpoint and endpoint clock, is taken -- the single call's ends.
+
+**Checks** (`p189/eq/eq.txt`, `p189/chain.txt`): `SLACK_BANDS=16` against the single call on the Part 188
+best routes -- visible ariane (10431 nets, 35 s each) and mempool_tile_wrap (11888 nets, 47 s) byte-identical
+slack files and identical tns / wns / power; bsg_chip (56374 nets) running. Then `--lean` with 16 bands, end
+to end on visible ariane (`--refine 1`): its base.slack must equal Part 134's and its ten candidates
+(tag through score change) Parts 134 / 188's. Only if all pass does the visible loop start (`p189/chain.sh`:
+`--lean`, `SLACK_BANDS=16`, `--refine 2`, a guard that stops OpenROAD at swap > 55 GB or free disk < 20 GB,
+OpenROAD under `/usr/bin/time -l`); the blind loop follows if visible ends cleanly (`then_blind.sh`).
+
+Results: pending.
