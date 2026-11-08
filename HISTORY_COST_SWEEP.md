@@ -13054,7 +13054,8 @@ self-test round-trips the file exactly and fails on a broken merge; `p189/resume
 `loop.tsv` identical in all twelve columns, (3) resumed with every score saved: identical, no OpenROAD session and no
 route run (its `.tcl` and `.err` files untouched), 0 s. The blind loop reruns with `--resume` (`p189/loop_resume.sh`),
 skipping the unbiased route and its 2 h 6 min slack session and all six routings, once the user has set Time Machine
-to back up manually (no new local snapshots).
+to back up manually (no new local snapshots). The user did; it started at 10:05:02 (`start_resume.sh`; no local
+snapshots, 118 GB free) and began by evaluating the packed unbiased route.
 
 **Routability predictors for both mempool_cluster designs** (`p189/then_features.sh` after the blind loop,
 06:35-06:36; `p189/features_cluster.txt`, `features.<set>.time`; `routability.p189`). Visible: 10446140 nets, 10080625
