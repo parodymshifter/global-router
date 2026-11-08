@@ -13123,4 +13123,9 @@ route's 178.60M (57.5%; changeable 75.89M = 0.379 score units at 5e-9), blind **
 per GCell). Twelve-design sum of the changeable part of the unbiased routes: **3.43 score units** (2.52 + 0.38 + 0.53);
 the visible cluster's best route adds +0.147 of overflow, the blind's best so far +0.178.
 
+**Second session** (input-class group): k20i / k180i / k540i evaluated from their packed routes 15:16-15:22, overflow
+costs 228447934 / 298795205 / 346070001 -- +34.5M / +104.8M / +152.1M over the unbiased route, i.e. +0.345 / +1.048 /
++1.521 score units before any timing gain (k180r's whole change is -0.3139; the visible design's input classes paid
++0.145 / +0.644 / +0.983). The scoring session started 15:22:54 with 83 GB free and 8.8 GB of swap.
+
 Results for the blind design and the twelve-design sum: pending.
