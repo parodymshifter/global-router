@@ -13003,6 +13003,15 @@ timing-and-power gain into +0.582. The input-slack classes beat the routed-estim
 classes at k20 (-0.6989 against -0.6258) and lose to them at k180 and k540, where their wider bias costs
 overflow the routed classes do not. Refine changed only TNS and power (WNS identical, the same critical path),
 0.0002 per round, for 3 h 34 min and about 3 h 40 min of OpenROAD and routing; on this design `--refine 0`
-would have ended at about 13:57 with -0.6989 instead of 21:12 with -0.6993. Blind mempool_cluster: started
-21:14:03, running. Results for the blind design, the routability predictors for both, and the twelve-design
-sum: pending.
+would have ended at about 13:57 with -0.6989 instead of 21:12 with -0.6993. 
+
+**Blind mempool_cluster, the unbiased route and its slack session** (2026-11-07; `p189/openroad.time`,
+`p189/guard.log`, `p189/loop.blind/*.err`). The loop started 21:14:03 (work folder in `~/Code/GlobalRouterTemp`,
+design files unzipped there). The unbiased route took 285 s (peak footprint 19.9 GB; 0.70 GB compressed) and
+ends with real (wire + via) overflow 1733478, against 4205024 for the visible design's. OpenROAD measured its slack
+21:21-23:27: 7551 s (2 h 6 min; visible 7887 s), peak footprint 112.6 GB (visible 109.5 GB), resident 7.1 GB, swap
+peak 50.2 GB -- 4.8 GB under the guard, the same margin as the visible session (50.8 GB) with `SLACK_BANDS=16`;
+free disk stayed >= 67 GB (the visible loop's low was 28 GB, in its input-class session, before the cleanup above).
+The guard did not act. The routed-class group then routed 23:27-23:44 (k20r / k180r / k540r: 250 s each, 11.6-12.0 GB, peak
+footprint 20.7-21.8 GB; real overflow 2768619 / 6452354 / 8032674) and has been scored in one session since 23:46.
+Results for the blind design, the routability predictors for both, and the twelve-design sum: pending.
