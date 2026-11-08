@@ -13119,7 +13119,7 @@ follows, then stage 2 and refine.
 
 **Both mempool_cluster floors** (15:16:17-15:16:32, 6 s / 9 s; `p189/floors.txt`): visible **102.71M** of the unbiased
 route's 178.60M (57.5%; changeable 75.89M = 0.379 score units at 5e-9), blind **141.02M** of 193.95M (72.7%; changeable
-52.93M = 0.529 units at 1e-8). On both, 96-97% of the floor is metal7-10 (the wide upper layers, idle at e^(-c/2) x 5
+52.93M = 0.529 units at 1e-8). On both, 95.5-95.6% of the floor is metal7-10 (the wide upper layers, idle at e^(-c/2) x 5
 per GCell). Twelve-design sum of the changeable part of the unbiased routes: **3.43 score units** (2.52 + 0.38 + 0.53);
 the visible cluster's best route adds +0.147 of overflow, the blind's best so far +0.178.
 
