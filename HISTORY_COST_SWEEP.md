@@ -12975,4 +12975,34 @@ its blind designs showed (ariane 0.0010, the other four 0). Because it gained, r
 slack 17:32-19:31 (7177 s, peak footprint 107.1 GB, swap peak 48.3 GB), k20im2 routed by 19:37 and scored from 19:39.
 Round 1 took 3 h 34 min (13:57-17:31) for that 0.0002; the guard has not acted since Part 189's unbanded test.
 
-Results: pending.
+**Visible mempool_cluster: -0.6993** (`p189/loop.visible/loop.tsv`, copied to `p189/results.visible/`; contest
+score change against our unbiased route, lower is better; weights WNS -1.0, TNS/endpoints -10.0, power 0.3,
+overflow 5e-9, 1443997 endpoints). The loop ran 01:13:32-21:12:50 (71958 s, 19 h 59 min, 11 candidates) and
+exited cleanly.
+
+| candidate | k3 | kp | WNS (ns) | TNS (ns) | power | overflow cost | change |
+|---|---|---|---|---|---|---|---|
+| base (unbiased) | 0 | 0 | -0.9289 | -82910 | 23.6668 | 178597927 | +0.0000 |
+| k20r | 20 | 0 | -0.3573 | -72848 | 23.6367 | 183496635 | -0.6258 |
+| k180r | 180 | 0 | -0.3475 | -68842 | 23.6002 | 194811279 | -0.6177 |
+| k540r | 540 | 0 | -0.3406 | -65827 | 23.5950 | 200372957 | -0.6193 |
+| k20i | 20 | 0 | -0.2802 | -63181 | 23.4704 | 207675385 | -0.6989 |
+| k180i | 180 | 0 | -0.2725 | -60206 | 23.2578 | 307290897 | -0.2928 |
+| k540i | 540 | 0 | -0.2618 | -56796 | 23.1870 | 375111042 | -0.0093 |
+| k20ip1 | 20 | 1 | -0.2767 | -59881 | 22.8674 | 267979462 | -0.6046 |
+| k20ip4 | 20 | 4 | -0.2615 | -55303 | 22.0691 | 562511056 | +0.5816 |
+| k20im1 (refine 1) | 20 | 0 | -0.2802 | -62975 | 23.4687 | 208028296 | -0.6991 |
+| **k20im2 (refine 2)** | 20 | 0 | -0.2802 | -62923 | 23.4686 | 208064082 | **-0.6993** |
+
+The best, k20im2, splits as WNS -0.6487, TNS -0.1384, power -0.0595, overflow +0.1473: the worst path improves
+from -0.929 to -0.280 ns, and it is the weakest bias that does most of it. On this design the overflow term
+decides the strength -- each step up in k3 or kp buys a little more timing and power and pays much more overflow:
+in the input classes the timing-and-power part goes -0.844 / -0.936 / -0.992 at k3 20 / 180 / 540 while the overflow
+part goes +0.145 / +0.644 / +0.983, and k20ip4's overflow cost, 3.15x the unbiased route's, turns a -1.338
+timing-and-power gain into +0.582. The input-slack classes beat the routed-estimate
+classes at k20 (-0.6989 against -0.6258) and lose to them at k180 and k540, where their wider bias costs
+overflow the routed classes do not. Refine changed only TNS and power (WNS identical, the same critical path),
+0.0002 per round, for 3 h 34 min and about 3 h 40 min of OpenROAD and routing; on this design `--refine 0`
+would have ended at about 13:57 with -0.6989 instead of 21:12 with -0.6993. Blind mempool_cluster: started
+21:14:03, running. Results for the blind design, the routability predictors for both, and the twelve-design
+sum: pending.
