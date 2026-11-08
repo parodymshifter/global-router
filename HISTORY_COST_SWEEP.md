@@ -13097,4 +13097,30 @@ visible design's are -1, -10, 0.3, 5e-9 -- so its unbiased route's 193.9M is 1.9
 the loop reads each design's weights from its `.cap`, so its scores were right.) Both mempool_cluster floors: after the
 current OpenROAD session.
 
-Results for the blind design, both mempool_cluster floors, and the twelve-design sum: pending.
+**Resumed blind loop, first session** (2026-11-08; `p189/openroad.time`, `loop.blind/scores.jsonl`): the unbiased route
+and the routed-class group scored in one session 10:15:26-15:14:49 (17963 s, 4 h 59 min -- 3 h 55 min for three routes
+last night; peak footprint 112.8 GB, resident 7.5 GB, swap peak 49.9 GB at 15:08, free disk >= 45 GB). At 13:57 the
+guard's swap limit was raised 55 -> 65 GB (`p189/guard2.sh`; swap sat at 43-45 GB with the 5-10 GB end-of-session rises
+seen before; the free-disk floor of 20 GB, which swap draws on, is unchanged and stays the binding stop); the peak
+stayed under the old limit, and the guard did not act. No Time Machine local snapshot exists (automatic backups paused).
+Blind weights WNS -0.4, TNS -4 / endpoints, power 2, overflow 1e-8; 1443997 endpoints:
+
+| candidate | WNS (ns) | TNS (ns) | power | overflow cost | WNS / TNS / power / overflow part | change |
+|---|---|---|---|---|---|---|
+| base | -1.5274 | -126326.5 | 24.4524 | 193948795 | -- | +0.0000 |
+| k20r | -1.0916 | -102985.8 | 24.4178 | 200923256 | -0.1743 / -0.0647 / -0.0693 / +0.0697 | -0.2385 |
+| **k180r** | -1.0378 | -81611.8 | 24.3662 | 211766196 | -0.1958 / -0.1239 / -0.1724 / +0.1782 | **-0.3139** |
+| k540r | -1.0356 | -81379.4 | 24.3610 | 217681194 | -0.1967 / -0.1245 / -0.1830 / +0.2373 | -0.2669 |
+
+k180r is kept, as in last night's lost session; k20r and k540r packed again. As on the visible design, overflow sets the
+strength: k540r buys almost nothing more in timing (WNS -0.0009, TNS -0.0006 vs k180r) and pays +0.0591 in overflow.
+The input-class group (k20i / k180i / k540i, routed last night) is being evaluated from its packed routes; its session
+follows, then stage 2 and refine.
+
+**Both mempool_cluster floors** (15:16:17-15:16:32, 6 s / 9 s; `p189/floors.txt`): visible **102.71M** of the unbiased
+route's 178.60M (57.5%; changeable 75.89M = 0.379 score units at 5e-9), blind **141.02M** of 193.95M (72.7%; changeable
+52.93M = 0.529 units at 1e-8). On both, 96-97% of the floor is metal7-10 (the wide upper layers, idle at e^(-c/2) x 5
+per GCell). Twelve-design sum of the changeable part of the unbiased routes: **3.43 score units** (2.52 + 0.38 + 0.53);
+the visible cluster's best route adds +0.147 of overflow, the blind's best so far +0.178.
+
+Results for the blind design and the twelve-design sum: pending.
