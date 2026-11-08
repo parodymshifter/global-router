@@ -13055,7 +13055,9 @@ self-test round-trips the file exactly and fails on a broken merge; `p189/resume
 route run (its `.tcl` and `.err` files untouched), 0 s. The blind loop reruns with `--resume` (`p189/loop_resume.sh`),
 skipping the unbiased route and its 2 h 6 min slack session and all six routings, once the user has set Time Machine
 to back up manually (no new local snapshots). The user did; it started at 10:05:02 (`start_resume.sh`; no local
-snapshots, 118 GB free) and began by evaluating the packed unbiased route.
+snapshots, 118 GB free) and began by evaluating the packed unbiased route. The four evaluations (10:05-10:15;
+`loop.blind/scores.jsonl`) give overflow costs base 193948794, k20r 200923256, k180r 211766196, k540r 217681194, and
+the session scoring the unbiased route with the routed group started at 10:15:26 with 85 GB free.
 
 **Routability predictors for both mempool_cluster designs** (`p189/then_features.sh` after the blind loop,
 06:35-06:36; `p189/features_cluster.txt`, `features.<set>.time`; `routability.p189`). Visible: 10446140 nets, 10080625
