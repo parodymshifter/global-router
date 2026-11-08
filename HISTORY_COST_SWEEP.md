@@ -13013,5 +13013,9 @@ ends with real (wire + via) overflow 1733478, against 4205024 for the visible de
 peak 50.2 GB -- 4.8 GB under the guard, the same margin as the visible session (50.8 GB) with `SLACK_BANDS=16`;
 free disk stayed >= 67 GB (the visible loop's low was 28 GB, in its input-class session, before the cleanup above).
 The guard did not act. The routed-class group then routed 23:27-23:44 (k20r / k180r / k540r: 250 s each, 11.6-12.0 GB, peak
-footprint 20.7-21.8 GB; real overflow 2768619 / 6452354 / 8032674) and has been scored in one session since 23:46.
+footprint 20.7-21.8 GB; real overflow 2768619 / 6452354 / 8032674) and was scored in one session 23:46:10-03:40:55
+(14085 s, 3 h 55 min -- visible 12031 s; peak footprint 101.4 GB, resident 11.7 GB, swap peak 45.0 GB, free disk >= 54
+GB; the guard did not act). **k180r was kept** (k20r and k540r compressed at 03:41), where the visible design kept
+k20r; the three changes are written to `loop.tsv` only when the loop ends. The input-class group started routing at
+03:41:38.
 Results for the blind design, the routability predictors for both, and the twelve-design sum: pending.
