@@ -13065,4 +13065,36 @@ GCells, utilization 0.4413, RUDY p99 1.305 / p99.9 1.860, RUDY over capacity 0.0
 peak footprint 10.8 GB. Blind: 10876903 nets, 13830961 GCells, utilization 0.3295, RUDY p99 1.121 / p99.9 1.612,
 over capacity 0.0163, pins per net max 76; 25.6 s, peak footprint 11.3 GB. The blind design is the larger and the
 less congested one (its unbiased route ended at 1733478 real overflow against the visible design's 4205024).
-Results for the blind design, the routability predictors for both, and the twelve-design sum: pending.
+**The idle-GCell floor of the 2025 designs** (2026-11-08, the user's request). The overflow cost (ISPD24_FORMAT.md) charges
+every routing-layer GCell exp(0.5 (d/2 - c)), so an empty solution already pays sum over z >= 1 of overflowCost[z] x
+sum exp(-c/2) over GCells with c > 0.001 -- a floor no route can go below. `p189/g24_floor.cpp` computes it from the
+`.cap` alone (the loop and loss of `g24_verify`'s per-layer floor; seconds, no route read); it reproduces the recorded
+2024 floors to the digit (mempool_tile_rank 2538617.8, Part 102; ariane_68_rank 7064900.0, Part 105's 7.06M). The ten
+designs of Part 188 (13:37:43-13:37:51, 8 s for all ten; `p189/floors.txt`, `p189/floors_table.txt`), against each
+design's unbiased route (Part 134) and Part 188's best; score = w_overflow x cost, lower is better:
+
+| set | design | w_overflow | floor | unbiased overflow cost | floor share | changeable (cost) | changeable (score) | best (Part 188) | best's overflow cost | best's added cost (score) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| visible | ariane | 3e-07 | 5.424M | 5.767M | 94.1% | 0.343M | 0.103 | k540rm2 (-4.0542) | 7.056M | +0.387 |
+| visible | bsg_chip | 4e-08 | 17.971M | 20.774M | 86.5% | 2.803M | 0.112 | k540rm2 (-1.9862) | 27.128M | +0.254 |
+| visible | NV_NVDLA_partition_c | 1.5e-07 | 11.733M | 12.987M | 90.3% | 1.254M | 0.188 | k540r (-6.2887) | 13.178M | +0.029 |
+| visible | mempool_group | 3e-08 | 24.101M | 44.308M | 54.4% | 20.207M | 0.606 | k180ip4m2 (-7.5202) | 190.656M | +4.390 |
+| visible | mempool_tile_wrap | 7e-07 | 1.698M | 1.945M | 87.3% | 0.247M | 0.173 | k180rp1m2 (-0.9260) | 3.328M | +0.968 |
+| blind | ariane | 4e-07 | 3.921M | 4.283M | 91.5% | 0.362M | 0.145 | k180im1 (-0.2551) | 4.426M | +0.057 |
+| blind | bsg_chip | 2e-08 | 17.965M | 20.979M | 85.6% | 3.014M | 0.060 | k180i (-0.2351) | 21.037M | +0.001 |
+| blind | NV_NVDLA_partition_c | 1e-07 | 11.728M | 13.132M | 89.3% | 1.404M | 0.140 | k20r (-1.4391) | 13.201M | +0.007 |
+| blind | mempool_group | 4e-08 | 24.099M | 41.954M | 57.4% | 17.856M | 0.714 | k20ip1 (-1.2559) | 76.882M | +1.397 |
+| blind | mempool_tile_wrap | 1e-06 | 1.385M | 1.663M | 83.3% | 0.278M | 0.278 | k20ip1 (-1.1491) | 2.727M | +1.064 |
+
+The floor is 83-94% of the unbiased routes' overflow cost on eight designs and 54-57% on the two mempool_group designs.
+The part a router can change at all is worth **2.52 score units summed over the ten** -- removing every bit of it (not
+possible: it is the cost of carrying the wire) would gain less than a tenth of the timing loop's -25.11. The best routes
+instead **add 8.56 units of overflow** to buy their timing and power (visible mempool_group +4.39: 44.3M -> 190.7M,
+for a net -7.52). So the overflow term matters through how much the bias adds, not through the unbiased routes' own
+overflow -- a cheaper way to carry the critical nets, not a better congestion stage, is where it can pay. (Correction to
+the reply that raised this: the blind mempool_cluster's weights are WNS -0.4, TNS -4, power 2, overflow 1e-8 -- the
+visible design's are -1, -10, 0.3, 5e-9 -- so its unbiased route's 193.9M is 1.94 units and k540r's +23.7M is +0.24;
+the loop reads each design's weights from its `.cap`, so its scores were right.) Both mempool_cluster floors: after the
+current OpenROAD session.
+
+Results for the blind design, both mempool_cluster floors, and the twelve-design sum: pending.
