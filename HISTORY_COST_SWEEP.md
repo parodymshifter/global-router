@@ -13024,4 +13024,26 @@ would otherwise have left ~20 GB, the guard's stop. k180r was packed by 03:43:15
 group routed 03:41:38-04:00:04 (k20i / k180i / k540i: 284 / 279 / 288 s, 11.8-12.8 GB, peak footprint 20.4-22.3 GB;
 real overflow 12787646 / 34108221 / 42208713, against the visible design's 14842535 / 42492129 / 51820776), and its
 scoring session started at 04:02:18 with 51 GB free and 10 GB of swap.
+
+**The blind loop was stopped by the guard** (2026-11-08 06:33:39; `p189/guard.log`, `run.blind.err`). Neither
+relief freed anything: a Time Machine local snapshot taken at 02:11 (and one from 2026-11-07 18:43) held
+`k180r.route` and the visible design's `.def` / `.net` -- compressed 04:03-04:05 to save another 17.9 GB
+(`relieve2.blind.sh`, restored byte-for-byte in size at 06:34) -- so free disk fell 51 -> 36 GB in the session's
+first 10 minutes and then with swap (25 GB at 05:02, 21 GB from 06:12) until 19 GB at 06:33:39, 2 h 31 min into the
+session, with k20i and k180i scored and k540i in progress. OpenROAD was killed, `timing_loop.py` exited ("OpenROAD
+failed", `done blind rc=1` at 06:33:41), and no `loop.tsv` was written: the loop holds candidates' scores in memory
+until the end, so the unbiased route's and the routed group's timing and power are lost; `run.blind.err` keeps the
+last 2000 characters of the failed session (k180i: WNS -0.3226, TNS -51099, power 24.1125; k20i partly). The
+`.route.xz` files, `base.slack` and the logs are intact (`results.blind/`). **The lesson: `tmutil addexclusion`
+keeps a folder out of the backups, not out of the local snapshots** -- a snapshot is the whole volume, so with
+automatic backups on, every route `--lean` compresses after the next snapshot keeps its 11-12 GB until that snapshot
+is deleted, and the disk model above (free = ~106 GB - swap - uncompressed routes) only holds without snapshots. With
+the user's approval the two snapshots were deleted at 09:30 (free disk 55 -> 119 GB; `CLEANUP_2026-11-07.log`).
+
+**Routability predictors for both mempool_cluster designs** (`p189/then_features.sh` after the blind loop,
+06:35-06:36; `p189/features_cluster.txt`, `features.<set>.time`; `routability.p189`). Visible: 10446140 nets, 10080625
+GCells, utilization 0.4413, RUDY p99 1.305 / p99.9 1.860, RUDY over capacity 0.0331, pins per net max 253; 23.6 s,
+peak footprint 10.8 GB. Blind: 10876903 nets, 13830961 GCells, utilization 0.3295, RUDY p99 1.121 / p99.9 1.612,
+over capacity 0.0163, pins per net max 76; 25.6 s, peak footprint 11.3 GB. The blind design is the larger and the
+less congested one (its unbiased route ended at 1733478 real overflow against the visible design's 4205024).
 Results for the blind design, the routability predictors for both, and the twelve-design sum: pending.
