@@ -12962,4 +12962,17 @@ directory symlink). The visible loop's folder and design files, in use, were exc
 moves them into the folder once the blind loop starts and copies each loop's small result files (`loop.tsv`,
 slack files, logs) to `p189/results.<set>/`, which stays backed up.
 
+**The power term and refine round 1** (2026-11-07; `p189/openroad.time`, `p189/guard.log`, `p189/run.txt`). The
+input-class session ended 11:09 (12657 s, peak footprint 98.6 GB); k20i was the best of six, kept uncompressed, and
+`relieve.sh` left k20r packed. Stage 2 routed k20ip1 and k20ip4 (320 s each) and scored both in one session 11:25-13:56
+(9100 s, peak footprint 86.4 GB, swap peak 37.7 GB, free disk >= 80 GB); neither beat k20i, and `--lean` compressed both
+(their changes are recorded only in `loop.tsv`, written when the loop ends). Refine round 1 measured k20i's own
+failing-path slack 13:57-15:56 (7116 s, peak footprint 107.1 GB, resident 9.3 GB, swap peak 48.7 GB -- 6.3 GB under the
+guard), merged it with the unbiased route's slack (983669 nets classed), routed k20im1 (331 s, 11.2 GB route, peak
+footprint 19.1 GB) and scored it 16:03-17:31 (5277 s, peak footprint 76.9 GB): **k20im1 -0.6991 against k20i -0.6989**,
+a gain of 0.0002 -- far below the 0.04-0.75 that refine gave four of Part 188's five visible designs, and of the size
+its blind designs showed (ariane 0.0010, the other four 0). Because it gained, round 2 ran: k20im1's
+slack 17:32-19:31 (7177 s, peak footprint 107.1 GB, swap peak 48.3 GB), k20im2 routed by 19:37 and scored from 19:39.
+Round 1 took 3 h 34 min (13:57-17:31) for that 0.0002; the guard has not acted since Part 189's unbanded test.
+
 Results: pending.
