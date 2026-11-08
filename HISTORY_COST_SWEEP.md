@@ -13017,5 +13017,8 @@ footprint 20.7-21.8 GB; real overflow 2768619 / 6452354 / 8032674) and was score
 (14085 s, 3 h 55 min -- visible 12031 s; peak footprint 101.4 GB, resident 11.7 GB, swap peak 45.0 GB, free disk >= 54
 GB; the guard did not act). **k180r was kept** (k20r and k540r compressed at 03:41), where the visible design kept
 k20r; the three changes are written to `loop.tsv` only when the loop ends. The input-class group started routing at
-03:41:38.
+03:41:38. The same disk relief as the visible loop's runs from 03:42 (`p189/relieve.blind.sh`, `relieve.blind.log`):
+`k180r.route` is compressed while the input group routes and is scored, and restored before refine if no input-class
+route is kept -- with 86 GB free and the visible input session's ~30 GB of swap growth, the three new routes (~36 GB)
+would otherwise have left ~20 GB, the guard's stop.
 Results for the blind design, the routability predictors for both, and the twelve-design sum: pending.
