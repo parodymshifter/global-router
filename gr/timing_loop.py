@@ -8,7 +8,7 @@ candidate with the contest's own OpenROAD (timing, power -- one session for all 
 evaluator, and keep the best by the contest score's change against the unbiased route.
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
-      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] | --selftest
+      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -26,10 +26,15 @@ measured before (per net, the worst), and a re-route at the best's setting, whil
 `--lean` (Part 189, for designs whose routes are ~11 GB each, mempool_cluster): every route that can no
 longer be the best is compressed (xz) once scored, and stage 1 is scored one class source at a time, so at
 most four routes sit uncompressed (the scores are the same: each route is scored on its own in a session).
+Every score is also written to WORK_DIR/scores.jsonl as soon as it is measured (Part 189: a guard kill 2 h 31 min
+into a session lost a whole day's scores, which lived only in memory). `--resume` restarts a stopped loop in
+the same WORK_DIR: a route that was compressed or evaluated before is not routed again, a candidate already
+scored is not scored again, and a slack file already written is not measured again -- the rest runs as
+before, so the result is the same as an uninterrupted run's.
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
-import filecmp, os, re, shutil, subprocess, sys, time
+import filecmp, json, os, re, shutil, subprocess, sys, time
 
 GR = os.path.dirname(os.path.abspath(__file__))
 EVAL_DIR = os.path.expanduser('~/Code/GlobalRouterRuns/ispd25eval')       # NanGate45 libraries, setRC.tcl
@@ -47,6 +52,35 @@ K3_LADDER = [20, 180, 540]
 KP_LADDER = [1, 4]
 ROUTER = os.path.join(GR, 'pd39route')  # --router PATH to use another build
 LEAN = False  # --lean (Part 189)
+CKPT, RESUME, DONE, N_SAVED = None, False, {}, None  # scores.jsonl and --resume (Part 189)
+SAVED = ('tag', 'k3', 'kp', 'src', 'of', 'opens', 'wns', 'tns', 'power', 'slack_nets', 'slack_unmatched', 'classed')
+SCORED = ('wns', 'tns', 'power')
+
+
+def save(c=None, n=None):
+    """Append a candidate's measured fields (or the endpoint count) to scores.jsonl at once."""
+    global N_SAVED
+    if not CKPT:
+        return
+    rec = {'endpoints': n} if c is None else {k: c[k] for k in SAVED if k in c}
+    with open(CKPT, 'a') as f:
+        f.write(json.dumps(rec) + '\n')
+    if c is None:
+        N_SAVED = n
+    else:
+        DONE.setdefault(c['tag'], {}).update(rec)
+
+
+def load(path):
+    """scores.jsonl -> DONE (per tag, the latest value of every field) and N_SAVED."""
+    global N_SAVED
+    for line in open(path):
+        if line.strip():
+            rec = json.loads(line)
+            if 'endpoints' in rec:
+                N_SAVED = rec['endpoints']
+            else:
+                DONE.setdefault(rec['tag'], {}).update(rec)
 
 
 def env_file(path):
@@ -89,17 +123,29 @@ def route(d, name, work, tag, k3, kp, slack_file=None, slack_mode='replace'):
         base['PD39ROUTE_TIMING_SLACK'] = slack_file
         base['PD39ROUTE_TIMING_SLACK_MODE'] = slack_mode
     sol = os.path.join(work, f'{tag}.route')
-    wait_slot()
-    with open(os.path.join(work, f'{tag}.err'), 'w') as err:
-        subprocess.run(['/usr/bin/time', '-l', ROUTER, os.path.join(d, name + '.cap'),
-                        os.path.join(d, name + '.net'), sol], env={**os.environ, **base}, stdout=subprocess.DEVNULL,
-                       stderr=err, check=True)
+    got = DONE.get(tag, {}) if RESUME else {}
+    if 'of' in got and (os.path.exists(sol) or os.path.exists(sol + '.xz')):  # --resume: routed and evaluated
+        print(f'{name}: resume: {tag} routed and evaluated before', flush=True)
+        return {'tag': tag, 'k3': k3, 'kp': kp, 'route': sol, 'of': got['of'], 'opens': got['opens']}
+    if RESUME and os.path.exists(sol + '.xz'):  # --resume: a route packed by --lean is complete; evaluate it
+        print(f'{name}: resume: {tag} routed before, evaluating it', flush=True)
+        with open(sol + '.tmp', 'wb') as g:
+            subprocess.run(['xz', '-dc', sol + '.xz'], stdout=g, check=True)
+        os.replace(sol + '.tmp', sol)
+    else:
+        wait_slot()
+        with open(os.path.join(work, f'{tag}.err'), 'w') as err:
+            subprocess.run(['/usr/bin/time', '-l', ROUTER, os.path.join(d, name + '.cap'),
+                            os.path.join(d, name + '.net'), sol], env={**os.environ, **base}, stdout=subprocess.DEVNULL,
+                           stderr=err, check=True)
     ev = subprocess.run([EVALUATOR, os.path.join(d, name + '.cap'), os.path.join(d, name + '.net'), sol],
                         capture_output=True, text=True).stdout
     m = re.search(r'^overflow cost ([\d.eE+-]+)', ev, re.M)
     opens = re.search(r'open nets : (\d+)', ev)
-    return {'tag': tag, 'k3': k3, 'kp': kp, 'route': sol, 'of': float(m.group(1)) if m else float('nan'),
-            'opens': int(opens.group(1)) if opens else -1}
+    c = {'tag': tag, 'k3': k3, 'kp': kp, 'route': sol, 'of': float(m.group(1)) if m else float('nan'),
+         'opens': int(opens.group(1)) if opens else -1}
+    save(c)
+    return c
 
 
 def pack(c):
@@ -122,7 +168,18 @@ def prune(cands, keep):
 
 
 def sta(d, name, cands):
-    """One OpenROAD session: timing and power of every candidate route, and the endpoint count."""
+    """One OpenROAD session: timing and power of every candidate route, and the endpoint count. With
+    --resume, candidates scored before take their saved numbers and only the rest are scored."""
+    todo = [c for c in cands if not (RESUME and all(k in DONE.get(c['tag'], {}) for k in SCORED))]
+    for c in cands:
+        if all(c is not t for t in todo):
+            c.update({k: DONE[c['tag']][k] for k in SCORED})
+            print(f"{name}: resume: {c['tag']} scored before", flush=True)
+    if not todo:
+        return N_SAVED
+    cands = todo
+    for c in cands:
+        unpack(c)
     env = {**os.environ, 'DESIGN': name, 'DESIGN_DIR': os.path.dirname(d.rstrip('/')),
            'ROUTES': ' '.join(c['route'] for c in cands)}
     # OpenROAD sources its script unquoted, so the script's path must not contain a space ("Global Router")
@@ -138,7 +195,10 @@ def sta(d, name, cands):
         c['tns'] = float(re.search(r'^tns (\S+)', b, re.M).group(1))
         c['wns'] = float(re.search(r'^wns (\S+)', b, re.M).group(1))
         c['power'] = float(re.search(r'^Total\s+\S+\s+\S+\s+\S+\s+(\S+)', b, re.M).group(1))
-    return int(re.search(r'ENDPOINTS (\d+)', out).group(1))
+        save(c)
+    n = int(re.search(r'ENDPOINTS (\d+)', out).group(1))
+    save(n=n)
+    return n
 
 
 def net_index(net_path):
@@ -156,6 +216,16 @@ def sta_slack(d, name, c, work, idx):
     """One OpenROAD session: candidate c's timing and power, and its failing-path nets' slack, written
     as the router's routed-slack file (net index, seconds). Returns that file."""
     raw, out = os.path.join(work, c['tag'] + '.slack_names'), os.path.join(work, c['tag'] + '.slack')
+    if RESUME and os.path.exists(out) and os.path.exists(raw):  # measured before (written after the session)
+        c['slack_nets'] = sum(1 for _ in open(out)) - 1
+        c['slack_unmatched'] = sum(1 for _ in open(raw)) - c['slack_nets']
+        got = DONE.get(c['tag'], {})
+        if all(k in got for k in SCORED):  # otherwise the next scoring session scores c
+            c.update({k: got[k] for k in SCORED})
+        print(f"{name}: resume: {c['tag']} slack measured before", flush=True)
+        save(c)
+        return out
+    unpack(c)  # --resume: the best of a stopped run may have been packed
     tcl = os.path.join(work, 'timing_slack.tcl')
     shutil.copyfile(SLACK_TCL, tcl)
     env = {**os.environ, 'DESIGN': name, 'DESIGN_DIR': os.path.dirname(d.rstrip('/')), 'ROUTE': c['route'],
@@ -178,6 +248,7 @@ def sta_slack(d, name, c, work, idx):
             g.write(f'{i} {float(v) * 1e-9:.6e}\n')
     c['slack_nets'] = sum(1 for _ in open(out)) - 1
     c['slack_unmatched'] = missing
+    save(c)
     return out
 
 
@@ -236,9 +307,11 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
         sta(d, name, [c])
         c['delta'] = delta(c, b, w, n)
         c['classed'] = sum(1 for _ in open(merged)) - 1  # nets in its classes (its own slack_nets is set if measured)
+        save(c)
         out.append(c)
         print(f"{name}: refine {it}: {c['tag']} delta {c['delta']:+.4f} (from {cur['tag']} {cur['delta']:+.4f}, "
               f"{c['classed']} nets classed)", flush=True)
+        unpack(cur)  # --resume: cur's slack may have been measured before and its route left packed
         if c['delta'] >= cur['delta'] or filecmp.cmp(c['route'], cur['route'], shallow=False):
             pack(c)
             break
@@ -319,6 +392,17 @@ def selftest():
     unpack(c1)
     ok &= filecmp.cmp(r1, r2, shallow=False)
     LEAN = False
+    global CKPT, N_SAVED  # scores.jsonl: every field round-trips exactly, the latest value wins, endpoints kept
+    CKPT, N_SAVED = os.path.join(t, 'scores.jsonl'), None
+    save({'tag': 'k20r', 'k3': 20, 'kp': 0, 'route': r1, 'of': 178597927.0813, 'opens': 0})
+    save({'tag': 'k20r', 'wns': -0.28017923, 'tns': -63180.6796875, 'power': 23.466699 + 1e-12})
+    save(n=1443997)
+    keep_done = dict(DONE)
+    DONE.clear(); N_SAVED = None
+    load(CKPT)
+    ok &= DONE == keep_done and N_SAVED == 1443997 and 'route' not in DONE['k20r']
+    ok &= DONE['k20r']['power'] == 23.466699 + 1e-12 and DONE['k20r']['of'] == 178597927.0813
+    DONE.clear(); CKPT, N_SAVED = None, None
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got}')
     shutil.rmtree(t)
     return ok
@@ -339,8 +423,17 @@ def main():
     mode = sys.argv[sys.argv.index('--classes') + 1] if '--classes' in sys.argv else 'both'
     if mode not in ('both', 'routed', 'input'):
         raise SystemExit('timing_loop.py: --classes must be both, routed or input')
-    global ROUTER, LEAN
+    global ROUTER, LEAN, CKPT, RESUME
     LEAN = '--lean' in sys.argv
+    RESUME = '--resume' in sys.argv
+    CKPT = os.path.join(work, 'scores.jsonl')
+    if RESUME:
+        if not os.path.exists(CKPT):
+            raise SystemExit('timing_loop.py: --resume: no scores.jsonl in ' + work)
+        load(CKPT)
+        print(f"{name}: resume: {len(DONE)} candidates in scores.jsonl", flush=True)
+    elif os.path.exists(CKPT):  # a fresh run starts its own record
+        os.replace(CKPT, CKPT + '.prev')
     if '--router' in sys.argv:
         ROUTER = os.path.abspath(sys.argv[sys.argv.index('--router') + 1])
     # Part 188 (the user, 2026-11-06): two rounds of sticky re-classification by default; --refine 0 turns it off
@@ -364,7 +457,7 @@ def main():
         s1, n, best = [], None, b
         for t, sf in srcs.items():
             g = [dict(route(d, name, work, f'k{k}{t}', k, 0, sf), src=t) for k in K3_LADDER]
-            m = sta(d, name, g if 'r' in srcs or n is not None else [b] + g)
+            m = sta(d, name, ([b] if 'wns' not in b else []) + g)  # b: scored with the first group if not by stage 0
             if n is not None and m != n:
                 raise SystemExit(f'timing_loop.py: endpoint count {m} != {n}')
             n = m
@@ -375,7 +468,7 @@ def main():
             prune([b] + s1, best)
     else:
         s1 = [dict(route(d, name, work, f'k{k}{t}', k, 0, sf), src=t) for t, sf in srcs.items() for k in K3_LADDER]
-        n = sta(d, name, s1 if 'r' in srcs else [b] + s1)
+        n = sta(d, name, ([b] if 'wns' not in b else []) + s1)
         for c in s1:
             c['delta'] = delta(c, b, w, n)
         best = min([b] + s1, key=lambda c: c['delta'])

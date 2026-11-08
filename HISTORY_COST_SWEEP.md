@@ -13040,6 +13040,22 @@ automatic backups on, every route `--lean` compresses after the next snapshot ke
 is deleted, and the disk model above (free = ~106 GB - swap - uncompressed routes) only holds without snapshots. With
 the user's approval the two snapshots were deleted at 09:30 (free disk 55 -> 119 GB; `CLEANUP_2026-11-07.log`).
 
+**`timing_loop.py` keeps its scores on disk and can resume** (2026-11-08 09:32-09:59; the user's choice over a plain
+rerun). Every measured field (overflow cost, opens, WNS, TNS, power, slack counts, classes) is appended to
+`WORK_DIR/scores.jsonl` the moment it is measured, and the endpoint count after each session; a fresh run moves an
+old file to `.prev`. `--resume` restarts in the same work folder: a route evaluated before, or packed by `--lean`
+(packing only follows scoring), is not routed again (a packed route never evaluated is unpacked and evaluated); a
+candidate scored before keeps its numbers and only the rest go into the session; a slack file written before is not
+measured again, and a route whose slack exists but whose timing was lost is scored with the next session (the blind
+unbiased route's case). Refine unpacks the best before comparing routes (the bug the first test found). Checks: the
+self-test round-trips the file exactly and fails on a broken merge; `p189/resume_test.sh` on visible ariane (`--lean
+--refine 1`, `SLACK_BANDS=16`, 09:48-09:59, `resume_test.txt`) -- (1) a fresh run's scores identical to `lean.ariane`
+(Parts 134/188), (2) resumed from packed routes and `base.slack` with no score saved (the blind loop's state):
+`loop.tsv` identical in all twelve columns, (3) resumed with every score saved: identical, no OpenROAD session and no
+route run (its `.tcl` and `.err` files untouched), 0 s. The blind loop reruns with `--resume` (`p189/loop_resume.sh`),
+skipping the unbiased route and its 2 h 6 min slack session and all six routings, once the user has set Time Machine
+to back up manually (no new local snapshots).
+
 **Routability predictors for both mempool_cluster designs** (`p189/then_features.sh` after the blind loop,
 06:35-06:36; `p189/features_cluster.txt`, `features.<set>.time`; `routability.p189`). Visible: 10446140 nets, 10080625
 GCells, utilization 0.4413, RUDY p99 1.305 / p99.9 1.860, RUDY over capacity 0.0331, pins per net max 253; 23.6 s,
