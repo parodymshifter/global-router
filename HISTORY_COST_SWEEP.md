@@ -13357,8 +13357,8 @@ layer assignment -- the restart reproduces the route's overflow. The chain runs,
 
 | setting (margin, blockers per chain) | chains tried | kept | blocker reroutes | blocker moves undone with their chain | failed chains that cleared N's own route | 2D overflow | pass wall time |
 |---|---|---|---|---|---|---|---|
-| 10, 8 | 3763 | 0 | 27568 | 19613 | 6 | 318 -> 318 | ~3 min |
-| 30, 16 | 3763 | 0 | 55136 | (counters added after) | -- | 318 -> 318 | -- |
+| 10, 8 | 3763 | 0 | 27568 | 19613 | 6 | 318 -> 318 | < 1 min (run 268 s, peak RSS 2.11 GB) |
+| 30, 16 | 3763 | 0 | 55136 | (counters added after) | -- | 318 -> 318 | ~2.5 min |
 | 60, 64 | 3763 | 0 | 220544 | 151925 | 68 | 318 -> 318 | ~16 min (run 1211 s, peak RSS 2.09 GB) |
 
 (The first two ran on `pd39route.p191`; the diagnostics -- the last three columns -- on `pd39route.p191b`, the committed
