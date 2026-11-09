@@ -13432,3 +13432,17 @@ Steiner minimum of a tree kept inside the box lies between 2/3 of it and it.
 **Verdict.** There is no slack inside the box of the kind a per-net "less wire inside" move would harvest: the trees
 already push wire out to the edge of the room around it. What separates 318 from 160, if 160 is real, is not visible in
 these measures; without NTHU's routes (Part 189: not retrievable) it cannot be compared. bigblue4 is set aside.
+
+## Part 192 -- newblue7's late stages on the current standard, profiled
+
+Question (2026-11-09, the user's choice from the ranking after Part 191c): where does a residue run's time go now?
+Part 182's newblue7 on the current standard (`@standard.env @fast08.env @speed08.env`, 13029 s): slow tier 5290 s
+(40.6%), fallback 7443 s (57.1%; region stage batched on 8 threads, portfolio of four, variant 2 kept). Its region
+rounds report search + commit time: variant 0's 1000 rounds sum to 3709 s of search + commit, so whatever a round
+does besides searching -- the per-round whole-grid work -- is the difference from its wall time, which no trace gave.
+
+**Run** (started 2026-11-09 13:06, `~/Code/GlobalRouterRuns/p192/`): newblue7 alone, the same setting, binary
+`pd39route.p192` (= ee6a359; routes should be byte-identical to Part 182's), nice 20. `prof.sh` timestamps every trace
+line (`ts.log`, for each round's wall time) and attaches Instruments (CPU Counters, 90 s, one at a time) at slow round
+60, region round 150 (the portfolio variants running), region round 700, and path A's refinement + 300 s (the other
+variants running on their own). Results below once it ends.
