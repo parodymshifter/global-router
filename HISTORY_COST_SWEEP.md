@@ -13167,6 +13167,9 @@ started 00:53:57 with 100 GB free and 12.8 GB of swap. It ended 02:31:16 (5839 s
 peak 39.4 GB at 02:00, free disk >= 75 GB): **k20ip1m1 -1.3643** (WNS -0.2682, TNS -50334.2, power 23.5867; parts
 -0.5037 / -0.2105 / -1.7316 / +1.0815), 1060175 nets classed -- -0.0232 better than k20ip1, from WNS
 (-0.0218) and TNS (-0.0041) at no power or overflow cost. It gained, so refine round 2 (slack of k20ip1m1, merged) follows. Refine round 2's slack session started 02:31:40 with 109 GB free and 15.1 GB of swap. It ended 04:33:36 (7316 s, 2 h 2 min; peak footprint 109.7 GB, resident 11.2 GB, swap
-peak 51.8 GB at 04:26, free disk >= 73 GB; k20ip1m1's slack covered 739070 nets, none unmatched); k20ip1m2 is being routed.
+peak 51.8 GB at 04:26, free disk >= 73 GB; k20ip1m1's slack covered 739070 nets, none unmatched); k20ip1m2 is being routed. k20ip1m2 routed 04:34-04:40 and is **byte-identical to k20ip1m1** (`cmp`, 12437073367 bytes
+each): the second round's merged classes route exactly as the first's. Its scoring session started 04:40:33 (99 GB free,
+13.6 GB of swap) and can only repeat k20ip1m1's score; `timing_loop.py` compares routes only after scoring them
+(`refine`), so checking for an identical route before the session would have saved it (about 1.5 h here).
 
 Results for the blind design and the twelve-design sum: pending.
