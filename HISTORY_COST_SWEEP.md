@@ -13229,3 +13229,11 @@ Atlas as its second page and a report on unexplored options): https://claude.ai/
 lower than LMgr's re-run table (Part 75: 166 / 144 / 68), which the plan used. Its newblue7 equals Part 91's certified
 bound (>= 54), so if legal it is optimal on overflow; newblue4 136 is 2 below it, not 8. Self-reported; the page offers
 the route files, not yet downloaded or checked.
+
+**NTHU's route files cannot be fetched** (checked 2026-11-09 08:14-08:17). The page's sixteen "Download" links point
+at `http://vlsicdb.cs.nthu.edu.tw/~lab221/nthuroute/result/{a1..a5,b1..b4,n1..n7}.res.gz`. That host no longer
+resolves (the local resolver, 8.8.8.8 and 1.1.1.1 all return nothing; `cs.nthu.edu.tw`'s own name servers answer for
+the domain); the same path on `www.cs.nthu.edu.tw` (under `~lab221` and `~tcwang`) is 404; the Wayback Machine has the
+page itself (a 2013-03-19 capture) but none of the sixteen files (each 404), and its index search was offline at the
+time. No mirror turned up in a web search. So NTHU's 160 / 138 / 54 stay self-reported: the only remaining source is
+the authors (the page's contact, NTHU.Route@gmail.com).
