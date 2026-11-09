@@ -13445,4 +13445,50 @@ does besides searching -- the per-round whole-grid work -- is the difference fro
 `pd39route.p192` (= ee6a359; routes should be byte-identical to Part 182's), nice 20. `prof.sh` timestamps every trace
 line (`ts.log`, for each round's wall time) and attaches Instruments (CPU Counters, 90 s, one at a time) at slow round
 60, region round 150 (the portfolio variants running), region round 700, and path A's refinement + 300 s (the other
-variants running on their own). Results below once it ends.
+variants running on their own).
+
+**Result** (13:06:25-16:54:59, 13728 s; Part 182 13029 s, the difference is the Instruments windows): legal,
+overflow 92, max 2, wirelength 35935215, `eval2008.pl` agreeing exactly; the route byte-identical to Part 182's
+(variant 2 kept, 2D 92, wire 20115675); peak RSS 4383 MB (footprint 7.5 GB). Stage times: slow tier
+5181 s (37.7%), fallback 8233 s (60.0%: path A's region stage 14:33-15:44 and refinement to 15:45, then the three
+other variants alone until 16:50).
+
+**Per-round work outside the search: nothing to remove.** Wall time between consecutive round lines against each
+round's own search + commit time:
+
+| stage | rounds | wall | search + commit | outside them | thread time in search | busy threads | sum of each batch's slowest search |
+|---|---|---|---|---|---|---|---|
+| slow tier | 150 | (round lines) | 5134 s | 0.3% (69 rounds checked) | 22510 s | **4.38 of 8** | 4401 s (**86%**) |
+| region stage, variant 0 | 999 | 4270 s | 4210 s | 1.4% | 27559 s | 6.55 of 8 | 2678 s (64%) |
+
+So the rescans the ranking named are 0.3-1.4% of the stages' time -- dropped. What the stages lose is **waiting on
+each batch's slowest net**: a batch commits only when all its searches are done, and in the slow tier the slowest
+search of each batch adds up to 86% of the stage's wall time (round 60: 29.2 of 33.6 s), so 8 threads do 4.4 threads'
+work. Balanced, the slow tier's 22510 thread-seconds take 2814 s on 8 threads instead of 5134 s: **at most ~2300 s,
+17% of this run**, if batches could overlap (search batch k+1 while batch k's stragglers finish, commits still in net
+order). The region stage is another matter: while the variants run (path A from 300 s in, then three variants alone
+for 65 min on 2-4 threads each), the process keeps 11.7 of the Mac's 14 cores busy, so another variant's work fills
+path A's waits; overlap would buy little there.
+
+**Instruments** (CPU Counters, 90 s windows, `p192/instr/`):
+
+| window | busy threads | useful | back end (memory) | front end | discarded | search share |
+|---|---|---|---|---|---|---|
+| slow round 60 | 4.28 (8 threads) | 32% | 28% | 8% | 33% | 96% (`SearchHeap::pop` 37% self, `multiSourceDijkstra` 31%, push 12%, wire costs 13%) |
+| region round 150, four variants | 11.70 (78% on performance cores) | 36% | 32% | 5% | 28% | 95% |
+
+- At 8 or more threads searching, ~30% of cycles wait on memory (the single-threaded region stage in Part 133: 1-4%):
+  more threads per search stage buy less than linear.
+- 6863 threads created in the region window: `runOnThreads` uses the persistent pool only when it is free and the
+  call wants exactly `PD37ROUTE_THREADS`; the portfolio variants ask for their 2-7-thread share while variant 0 holds
+  the pool, so each batched round starts fresh threads (Part 127's fallback). About 76 a second, well under 0.1% of
+  the time: not worth a change.
+- **Saving a CPU Counters trace of a portfolio run is not safe.** The round-150 window took 7.5 min to save (4.1 GB);
+  the round-700 window hung saving at 0% CPU for 45 min and was stopped (no report); the variants-only window was
+  still saving after 40 min and was stopped when free disk fell 108 -> 23 GB and the router was pushed into swap
+  (373 MB resident). Each such save took 45-85 GB of temporary disk (the guard's log), returned afterwards. The
+  8-thread slow-tier window saved cleanly. `PROFILING.md` now says so.
+
+**Verdict.** The runtime lead is the slow tier's per-batch wait, not per-round work: up to ~17% of a residue run
+(and the slow tier is a larger share of the zero-overflow designs' runs). Next step, if taken: measure the ceiling of
+overlapping batches from the round lines and a dump of per-task times before building it (the Part 118 rule).

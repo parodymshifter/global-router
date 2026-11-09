@@ -36,7 +36,9 @@ cd gr && ./instruments_profile.sh -a "$(pgrep -f '^\./pd39route' | head -1)" -l 
 
 Open `OUT.trace` in Instruments for the timeline. Traces are large -- a 90 s CPU Counters window of an
 8-thread run saves 1.2-1.7 GB -- so keep windows short, keep traces in the run archive (not the repository),
-and delete them once their reports are written. While recording, xctrace also writes a raw kernel trace
+and delete them once their reports are written. On a run with several busy portfolio variants (12 or more threads), a CPU
+Counters window may not save at all: in Part 192 one hung at 0% CPU for 45 min, another took over 40 min and 85 GB of
+temporary disk and pushed the router into swap. There, use Time Profiler or a window of 20-30 s, and watch free disk. While recording, xctrace also writes a raw kernel trace
 (`$TMPDIR/instruments*.ktrace`, 5-13 GB per 90 s window) that it does not remove; `instruments_profile.sh`
 deletes the ones its recording made. Calling `xctrace record` directly leaves them behind: ten of them filled
 the disk on 2026-10-24 (Part 154).

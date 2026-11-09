@@ -12,6 +12,9 @@
 #                before it -- the "stale" share below, a proxy for the extra conflicts (carried nets) it would cause
 #   no gates     any task as soon as a worker is free (list scheduling over the whole round)
 #   bound        max(task time / T, longest task) per round
+#   barrier, ideal order  the current rule with each batch's tasks handed out longest first by their *measured*
+#                time (exact: the order inside a batch changes no route) -- the ceiling of a better work estimate
+#                than the search box's area (PD38ROUTE_SLOW_LPT's)
 # Commit time is not in the dump (it is ~1% of the stage) and is taken as zero in every model. Durations were
 # measured with the machine's other threads idle part of the time; fuller overlap means more concurrent searches
 # and, at ~30% memory stalls (Part 192's Instruments), somewhat slower ones -- so these are ceilings.
@@ -88,6 +91,8 @@ def main():
             row.append(m)
             tot[f'L{l}'] += m
             stales.append(st / task if task else 0.0)
+        ideal, _, _ = simulate([(w, sorted(d, reverse=True)) for w, d in b], T, 0)
+        tot['barrier, ideal order'] += ideal
         ng, _, _ = simulate(b, T, None)
         longest = max((max(d) for _, d in b if d), default=0.0)
         bound = max(task / T, longest)
@@ -99,8 +104,8 @@ def main():
     print()
     print(f'all dumped rounds, {T} threads: measured {tot["measured"]:.1f} s, barrier model {tot["barrier"]:.1f} s '
           f'({100 * (tot["barrier"] / tot["measured"] - 1):+.1f}% vs measured), task time {tot["task"]:.1f} s')
-    for k in [f'L{l}' for l in looks] + ['no gates', 'bound']:
-        print(f'  {k:9s} {tot[k]:9.1f} s  {tot["barrier"] / tot[k]:.2f}x vs barrier  '
+    for k in ['barrier, ideal order'] + [f'L{l}' for l in looks] + ['no gates', 'bound']:
+        print(f'  {k:21s} {tot[k]:9.1f} s  {tot["barrier"] / tot[k]:.2f}x vs barrier  '
               f'({100 * (1 - tot[k] / tot["barrier"]):.1f}% less)')
 
 
