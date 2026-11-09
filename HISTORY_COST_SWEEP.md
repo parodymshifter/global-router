@@ -13166,6 +13166,6 @@ units over k20i. Refine (two rounds of sticky re-classification at k20ip1's sett
 started 00:53:57 with 100 GB free and 12.8 GB of swap. It ended 02:31:16 (5839 s, 1 h 37 min; peak footprint 80.7 GB, resident 8.9 GB, swap
 peak 39.4 GB at 02:00, free disk >= 75 GB): **k20ip1m1 -1.3643** (WNS -0.2682, TNS -50334.2, power 23.5867; parts
 -0.5037 / -0.2105 / -1.7316 / +1.0815), 1060175 nets classed -- -0.0232 better than k20ip1, from WNS
-(-0.0218) and TNS (-0.0041) at no power or overflow cost. It gained, so refine round 2 (slack of k20ip1m1, merged) follows.
+(-0.0218) and TNS (-0.0041) at no power or overflow cost. It gained, so refine round 2 (slack of k20ip1m1, merged) follows. Refine round 2's slack session started 02:31:40 with 109 GB free and 15.1 GB of swap.
 
 Results for the blind design and the twelve-design sum: pending.
