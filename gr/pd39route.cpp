@@ -7191,6 +7191,13 @@ long long gSlowBatchCarried = 0; // self-test: carried nets, run-wide
 bool gSlowBatchLpt = true;       // PD38ROUTE_SLOW_LPT (1): biggest searches first within a batch
 int gSlowSpread = 0;             // PD38ROUTE_SLOW_SPREAD: tile size for spreading batches (0 = net order)
 bool gSlowConflict = true;       // PD38ROUTE_SLOW_CONFLICT (1): the "fresh" conflict rule; 0 commits every net as searched
+// Part 192 (trace only): PD39ROUTE_SLOW_TASKS=file[,every] -- for every `every`-th slow round, one line per batch:
+// "B round batch n searchWall" then each task in the order the workers took them, "dur_us:pops:outcome" (outcome c
+// committed, u unchanged, x carried). Lets a simulator replay the batches under other scheduling rules. Routes
+// unchanged.
+FILE *gSlowTaskDump = nullptr;
+int gSlowTaskEvery = 1;
+int gSlowTaskRound = -1; // set by the slow tier around its runSlowBatched call; -1 elsewhere (region stage)
 
 
 // pd38route: PD38ROUTE_SLOW_BATCH -- pd27route's batched executor (carry +
@@ -7334,6 +7341,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
     }
     // commit in net order
     std::vector<Delta> deltas;
+    std::vector<char> outcome(n, 'c'); // Part 192 trace
     auto passD = [&](bool hz, size_t e) {
       return hz ? (dStampH[e] == stamp ? passDH[e] : 0) : (dStampV[e] == stamp ? passDV[e] : 0);
     };
@@ -7347,6 +7355,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
           for (int x = b.x0; x <= b.x1 && !touched; ++x)
             touched = dirtyTile[static_cast<size_t>(y) * g.nx + x] == stamp;
         if (touched) {
+          outcome[k] = 'x';
           carried.push_back(pos);
           ++br.carried;
           if (gRecordCarried)
@@ -7360,6 +7369,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
         outs[pos] = o[k];
         gSearchPops += pops[k];
         ++br.unchanged;
+        outcome[k] = 'u';
         continue;
       }
       for (const ChargeRecord &c : rn.charges)
@@ -7386,6 +7396,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
       if (conflict) {
         for (const ChargeRecord &c : rn.charges)
           addCharge2D(g, live, c);
+        outcome[k] = 'x';
         carried.push_back(pos);
         ++br.carried;
         if (gRecordCarried)
@@ -7442,6 +7453,15 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
     }
     if (!carried.empty() && carried.size() == n)
       fail("pd38route: a slow batch committed nothing (its first changed net cannot conflict)");
+    if (gSlowTaskDump && gSlowTaskRound >= 0 && gSlowTaskRound % gSlowTaskEvery == 0) { // Part 192 trace
+      std::fprintf(gSlowTaskDump, "B %d %lld %zu %.6f", gSlowTaskRound, br.batches - 1, n,
+                   std::chrono::duration<double>(tC0 - tS0).count());
+      for (size_t kk = 0; kk < n; ++kk) {
+        const size_t k = take[kk];
+        std::fprintf(gSlowTaskDump, " %.0f:%lld:%c", dur[k] * 1e6, pops[k], outcome[k]);
+      }
+      std::fputc('\n', gSlowTaskDump);
+    }
     const auto tY0 = std::chrono::steady_clock::now();
     br.commitS += std::chrono::duration<double>(tY0 - tC0).count();
     if (gSlowBatchCheck) { // self-test: sync now and check every replica against the live state
@@ -9198,6 +9218,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       const auto tDag0 = std::chrono::steady_clock::now();
       // the per-net body of pd37route's loop from its overflow check on,
       // against the worker's usage copy `u`
+      gSlowTaskRound = round; // Part 192 trace
       sbr = runSlowBatched(
           g, nets, cand, usage, gThreads, static_cast<size_t>(gSlowBatch), bouts,
           [&](Usage &u, SearchRegion &reg, RoutedNet &rn, BatchOut &o) {
@@ -9246,6 +9267,9 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
               slowBest.save(nets, i);
           },
           gSlowBatchLpt ? &wt : nullptr);
+      gSlowTaskRound = -1; // Part 192 trace
+      if (gSlowTaskDump)
+        std::fflush(gSlowTaskDump);
       tDag = std::chrono::duration<double>(std::chrono::steady_clock::now() - tDag0).count();
       if (gFrames.on) { // pd38route: video trace -- search boxes and conflicts this round
         for (size_t k = 0; k < cand.size(); ++k)
@@ -22481,6 +22505,21 @@ int main(int argc, char **argv) {
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_SLOW_CONFLICT must be 0 or 1 (got '" + sv + "')");
     gSlowConflict = sv == "1";
+  }
+  if (const char *v = std::getenv("PD39ROUTE_SLOW_TASKS"); v && *v) { // Part 192 (trace only): file[,every]
+    std::string sv(v), file = sv;
+    const size_t c = sv.rfind(',');
+    if (c != std::string::npos) {
+      file = sv.substr(0, c);
+      char *end = nullptr;
+      const long e = std::strtol(sv.c_str() + c + 1, &end, 10);
+      if (c + 1 == sv.size() || *end || e < 1)
+        fail("PD39ROUTE_SLOW_TASKS must be file[,every] with every >= 1 (got '" + sv + "')");
+      gSlowTaskEvery = static_cast<int>(e);
+    }
+    gSlowTaskDump = std::fopen(file.c_str(), "w");
+    if (!gSlowTaskDump)
+      fail("PD39ROUTE_SLOW_TASKS: cannot write " + file);
   }
   if (const char *v = std::getenv("PD38ROUTE_SLOW_LPT"); v) {
     std::string sv(v);

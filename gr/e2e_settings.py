@@ -184,6 +184,15 @@ def main():
     run('residue', {**off, 'PD39ROUTE_REGION_DUMP': prefix4, 'PD39ROUTE_REGION_OVER': '0.25'}, 'dumpover')
     head = open(prefix4 + '.A.txt').readline() if os.path.exists(prefix4 + '.A.txt') else ''
     check('PD39ROUTE_REGION_OVER reaches the region stage (its dump header)', head.rstrip().endswith(' over 0.25'), head.strip())
+    # Part 192 (trace only): PD39ROUTE_SLOW_TASKS writes one B line per slow-tier batch, for every slow round run.
+    tfile = os.path.join(work, 'slowtasks.txt')
+    b = run('residue', {**off, 'PD39ROUTE_SLOW_TASKS': tfile}, 'slowtasks')
+    rounds = set()
+    if os.path.exists(tfile):
+        rounds = {l.split()[1] for l in open(tfile) if l.startswith('B ')}
+    nslow = len(lines(b, 'slow round '))
+    check('PD39ROUTE_SLOW_TASKS dumps every slow round\'s batches', nslow > 0 and len(rounds) == nslow,
+          f'{len(rounds)} rounds dumped, {nslow} slow round lines')
     # refinement annealing: the refinement trace reports its temperature.
     prefix3 = os.path.join(work, 'searchdump')
     run('residue', {**off, 'PD39ROUTE_SEARCH_DUMP': prefix3 + ',1,0'}, 'searchdump')
