@@ -13160,6 +13160,7 @@ free disk >= 65 GB):
 than its +0.73 of extra overflow; the start-of-session estimate that k20i would most likely stay best was wrong -- no
 earlier candidate had shown how far kp moves power on this design. At kp 4 power falls 1.57, but overflow rises +3.76
 units over k20i. Refine (two rounds of sticky re-classification at k20ip1's setting) follows. Refine round 1's slack session (k20ip1's failing-path slack) started 22:36:26 with 114 GB free and
-11.5 GB of swap.
+11.5 GB of swap. It ended 00:46:58 (7831 s, 2 h 11 min; peak footprint 109.7 GB, resident 7.0 GB, swap peak 50.7 GB at
+00:40, free disk >= 76 GB); the re-classified route (k20ip1m1) is being routed.
 
 Results for the blind design and the twelve-design sum: pending.
