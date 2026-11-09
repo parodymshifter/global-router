@@ -12888,7 +12888,7 @@ A third round costs one more route and OpenROAD session only on designs whose ro
 the rest earlier); here 54 min, 45 of them on mempool_group for nothing. Not adopted: the default stays
 `--refine 2` (the user, 2026-11-06: keep it at 2).
 
-## Part 189 -- ISPD 2025: mempool_cluster with timing on a 24 GB Mac -- `--lean`, slack bands (running)
+## Part 189 -- ISPD 2025: mempool_cluster with timing on a 24 GB Mac -- `--lean`, slack bands, `--resume` -- visible -0.6993, blind -1.3643; twelve designs -27.17
 
 **Why.** mempool_cluster (visible and blind) was the last 2025 design without a timing score: Part 130
 noted its OpenROAD session would load a 9.7 GB DEF on 24 GB of RAM, and disk was short then. Disk now
@@ -13172,4 +13172,41 @@ each): the second round's merged classes route exactly as the first's. Its scori
 13.6 GB of swap) and can only repeat k20ip1m1's score; `timing_loop.py` compares routes only after scoring them
 (`refine`), so checking for an identical route before the session would have saved it (about 1.5 h here).
 
-Results for the blind design and the twelve-design sum: pending.
+The session ended 06:15:13 (5681 s, 1 h 35 min; peak footprint 80.7 GB, resident 8.4 GB) with k20ip1m2's score
+identical to k20ip1m1's (1067408 nets classed), and the loop exited cleanly at 06:15:47.
+
+**Blind mempool_cluster: -1.3643** (`p189/loop.blind/loop.tsv`, copied with `scores.jsonl`, the slack files and the
+logs to `p189/results.blind/`; contest score change against our unbiased route, lower is better; weights WNS -0.4,
+TNS/endpoints -4, power 2, overflow 1e-8, 1443997 endpoints). The resumed loop ran 10:05:02-06:15:47 (72645 s, 20 h
+11 min, 11 candidates; the first run's unbiased route, its slack session and six routings, 21:14-04:00 the night
+before, were reused); the guard did not act.
+
+| candidate | k3 | kp | WNS (ns) | TNS (ns) | power | overflow cost | change |
+|---|---|---|---|---|---|---|---|
+| base (unbiased) | 0 | 0 | -1.5274 | -126327 | 24.4524 | 193948795 | +0.0000 |
+| k20r | 20 | 0 | -1.0916 | -102986 | 24.4178 | 200923256 | -0.2385 |
+| k180r | 180 | 0 | -1.0378 | -81612 | 24.3662 | 211766196 | -0.3139 |
+| k540r | 540 | 0 | -1.0356 | -81379 | 24.3610 | 217681194 | -0.2669 |
+| k20i | 20 | 0 | -0.3226 | -54541 | 24.2872 | 228447934 | -0.6662 |
+| k180i | 180 | 0 | -0.3226 | -51099 | 24.1125 | 298795205 | -0.3217 |
+| k540i | 540 | 0 | -0.3226 | -49075 | 24.0510 | 346070001 | +0.0225 |
+| k20ip1 | 20 | 1 | -0.3227 | -51816 | 23.5863 | 301903224 | -1.3411 |
+| k20ip4 | 20 | 4 | -0.2472 | -43590 | 22.7144 | 604366755 | -0.1132 |
+| **k20ip1m1 (refine 1)** | 20 | 1 | -0.2682 | -50334 | 23.5867 | 302096332 | **-1.3643** |
+| k20ip1m2 (refine 2) | 20 | 1 | -0.2682 | -50334 | 23.5867 | 302096332 | -1.3643 |
+
+The best, k20ip1m1, splits as WNS -0.5037, TNS -0.2105, power -1.7316, overflow +1.0815. Against the visible design
+(-0.6993, k20im2), the path to it differs in one place: **the power term wins here and lost there**, because the
+blind design weights power 2 against the visible design's 0.3 -- k20ip1 cut power by 0.70 here (-1.40 units) and by
+0.60 on the visible design (-0.18 units), for a similar overflow rise (+0.73 / +0.30 units over k20i). Elsewhere the
+two agree: the input-slack classes at the weakest strength beat every routed-class candidate, overflow sets the
+strength (k540i and k20ip4 give back most or all of their timing and power gain), and refine adds little (-0.0232
+here in round 1, nothing in round 2, whose route was byte-identical; visible 0.0002 per round). As in Part 133, which
+setting wins depends on the design's own weights and paths, not on anything fixed.
+
+**Twelve-design sum: -27.17** -- Part 188's ten (-25.11) plus visible mempool_cluster (-0.6993) and blind
+mempool_cluster (-1.3643); every 2025 design now has a timing score. The two mempool_cluster loops took 20 h (visible)
+and 29 h 31 min (blind: 9 h 20 min before the guard stop, 20 h 11 min resumed) of an M4 Pro with 24 GB, at peak footprints up to
+112.8 GB on swap; `--lean`, `SLACK_BANDS=16` and `--resume` are what made them fit. Two savings for a rerun: check a
+refine route against the current best before scoring it (here 1 h 35 min), and keep Time Machine on manual backups
+for any disk-tight loop (the 06:33 stop).
