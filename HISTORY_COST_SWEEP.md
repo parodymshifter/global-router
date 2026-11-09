@@ -13142,4 +13142,9 @@ The session ended 19:15:57 (13984 s, 3 h 53 min; peak footprint 102.0 GB, reside
 the weakest one wins; at 540 the overflow cost exceeds the whole timing and power gain. Stage 2 (power term kp 1 and 4
 at k20i) follows, then refine.
 
+**Third session** (stage 2, the power term at k20i): k20ip1 and k20ip4 routed 19:16-19:32 (8 min each), overflow costs
+301903224 / 604366755 -- +108.0M / +410.4M over the unbiased route, +1.080 / +4.104 units (k20i: +0.345), so k20ip1
+needs a power part below -1.07 (power under 23.92) and k20ip4 below -4.10 to win. The scoring session started 19:34:20
+with 93 GB free and 11.0 GB of swap.
+
 Results for the blind design and the twelve-design sum: pending.
