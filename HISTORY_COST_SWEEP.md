@@ -13237,3 +13237,58 @@ the domain); the same path on `www.cs.nthu.edu.tw` (under `~lab221` and `~tcwang
 page itself (a 2013-03-19 capture) but none of the sixteen files (each 404), and its index search was offline at the
 time. No mirror turned up in a web search. So NTHU's 160 / 138 / 54 stay self-reported: the only remaining source is
 the authors (the page's contact, NTHU.Route@gmail.com).
+
+## Part 190 -- ISPD 2025: where the timing bias spends overflow -- 95.4% of the overflow cost it adds is on metal7-10
+
+**Question** (Recap 7's option 2). Part 189's idle-GCell floor showed the best timing routes add more overflow cost
+than the whole changeable part of the unbiased routes. Where, by layer? If it is the upper metal the resistance
+bias pulls critical nets toward -- few tracks per GCell, nearly empty in the unbiased routes -- a layer-aware bias could
+carry the same nets for less.
+
+**Method** (2026-11-09 09:32-10:07, `~/Code/GlobalRouterRuns/p190/`: `layers.sh`, `layers_group.sh`, `chain.sh`,
+`summarize.py`, `summary.txt`, `eval/`). For each of the twelve 2025 designs, the contest evaluator on the unbiased route
+(`base`) and on the timing loop's best (Parts 188-189), one at a time; the evaluator's per-layer "overflow cost" lines
+are cumulative (the metal10 line is the total), so a layer's own cost is the difference from the line before. Wire
+length and via count per layer summed from the route files. Every evaluation's total overflow cost matches the loop's
+own table to the digit (24 of 24), and the two mempool_cluster base totals match Atlas v7's evaluations (1597901051.7522,
+1726790015.5308). mempool_cluster's evaluator peaked at 12.0-14.1 GB footprint, 5.5-6 min per route with the unpacking.
+mempool_group's `.net` files had been cleared from `bench/` for Part 189's disk space; its first pass failed ("Failed to
+open net file", kept in `eval/failed_no_net/`) and was rerun from `ISPD2025_benchmarks.zip` unpacked into
+GlobalRouterTemp (removed after); `layers_group.sh` now flags an evaluation without a total.
+
+| design | best | score change | overflow cost the bias adds (score units) | timing + power gain without it | share on metal7-10 | wire on metal7-10, base -> best | wire on metal4-6, base -> best |
+|---|---|---|---|---|---|---|---|
+| visible ariane | k540rm2 | -4.0542 | +0.3867 | -4.4409 | 98.7% | 0.2% -> 10.1% | 32.1% -> 27.9% |
+| blind ariane | k180im1 | -0.2551 | +0.0572 | -0.3123 | 94.7% | 0.4% -> 1.6% | 36.6% -> 36.1% |
+| visible mempool_tile_wrap | k180rp1m2 | -0.9260 | +0.9682 | -1.8942 | 93.2% | 0.1% -> 15.3% | 19.3% -> 4.9% |
+| blind mempool_tile_wrap | k20ip1m1 | -1.1491 | +1.0639 | -2.2130 | 91.4% | 0.2% -> 20.0% | 24.4% -> 11.3% |
+| visible NV_NVDLA_partition_c | k540rm1 | -6.2887 | +0.0286 | -6.3173 | 98.9% | 1.2% -> 1.9% | 42.1% -> 41.8% |
+| blind NV_NVDLA_partition_c | k20r | -1.4391 | +0.0069 | -1.4460 | 95.7% | 1.7% -> 2.1% | 43.5% -> 43.3% |
+| visible bsg_chip | k540rm2 | -1.9862 | +0.2542 | -2.2404 | 94.7% | 0.3% -> 10.2% | 33.0% -> 28.1% |
+| blind bsg_chip | k180i | -0.2351 | +0.0012 | -0.2363 | 97.5% | 0.5% -> 0.5% | 32.6% -> 32.5% |
+| visible mempool_group | k180ip4m2 | -7.5202 | +4.3904 | -11.9106 | 94.2% | 4.0% -> 38.2% | 44.2% -> 12.0% |
+| blind mempool_group | k20ip1 | -1.2559 | +1.3971 | -2.6530 | 101.5% | 2.8% -> 24.0% | 43.4% -> 25.3% |
+| visible mempool_cluster | k20im2 | -0.6993 | +0.1473 | -0.8466 | 98.5% | 2.4% -> 8.6% | 46.8% -> 45.3% |
+| blind mempool_cluster | k20ip1m1 | -1.3643 | +1.0815 | -2.4458 | 96.4% | 0.9% -> 18.2% | 41.1% -> 17.9% |
+| **twelve** | | **-27.17** | **+9.78** | **-36.95** | **95.4%** (metal9-10: 69.3%) | | |
+
+(Shares are of the design's total wire; "without it" is the score change minus the added overflow cost, i.e. what
+the timing and power terms gained. blind mempool_group's 101.5%: the mid layers' cost fell.)
+
+**What it shows.**
+- The bias moves wire up, not out: total wire changes +0.00% to +0.09% on every design, vias rise 5-81%
+  (visible mempool_group 19.5M -> 35.3M), and the cost lands where the floor said it would -- metal7-10, nearly empty
+  in the unbiased routes (their cost above the floor there is 0.000-0.053 score units per layer), with 69.3% on metal9-10
+  alone.
+- The added overflow is 9.78 score units over twelve designs: 36% of the -27.17 the loop gained. Carried for free, the
+  same timing and power gains would sum to -36.95. Four designs pay about as much in overflow as they gain net
+  (mempool_tile_wrap both, blind mempool_group, blind mempool_cluster: added cost 0.79-1.11x the net gain), and visible
+  mempool_group pays 4.39 of an 11.91 gross gain.
+- On the designs where the bias moved the most wire, metal4-6 empty out (visible mempool_group 44.2% -> 12.0%, blind
+  mempool_cluster 41.1% -> 17.9%, visible mempool_tile_wrap 19.3% -> 4.9%): the bias does not stop at the mid layers,
+  which have more tracks per GCell, because they carry more resistance.
+
+**Next.** A layer choice for biased nets that sees the score's own price of the upper layers -- the timing term's gain
+from a lower-resistance layer against w3 times that layer's marginal overflow cost -- instead of resistance alone (the
+direction of GAP-LA, Recap 7's option 8). The ceiling is the 9.78 units; a 25% move on the 2025 sum would need about
+70% of it back at equal timing.
