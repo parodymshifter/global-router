@@ -13147,4 +13147,18 @@ at k20i) follows, then refine.
 needs a power part below -1.07 (power under 23.92) and k20ip4 below -4.10 to win. The scoring session started 19:34:20
 with 93 GB free and 11.0 GB of swap.
 
+The session ended 22:35:30 (10870 s, 3 h 1 min; peak footprint 89.9 GB, resident 8.1 GB, swap peak 40.0 GB at 22:16,
+free disk >= 65 GB):
+
+| candidate | WNS (ns) | TNS (ns) | power | overflow cost | WNS / TNS / power / overflow part | change |
+|---|---|---|---|---|---|---|
+| k20i | -0.3226 | -54541.2 | 24.2872 | 228447934 | -0.4819 / -0.1989 / -0.3305 / +0.3450 | -0.6662 |
+| **k20ip1** | -0.3227 | -51816.3 | 23.5863 | 301903224 | -0.4819 / -0.2064 / -1.7323 / +1.0795 | **-1.3411** |
+| k20ip4 | -0.2472 | -43590.2 | 22.7144 | 604366755 | -0.5121 / -0.2292 / -3.4761 / +4.1042 | -0.1132 |
+
+**k20ip1 is the new best, -1.3411** (k20i -0.6662). The power term cut power by 0.70 (-1.40 units at weight 2), more
+than its +0.73 of extra overflow; the start-of-session estimate that k20i would most likely stay best was wrong -- no
+earlier candidate had shown how far kp moves power on this design. At kp 4 power falls 1.57, but overflow rises +3.76
+units over k20i. Refine (two rounds of sticky re-classification at k20ip1's setting) follows.
+
 Results for the blind design and the twelve-design sum: pending.
