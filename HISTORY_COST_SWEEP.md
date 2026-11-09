@@ -13405,3 +13405,30 @@ can detour around the box, because nothing is passing through. That is why the c
 nets that must stay) and why lateral shifts found nothing to shift (Part 152). What could still lower it is less wire
 *inside* the box per pin net -- trees that leave the box and come back where ring 3+ has room, or that share tiles
 better -- which no move tried so far targets. NTHU-Route 2.0's self-reported 160 says some of it is reachable.
+
+### Part 191c -- bigblue4's hotspot: no excess wire inside the box to take out
+
+**Measures** (2026-11-09 11:44-11:45, `~/Code/GlobalRouterRuns/p191/boxexcess.cpp`, `boxbound.cpp`; outputs
+`boxexcess_318.txt`, `boxbound.txt`; seconds each) on the 318 route and Part 191b's box (x 204-211, y 132-146), counting
+the box's *internal* edges only (both end tiles inside: H capacity 21300, usage 21482, overflow 182; V 22812 / 22838 /
+82). For each of the 5104 nets with a pin inside: its internal usage (every segment as written) against a rectilinear
+minimum spanning tree over its distinct pin tiles inside plus, for each pin outside, the box tile nearest it -- the
+Steiner minimum of a tree kept inside the box lies between 2/3 of it and it.
+
+| | internal usage (5104 pin nets) | spanning tree | 2/3 of the tree |
+|---|---|---|---|
+| H | 21476 | 30202 | 20135 |
+| V | 22838 | 43298 | 28865 |
+
+- The routes already use far less wire inside the box than trees kept inside it would: 29% (H) and 47% (V) below the
+  spanning tree, V even below 2/3 of it -- possible only because they leave the box and come back (rings 1-2 are 84% /
+  55% full in H, Part 191b). 153 of 5104 nets use more than their tree inside (by at most 14 units); no net uses one
+  2D edge on two layers.
+- A certified floor from the pins alone (a net with >= 2 pin tiles needs an edge at each; at a tile with all four
+  neighbours inside, that edge is internal, and one edge touches at most two of the net's tiles): >= 15344 of the
+  44112 internal capacity (34.8%). Weak -- it ignores connection -- so nothing is certified forced, and NTHU-Route
+  2.0's self-reported 160 stays unexplained.
+
+**Verdict.** There is no slack inside the box of the kind a per-net "less wire inside" move would harvest: the trees
+already push wire out to the edge of the room around it. What separates 318 from 160, if 160 is real, is not visible in
+these measures; without NTHU's routes (Part 189: not retrievable) it cannot be compared. bigblue4 is set aside.
