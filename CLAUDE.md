@@ -320,6 +320,16 @@ is re-routed at the best's setting while that gains -- ten designs -23.97 -> -25
 ariane -3.31 -> -4.05), for 1-2 more routes and OpenROAD sessions per design. Part 133 found why
 a fixed rule fails: the best strength (20-540) and whether the power term helps depend on each
 design's timing paths, which neither its score weights nor its wire geometry reveal.
+Since 2026-11-09 (Part 189) all twelve 2025 designs are scored: mempool_cluster visible -0.6993, blind -1.3643,
+**twelve designs -27.17**. On a 24 GB Mac its OpenROAD sessions peak at 80-113 GB of footprint on swap, so it runs
+with `--lean` (compress every route that can no longer win), `SLACK_BANDS=16` (walk the failing paths in slack
+bands; slack files byte-identical) and, after any stop, `--resume` (scores are appended to `WORK_DIR/scores.jsonl`
+as measured; a resumed loop re-runs nothing it has). One loop takes 20-30 h. Before a disk-tight run, pause Time
+Machine's automatic backups: a local snapshot keeps every route `--lean` compresses (the blind loop's first stop),
+and excluding a folder keeps it out of backups, not snapshots. The overflow cost has an idle-GCell floor no route
+can go below (`p189/g24_floor.cpp`, from the `.cap` alone): 83-94% of the unbiased routes' overflow cost
+(mempool_group 54-57%), and the best routes add more overflow than all the rest -- a cheaper way to carry the
+critical nets is where overflow can still pay.
 
 What did not change: the "Target" line above is stale (kept for history,
 not deleted) but the discipline below it -- verification first, cross-check

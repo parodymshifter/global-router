@@ -8,14 +8,14 @@ legal and cross-checked against the contest's own evaluator.
 
 ## Where we stand
 
-(Updated 2026-11-05; the rest of the scope below is as written on 2026-10-12.)
+(Updated 2026-11-09; the rest of the scope below is as written on 2026-10-12.)
 
 | set | designs | ours | best known | gap |
 |---|---|---|---|---|
 | ISPD 2008 | 16 | 11 at zero overflow; newblue1 26, newblue4 136, newblue7 92, bigblue4 318, newblue3 33492 (`speed08.env`, Parts 176-185) | newblue1 0 (LMgr), newblue4 144, newblue7 68, bigblue4 166, newblue3 ~31024 (NTUgr) | newblue4 already 8 below the best; newblue3 +8.0% (at least 26264 forced, Part 91), bigblue4 1.9x, newblue7 +24 (>= 54 forced), newblue1 +26; wirelength on the eleven -0.05% to +2.3% vs NTHU-Route 2.0 (Part 87; later speed settings moved it +-0.2%), bigblue4 +9.3% (its kept slack-0 route, Part 183) |
 | ISPD 2007 | 8 (3D) + 8 (2D) | the 3D designs are the 2008 contest's adaptec1-5, newblue1-3 | -- | the 2D (single-layer) variants are not yet run |
 | ISPD 2024 | 13 | all six hidden designs beat the contest's best raw score, 12-38x faster (Parts 115-120) | contest #1 | already ahead; what remains is the score's own terms (overflow cost, vias) |
-| ISPD 2025 | 6 visible + 6 blind | `gr/timing_loop.py` with the contest's OpenROAD in the loop (Part 134): ten scored designs sum -23.97 against our unbiased routes with classes from the input or the unbiased route's slack, none worse; ariane 0.14 under `standard25.env` (Part 133) against 1st place's 0.90 (lower is better) | contest winners (Hippo, PKU) | mempool_cluster (visible and blind) not yet scored with timing; sticky re-classification (Part 188, the loop's default since 2026-11-06: ten designs -25.11; a third round -25.19, not adopted) |
+| ISPD 2025 | 6 visible + 6 blind | `gr/timing_loop.py` with the contest's OpenROAD in the loop (Part 134) and sticky re-classification (Part 188, `--refine 2`, the default): **all twelve designs scored, sum -27.17** against our unbiased routes, none worse -- the ten of Part 188 -25.11, mempool_cluster visible -0.6993 and blind -1.3643 (Part 189: `--lean`, `SLACK_BANDS=16`, `--resume`, on swap, 20 h / 29.5 h per loop); ariane 0.14 under `standard25.env` (Part 133) against 1st place's 0.90 (lower is better) | contest winners (Hippo, PKU) | the best routes add more overflow cost than the whole changeable part of the unbiased routes (Part 189's idle-GCell floor: 83-94% of the unbiased routes' overflow cost is unavoidable, mempool_group's 54-57%), so a cheaper way to carry the critical nets is the lever; mempool_cluster's loop time (a refine route identical to the best is still scored) |
 
 Comparisons for 2008 are to published results through ~2013 (LMgr's re-run
 table, Part 75); newer routers report on the 2018/2019/2024 sets instead.
