@@ -13276,7 +13276,7 @@ GlobalRouterTemp (removed after); `layers_group.sh` now flags an evaluation with
 the timing and power terms gained. blind mempool_group's 101.5%: the mid layers' cost fell.)
 
 **What it shows.**
-- The bias moves wire up, not out: total wire changes +0.00% to +0.09% on every design, vias rise 5-81%
+- The bias moves wire up, not out: total wire changes +0.00% to +0.09% on every design, vias rise 0.5-81%
   (visible mempool_group 19.5M -> 35.3M), and the cost lands where the floor said it would -- metal7-10, nearly empty
   in the unbiased routes (their cost above the floor there is 0.000-0.053 score units per layer), with 69.3% on metal9-10
   alone.
