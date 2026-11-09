@@ -13210,3 +13210,22 @@ and 29 h 31 min (blind: 9 h 20 min before the guard stop, 20 h 11 min resumed) o
 112.8 GB on swap; `--lean`, `SLACK_BANDS=16` and `--resume` are what made them fit. Two savings for a rerun: check a
 refine route against the current best before scoring it (here 1 h 35 min), and keep Time Machine on manual backups
 for any disk-tight loop (the 06:33 stop).
+
+**Atlas v7 and Recap 7** (2026-11-09 06:18-06:50). The two mempool_cluster unbiased routes scored by the contest
+evaluator for the Atlas (`p189/atlas7/cluster_eval.sh`; visible total cost 1597901051.7522, blind 1726790015.5308; their
+overflow costs equal the loop's to the digit) and the idle floors of the 13 ISPD 2024 designs (`p189/atlas7/floors24.txt`;
+mempool_tile_rank and ariane_68_rank reproduce Parts 102 / 105). `gr/difficulty_data.py` gains the cluster designs (Part
+189's loops), the current loop gains (Part 188's), and two outcomes from the floor (`of_floor_share`, `of_excess_gcell`);
+41 designs, and on the 39 shared with v6 every field identical except five loop gains (`p189/atlas7/README.txt`).
+Readings: the floor is 54-97% of the unbiased overflow cost on all 25 designs of 2024 / 2025, and the cost above it per
+GCell ranks with RUDY's 99th percentile at Spearman +0.94; the loop gain (0.24-7.52) ranks with no pre-routing measure
+(best |0.42|, n = 12); with 41 designs the three k-means clusters put newblue3 with the ariane / NVDLA designs. Atlas v7:
+https://claude.ai/artifact/NhWAbyFKkxv2RVXZndpweX (`recaps/difficulty-atlas.html`). Recap 7 (Parts 150-189, with the
+Atlas as its second page and a report on unexplored options): https://claude.ai/artifact/7B3CUgsAysRb291D9BEpKp
+(`recaps/recap-2026-11-09.html`).
+
+**A correction to the 2008 "best known" column** (found for the recap): NTHU-Route 2.0's own results page ("as of
+10/20/2008", https://www.cs.nthu.edu.tw/~tcwang/nthuroute) lists bigblue4 160, newblue4 138, newblue7 54, newblue3 31454 --
+lower than LMgr's re-run table (Part 75: 166 / 144 / 68), which the plan used. Its newblue7 equals Part 91's certified
+bound (>= 54), so if legal it is optimal on overflow; newblue4 136 is 2 below it, not 8. Self-reported; the page offers
+the route files, not yet downloaded or checked.
