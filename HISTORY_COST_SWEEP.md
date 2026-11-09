@@ -13330,3 +13330,48 @@ Score change against the unbiased route, split by term (lower is better):
 layers" is dead on mempool_tile_wrap: metal9-10 is where the gain is, and its overflow is the price of it. What is left
 of the 9.78 units is which nets and segments go up, not which layer they go to -- Recap 7's option 9 (per-segment
 RC weighting), not a layer rule.
+
+## Part 191 -- bigblue4: blocker eviction chains (Part 151's option 2) keep none -- the hotspot's neighbourhood is saturated out to 60 tiles
+
+**Why** (2026-11-09, the user's order: "start the bigblue4 make-room reroutes"). bigblue4 is the widest open 2008 gap --
+318 against NTHU-Route 2.0's self-reported 160, and the cut bound forces none of it (tightest cut 89.3%, Part 91).
+Part 152's lateral shifts could move 2 of ~1500 legal nets because the parallel rows beside the hotspot are full along
+the whole run; Part 151's option 2 sends the blockers further away.
+
+**The pass** (`gr/pd39route.cpp`, `evictChains`; `PD39ROUTE_REFINE_EVICT=nets[,margin[,blockers[,passes]]]`, off by
+default, before refinement's first iteration). For each overflowed net N (most overflow first): (1) its *wanted* route,
+searched against a copy of the usage in which every legal edge has room for N while edges already over capacity keep
+their demand, under refinement's own cost; (2) the wanted route committed; (3) the nets on the full-but-legal edges it
+took (*blockers*, longest box first) rerouted one by one under refinement's cost, each kept only if the overflow over
+its old and new edges does not rise; (4) the whole chain kept only if the design's total 2D overflow fell, otherwise N
+and every blocker put back exactly. Self-test (`testEvictChains`, 4 checks): a fixture refinement cannot clear (the
+control is checked: 10 stays 10) where the chain evicts the blocker to a row only it can reach (10 -> 0, connected,
+usage equal to the charges, +4 wire); a fixture where the blocker has nowhere to go (no chain kept, every route and the
+usage byte-identical); no overflow (nothing tried). `gr/e2e_settings.py` 40 of 40 (the new check: the pass's own trace
+line on the residue fixture, 41 nets tried).
+
+**Runs** (`~/Code/GlobalRouterRuns/p191/`; `runs/p191/`): Part 183's 318 route (`p183_bb4_r1000`) read back as 2D
+(`PD3ROUTE_LA_FROM`, fallback and region stage off, so refinement starts from it), `@standard.env @fast08.env
+@speed08.env`. The control (`p191_bb4_ctl`, no chains): refinement 318 -> 318 in 20 iterations, real overflow 318 after
+layer assignment -- the restart reproduces the route's overflow. The chain runs, every overflowed net tried once per pass:
+
+| setting (margin, blockers per chain) | chains tried | kept | blocker reroutes | blocker moves undone with their chain | failed chains that cleared N's own route | 2D overflow | pass wall time |
+|---|---|---|---|---|---|---|---|
+| 10, 8 | 3763 | 0 | 27568 | 19613 | 6 | 318 -> 318 | ~3 min |
+| 30, 16 | 3763 | 0 | 55136 | (counters added after) | -- | 318 -> 318 | -- |
+| 60, 64 | 3763 | 0 | 220544 | 151925 | 68 | 318 -> 318 | ~16 min (run 1211 s, peak RSS 2.09 GB) |
+
+(The first two ran on `pd39route.p191`; the diagnostics -- the last three columns -- on `pd39route.p191b`, the committed
+code, which only adds the counters; 317 of the 3763 wanted routes needed no one to move. The two chain runs on
+`p191` were stopped after their pass, since nothing changed and the rest repeats the control.)
+
+**What it shows.** Blockers can move -- about 70% of their reroutes found a way out without raising overflow where
+they went -- but the room does not add up: even with 60 tiles of margin and 64 blockers per chain, the 68 chains that
+cleared N completely still never lowered the total, which can only mean the blockers' new routes filled the room N
+left. Within 60 tiles of the hotspot the free capacity is fixed, and single-level moves trade overflow from edge to
+edge. Lateral shifts (Part 152) met the same wall at 1-3 rows. **Not adopted** (off by default, kept for the record and
+for designs with room further out).
+
+**What is left for bigblue4.** Where the room is: free capacity in rings around the hotspot, from the `.gr` and the
+route (cheap; says whether a 160 needs detours longer than 60 tiles). A joint choice over the hotspot's nets (Part 151's
+option 5) is the remaining local method; it cannot beat a fixed free capacity either, so the ring measure comes first.

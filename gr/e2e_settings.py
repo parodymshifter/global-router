@@ -288,6 +288,12 @@ def main():
     b = run('residue', {**off, 'PD39ROUTE_REFINE_SHIFT': '2'}, 'shift')
     m = re.search(r'^refine shift: k 2 radius 2: (\d+) legal nets', b, re.M)
     check('PD39ROUTE_REFINE_SHIFT runs before refinement', bool(m), m.group(0) if m else 'no refine shift line')
+    # Part 191: PD39ROUTE_REFINE_EVICT -- blocker eviction chains before refinement's first iteration: the pass's
+    # own per-pass trace line (written only while it runs) and its summary after refinement.
+    b = run('residue', {**off, 'PD39ROUTE_REFINE_EVICT': '50,10,8,1'}, 'evict')
+    m = re.search(r'^refine evict: pass 0: (\d+) overflowed nets tried', b, re.M)
+    check('PD39ROUTE_REFINE_EVICT runs before refinement', bool(m) and int(m.group(1)) > 0 and
+          bool(re.search(r'^refine evict: 2D overflow \d+ -> \d+', b, re.M)), m.group(0) if m else 'no refine evict line')
     b = run('residue', {**off, 'PD39ROUTE_REFINE_ANNEAL': '5,0.9'}, 'anneal')
     check('PD39ROUTE_REFINE_ANNEAL runs in refinement', any(' anneal T ' in l for l in lines(b, 'refine iter ')))
     # Part 168: PD39ROUTE_REFINE_STOP=1 -- refinement stops at its first iteration without gain (residue design,

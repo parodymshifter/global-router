@@ -4074,6 +4074,10 @@ struct RefineSettings {
   // straight pieces on full edges within `radius` parallel rows (columns) of an overflowed edge are shifted
   // sideways by up to k rows (columns) where every new edge has room -- making room for the overflowed nets.
   int shiftK = 0, shiftRadius = 2;
+  // Part 191: PD39ROUTE_REFINE_EVICT=nets[,margin[,blockers[,passes]]] (nets 0 = off): before refinement's first
+  // iteration, blocker eviction chains (evictChains) for up to `nets` overflowed nets per pass, `passes` passes
+  // while a pass keeps a chain.
+  int evictNets = 0, evictMargin = 10, evictBlockers = 8, evictPasses = 3;
   // Part 168: PD39ROUTE_REFINE_STOP=W (0 = off): below PD12ROUTE_PLATEAU_MIN, where the plateau rule does not
   // apply, refinement stops after W iterations in a row without any gain. Its overflow never rises (the revert
   // rule), and on every residue run traced its last gain came by iteration 9.
@@ -4287,6 +4291,8 @@ struct RefineReport {
   int lastMargin = 0;     // pd13route: the margin of the last round run
   long long annealWorse = 0, annealKept = 0; // Part 147: worse reroutes seen / kept by annealing
   long long shiftCandidates = 0, shiftShifted = 0, shiftWire = 0; // Part 152: the lateral-shift probe
+  long long evictTried = 0, evictKept = 0, evictMoved = 0, evictWire = 0; // Part 191: eviction chains
+  long long evictBefore = -1, evictAfter = -1;
   bool cancelled = false; // Part 168: stopped by a cancel flag
   bool lowStopped = false; // Part 168: stopped by PD39ROUTE_REFINE_STOP
   int lastGain = -1;       // Part 168 (trace): the last iteration that lowered the best (-1: none)
@@ -4555,6 +4561,215 @@ ShiftOutcome shiftLegalPieces(const RoutingGrid &g, Usage &usage, std::vector<Ro
 }
 
 
+// Part 191: blocker eviction chains ("make room", Part 151's option 2). Lateral shifts (Part 152) could move 2 of
+// ~1500 legal nets: the parallel rows beside a hotspot are full along the whole run. A chain sends the blockers
+// further away. For an overflowed net N (most overflow first, then smallest box):
+//   1. its wanted route: N rerouted against a copy of the usage in which every legal edge (at or under capacity
+//      with N on the grid) has room for N -- as if the legal nets on it could move -- while the edges already over
+//      capacity keep their demand (refinement's cost: a full edge costs 1, any other kRefineEps);
+//   2. N's wanted route is committed to the real usage, pushing the edges it takes from legal nets over capacity;
+//   3. the nets on the edges it pushed over capacity -- edges that were full but legal before ("blockers",
+//      longest box first, at most `blockers` of them) -- are rerouted one by one under refinement's own cost, each
+//      while it still has an edge over capacity, and each kept only if the overflow over its old and new edges does
+//      not rise (refinement's revert rule);
+//   4. the chain is kept only if the design's total 2D overflow fell; otherwise N and every blocker are put back
+//      exactly (supervised, CLAUDE.md: a new move class is accepted per move, never as a batch).
+// At most `nets` candidates per pass; each search uses box margin `margin`. Deterministic (one thread, fixed order).
+void addCharge2D(const RoutingGrid &g, Usage &u, const ChargeRecord &c); // defined below
+struct EvictOutcome {
+  long long tried = 0, kept = 0, blockersTried = 0, blockersMoved = 0, wireAdded = 0;
+  long long before = 0, after = 0;
+  // diagnostics (trace): chains whose wanted route needed no one to move; blocker reroutes kept inside chains that
+  // were then undone; failed chains whose blockers all left the wanted route's edges (the total still did not fall)
+  long long noBlockers = 0, movedInFailed = 0, clearedButFailed = 0;
+};
+
+EvictOutcome evictChains(const RoutingGrid &g, Usage &usage, Prices &prices, LayerPlan &lp, SearchRegion &region,
+                         std::vector<RoutedNet> &nets, int maxNets, int margin, int maxBlockers) {
+  EvictOutcome out;
+  out.before = out.after = totalOverflow(g, usage);
+  if (out.before <= 0 || maxNets <= 0)
+    return out;
+  // the nets on each 2D edge (dense, per CLAUDE.md), kept current as routes change
+  std::vector<std::vector<int>> onH(usage.h.size()), onV(usage.v.size());
+  auto forEdges = [&](const std::vector<ChargeRecord> &cs, auto &&f) {
+    for (const ChargeRecord &c : cs) {
+      if (c.horizontal)
+        for (int x = c.a; x < c.b; ++x)
+          f(true, g.hIndex(x, c.cross, c.layer));
+      else
+        for (int y = c.a; y < c.b; ++y)
+          f(false, g.vIndex(c.cross, y, c.layer));
+    }
+  };
+  auto indexAdd = [&](int id) {
+    forEdges(nets[static_cast<size_t>(id)].charges, [&](bool h, size_t e) { (h ? onH : onV)[e].push_back(id); });
+  };
+  auto indexRemove = [&](int id) {
+    forEdges(nets[static_cast<size_t>(id)].charges, [&](bool h, size_t e) {
+      std::vector<int> &l = (h ? onH : onV)[e];
+      auto it = std::find(l.begin(), l.end(), id);
+      if (it != l.end())
+        l.erase(it);
+    });
+  };
+  for (size_t i = 0; i < nets.size(); ++i)
+    if (!nets[i].giant)
+      indexAdd(static_cast<int>(i));
+  auto bboxOf = [&](const RoutedNet &rn) {
+    int x0 = rn.pts[0].x, x1 = x0, y0 = rn.pts[0].y, y1 = y0;
+    for (const Point &p : rn.pts) {
+      x0 = std::min(x0, p.x);
+      x1 = std::max(x1, p.x);
+      y0 = std::min(y0, p.y);
+      y1 = std::max(y1, p.y);
+    }
+    return (x1 - x0) + (y1 - y0);
+  };
+  auto wireOf = [&](const std::vector<ChargeRecord> &cs) {
+    long long w = 0;
+    for (const ChargeRecord &c : cs)
+      w += c.b - c.a;
+    return w;
+  };
+  std::vector<std::tuple<long long, int, int>> cand; // (-overflow, bbox, id)
+  for (size_t i = 0; i < nets.size(); ++i) {
+    const RoutedNet &rn = nets[i];
+    if (rn.giant || rn.pts.size() < 2)
+      continue;
+    const long long ov = netOverflowAmount(g, usage, rn);
+    if (ov > 0)
+      cand.emplace_back(-ov, bboxOf(rn), static_cast<int>(i));
+  }
+  std::sort(cand.begin(), cand.end());
+  if (cand.size() > static_cast<size_t>(maxNets))
+    cand.resize(static_cast<size_t>(maxNets));
+  struct Saved {
+    int id;
+    std::vector<ChargeRecord> charges;
+    std::vector<Seg> segs;
+  };
+  auto putBack = [&](const Saved &s) {
+    RoutedNet &rn = nets[static_cast<size_t>(s.id)];
+    indexRemove(s.id);
+    for (const ChargeRecord &c : rn.charges)
+      undoCharge(g, usage, c);
+    rn.charges = s.charges;
+    rn.segs = s.segs;
+    for (const ChargeRecord &c : rn.charges)
+      addCharge2D(g, usage, c);
+    indexAdd(s.id);
+  };
+  const Usage *const liveBefore = gLiveOverride;
+  for (const auto &cd : cand) {
+    const int id = std::get<2>(cd);
+    RoutedNet &rn = nets[static_cast<size_t>(id)];
+    if (!netOverflowed(g, usage, rn))
+      continue; // an earlier chain already cleared it
+    ++out.tried;
+    const long long tot0 = totalOverflow(g, usage);
+    const long long wire0 = wireOf(rn.charges);
+    const int amount = rn.net->minWidth + g.minSpacing[0];
+    // 1. the wanted route, against the relaxed copy
+    Usage rel = usage;
+    for (const ChargeRecord &c : rn.charges)
+      undoCharge(g, rel, c);
+    for (size_t e = 0; e < rel.h.size(); ++e)
+      if (usage.h[e] <= usage.capH[e] && rel.capH[e] - amount >= 0)
+        rel.h[e] = std::min(rel.h[e], rel.capH[e] - amount);
+    for (size_t e = 0; e < rel.v.size(); ++e)
+      if (usage.v[e] <= usage.capV[e] && rel.capV[e] - amount >= 0)
+        rel.v[e] = std::min(rel.v[e], rel.capV[e] - amount);
+    RoutedNet want = rn;
+    want.charges.clear(); // already off `rel`
+    want.segs.clear();
+    want.boxMargin = margin;
+    gLiveOverride = &rel;
+    routeNetSlowMSMV(g, prices, rel, lp, region, 0.0, want);
+    gLiveOverride = liveBefore;
+    // the legal nets on the edges the wanted route would push over capacity
+    std::vector<int> blockers;
+    {
+      Usage &u = usage;
+      forEdges(want.charges, [&](bool h, size_t e) {
+        const int cap = h ? u.capH[e] : u.capV[e];
+        const int now = h ? u.h[e] : u.v[e];
+        if (now > cap) // already over: its nets are overflowed, not blockers
+          return;
+        if (now + amount <= cap)
+          return; // room for N here even with everyone staying
+        for (int b : (h ? onH : onV)[e])
+          if (b != id && std::find(blockers.begin(), blockers.end(), b) == blockers.end())
+            blockers.push_back(b);
+      });
+    }
+    if (blockers.empty()) {
+      ++out.noBlockers;
+      continue; // the wanted route needs no one to move: plain refinement's job
+    }
+    std::stable_sort(blockers.begin(), blockers.end(), [&](int a, int b) {
+      return bboxOf(nets[static_cast<size_t>(a)]) > bboxOf(nets[static_cast<size_t>(b)]);
+    });
+    // 2. commit N's wanted route
+    std::vector<Saved> undo;
+    undo.push_back({id, rn.charges, rn.segs});
+    indexRemove(id);
+    for (const ChargeRecord &c : rn.charges)
+      undoCharge(g, usage, c);
+    rn.charges = want.charges;
+    rn.segs = want.segs;
+    for (const ChargeRecord &c : rn.charges)
+      addCharge2D(g, usage, c);
+    indexAdd(id);
+    // 3. move the blockers
+    long long wireB = 0;
+    int moved = 0, triedB = 0;
+    for (int b : blockers) {
+      if (triedB >= maxBlockers)
+        break;
+      RoutedNet &bn = nets[static_cast<size_t>(b)];
+      if (!netOverflowed(g, usage, bn))
+        continue; // the edges it shared with N have room again
+      ++triedB;
+      Saved s{b, bn.charges, bn.segs};
+      const long long localBefore = overflowOverUnion(g, usage, s.charges, s.charges);
+      const long long w0 = wireOf(bn.charges);
+      indexRemove(b);
+      const int savedMargin = bn.boxMargin;
+      bn.boxMargin = margin;
+      routeNetSlowMSMV(g, prices, usage, lp, region, 0.0, bn);
+      bn.boxMargin = savedMargin;
+      indexAdd(b);
+      if (overflowOverUnion(g, usage, s.charges, bn.charges) > localBefore) {
+        putBack(s);
+        continue;
+      }
+      undo.push_back(std::move(s));
+      wireB += wireOf(bn.charges) - w0;
+      ++moved;
+    }
+    out.blockersTried += triedB;
+    // 4. keep the chain only if the total fell
+    if (totalOverflow(g, usage) < tot0) {
+      ++out.kept;
+      out.blockersMoved += moved;
+      out.wireAdded += wireOf(rn.charges) - wire0 + wireB;
+    } else {
+      out.movedInFailed += moved;
+      bool cleared = true;
+      forEdges(rn.charges, [&](bool h, size_t e) {
+        cleared = cleared && (h ? usage.h[e] <= usage.capH[e] : usage.v[e] <= usage.capV[e]);
+      });
+      out.clearedButFailed += cleared;
+      for (auto it = undo.rbegin(); it != undo.rend(); ++it)
+        putBack(*it);
+    }
+  }
+  gLiveOverride = liveBefore;
+  out.after = totalOverflow(g, usage);
+  return out;
+}
+
 RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const RefineSettings &rs,
                       bool trace, const std::atomic<bool> *cancel = nullptr) {
   const RoutingGrid &g = d.grid;
@@ -4579,6 +4794,29 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
       std::cerr << "refine shift: k " << rs.shiftK << " radius " << rs.shiftRadius << ": " << so.candidates
                 << " legal nets on full edges near overflow, " << so.shifted << " shifted, +" << so.wireAdded
                 << " wire, 2D overflow " << totalOverflow(g, usage) << "\n";
+  }
+  if (rs.evictNets > 0 && total > 0) { // Part 191: blocker eviction chains before the first iteration
+    rep.evictBefore = total;
+    for (int p = 0; p < rs.evictPasses && total > 0; ++p) {
+      const EvictOutcome eo =
+          evictChains(g, usage, prices, lp, region, nets, rs.evictNets, rs.evictMargin, rs.evictBlockers);
+      rep.evictTried += eo.tried;
+      rep.evictKept += eo.kept;
+      rep.evictMoved += eo.blockersMoved;
+      rep.evictWire += eo.wireAdded;
+      total = eo.after;
+      if (trace)
+        std::cerr << "refine evict: pass " << p << ": " << eo.tried << " overflowed nets tried, " << eo.kept
+                  << " chains kept (" << eo.blockersMoved << " of " << eo.blockersTried << " blockers moved, +"
+                  << eo.wireAdded << " wire), 2D overflow " << eo.before << " -> " << eo.after << "; "
+                  << eo.noBlockers << " needed no move, " << eo.movedInFailed << " blocker moves undone with their "
+                  << "chain, " << eo.clearedButFailed << " failed chains cleared their route\n";
+      if (eo.kept == 0)
+        break;
+    }
+    rep.evictAfter = total;
+    rep.after = total;
+    bestAfter.assign(1, rep.after);
   }
   // Part 147: annealed acceptance, on this thread for this stage only.
   const bool anneal = rs.annealT0 > 0 && rs.accept == AcceptMode::kRevert;
@@ -19842,6 +20080,115 @@ void testLateralShifts() {
   check(o3.candidates == 0 && o3.shifted == 0, "lateral shifts: no overflow, no candidates");
 }
 
+// Part 191: blocker eviction chains. One track per edge. Nets A and B share row 0 from column 0 to 5 (over
+// capacity: 10 units); legal net L fills row 1 between the same columns. With box margin 1, A and B see rows 0-1
+// only, so plain refinement cannot clear them (every way across is full); L's box reaches row 2, which is free.
+// (1) Control: refinement's reroute of B leaves the overflow at 10. (2) The chain: A's wanted route takes row 1,
+// L is evicted to row 2, the total falls to 0 and the chain is kept -- every net connected and covering its pins,
+// usage equal to what the charges add up to, +4 wire (two vias' worth of jogs each for A and L). (3) On a grid
+// without row 2, L cannot leave: no chain is kept, and every net's route and the usage are exactly as before.
+// (4) No overflow: nothing is tried.
+void testEvictChains() {
+  auto gr = [](int rows) {
+    return std::string("grid 6 ") + std::to_string(rows) +
+           " 2\nvertical capacity 0 2\nhorizontal capacity 2 0\nminimum width 1 1\nminimum spacing 1 1\n"
+           "via spacing 0 0\n0 0 10 10\nnum net 3\n"
+           "nA 0 2 1\n5 5 1\n55 5 1\nnB 1 2 1\n5 5 1\n55 5 1\nnL 2 2 1\n5 15 1\n55 15 1\n0\n";
+  };
+  auto setup = [](Design &d, std::vector<RoutedNet> &nets) {
+    nets.assign(3, RoutedNet());
+    for (int i = 0; i < 3; ++i)
+      nets[i].net = &d.nets[i];
+    nets[0].segs = {{0, 0, 0, 5, 0, 0}};
+    nets[1].segs = {{0, 0, 0, 5, 0, 0}};
+    nets[2].segs = {{0, 1, 0, 5, 1, 0}};
+    prepareFor2DRefine(d, nets);
+  };
+  auto covers = [](const RoutedNet &rn) {
+    for (const Point &p : rn.pts) {
+      bool on = false;
+      for (const Seg &sg : rn.segs)
+        on = on || (sg.x1 == p.x && sg.y1 == p.y) || (sg.x2 == p.x && sg.y2 == p.y);
+      if (!on)
+        return false;
+    }
+    return segsConnected(rn.segs);
+  };
+  auto sameSegs = [](const std::vector<Seg> &a, const std::vector<Seg> &b) {
+    if (a.size() != b.size())
+      return false;
+    for (size_t i = 0; i < a.size(); ++i)
+      if (a[i].x1 != b[i].x1 || a[i].y1 != b[i].y1 || a[i].l1 != b[i].l1 || a[i].x2 != b[i].x2 ||
+          a[i].y2 != b[i].y2 || a[i].l2 != b[i].l2)
+        return false;
+    return true;
+  };
+  auto wire = [](const std::vector<RoutedNet> &ns) {
+    long long w = 0;
+    for (const RoutedNet &rn : ns)
+      for (const ChargeRecord &c : rn.charges)
+        w += c.b - c.a;
+    return w;
+  };
+  {
+    const std::string t3 = gr(3);
+    Design d = parse("pd39route_selftest_evict3.gr", t3.c_str());
+    std::vector<RoutedNet> nets;
+    setup(d, nets);
+    Usage u = usageFromCharges(d.grid, nets);
+    Prices pr(d.grid);
+    pr.model = CostModel::kRefine;
+    pr.live = &u;
+    LayerPlan lp(d.grid);
+    SearchRegion region;
+    const long long ov0 = totalOverflow(d.grid, u);
+    nets[1].boxMargin = 1;
+    routeNetSlowMSMV(d.grid, pr, u, lp, region, 0.0, nets[1]);
+    check(ov0 == 10 && totalOverflow(d.grid, u) == 10,
+          "eviction chains, control: refinement's own reroute of B (margin 1) cannot clear the overflow (10)");
+    setup(d, nets);
+    Usage u2 = usageFromCharges(d.grid, nets);
+    pr.live = &u2;
+    const long long w0 = wire(nets);
+    const EvictOutcome eo = evictChains(d.grid, u2, pr, lp, region, nets, 10, 1, 8);
+    const Usage again = usageFromCharges(d.grid, nets);
+    bool rowL2 = false;
+    for (const Seg &sg : nets[2].segs)
+      rowL2 = rowL2 || (sg.y1 == 2 && sg.y2 == 2);
+    check(eo.before == 10 && eo.after == 0 && eo.kept == 1 && eo.blockersMoved == 1 && totalOverflow(d.grid, u2) == 0 &&
+              again.h == u2.h && again.v == u2.v && rowL2 && covers(nets[0]) && covers(nets[1]) && covers(nets[2]) &&
+              wire(nets) == w0 + 4 && eo.wireAdded == 4,
+          "eviction chains: A takes row 1, L is evicted to row 2, overflow 10 -> 0, connected, usage = the charges, "
+          "+4 wire");
+  }
+  {
+    const std::string t2 = gr(2);
+    Design d = parse("pd39route_selftest_evict2.gr", t2.c_str());
+    std::vector<RoutedNet> nets;
+    setup(d, nets);
+    const std::vector<RoutedNet> start = nets;
+    Usage u = usageFromCharges(d.grid, nets);
+    const Usage u0 = u;
+    Prices pr(d.grid);
+    pr.model = CostModel::kRefine;
+    pr.live = &u;
+    LayerPlan lp(d.grid);
+    SearchRegion region;
+    const EvictOutcome eo = evictChains(d.grid, u, pr, lp, region, nets, 10, 1, 8);
+    bool same = u.h == u0.h && u.v == u0.v;
+    for (size_t i = 0; i < nets.size(); ++i)
+      same = same && sameSegs(nets[i].segs, start[i].segs) && sameCharges2D(nets[i].charges, start[i].charges);
+    check(eo.tried >= 1 && eo.kept == 0 && eo.after == 10 && same,
+          "eviction chains: L has nowhere to go (no row 2), no chain kept, every route and the usage exactly as "
+          "before");
+    std::vector<RoutedNet> legal = {nets[0], nets[2]};
+    Usage u3 = usageFromCharges(d.grid, legal);
+    pr.live = &u3;
+    const EvictOutcome e3 = evictChains(d.grid, u3, pr, lp, region, legal, 10, 1, 8);
+    check(e3.tried == 0 && e3.kept == 0 && e3.after == 0, "eviction chains: no overflow, nothing tried");
+  }
+}
+
 // Part 150: the wall-aware heuristic. (1) On 40 present-demand fixtures with a congested wall (gaps at varied
 // rows, a decayed WL term, history), the search with the coarse bound finds exactly the cost the plain search
 // finds, and expands fewer nodes in all. (2) Consistency, checked edge by edge: h(u) <= cost(u, v) + h(v) with h =
@@ -22037,6 +22384,7 @@ int run() {
   testWallAwareHeuristic();
   testSearchHeapMatchesPriorityQueue();
   testLateralShifts();
+  testEvictChains();
   testScoreCapTableIsExact();
   testScoreLossTableIsExact();
   testStageReport();
@@ -22270,6 +22618,19 @@ int main(int argc, char **argv) {
         fail(std::string("PD39ROUTE_REFINE_SHIFT must be k[,radius] (0-1000 each; got '") + v + "')");
       refine.shiftK = k;
       refine.shiftRadius = r;
+    }
+    if (const char *v = std::getenv("PD39ROUTE_REFINE_EVICT"); v) { // Part 191: nets[,margin[,blockers[,passes]]]
+      int n = -1, m = 10, b = 8, p = 3;
+      char tail = 0;
+      const int got = std::sscanf(v, "%d,%d,%d,%d%c", &n, &m, &b, &p, &tail);
+      if (got < 1 || got > 4 || n < 0 || n > 10000000 || m < 0 || m > 10000 || b < 1 || b > 10000 || p < 1 ||
+          p > 1000)
+        fail(std::string("PD39ROUTE_REFINE_EVICT must be nets[,margin[,blockers[,passes]]] (nets 0-1e7, margin "
+                         "0-1e4, blockers 1-1e4, passes 1-1000; got '") + v + "')");
+      refine.evictNets = n;
+      refine.evictMargin = m;
+      refine.evictBlockers = b;
+      refine.evictPasses = p;
     }
     if (const char *v = std::getenv("PD39ROUTE_REFINE_STOP"); v) { // Part 168: W
       char *end = nullptr;
@@ -23352,6 +23713,10 @@ int main(int argc, char **argv) {
               << (refRep.lowStopped ? ", PD39ROUTE_REFINE_STOP" : "") << ", last gain at iteration "
               << refRep.lastGain << ", longest wait before a gain " << refRep.longestWait << ", " << refRep.seconds
               << "s)\n";
+  if (refine.enabled && refRep.evictBefore >= 0) // Part 191
+    std::cerr << "refine evict: 2D overflow " << refRep.evictBefore << " -> " << refRep.evictAfter << " ("
+              << refRep.evictKept << " of " << refRep.evictTried << " chains kept, " << refRep.evictMoved
+              << " blockers moved, +" << refRep.evictWire << " wire)\n";
  if (piecesTotal > 0)
     std::cerr << "piece reroutes: " << piecesTotal << ", by L/Z pattern (no maze): " << patternedTotal << "\n";
   if (!twoDOnly) {
