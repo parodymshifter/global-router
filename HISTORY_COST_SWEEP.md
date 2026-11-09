@@ -13292,3 +13292,41 @@ the timing and power terms gained. blind mempool_group's 101.5%: the mid layers'
 from a lower-resistance layer against w3 times that layer's marginal overflow cost -- instead of resistance alone (the
 direction of GAP-LA, Recap 7's option 8). The ceiling is the 9.78 units; a 25% move on the 2025 sum would need about
 70% of it back at equal timing.
+
+### Part 190b -- mempool_tile_wrap: damping the upward pull loses on both designs
+
+**Screen** (2026-11-09 10:23:18-10:29:42, `~/Code/GlobalRouterRuns/p190/screen.py`, `screen.{visible,blind}/`:
+`screen.tsv`, `screen.log`, routes `*.route.xz`). At each design's Part 188 best (visible k180rp1m2: k3 180, kp 1,
+routed classes from `merged2.slack`; blind k20ip1m1: k3 20, kp 1, input classes lowered by `merged1.slack`), the same
+router build (`pd39route.p186`) told different R or C for the upper layers only -- OpenROAD scores with NanGate45's real
+values: **R9** metal9-10 R raised to metal7-8's; **R7** metal7-10 R raised to metal4-6's; **C9** metal9-10 C raised to
+metal8's; **R9C9**, **R7C9** both. P (unchanged) is byte-identical to Part 188's best on both designs, and its score
+reproduces Part 188's exactly. Routes 3-4 s each (peak RSS 388-422 MB), one OpenROAD session of 142-144 s per design.
+
+Score change against the unbiased route, split by term (lower is better):
+
+| variant | visible: total | timing | power | overflow | blind: total | timing | power | overflow |
+|---|---|---|---|---|---|---|---|---|
+| **P** (best) | **-0.9260** | -0.7962 | -1.0980 | +0.9682 | **-1.1491** | -1.9252 | -0.2879 | +1.0639 |
+| C9 | -0.6630 | -0.6227 | -0.9009 | +0.8606 | -0.8953 | -1.5885 | -0.1459 | +0.8391 |
+| R9 | -0.5335 | -0.4968 | -0.7599 | +0.7232 | -0.7028 | -1.4685 | -0.2476 | +1.0133 |
+| R7 | -0.0970 | -0.0552 | -0.2946 | +0.2528 | +0.4435 | +0.1118 | -0.1086 | +0.4403 |
+| R9C9 | +0.4762 | +0.1027 | -0.2281 | +0.6016 | +0.7095 | -0.0127 | -0.0754 | +0.7976 |
+| R7C9 | +0.6721 | +0.3952 | +0.1762 | +0.1007 | +1.2640 | +0.9916 | +0.0715 | +0.2009 |
+
+**What it shows.**
+- Every damping is worse than the best, on both designs: the timing and power the upper layers buy fall faster
+  than the overflow they cost. Per unit of added overflow cost, P buys the most (visible: 1.95 units of timing + power
+  per unit of overflow; C9 1.77, R9 1.74, R7 1.38).
+- The mid layers are no cheaper way to carry the nets: with the pull stopped at metal4-6 (R7, R7C9) timing ends
+  worse than the unbiased route on both designs (blind R7C9 +0.99). A lifted net there pays the vias and metal4-8's
+  capacitance (the highest of the stack) without metal9-10's resistance (1/40 of metal4-6's) -- Part 133's finding
+  for a weak bias, now at the best's own strength.
+- The two pulls work together on blind: R9 alone loses 0.46 of the timing gain, C9 alone 0.34, both together 1.91 --
+  all of it. At its weak timing strength (k3 20) the power term (every net, kp x C) is what lifts many critical nets
+  onto metal9-10.
+
+**Verdict.** Recap 7's option 2 / Part 190's "layer-aware bias" in the form "keep moderately critical nets on the mid
+layers" is dead on mempool_tile_wrap: metal9-10 is where the gain is, and its overflow is the price of it. What is left
+of the 9.78 units is which nets and segments go up, not which layer they go to -- Recap 7's option 9 (per-segment
+RC weighting), not a layer rule.
