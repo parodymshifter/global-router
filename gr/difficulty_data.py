@@ -3,7 +3,7 @@
 routing outcomes recorded for each design, into one JSON file for the difficulty explorer page
 (HISTORY_COST_SWEEP.md Part 130). Standard library only.
 
-  python3 gr/difficulty_data.py FEATURES.txt ROUTE25.txt OUT.json [NETTIMES.txt]
+  python3 gr/difficulty_data.py FEATURES.txt ROUTE25.txt OUT.json [NETTIMES.txt] [--floors FLOORS.txt]
 
 Outcomes, per design (None where a set has no such measure):
   detour        routed 2D wire length (GCell steps) / total Steiner tree length of every net -- comparable
@@ -25,10 +25,18 @@ Outcomes, per design (None where a set has no such measure):
                 designs, with many short nets, look uncongested)
   wns, tns_ep, power  (Part 133) ISPD 2025: timing and power of the unbiased route (the contest's OpenROAD),
                 TNS per contest endpoint (registers + outputs)
-  loop_gain     (Part 134) ISPD 2025: the timing loop's score improvement over the unbiased route
+  loop_gain     ISPD 2025: the timing loop's score improvement over the unbiased route -- since Atlas v7 the
+                current flow's (Part 188's `--refine 2` loops, Part 189's for mempool_cluster); Part 134's before
+  of_floor_share  (Atlas v7, Part 189) ISPD 2024 / 2025: the idle-GCell floor (the overflow cost an empty
+                solution pays, `p189/g24_floor` on the .cap; FLOORS.txt lines set= design= floor=) over the
+                unbiased route's overflow cost -- the part of the overflow term no route can remove
+  of_excess_gcell (Atlas v7) the overflow cost above that floor, per GCell: the changeable congestion
 Sources: ISPD 2008 -- Part 133's re-measurement runs (pd39route, the 2008 standard @fast08, routes
 byte-identical to Part 124's); ISPD 2024 -- Part 123's pd39route runs; ISPD 2025 -- ROUTE25.txt (pd39route,
-the 2024 standard, scored by the contest evaluator), Part 133's OpenROAD scores, Part 134's timing loop.
+the 2024 standard, scored by the contest evaluator), Part 133's OpenROAD scores, Part 188's timing loops;
+the two 2025 mempool_cluster designs (Atlas v7) -- Part 189's loops: the unbiased route (base.route.xz, pd39route.p186,
+the same 2024 settings), its evaluator output and 2D wire length (`p189/atlas7/<set>.eval`, `.steps_dbu`), its
+OpenROAD scores and the loop's gain (`p189/results.<set>/loop.tsv`); no per-net times.
 """
 import json
 import os
@@ -90,6 +98,24 @@ def cpu_of(path):
 
 P133 = os.path.expanduser('~/Code/GlobalRouterRuns/p133')
 P134 = os.path.expanduser('~/Code/GlobalRouterRuns/p134')
+P188 = os.path.expanduser('~/Code/GlobalRouterRuns/p188')
+P189 = os.path.expanduser('~/Code/GlobalRouterRuns/p189')
+
+
+def cluster25(which):
+    """Atlas v7: the 2025 mempool_cluster designs, from Part 189's loops (see the header)."""
+    ev = read_text(os.path.join(P189, 'atlas7', f'{which}.eval'))
+    loop = read_text(os.path.join(P189, f'results.{which}', 'loop.tsv'))
+    base = next((l.split('\t') for l in loop.splitlines() if l.startswith('base\t')), None)
+    ep = num(r'endpoints (\d+)', loop)
+    gain = num(r'^# best \S+ delta ([-+\d.]+)', loop)
+    steps = num(r'^(\d+)$', read_text(os.path.join(P189, 'atlas7', f'{which}.steps_dbu')))
+    rec = dict(opens=num(r'open nets : (\d+)', ev), wl_cost=num(r'^wirelength cost ([\d.]+)', ev),
+               via_cost=num(r'^via cost ([\d.]+)', ev), of_cost=num(r'^overflow cost ([\d.]+)', ev),
+               cost=num(r'^total cost ([\d.]+)', ev))
+    sta = dict(wns=float(base[3]) if base else None, tns_ep=float(base[4]) / ep if base and ep else None,
+               power=float(base[5]) if base else None, loop_gain=-gain if gain is not None else None)
+    return rec, sta, steps, os.path.join(P189, f'results.{which}', 'base.err')
 
 
 def sta_of(s, n):
@@ -100,7 +126,9 @@ def sta_of(s, n):
     t = next((read_text(c) for c in cands if os.path.exists(c)), '')
     loop = read_text(os.path.join(P134, f'bt.{which}.{n}', 'loop.tsv')) or read_text(os.path.join(P134, f'{which}.{n}', 'loop.tsv'))
     ep = num(r'endpoints (\d+)', loop)
-    gain = num(r'^# best \S+ delta ([-+\d.]+)', loop)
+    gain = num(r'^# best \S+ delta ([-+\d.]+)', read_text(os.path.join(P188, f'rf.{which}.{n}', 'refine.tsv')))
+    if gain is None:  # before Part 188's loops
+        gain = num(r'^# best \S+ delta ([-+\d.]+)', loop)
     wns, tns = num(r'^wns (\S+)', t), num(r'^tns (\S+)', t)
     pw = re.search(r'^Total\s+\S+\s+\S+\s+\S+\s+(\S+)', t, re.M)
     return dict(wns=wns, tns_ep=tns / ep if tns is not None and ep else None, power=float(pw.group(1)) if pw else None,
@@ -117,6 +145,16 @@ def cap_header(cap):
 
 
 def main():
+    args = sys.argv[1:]
+    floors = {}
+    if '--floors' in args:
+        i = args.index('--floors')
+        for line in open(args[i + 1]):
+            if line.startswith('set='):
+                d = kv(line)
+                floors[(d['set'], d['design'])] = d['floor']
+        del args[i:i + 2]
+    sys.argv = sys.argv[:1] + args
     feats, route25 = sys.argv[1], sys.argv[2]
     rows = []
     for line in open(feats):
@@ -137,7 +175,8 @@ def main():
     for r in rows:
         s, n = r['set'], r['design']
         o = dict(detour=None, runtime_knet=None, runtime_mstep=None, over_share=None, overflow=None, of_share=None, of_knet=None,
-                 score_knet=None, cpu_knet=None, cpu_mstep=None, of_gcell=None, wns=None, tns_ep=None, power=None, loop_gain=None)
+                 score_knet=None, cpu_knet=None, cpu_mstep=None, of_gcell=None, wns=None, tns_ep=None, power=None, loop_gain=None,
+                 of_floor_share=None, of_excess_gcell=None)
         rsmt_total = r['rsmt_total']
         if s == 'ispd08':
             base = os.path.join(RUNS, 'p133nt', f'p133nt_{n}')
@@ -166,6 +205,9 @@ def main():
             o['of_share'] = of / cost if cost and of is not None else None
             o['of_knet'] = of / r['nets_all'] * 1000 if of is not None else None
             o['of_gcell'] = of / r['tiles'] if of is not None else None
+            fl = floors.get((s, n))
+            o['of_floor_share'] = fl / of if fl is not None and of else None
+            o['of_excess_gcell'] = (of - fl) / r['tiles'] if fl is not None and of is not None else None
             o['score_knet'] = cost / r['nets_all'] * 1000 if cost else None
             cpu = cpu_of(base + '.time')
             o['cpu_knet'] = cpu / r['nets_all'] * 1000 if cpu else None
@@ -174,6 +216,28 @@ def main():
             o['runtime_knet'] = t / r['nets_all'] * 1000 if t else None
             o['runtime_mstep'] = t / rsmt_total * 1e6 if t and rsmt_total else None
             o['source'] = os.path.basename(base)
+        elif n == 'mempool_cluster':  # ISPD 2025, Atlas v7
+            which = s.replace('ispd25', '')
+            d, st, steps_dbu, err = cluster25(which)
+            unit_len, pitch = cap_header(os.path.join(BENCH, 'ispd25', 'ISPD2025_benchmarks', which, n, n + '.cap'))
+            o['detour'] = steps_dbu / pitch / rsmt_total if steps_dbu and rsmt_total else None
+            if d['cost']:
+                o['of_share'] = d['of_cost'] / d['cost']
+                o['of_knet'] = d['of_cost'] / r['nets_all'] * 1000
+                o['of_gcell'] = d['of_cost'] / r['tiles']
+                o['score_knet'] = d['cost'] / r['nets_all'] * 1000
+                fl = floors.get((s, n))
+                o['of_floor_share'] = fl / d['of_cost'] if fl is not None else None
+                o['of_excess_gcell'] = (d['of_cost'] - fl) / r['tiles'] if fl is not None else None
+            cpu = cpu_of(err)
+            o['cpu_knet'] = cpu / r['nets_all'] * 1000 if cpu else None
+            o['cpu_mstep'] = cpu / rsmt_total * 1e6 if cpu and rsmt_total else None
+            o.update(st)
+            t = num(r'([\d.]+) real', read_text(err))
+            o['runtime_knet'] = t / r['nets_all'] * 1000 if t else None
+            o['runtime_mstep'] = t / rsmt_total * 1e6 if t and rsmt_total else None
+            o['opens'] = d['opens']
+            o['source'] = 'p189 loop base'
         else:
             d = r25.get((s, n))
             if d:
@@ -185,6 +249,9 @@ def main():
                 o['of_share'] = d['of_cost'] / d['cost'] if d.get('cost') else None
                 o['of_knet'] = d['of_cost'] / r['nets_all'] * 1000 if d.get('of_cost') is not None else None
                 o['of_gcell'] = d['of_cost'] / r['tiles'] if d.get('of_cost') is not None else None
+                fl = floors.get((s, n))
+                o['of_floor_share'] = fl / d['of_cost'] if fl is not None and d.get('of_cost') else None
+                o['of_excess_gcell'] = (d['of_cost'] - fl) / r['tiles'] if fl is not None and d.get('of_cost') is not None else None
                 err = os.path.expanduser(f'~/Code/GlobalRouterRuns/p130/{which}.{n}.err')
                 cpu = cpu_of(err)
                 o['cpu_knet'] = cpu / r['nets_all'] * 1000 if cpu else None

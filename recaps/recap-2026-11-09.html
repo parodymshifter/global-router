@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Router Recap 7</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+a { color: var(--trace); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+figure.shot { margin: 10px 0 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+figure.shot figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 5px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.shots > * { min-width: 0; }
+img.px { image-rendering: pixelated; }
+/* Recap 7 additions: an options ledger. */
+.opt { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 18px; }
+.opt h3 { margin: 0 0 6px; }
+.opt p { margin: 0 0 8px; }
+.opt .why { font-size: 14px; color: var(--ink-soft); }
+.opts { display: grid; gap: 12px; }
+.src { font-size: 13px; color: var(--ink-soft); }
+.callout { background: var(--trace-soft); border-left: 3px solid var(--trace); padding: 12px 16px; margin: 10px 0 14px; }
+.callout p:last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap 7 · 9 November 2026 · Parts 150–189</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">Seventeen days, three threads. On ISPD 2008 a cost that matches the contest's own objective took the
+  hardest benchmark from 38898 to 33492 units of overflow, and a three-variant portfolio brought four of the five residues
+  to their best yet; a faster search queue and a batched, gated region stage cut the long runs by half or more. On ISPD 2025
+  all twelve designs now have a timing score, mempool_cluster included, routed and scored on a 24 GB laptop at 80–113 GB
+  of memory footprint. And one measurement reframes the 2024 / 2025 overflow term: most of it is a floor no route can
+  go below.</p>
+  <div class="meta">
+    <span><b>2008 best:</b> <code>pd39route @standard.env @fast08.env @speed08.env</code></span>
+    <span><b>2025 flow:</b> <code>gr/timing_loop.py</code> (<code>--refine 2</code>; <code>--lean --resume</code>, <code>SLACK_BANDS=16</code> on mempool_cluster)</span>
+    <span><b>Checks:</b> every 2008 result legal, <code>gr_verify</code> equal to the official <code>eval2008.pl</code>; 2025 by the contest's evaluator and OpenROAD</span>
+  </div>
+</header>
+<nav class="toc" aria-label="Sections">
+  <a href="#glance">At a glance</a><a href="#ispd08">ISPD 2008</a><a href="#over">The over-capacity cost</a>
+  <a href="#speed">Runtime</a><a href="#ispd25">ISPD 2025</a><a href="#floor">The idle floor</a>
+  <a href="#atlas">Atlas v7</a><a href="#aside">Set aside</a><a href="#process">Process</a>
+  <a href="#options">Unexplored options</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">−13.8%</div><div class="lab">ISPD 2008 residue overflow, the five designs summed: 39526 (Part 135) → 34064</div></div>
+    <div class="tile"><div class="fig">−70%</div><div class="lab">newblue7 wall time, 42800 s → 13029 s, with its overflow 104 → 92</div></div>
+    <div class="tile"><div class="fig">−40%</div><div class="lab">search time from two exact data-structure changes (newblue1, region stage capped: 1589 → 955 s), routes byte-identical</div></div>
+    <div class="tile"><div class="fig">−27.17</div><div class="lab">ISPD 2025 contest-score change, all twelve designs (Part 134's ten: −23.97); lower is better</div></div>
+  </div>
+</section>
+
+<section id="ispd08">
+  <h2>ISPD 2008: where the residues stand</h2>
+  <p>Eleven of the sixteen benchmarks stay at zero overflow, their routes byte-identical through every change below. The
+  other five, against the best published numbers and the overflow our cut bound (Part 91) proves no router can avoid:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>design</th><th class="num">Recap 6 (Part 135)</th><th class="num">now</th><th class="num">NTHU-Route 2.0, own page</th><th class="num">other best published</th><th>certified forced</th></tr></thead>
+    <tbody>
+      <tr><td>newblue1</td><td class="num">24</td><td class="num">26</td><td class="num">0</td><td class="num">0 (LMgr)</td><td>none: through-traffic</td></tr>
+      <tr><td>newblue4</td><td class="num">140</td><td class="num"><b>136</b></td><td class="num">138</td><td class="num">144</td><td>pin-bound (tightest cut 98.4%)</td></tr>
+      <tr><td>bigblue4</td><td class="num">360</td><td class="num">318</td><td class="num">160</td><td class="num">166</td><td>none (tightest cut 89.3%)</td></tr>
+      <tr><td>newblue7</td><td class="num">104</td><td class="num">92</td><td class="num">54</td><td class="num">68</td><td>≥ 54</td></tr>
+      <tr><td>newblue3</td><td class="num">38898</td><td class="num">33492</td><td class="num">31454</td><td class="num">31024 (NTUgr)</td><td>≥ 26264</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">"Now" is <code>speed08.env</code> (Parts 176–185), one setting for all sixteen. newblue1's own spread is 24–38.
+  Wire length on the eleven: −0.05% to +2.3% against NTHU-Route 2.0; bigblue4 +9.3% (its kept route).</p>
+  <div class="callout">
+    <p><b>A correction found while writing this recap.</b> The plan's "best known" column came from LMgr's re-run table
+    (Part 75). NTHU-Route 2.0's own results page ("as of 10/20/2008") lists lower numbers: bigblue4 160, newblue4 138,
+    newblue7 54. Its newblue7 equals our certified lower bound, so if that route is legal it is optimal on overflow, and
+    newblue4 is 2 below it rather than 8. The page offers its route files for download; checking them with
+    <code>gr_verify</code> and <code>eval2008.pl</code> is the first option below.</p>
+  </div>
+</section>
+
+<section id="over">
+  <h2>The over-capacity cost</h2>
+  <p>The ISPD 2008 score charges every unit beyond capacity the same, wherever it lands. The router's present-demand cost,
+  <code>hist × cong<sup>5</sup></code>, charges an edge 50 units over far more than a just-full one. On newblue3, where at least
+  26264 units are forced, that kept pushing nets off edges that stay over capacity whatever happens, onto detours that
+  overflowed other edges. Part 179 let the region stage read demand capped at capacity plus a slack
+  (<code>PD39ROUTE_REGION_OVER</code>). The results, as portfolio variants beside the standard path:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>design</th><th class="num">before</th><th class="num">with the cost</th><th>slack kept</th><th>Parts</th></tr></thead>
+    <tbody>
+      <tr><td>newblue3</td><td class="num">38910</td><td class="num">33492</td><td>0.075 (flat bottom 0.05–0.15)</td><td>179, 184–185</td></tr>
+      <tr><td>bigblue4</td><td class="num">356</td><td class="num">318</td><td>0</td><td>180, 183</td></tr>
+      <tr><td>newblue7</td><td class="num">102</td><td class="num">92</td><td>0</td><td>180, 182</td></tr>
+      <tr><td>newblue4</td><td class="num">146</td><td class="num">136</td><td>0</td><td>180</td></tr>
+      <tr><td>newblue1</td><td class="num">26</td><td class="num">26</td><td>(margin-120 variant kept)</td><td>181</td></tr>
+    </tbody>
+  </table></div>
+  <p>An eight-variant run (Part 181) showed which variants are ever kept; the adopted portfolio is the three that are:
+  <code>expand=120,lagr=0.2;over=0;over=0.075</code>. On newblue7 it gives the same route as the eight in 39% less time and
+  47% less peak memory (Part 182). Moving the same cost up into the slow tier made the slow tier end lower and the run
+  end worse on both designs tried (Part 186); a 1000- or 2000-round region budget on bigblue4 gave the same 318 as 500
+  (Part 183).</p>
+</section>
+
+<section id="speed">
+  <h2>Runtime</h2>
+  <p>Measure the ceiling first, then build (the rule from Part 118). Two ceilings came back low. A parallel search inside
+  one net, delta-stepping, has a ceiling below 1× on the region stage's real instances (Part 153). An exact split of a
+  region round has none, because its dependency chain is the whole round (Part 157). What worked:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>change</th><th>effect</th><th>exact?</th><th>Part</th></tr></thead>
+    <tbody>
+      <tr><td>4-ary search heap with decrease-key in place of <code>std::priority_queue</code></td><td>newblue1 1589 → 1059 s (slow tier −35%, region stage −34%)</td><td><span class="pill good">byte-identical</span></td><td>154</td></tr>
+      <tr><td>16-byte, cache-aligned heap entries</td><td>1038 → 955 s (−8%)</td><td><span class="pill good">byte-identical</span></td><td>158</td></tr>
+      <tr><td>Batched region stage (64 nets per batch, spread over tiles), gated to stages entering ≤ 1000, with a sequential rerun if it never beats its start</td><td>3–4× faster stages; newblue7 102 in 18915 s against 42800 s</td><td><span class="pill warn">judged on overflow</span></td><td>159–167</td></tr>
+      <tr><td>Batched executor: sync folded into the search, biggest searches first</td><td>−20% on batched stages</td><td><span class="pill good">byte-identical</span></td><td>164</td></tr>
+      <tr><td>Speculative portfolio beside path A, cancelled if path A ends ≤ 10; refinement stop below the floor</td><td>bigblue4 22752 → 13095 s, newblue1 3503 → 1650 s</td><td><span class="pill good">byte-identical</span></td><td>168</td></tr>
+      <tr><td>Variants wait 300 s for path A</td><td>adaptec3 peak 4467 → 1900 MB; zero-overflow designs never start them</td><td><span class="pill good">byte-identical</span></td><td>170</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">The batched region stage gives different routes from the sequential one and was adopted only behind its gate and
+  fallback (bigblue4 back to its sequential 360, byte-identical, Part 167). Every speed idea had Instruments attached to
+  its baseline and variant.</p>
+</section>
+
+<section id="ispd25">
+  <h2>ISPD 2025: every design scored with timing</h2>
+  <p><b>Sticky re-classification</b> (Part 188). Classing nets from one biased route's slack dropped the nets the bias had
+  fixed. The loop now measures its best route's own failing-path slack, merges it per net with every slack measured
+  before (keeping the worst), and reroutes while that gains: ten designs −23.97 → −25.11, none worse. A third round
+  gave −25.19 and was not adopted.</p>
+  <p><b>mempool_cluster</b> (Part 189), 10–11 million nets, was the last design without a timing score. One OpenROAD
+  session peaks at 80–113 GB of memory footprint on this 24 GB machine, almost all of it in swap. Three changes made
+  it fit: <code>--lean</code> compresses every route that can no longer win; <code>SLACK_BANDS=16</code> walks the failing
+  paths in slack bands, with slack files byte-identical to a single walk; and <code>--resume</code> appends every score to
+  <code>scores.jsonl</code> as it is measured. That checkpoint saved the blind loop after a guard stop.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>design</th><th class="num">visible</th><th>setting</th><th class="num">blind</th><th>setting</th></tr></thead>
+    <tbody>
+      <tr><td>ariane</td><td class="num">−4.0542</td><td>routed classes, k3 540, refined</td><td class="num">−0.2551</td><td>input classes, 180, refined</td></tr>
+      <tr><td>bsg_chip</td><td class="num">−1.9862</td><td>routed, 540, refined</td><td class="num">−0.2351</td><td>input, 180</td></tr>
+      <tr><td>NV_NVDLA_partition_c</td><td class="num">−6.2887</td><td>routed, 540, refined</td><td class="num">−1.4391</td><td>routed, 20</td></tr>
+      <tr><td>mempool_group</td><td class="num">−7.5202</td><td>input, 180, power 4, refined</td><td class="num">−1.2559</td><td>input, 20, power 1</td></tr>
+      <tr><td>mempool_tile_wrap</td><td class="num">−0.9260</td><td>routed, 180, power 1, refined</td><td class="num">−1.1491</td><td>input, 20, power 1, refined</td></tr>
+      <tr><td><b>mempool_cluster</b></td><td class="num"><b>−0.6993</b></td><td>input, 20, refined</td><td class="num"><b>−1.3643</b></td><td>input, 20, power 1, refined</td></tr>
+      <tr><td><b>sum</b></td><td class="num">−21.47</td><td></td><td class="num">−5.70</td><td>twelve: <b>−27.17</b></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Contest score change against our own unbiased route (lower is better), each design's own weights.
+  The loops took 20 h (visible cluster) and 29.5 h (blind: 9 h 20 min before the stop, 20 h 11 min resumed).</p>
+  <p>The two clusters differ in one place that shows why no fixed rule works: the power term won on the blind design and
+  lost on the visible one. Both cut power by 0.6–0.7 W for a similar rise in overflow, but the blind design weights power
+  2 and the visible 0.3, so the same cut was worth −1.40 score units on one and −0.18 on the other.</p>
+  <h3>Two lessons from the cluster runs</h3>
+  <ul>
+    <li><b>Excluding a folder from Time Machine keeps it out of backups, not out of local snapshots.</b> A snapshot taken
+    while an 11–12 GB route was uncompressed kept its space after <code>--lean</code> compressed it. Free disk fell to the
+    guard's floor and stopped the blind loop at 06:33 on 8 November. Before a disk-tight run, pause automatic backups.</li>
+    <li><b>Refine can reproduce its own route.</b> The blind loop's second refine round routed a file byte-identical to the
+    first round's and still scored it for 1 h 35 min. A comparison before scoring would have skipped it.</li>
+  </ul>
+</section>
+
+<section id="floor">
+  <h2>The idle floor of the overflow term</h2>
+  <p>The 2024 / 2025 overflow cost charges every GCell with capacity <i>c</i> the amount <code>exp(0.5 (d/2 − c))</code>,
+  so an empty GCell still pays <code>exp(−c/2)</code>. Summed over the die (<code>p189/g24_floor</code>, from the
+  <code>.cap</code> alone; it reproduces the recorded 2024 floors to the digit), that floor is a cost no route can go below:</p>
+  <ul>
+    <li><b>54–97% of the unbiased route's overflow cost</b> on all 25 designs: 83–94% on most 2025 designs, 54–76% on the
+    mempool group and cluster designs.</li>
+    <li>95.5–95.6% of the mempool_cluster floor sits on metal7–10, the wide upper layers with few tracks per GCell.</li>
+    <li>On the twelve 2025 designs the part above the floor, summed, is 3.43 score units, while the best timing routes
+    <i>add</i> more overflow cost than that. The overflow term matters through how much the timing bias adds, so a cheaper way
+    to carry the critical nets is the lever, not a better congestion stage.</li>
+  </ul>
+</section>
+
+<section id="atlas">
+  <h2>The Routing Difficulty Atlas, version 7</h2>
+  <p>The Atlas puts pre-routing measurements of every benchmark beside how hard each one turned out to be. Version 7 adds
+  the two 2025 mempool_cluster designs (41 in all), the congestion-spectrum measures of Part 139, two outcomes from the
+  floor (its share of the overflow cost, and the cost above it per GCell), and the current timing loop's gains.
+  <a href="atlas.html">Open the Atlas v7</a> (in this recap). What it adds:</p>
+  <ul>
+    <li><b>The changeable overflow is predictable before routing.</b> The cost above the floor per GCell ranks with RUDY's
+    99th-percentile edge at Spearman +0.94 over the 25 designs of 2024 and 2025.</li>
+    <li><b>The timing loop's gain is not.</b> It ranges from 0.24 to 7.52 score points across the twelve designs, and no
+    pre-routing measure ranks it: the strongest reaches |0.42|, noise at n = 12.</li>
+    <li>The spectrum measures stay in as candidates; Part 139 found they add no reliable predictive power.</li>
+  </ul>
+</section>
+
+<section id="aside">
+  <h2>Measured and set aside</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>idea</th><th>result</th><th>Part</th></tr></thead>
+    <tbody>
+      <tr><td>Wall-aware search heuristic (exact lower bound across congested walls)</td><td>−60% expansions on fixtures; ≤ 2% on real runs: the flood is a near-tie, which no admissible heuristic removes</td><td>150</td></tr>
+      <tr><td>Lateral shifts to make room beside a hotspot</td><td>2 of ~1500 candidate nets could move: the parallel rows are full along the whole run</td><td>151–152</td></tr>
+      <tr><td>Parallel search inside one net (delta-stepping)</td><td>ceiling below 1× on 56 real instances</td><td>153</td></tr>
+      <tr><td>One record per search node</td><td>+6.6% slower</td><td>156</td></tr>
+      <tr><td>Adaptive batched-to-sequential switch</td><td>doubled batched rounds won; the switch is not worth its complexity</td><td>161</td></tr>
+      <tr><td>Slow-tier capacity cut around the hotspot</td><td>no gain; margin 120 came out of it instead</td><td>173</td></tr>
+      <tr><td>newblue3 with the region plateau stop off</td><td>byte-identical route: nothing moves after round 13</td><td>178</td></tr>
+      <tr><td>Over-capacity cost in the slow tier</td><td>lower slow tier, worse end on newblue3 and bigblue4</td><td>186</td></tr>
+      <tr><td>Larger reclaim budgets on the eleven</td><td>saturated (0.03–0.31%); bigblue2 +4.0%</td><td>187</td></tr>
+      <tr><td>A third refine round (2025)</td><td>−25.11 → −25.19, not adopted</td><td>188</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="process">
+  <h2>Process</h2>
+  <ul>
+    <li><b>Strict readers</b> (Part 155): out-of-spec input now stops the run, naming the file and line. Exercising the
+    verification principle on the readers found many silent repairs; <code>gr/input_check</code> reads a design without routing it.</li>
+    <li><b>The forced-overflow report</b> (Part 162): every run that ends with overflow now groups it into hotspots and says
+    how much of each the cut bound certifies as forced. This is the "return to placement" exit, as information.</li>
+    <li><b>Every new setting gets an end-to-end check</b> that runs the router and looks for evidence the mechanism acted
+    (<code>gr/e2e_settings.py</code>, in CI).</li>
+    <li><b>Long loops checkpoint to disk</b> (<code>scores.jsonl</code>, <code>--resume</code>), and temporary files live in one folder
+    excluded from backups (<code>~/Code/GlobalRouterTemp</code>), with the snapshot caveat above.</li>
+  </ul>
+</section>
+
+<section id="options">
+  <h2>Unexplored options</h2>
+  <p class="lede">Ranked roughly by evidence per unit of effort. Each says what is known, what it would test, and the cost.</p>
+  <h3>From this project's own findings</h3>
+  <div class="opts">
+    <div class="opt"><h3>1. Check NTHU-Route 2.0's posted routes</h3>
+    <p>Score their bigblue4 (160), newblue4 (138) and newblue7 (54) with <code>gr_verify</code> and <code>eval2008.pl</code>, then
+    compare their bigblue4 hotspot with ours (x 204–212, y 132–148).</p>
+    <p class="why">Whether newblue7 is already solved to its bound, and what a 2× better bigblue4 does differently. Minutes of
+    work, but it needs your permission to download their files.</p></div>
+    <div class="opt"><h3>2. Break the timing bias's added overflow down by layer</h3>
+    <p>The contest evaluator already prints overflow cost per layer. Re-evaluating each design's best and unbiased routes shows
+    where the bias spends overflow: the floor says metal7–10 have few tracks per GCell, and the bias pulls critical nets toward
+    those low-resistance layers.</p>
+    <p class="why">This tells us whether a layer-aware bias (moderately critical nets kept on the mid layers, with more tracks)
+    could carry them for less. Cheap: no OpenROAD, minutes per design.</p></div>
+    <div class="opt"><h3>3. Skip scoring a refine route identical to the best</h3>
+    <p>Byte-compare before the OpenROAD session.</p>
+    <p class="why">Saves 1.5 h on a mempool_cluster loop; a few lines in <code>timing_loop.py</code> plus a self-test.</p></div>
+    <div class="opt"><h3>4. Make room by rerouting blocking legal nets, supervised</h3>
+    <p>Part 151's options 2–5: rip up legal nets that hold the cheap way through a hotspot, reroute them, and keep the move only
+    if overflow does not rise. Lateral shifts (option 1) failed because the parallel rows are full.</p>
+    <p class="why">The direct test for newblue1, which is not cut-bound. Medium effort.</p></div>
+    <div class="opt"><h3>5. Make distance matter again in late region searches</h3>
+    <p>A wire-length floor on the heuristic gave −5–8% search work alone (Part 138); a ring bound around the sink (Part 150) is
+    untried.</p>
+    <p class="why">Runtime on the residues. Small to medium; judged on overflow, since ties break differently.</p></div>
+    <div class="opt"><h3>6. Exact per-round savings in the region stage (plan A4)</h3>
+    <p>Keep the best state as a delta, and track overflow incrementally instead of rescanning the grid.</p>
+    <p class="why">Byte-identical by construction; the size is unknown until profiled on newblue7.</p></div>
+    <div class="opt"><h3>7. Compare with the 2025 winners' raw scores (plan D4)</h3>
+    <p>Our numbers are changes against our own unbiased routes; only ariane has been set against 1st place (0.14 vs 0.90).</p>
+    <p class="why">Needed before any claim about where the twelve stand. Work: the contest's leaderboard and reference medians.</p></div>
+  </div>
+  <h3>From published research and contest publications</h3>
+  <div class="opts">
+    <div class="opt"><h3>8. Performance-driven layer assignment (GAP-LA)</h3>
+    <p>Zhao, Guo, Zhang and Lin (Peking University; Zhao and Lin are the 2025 contest's winning team, Hippo) assign layers by a
+    tree dynamic program with Elmore delay and a look-ahead, with timing-critical nets picked from static timing analysis.
+    They report 8.5–18.3% better WNS and 2.0–5.1% better TNS than the winners' original flow on the same 2D topology.</p>
+    <p class="why">Fits option 2: our timing bias acts on the whole route; this acts only on layers, where the overflow cost is.</p>
+    <p class="src"><a href="https://arxiv.org/abs/2507.13375v1">arXiv 2507.13375</a></p></div>
+    <div class="opt"><h3>9. Gradient-guided RC weighting (ISPD 2026)</h3>
+    <p>Xiao, Duan, Jin, Liu, Ho, Young and Wong (CUHK / HKBU) take each wire segment's capacitance and resistance sensitivity
+    from timing gradients and use them as weights. They report 14.3% better WNS and 18.5% better TNS than the 2025 winner,
+    and 10.6% lower switching power with the power term.</p>
+    <p class="why">Our classes are per net, in slack bands. Per-segment sensitivity would bias only the segments that matter,
+    which should add less overflow.</p>
+    <p class="src"><a href="https://scholars.hkbu.edu.hk/en/publications/gradient-guided-rc-weighting-for-timing-driven-global-routing/">HKBU listing</a> · <a href="https://qqq1357962.github.io/pdf/ispd2026.pdf">paper</a></p></div>
+    <div class="opt"><h3>10. An LP / column-generation post-pass for wire length (GRIP; plan B5)</h3>
+    <p>Wu, Davoodi and Linderoth price candidate routes with a linear program over rectangular subregions, then minimize
+    overflow in a second phase. They report 9.23% better wire length and 5.24% better via cost than the best published
+    results on the 2007 / 2008 sets.</p>
+    <p class="why">The eleven zero-overflow designs trail NTHU-Route 2.0 by up to 2.3%, and reclaim budgets are saturated.
+    Builds on <code>gr/lpbound.cpp</code>. Large effort.</p>
+    <p class="src"><a href="https://jlinderoth.github.io/papers/Wu-Davoodi-Linderoth-10-PP.pdf">paper</a></p></div>
+    <div class="opt"><h3>11. Baselines: OpenROAD's own router and InstantGR 2.0</h3>
+    <p>OpenROAD's FastRoute-based <code>grt</code> favours its worst-slack nets through <code>-critical_nets_percentage</code>, a direct
+    baseline for our timing loop. InstantGR 2.0 (TCAD, January 2026), a GPU 3D router, reports beating the 2024 contest
+    winner in runtime and quality.</p>
+    <p class="why">Comparisons rather than methods: where the 2025 loop stands against the stock flow, and whether our 2024
+    lead over contest #1 holds against the newest published router.</p>
+    <p class="src"><a href="https://openroad.readthedocs.io/en/latest/main/src/grt/README.html">OpenROAD grt</a> · <a href="https://qqq1357962.github.io/pdf/instantgr2.0.pdf">InstantGR 2.0</a></p></div>
+  </div>
+  <p class="note">Sources also consulted: <a href="https://www.cs.nthu.edu.tw/~tcwang/nthuroute">NTHU-Route 2.0 results page</a>;
+  <a href="https://www.ispd.cc/contests/25/index.html">ISPD 2025 contest page</a>; <a href="https://www.scribd.com/presentation/553214055/NTUgr">NTUgr slides</a> (newblue3 31024).
+  Published numbers are as reported by their authors, not reproduced here.</p>
+</section>
+</div>
+</body>
+</html>
