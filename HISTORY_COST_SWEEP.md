@@ -13159,6 +13159,7 @@ free disk >= 65 GB):
 **k20ip1 is the new best, -1.3411** (k20i -0.6662). The power term cut power by 0.70 (-1.40 units at weight 2), more
 than its +0.73 of extra overflow; the start-of-session estimate that k20i would most likely stay best was wrong -- no
 earlier candidate had shown how far kp moves power on this design. At kp 4 power falls 1.57, but overflow rises +3.76
-units over k20i. Refine (two rounds of sticky re-classification at k20ip1's setting) follows.
+units over k20i. Refine (two rounds of sticky re-classification at k20ip1's setting) follows. Refine round 1's slack session (k20ip1's failing-path slack) started 22:36:26 with 114 GB free and
+11.5 GB of swap.
 
 Results for the blind design and the twelve-design sum: pending.
