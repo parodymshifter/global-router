@@ -13368,10 +13368,40 @@ code, which only adds the counters; 317 of the 3763 wanted routes needed no one 
 **What it shows.** Blockers can move -- about 70% of their reroutes found a way out without raising overflow where
 they went -- but the room does not add up: even with 60 tiles of margin and 64 blockers per chain, the 68 chains that
 cleared N completely still never lowered the total, which can only mean the blockers' new routes filled the room N
-left. Within 60 tiles of the hotspot the free capacity is fixed, and single-level moves trade overflow from edge to
-edge. Lateral shifts (Part 152) met the same wall at 1-3 rows. **Not adopted** (off by default, kept for the record and
-for designs with room further out).
+left: single-level moves trade overflow from edge to edge. (First written here as "the free capacity is fixed within
+60 tiles" -- wrong: Part 191b measures plenty of room 3 tiles out. The real reason is that the hotspot's nets cannot
+leave it -- 4944 of its 4947 nets have pins inside.) **Not adopted** (off by default, kept for the record and for
+designs whose hotspots carry through traffic).
 
-**What is left for bigblue4.** Where the room is: free capacity in rings around the hotspot, from the `.gr` and the
-route (cheap; says whether a 160 needs detours longer than 60 tiles). A joint choice over the hotspot's nets (Part 151's
-option 5) is the remaining local method; it cannot beat a fixed free capacity either, so the ring measure comes first.
+The control, checked: `status=OK`, overflow 318 / max 4, wire 24858387 (`gr_verify` = `eval2008.pl`; Part 183's route
+24921431 -- the restart's rebuild, wire recovery and layer assignment take 0.25% off at the same overflow), 306 s, peak
+RSS 2332 MB.
+
+### Part 191b -- bigblue4's hotspot: room 3 tiles out, but its demand is its own pins'
+
+**Measures** (2026-11-09 11:14-11:16, `~/Code/GlobalRouterRuns/p191/rings.cpp`, `boxnets.cpp`; outputs `rings_318.txt`,
+`boxnets_318.txt`; 9 s each) on the 318 route, usage charged as `gr_verify` does (its total, 318, reproduced). All 318
+units sit in one box, **x 204-211, y 132-146** (8 x 15 tiles). Rings at Chebyshev distance d outside it:
+
+| ring | H edges full | H use / cap | V edges full | V use / cap | free room, cumulative (H / V, raw units) |
+|---|---|---|---|---|---|
+| 0 (the box) | 100% | 1.009 | 90% | 1.002 | 0 / 56 |
+| 1 | 84% | 0.984 | 56% | 0.977 | 164 / 284 |
+| 2 | 55% | 0.955 | 47% | 0.948 | 680 / 884 |
+| 3 | 33% | 0.896 | 42% | 0.922 | 2028 / 1904 |
+| 5 | 21% | 0.728 | 24% | 0.745 | 8986 / 8230 |
+| 10 | 10% | 0.624 | 3% | 0.520 | 44412 / 47362 |
+
+Room is close: by ring 3 the free room is 6x the box's overflow in each direction. Who uses the box:
+
+| | capacity | demand | from nets with a pin inside | through traffic | overflow |
+|---|---|---|---|---|---|
+| H | 24336 | 24550 | 24540 | 10 | 214 |
+| V | 24444 | 24492 | 24492 | 0 | 104 |
+
+4944 nets with a pin inside the box (27057 pins in 120 tiles, ~225 per tile) and **3** passing through (pin boxes 15-22
+tiles). **The overflow is the box's own pins' wiring**: the demand is 0.9% (H) / 0.2% (V) over capacity, and nothing
+can detour around the box, because nothing is passing through. That is why the chains kept none (their blockers are
+nets that must stay) and why lateral shifts found nothing to shift (Part 152). What could still lower it is less wire
+*inside* the box per pin net -- trees that leave the box and come back where ring 3+ has room, or that share tiles
+better -- which no move tried so far targets. NTHU-Route 2.0's self-reported 160 says some of it is reachable.
