@@ -13128,4 +13128,18 @@ costs 228447934 / 298795205 / 346070001 -- +34.5M / +104.8M / +152.1M over the u
 +1.521 score units before any timing gain (k180r's whole change is -0.3139; the visible design's input classes paid
 +0.145 / +0.644 / +0.983). The scoring session started 15:22:54 with 83 GB free and 8.8 GB of swap.
 
+The session ended 19:15:57 (13984 s, 3 h 53 min; peak footprint 102.0 GB, resident 8.7 GB, swap peak 46.5 GB at
+19:04, free disk >= 47 GB; the guard did not act):
+
+| candidate | WNS (ns) | TNS (ns) | power | overflow cost | WNS / TNS / power / overflow part | change |
+|---|---|---|---|---|---|---|
+| **k20i** | -0.3226 | -54541.2 | 24.2872 | 228447934 | -0.4819 / -0.1989 / -0.3305 / +0.3450 | **-0.6662** |
+| k180i | -0.3226 | -51098.8 | 24.1125 | 298795205 | -0.4819 / -0.2084 / -0.6799 / +1.0485 | -0.3217 |
+| k540i | -0.3226 | -49075.2 | 24.0510 | 346070001 | -0.4819 / -0.2140 / -0.8028 / +1.5212 | +0.0225 |
+
+**k20i is the new best, -0.6662, twice k180r's -0.3139.** The input classes reach a WNS of -0.3226 ns at every strength
+(the routed classes stop at -1.04), worth -0.48 against -0.20, and the extra overflow they pay rises with strength, so
+the weakest one wins; at 540 the overflow cost exceeds the whole timing and power gain. Stage 2 (power term kp 1 and 4
+at k20i) follows, then refine.
+
 Results for the blind design and the twelve-design sum: pending.
