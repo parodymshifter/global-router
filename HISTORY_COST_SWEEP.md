@@ -13629,3 +13629,12 @@ pair (spread 64):
 (mean of 4 pairs), overflow within noise on both, wire equal except bigblue2's one path-A outcome. Not adopted (the
 user decides); before adopting, the remaining fourteen benchmarks need a run with it, and the path-A rate needs more
 than one data point.
+
+## Part 194 -- the search quota on the other fourteen benchmarks
+
+The user's choice (2026-11-10, after Part 193): `PD39ROUTE_SLOW_SEARCHES=64` on the fourteen ISPD 2008 benchmarks not
+yet run with it, one job at a time. The suite's existing baselines (Parts 176, 180-185) mostly ran two or three at a
+time, so their times are not clean; each design therefore runs as a K = 0 / K = 64 pair, back to back, alone, on the
+same binary (`pd39route.p193` = 908c311), quickest first and the four residues last (`~/Code/GlobalRouterRuns/p194/`,
+started 07:33). No Instruments windows (they slow the run they record; Part 193 profiled both settings). Expected about
+25 h in all; quality is judged against each design's K = 0 run and the earlier records.
