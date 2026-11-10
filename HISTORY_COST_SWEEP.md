@@ -13492,3 +13492,53 @@ path A's waits; overlap would buy little there.
 **Verdict.** The runtime lead is the slow tier's per-batch wait, not per-round work: up to ~17% of a residue run
 (and the slow tier is a larger share of the zero-overflow designs' runs). Next step, if taken: measure the ceiling of
 overlapping batches from the round lines and a dump of per-task times before building it (the Part 118 rule).
+
+### Part 192b -- the ceiling of overlapping the slow tier's batches
+
+**Measure** (2026-11-09 17:22-19:01; `~/Code/GlobalRouterRuns/p192/`: `dump.sh`, `slowtasks.txt`, `overlap_sim.txt`,
+`regroup_sim.txt`). New trace-only setting `PD39ROUTE_SLOW_TASKS=file[,every]` (commit 8a12c49; self-test passes,
+`e2e_settings.py` 41 of 41): for every `every`-th slow round, one line per batch with each task's duration, expansions
+and outcome (committed / unchanged / carried) in the order the workers took them. newblue7 on the standard
+(`@standard.env @fast08.env @speed08.env`), every 5th round, `pd39route.p192b`, stopped when the region stage began:
+the slow tier's overflow trace is identical to Part 182's over all 150 rounds (the dump changes nothing).
+`gr/slow_overlap_sim.py` replays each dumped round's batches on 8 workers under scheduling rules; commit time (~1% of
+the stage) is left out of every model, and durations were measured with idle workers around them, so these are
+ceilings (Part 192: ~30% of cycles already wait on memory at 8 busy threads).
+
+**The model is right**: the barrier rule replayed gives 1136 s for the 30 dumped rounds against 1139 s measured (-0.2%).
+
+| rule (30 dumped rounds) | search time | vs now | stale share (task time searched before the previous batch committed) |
+|---|---|---|---|
+| now: barrier per batch of 256 nets, biggest box first | 1136 s | -- | 0 |
+| barrier, each batch ordered by its *measured* task times (exact) | 1107 s | -2.6% | 0 |
+| overlap 1 batch (commits in order) | 798 s | -29.7% | 30-68% by round |
+| overlap 2 / 4 batches | 724 / 678 s | -36.3 / -40.4% | 31-74% / 31-77% |
+| no gates | 648 s | -43.0% | -- |
+| bound: task time / 8 | 647 s | -43.2% | -- |
+
+**Why the barrier costs this much: a batch of 256 nets holds few searches.** Most of a batch's nets are no longer
+overflowed when their turn comes and return at once (their tasks are 0.3% of the time). Searches per batch fall from
+144 in round 0 to 36 by round 20 and 9 by round 120; with 9 searches on 8 workers, the batch's longest task exceeds
+its even share in 82% of batches. The longest single task of any round is 0.08-0.24 s -- no giant net -- and a better
+order inside a batch recovers only 2.6% (the area estimate is not the problem). So the loss is batch *granularity*.
+
+**Batching by searches instead of by nets** (cut the round's searches, in order, every K searches; barrier between):
+
+| K | 30 dumped rounds | vs now |
+|---|---|---|
+| 32 | 930 s | -18.2% |
+| 64 | 799 s | -29.7% |
+| 128 | 728 s | -35.9% |
+
+Early rounds (>= 78 searches per batch now) lose under small K; the late rounds, where the stage spends its time,
+gain 30-45%. The catch is conflicts: more searches per snapshot means more carried nets. Now the carried share of
+task time is 57% in round 0 (144 searches per batch), 21% at 36, 4-6% at 9-14; raising the late rounds to 64-128
+searches per batch moves them toward the early rounds' rate, and that work comes on top. If late rounds' carried share
+went from ~5% to ~20-25%, the net gain would be ~15-25% of the slow tier -- about 6-9% of newblue7's run, more on
+designs whose run is mostly slow tier. Overlapping batches would gain about the same with 60-75% of the search time
+on stale usage, so it is the worse of the two forms.
+
+**Verdict.** Ceiling: 43% of the slow tier (~16% of newblue7's run). The practical form is a batch that closes after
+K searches rather than after B nets (the nets in it that need no search still commit as now); the net check at batch
+formation is the one each task makes, since every replica equals the live usage at the batch's start. Its real gain
+depends on conflicts, which only a run measures -- overflow and wirelength judged against each design's spread.
