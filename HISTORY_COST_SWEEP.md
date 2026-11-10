@@ -13560,7 +13560,9 @@ workers, and another job on the machine would fill them): bigblue2 at K = 0 (thi
 slow tier is 75% of a 1241 s run, Part 176), then newblue7 at K = 128 and 64 (baseline Part 182/192: 13029 s,
 overflow 92). Each with one Instruments window in the slow tier (bigblue2 round 20, newblue7 round 60).
 
-**bigblue2, first three runs** (19:42-20:19; `eval2008.pl` checks pending):
+**bigblue2, first three runs** (19:42-20:19; all legal, `eval2008.pl` agreeing exactly: overflow 0 / max 0, scored
+wirelength 9190777 / 9208144 (+0.19%) / 9210211 (+0.21%); K = 0's 9190777 is Part 176's, the same route at 724 s against
+Part 176's 1241 s on a shared machine; peak RSS 1071 / 1107 / 1067 MB):
 
 | bigblue2 | K = 0 | K = 64 | K = 128 |
 |---|---|---|---|
@@ -13571,7 +13573,7 @@ overflow 92). Each with one Instruments window in the slow tier (bigblue2 round 
 | 2D overflow after the slow tier | 298 | 294 | 268 |
 | fallback (path B region rounds) | 122 s (97) | 173 s (198) | 253 s (410) |
 | total | 724 s | 699 s | 787 s |
-| final overflow / wire | 0 / 4884623 | 0 / 4898177 | 0 / 4899331 |
+| final overflow / 2D wire | 0 / 4884623 | 0 / 4898177 | 0 / 4899331 |
 
 The slow tier gains as modelled; K = 128's extra conflicts cancel its busier workers. The fallback decides the total
 and swings 2.6x with where the slow tier ends, so one run per setting cannot say whether the setting costs fallback
