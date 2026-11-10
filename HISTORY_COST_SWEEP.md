@@ -13638,3 +13638,33 @@ time, so their times are not clean; each design therefore runs as a K = 0 / K = 
 same binary (`pd39route.p193` = 908c311), quickest first and the four residues last (`~/Code/GlobalRouterRuns/p194/`,
 started 07:33). No Instruments windows (they slow the run they record; Part 193 profiled both settings). Expected about
 25 h in all; quality is judged against each design's K = 0 run and the earlier records.
+
+**The ten zero-overflow designs** (2026-11-10 07:33-12:10; all twenty runs legal, overflow 0 / max 0, `eval2008.pl`
+agreeing exactly; every K = 0 route's scored wirelength equals Part 176's; every run kept the reclaim path B):
+
+| design | total K = 0 / 64 | change | slow tier K = 0 / 64 | scored wire K = 0 / 64 | change |
+|---|---|---|---|---|---|
+| newblue2 | 83 / 87 s | +4.9% | 1 / 1 s | 7618810 / 7618465 | -0.005% |
+| adaptec2 | 248 / 227 s | -8.4% | 160 / 140 s | 5242781 / 5243151 | +0.007% |
+| adaptec4 | 272 / 276 s | +1.2% | 28 / 27 s | 12204261 / 12204029 | -0.002% |
+| bigblue3 | 376 / 366 s | -2.7% | 208 / 196 s | 13165027 / 13164597 | -0.003% |
+| adaptec3 | 727 / 650 s | -10.6% | 368 / 300 s | 13142021 / 13141985 | -0.000% |
+| adaptec1 | 770 / 770 s | +0.0% | 601 / 602 s | 5407378 / 5405601 | -0.033% |
+| bigblue1 | 931 / 927 s | -0.4% | 694 / 697 s | 5701837 / 5710078 | +0.145% |
+| newblue5 | 1595 / 1590 s | -0.3% | 1042 / 1050 s | 23325404 / 23321962 | -0.015% |
+| adaptec5 | 1390 / 1374 s | -1.1% | 977 / 951 s | 15650286 / 15650885 | +0.004% |
+| newblue6 | 1355 / 1310 s | -3.4% | 1017 / 976 s | 17941409 / 17945287 | +0.022% |
+| sum | 7747 / 7576 s | **-2.2%** | | | within +-0.15% |
+
+Why some gain and others not, from the slow rounds' own traces (busy threads = search thread time / search wall):
+
+| slow tier | busy threads K = 0 -> 64 | search thread time | slow tier |
+|---|---|---|---|
+| bigblue2 (Part 193) | 4.49 -> 5.84 | +9% | -15% |
+| newblue5 | 5.08 -> 5.97 | +18% | 0% |
+| adaptec1 | 6.75 -> 6.94 | +3% | 0% |
+
+The quota pays where the slow tier leaves many workers idle *and* the added conflicts stay cheap: adaptec1 already keeps
+6.75 of 8 busy; newblue5 recovers idle workers but its extra carried searches and memory contention add 18% to the
+work. Of the twelve designs run so far, it helps four by 7-11% (newblue7, bigblue2, adaptec3, adaptec2) and is neutral
+(+-5%) on the other eight; wire is unchanged everywhere except bigblue2's one path-A outcome (Part 193).
