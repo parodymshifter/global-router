@@ -7191,6 +7191,13 @@ long long gSlowBatchCarried = 0; // self-test: carried nets, run-wide
 bool gSlowBatchLpt = true;       // PD38ROUTE_SLOW_LPT (1): biggest searches first within a batch
 int gSlowSpread = 0;             // PD38ROUTE_SLOW_SPREAD: tile size for spreading batches (0 = net order)
 bool gSlowConflict = true;       // PD38ROUTE_SLOW_CONFLICT (1): the "fresh" conflict rule; 0 commits every net as searched
+// Part 193: PD39ROUTE_SLOW_SEARCHES=K -- a slow-tier batch also holds at least K nets that need a search (it closes when
+// it has >= PD38ROUTE_SLOW_BATCH nets *and* >= K of them need one). Part 192b: late in a round most of a 256-net batch's
+// nets are no longer overflowed and return at once, leaving 9-14 searches for 8 workers, so each batch waits on its
+// last one. A net needs a search if the task's own early return would not fire -- judged against the live usage at
+// batch formation, which every replica equals when the batch's searches start. 0 = off (batches as before).
+int gSlowBatchSearches = 0;
+long long gSlowBatchesRun = 0; // self-test: slow batches run, run-wide
 // Part 192 (trace only): PD39ROUTE_SLOW_TASKS=file[,every] -- for every `every`-th slow round, one line per batch:
 // "B round batch n searchWall" then each task in the order the workers took them, "dur_us:pops:outcome" (outcome c
 // committed, u unchanged, x carried). Lets a simulator replay the batches under other scheduling rules. Routes
@@ -7246,7 +7253,9 @@ template <class Out, class Task, class Save>
 SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &nets, const std::vector<size_t> &order,
                                Usage &live, int threads, size_t B, std::vector<Out> &outs, Task task, Save save,
                                const std::vector<double> *weight = nullptr,
-                               const std::vector<NetBox> *readBox = nullptr) {
+                               const std::vector<NetBox> *readBox = nullptr,
+                               const std::function<bool(size_t)> *needs = nullptr) { // Part 193: net i needs a search
+  const size_t needK = needs ? static_cast<size_t>(std::max(0, gSlowBatchSearches)) : 0;
   SlowBatchReport br;
   std::vector<int> dirtyTile(readBox ? static_cast<size_t>(g.nx) * g.ny : 0, -1); // Part 160
   outs.assign(order.size(), Out{});
@@ -7282,8 +7291,15 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
   while (nextFresh < order.size() || !carried.empty()) {
     std::vector<size_t> pending = std::move(carried);
     carried.clear();
-    while (pending.size() < B && nextFresh < order.size())
+    size_t searches = 0; // Part 193
+    if (needK > 0)
+      for (size_t pos : pending)
+        searches += (*needs)(order[pos]) ? 1 : 0;
+    while (nextFresh < order.size() && (pending.size() < B || (needK > 0 && searches < needK))) {
+      if (needK > 0)
+        searches += (*needs)(order[nextFresh]) ? 1 : 0;
       pending.push_back(nextFresh++);
+    }
     ++br.batches;
     ++stamp;
     const size_t n = pending.size();
@@ -7476,6 +7492,7 @@ SlowBatchReport runSlowBatched(const RoutingGrid &g, std::vector<RoutedNet> &net
     br.syncS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tY0).count();
   }
   gSlowBatchCarried += br.carried;
+  gSlowBatchesRun += br.batches;
   return br;
 }
 
@@ -9218,6 +9235,10 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       const auto tDag0 = std::chrono::steady_clock::now();
       // the per-net body of pd37route's loop from its overflow check on,
       // against the worker's usage copy `u`
+      // Part 193: the task's own early return, against the live usage (= every replica at the batch's start)
+      const std::function<bool(size_t)> needsSearch = [&](size_t i) {
+        return round == 0 || netOverflowed(g, usage, nets[i]);
+      };
       gSlowTaskRound = round; // Part 192 trace
       sbr = runSlowBatched(
           g, nets, cand, usage, gThreads, static_cast<size_t>(gSlowBatch), bouts,
@@ -9266,7 +9287,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
             if (deltaBest)
               slowBest.save(nets, i);
           },
-          gSlowBatchLpt ? &wt : nullptr);
+          gSlowBatchLpt ? &wt : nullptr, nullptr, gSlowBatchSearches > 0 ? &needsSearch : nullptr);
       gSlowTaskRound = -1; // Part 192 trace
       if (gSlowTaskDump)
         std::fflush(gSlowTaskDump);
@@ -21528,6 +21549,28 @@ void testSlowDagSameAtAnyThreadCount() {
   check(sameRoutes(p1, p4) && sp1 == sp4 && hp1 == hp4,
         "batched slow tier, spread over 8x8 tiles: 4 threads = 1 thread, round for round");
   check(hp1 != hc1, "batched slow tier: spreading changes the slow rounds (control)");
+  // Part 193: PD39ROUTE_SLOW_SEARCHES. Batches of 4 nets that must also hold 6 nets needing a search: fewer
+  // batches than batches of 4 alone, different rounds (control), 4 threads = 1 thread, replicas checked inside.
+  {
+    long long k0 = 0, k1 = 0, k4 = 0;
+    int ek0 = 0, ek1 = 0, ek4 = 0;
+    std::vector<SlowRoundRecord> hk0, hk1, hk4;
+    gSlowBatchesRun = 0;
+    auto r0 = run(1, k0, ek0, 4, &hk0);
+    const long long batches0 = gSlowBatchesRun;
+    gSlowBatchSearches = 6;
+    gSlowBatchesRun = 0;
+    auto r1 = run(1, k1, ek1, 4, &hk1);
+    const long long batches1 = gSlowBatchesRun;
+    auto r4 = run(4, k4, ek4, 4, &hk4);
+    gSlowBatchSearches = 0;
+    check(batches1 < batches0, "batched slow tier, at least 6 searches per batch: fewer batches (" +
+                                   std::to_string(batches1) + " vs " + std::to_string(batches0) + ")");
+    check(hk1 != hk0, "batched slow tier: a search quota changes the slow rounds (control)");
+    check(sameRoutes(r1, r4) && k1 == k4 && hk1 == hk4,
+          "batched slow tier, at least 6 searches per batch: 4 threads = 1 thread, round for round (2D overflow " +
+              std::to_string(k1) + " vs " + std::to_string(k0) + " without)");
+  }
   check(carriedSpread < carried1, "batched slow tier: spread batches collide less (" + std::to_string(carriedSpread) +
                                       " carried vs " + std::to_string(carried1) + ")");
   check(sp1 <= std::max(os1 * 3 / 2, os1 + 10), "batched slow tier, spread: ends near batch 1 (2D overflow " +
@@ -22505,6 +22548,13 @@ int main(int argc, char **argv) {
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_SLOW_CONFLICT must be 0 or 1 (got '" + sv + "')");
     gSlowConflict = sv == "1";
+  }
+  if (const char *v = std::getenv("PD39ROUTE_SLOW_SEARCHES"); v) { // Part 193
+    char *end = nullptr;
+    const long k = std::strtol(v, &end, 10);
+    if (!*v || *end || k < 0 || k > 1000000)
+      fail(std::string("PD39ROUTE_SLOW_SEARCHES must be 0..1000000 (got '") + v + "')");
+    gSlowBatchSearches = static_cast<int>(k);
   }
   if (const char *v = std::getenv("PD39ROUTE_SLOW_TASKS"); v && *v) { // Part 192 (trace only): file[,every]
     std::string sv(v), file = sv;

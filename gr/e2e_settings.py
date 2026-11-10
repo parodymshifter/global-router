@@ -23,8 +23,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SHORT = {'VROUTE_FAST_ROUNDS': '6', 'VROUTE_SLOW_ROUNDS': '30', 'PD5ROUTE_REGION_ROUNDS': '40',
          'PD4ROUTE_REFINE_ITERS': '6', 'PD12ROUTE_REGION_PLATEAU': '0', 'PD12ROUTE_REFINE_PLATEAU': '0'}
 # hard: overflow that cannot be cleared (slow tier and region stage without gain); residue: a region stage with
-# work to do and path A above the fallback's threshold; light: path A at or below it, so the reclaim path runs.
-DESIGNS = {'hard': (40, 40, 2, 1800, 7), 'residue': (60, 60, 4, 2200, 11), 'light': (60, 60, 4, 1800, 11)}
+# work to do and path A above the fallback's threshold; light: path A at or below it, so the reclaim path runs;
+# slow (Part 193): a 30-round slow tier whose late batches of 256 hold ~120 nets needing a search.
+DESIGNS = {'hard': (40, 40, 2, 1800, 7), 'residue': (60, 60, 4, 2200, 11), 'light': (60, 60, 4, 1800, 11),
+           'slow': (60, 60, 4, 3000, 11)}
 
 
 def env_file(path):
@@ -193,6 +195,13 @@ def main():
     nslow = len(lines(b, 'slow round '))
     check('PD39ROUTE_SLOW_TASKS dumps every slow round\'s batches', nslow > 0 and len(rounds) == nslow,
           f'{len(rounds)} rounds dumped, {nslow} slow round lines')
+    # Part 193: PD39ROUTE_SLOW_SEARCHES -- batches must also hold K nets needing a search: the slow rounds' own trace
+    # counts fewer batches than without.
+    def slow_batches(text):
+        return sum(int(m.group(1)) for l in lines(text, 'slow round ') for m in [re.search(r' batches (\d+)', l)] if m)
+    b = run('slow', {'PD39ROUTE_SLOW_SEARCHES': '200'}, 'slowsearches')
+    nb, nb0 = slow_batches(b), slow_batches(run('slow', {}, 'base'))
+    check('PD39ROUTE_SLOW_SEARCHES makes fewer, fuller slow-tier batches', 0 < nb < nb0, f'{nb} batches vs {nb0}')
     # refinement annealing: the refinement trace reports its temperature.
     prefix3 = os.path.join(work, 'searchdump')
     run('residue', {**off, 'PD39ROUTE_SEARCH_DUMP': prefix3 + ',1,0'}, 'searchdump')
