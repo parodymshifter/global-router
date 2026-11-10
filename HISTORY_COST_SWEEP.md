@@ -13542,3 +13542,20 @@ on stale usage, so it is the worse of the two forms.
 K searches rather than after B nets (the nets in it that need no search still commit as now); the net check at batch
 formation is the one each task makes, since every replica equals the live usage at the batch's start. Its real gain
 depends on conflicts, which only a run measures -- overflow and wirelength judged against each design's spread.
+
+## Part 193 -- slow-tier batches that hold enough searches (`PD39ROUTE_SLOW_SEARCHES`)
+
+Part 192b's practical form, the user's go-ahead (2026-11-09). `PD39ROUTE_SLOW_SEARCHES=K` (commit 908c311; off by
+default, byte-identical off): a slow-tier batch closes when it holds at least `PD38ROUTE_SLOW_BATCH` nets *and* at
+least K of them need a search. A net needs one if the task's own early return would not fire (round 0, or still
+overflowed) -- judged against the live usage when the batch forms, which every worker's replica equals when the
+batch's searches start, so the nets that need no search still return at once and commit as before. Early rounds
+(>= 128 searches per 256 nets) are unchanged; late rounds (9-14 searches per batch on newblue7) get K. Self-test:
+batches of 4 needing 6 searches run fewer batches (1648 vs 2523), change the rounds (control) and are the same at 1
+and 4 threads; `gr/e2e_settings.py` 42 of 42 (a new synthetic design `slow`, 60 x 60 x 4 with 3000 nets, whose
+30-round slow tier holds ~120 searches per batch: K = 200 gives 391 batches vs 447).
+
+**Runs** (started 2026-11-09 19:42, `~/Code/GlobalRouterRuns/p193/`, `pd39route.p193`, one at a time: the gain is idle
+workers, and another job on the machine would fill them): bigblue2 at K = 0 (this build's baseline), 64, 128 (its
+slow tier is 75% of a 1241 s run, Part 176), then newblue7 at K = 128 and 64 (baseline Part 182/192: 13029 s,
+overflow 92). Each with one Instruments window in the slow tier (bigblue2 round 20, newblue7 round 60).
