@@ -13579,3 +13579,21 @@ The slow tier gains as modelled; K = 128's extra conflicts cancel its busier wor
 and swings 2.6x with where the slow tier ends, so one run per setting cannot say whether the setting costs fallback
 time. Queued after newblue7 (the user, 20:22): bigblue2 at K = 0 and 64 with `PD38ROUTE_SLOW_SPREAD` 56 / 72 / 80
 (a quality-neutral reordering of the slow tier), to measure that spread (`rep.jobs`).
+
+**newblue7, K = 128** (2026-11-09 20:19-23:40, 12029 s; legal, `eval2008.pl` agreeing exactly: overflow 90, max 2,
+scored wirelength 35934263; peak RSS 5653 MB), against Part 182 (K = 0, 13029 s, 92 / 2 / 35935215, 5308 MB):
+
+| newblue7 | Part 182 | K = 128 |
+|---|---|---|
+| slow tier | 5290 s | 4652 s (-12%) |
+| 2D overflow leaving it | 694 | 770 (+11%) |
+| busy threads, Instruments at slow round 60 | 4.28 | 7.39 |
+| carried nets, rounds 30 / 50 / 70 | 8261 / 3221 / 1632 | 18293 / 13230 / 10265 |
+| fallback | 7443 s | 7085 s (-5%) |
+| kept variant: region stage, then refinement | 2 (over=0): 694 -> 122, 92 | 2 (over=0): 770 -> 122, 92 |
+| total | 13029 s | **12029 s (-7.7%)** |
+| final overflow / scored wire | 92 / 35935215 | 90 / 35934263 |
+
+The slow tier is 12% faster for 11% more overflow leaving it, and the portfolio's variant 2 recovers all of it
+(region stage 770 -> 122, as 694 -> 122 before). Overflow 90 vs 92 is inside newblue7's ~2-unit noise. The run had
+one 90 s Instruments window (Part 182 none), so -7.7% is if anything an underestimate.
