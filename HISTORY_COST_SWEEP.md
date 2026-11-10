@@ -13605,3 +13605,27 @@ one 90 s Instruments window (Part 182 none), so -7.7% is if anything an underest
 about an hour on newblue7 with overflow within its noise (90 / 92 / 94), K = 64's max overflow 4 (K = 0 and 128: 2).
 Peak RSS rises 0.3-0.8 GB (bigger batches hold more route copies). All five Part 193 jobs OK.
 Repeats started 03:45 without waiting for the last check (only a single-threaded verifier was left).
+
+**bigblue2 repeats** (2026-11-10 03:45-05:08, `rep.jobs`; all legal, `eval2008.pl` agreeing exactly, overflow 0 / max 0
+everywhere): the slow tier's batch spread at 56 / 72 / 80 tiles, a quality-neutral reordering, with Part 193's first
+pair (spread 64):
+
+| spread | slow tier K = 0 / 64 | fallback K = 0 / 64 | total K = 0 / 64 | scored wire K = 0 / 64 |
+|---|---|---|---|---|
+| 64 | 484 / 412 | 122 / 173 | 724 / 699 (-3.4%) | 9190777 / 9208144 |
+| 56 | 500 / 397 | 216 / 241 | 828 / 748 (-9.6%) | 9204866 / 9208980 |
+| 72 | 467 / 399 | 217 / 242 | 796 / 761 (-4.4%) | 9212190 / **9448098** (path A kept) |
+| 80 | 479 / 413 | 212 / 229 | 803 / 753 (-6.2%) | 9215120 / 9207018 |
+| mean | 483 / 405 (**-16%**) | 192 / 221 (+15%) | 788 / 740 (**-6.1%**) | 9205738 / 9208047 without the path-A run (+0.03%) |
+
+- The slow tier's gain is outside the noise: 397-413 s at K = 64 against 467-500 s at K = 0, no overlap.
+- The fallback is slower in all four pairs (+8 to +42%): the slow tier leaves slightly more 2D overflow at K = 64
+  (288-294 vs 258-298) and the region stage pays part of the time back. Net, every pair is faster (-3 to -10%).
+- Wire: equal except one run, where the reclaim path (B) ended above zero overflow after its 500-round cap and the
+  fallback kept path A (+2.6%). Path B reached its cap in 5 of these 8 runs; one path-A outcome in the 5 runs with a
+  quota (none in 4 without) cannot yet tell chance from cause.
+
+**Part 193 verdict so far.** `PD39ROUTE_SLOW_SEARCHES=64` cuts newblue7's run 6.7% (K = 128: 7.7%) and bigblue2's 6.1%
+(mean of 4 pairs), overflow within noise on both, wire equal except bigblue2's one path-A outcome. Not adopted (the
+user decides); before adopting, the remaining fourteen benchmarks need a run with it, and the path-A rate needs more
+than one data point.
