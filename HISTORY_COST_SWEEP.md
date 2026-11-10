@@ -13597,3 +13597,11 @@ scored wirelength 35934263; peak RSS 5653 MB), against Part 182 (K = 0, 13029 s,
 The slow tier is 12% faster for 11% more overflow leaving it, and the portfolio's variant 2 recovers all of it
 (region stage 770 -> 122, as 694 -> 122 before). Overflow 90 vs 92 is inside newblue7's ~2-unit noise. The run had
 one 90 s Instruments window (Part 182 none), so -7.7% is if anything an underestimate.
+
+**newblue7, K = 64** (2026-11-09 23:40 - 2026-11-10 03:03, 12163 s; legal, `eval2008.pl` agreeing exactly: overflow 94,
+**max 4**, scored wirelength 35883207 (-0.15%); peak RSS 6062 MB): slow tier 4696 s (-11%), 738 units leaving it,
+1.54 M carried nets over the slow tier (Part 182 1.01 M, K = 128 2.26 M), busy threads at round 60 6.77 (memory stalls
+34% of cycles vs 28%); fallback 7169 s, variant 2 again kept (738 -> 126, then 94); total **-6.7%**. Both quotas save
+about an hour on newblue7 with overflow within its noise (90 / 92 / 94), K = 64's max overflow 4 (K = 0 and 128: 2).
+Peak RSS rises 0.3-0.8 GB (bigger batches hold more route copies). All five Part 193 jobs OK.
+Repeats started 03:45 without waiting for the last check (only a single-threaded verifier was left).
