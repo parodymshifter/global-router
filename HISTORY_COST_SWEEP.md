@@ -13559,3 +13559,21 @@ and 4 threads; `gr/e2e_settings.py` 42 of 42 (a new synthetic design `slow`, 60 
 workers, and another job on the machine would fill them): bigblue2 at K = 0 (this build's baseline), 64, 128 (its
 slow tier is 75% of a 1241 s run, Part 176), then newblue7 at K = 128 and 64 (baseline Part 182/192: 13029 s,
 overflow 92). Each with one Instruments window in the slow tier (bigblue2 round 20, newblue7 round 60).
+
+**bigblue2, first three runs** (19:42-20:19; `eval2008.pl` checks pending):
+
+| bigblue2 | K = 0 | K = 64 | K = 128 |
+|---|---|---|---|
+| slow tier | 484 s | 412 s (-15%) | 418 s (-14%) |
+| busy threads in the slow search, trace / Instruments (round 20) | 4.49 / 3.08 | 5.84 / 5.93 | 6.49 / 6.63 |
+| search thread time | 2110 s | 2306 s (+9%) | 2594 s (+23%) |
+| carried nets | 182612 | 208202 (+14%) | 256401 (+40%) |
+| 2D overflow after the slow tier | 298 | 294 | 268 |
+| fallback (path B region rounds) | 122 s (97) | 173 s (198) | 253 s (410) |
+| total | 724 s | 699 s | 787 s |
+| final overflow / wire | 0 / 4884623 | 0 / 4898177 | 0 / 4899331 |
+
+The slow tier gains as modelled; K = 128's extra conflicts cancel its busier workers. The fallback decides the total
+and swings 2.6x with where the slow tier ends, so one run per setting cannot say whether the setting costs fallback
+time. Queued after newblue7 (the user, 20:22): bigblue2 at K = 0 and 64 with `PD38ROUTE_SLOW_SPREAD` 56 / 72 / 80
+(a quality-neutral reordering of the slow tier), to measure that spread (`rep.jobs`).
