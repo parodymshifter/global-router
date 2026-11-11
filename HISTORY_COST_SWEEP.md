@@ -13989,3 +13989,29 @@ reproducing the found cost) little is left for a per-search choice:
 | one-ended up to N expansions, then restart two-ended, N = 250 ... 8000 | | | 1.84 M ... 5.99 M |
 
 Samples of adaptec3 and bigblue1 (every search, one-ended) are queued to see the other regime before choosing.
+
+**Item 4, scoped and built: not a per-stage switch -- the heuristic on both ends.** Uniform samples of every search,
+one-ended, on two designs where value 1 gained least (`pd39route.p199`, 15:38-16:04; both runs legal and their K = 0
+routes; `p199/policy_*.txt`), expansions by policy:
+
+| design (searches sampled) | one-ended A* | two-ended as built | two-ended A* | better of the first two per search (oracle) | one-ended in region + elsewhere, two-ended in the slow tier |
+|---|---|---|---|---|---|
+| adaptec3 (768): slow tier / region / elsewhere | 5.34 M / 370 K / 4.3 K | 2.69 M / 595 K / 27 K | 2.25 M / 350 K / 6.0 K | 2.24 M / 365 K / 4.3 K | |
+| adaptec3, all | 5.72 M | 3.31 M | **2.60 M** | 2.61 M | 3.07 M |
+| bigblue1 (1846): slow tier / region / elsewhere | 7.33 M / 499 K / 13 K | 5.95 M / 629 K / 18 K | 5.87 M / 482 K / 12 K | 4.58 M / 439 K / 13 K | |
+| bigblue1, all | 7.84 M | 6.60 M | **6.37 M** | 5.03 M | 6.46 M |
+| newblue1 (1527), all (above) | 17.99 M | 1.67 M | **1.58 M** | 1.45 M | |
+
+Two-ended A* is the best realisable policy on all three samples, takes back the region stage's loss (below one-ended
+on each) and beats a per-stage switch, which gives up the heuristic in the slow tier. bigblue1's slow tier (chip-wide
+overflow) gains little from any two-ended form (1.25x); an oracle choosing per search would add 21% there, but no
+rule to make that choice is known.
+
+`PD39ROUTE_SEARCH_BIDIR=2` (commit adbf1ae; value 1 unchanged): consistent average potentials p = (hScale x
+Manhattan distance to the sinks' box - to the sources' box) / 2, a super source at min p over the sources and a super
+sink at max p over the sinks, keys d + p - pS and d - p + pT, stop at mu + pT - pS; with hScale 0 it is value 1. The
+box-limit proof carries over (an unsettled border node's route costs at least the forward top + pS). Self-tests:
+the one-ended cost and a simple path on the 120 fixtures (70657 expansions; value 1 95253, one-ended 137732); open
+ground at full heuristic strength 8524 vs 25548 (value 1) vs 8575 (one-ended A*); the batched slow tier identical at
+1 and 4 threads. `gr/e2e_settings.py` 47 of 47. Validation runs of value 2 with the reroute-counted stop queued on
+eight designs (`p199/v2.jobs`, started 16:06).
