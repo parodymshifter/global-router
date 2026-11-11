@@ -13882,3 +13882,11 @@ standard with the setting, one Instruments window each in the slow tier.
   back end 35%, front end 19%, discarded 24%. With searches this cheap the batch barrier weighs more: the stage waits
   on each batch's last search even more of the time (Part 192b's lever, worth re-measuring on top of this). The report
   took 8 min to write, so newblue1's window opened in its final stages, not its slow tier (no slow-tier profile of it).
+
+## Part 198 -- the two-ended search on the other fourteen benchmarks
+
+The user's go-ahead (2026-11-11 09:04). `PD39ROUTE_SEARCH_BIDIR=1` on the standard, `pd39route.p197`, one job at a
+time, quickest first (`~/Code/GlobalRouterRuns/p198/`, started 09:05): the ten other zero-overflow designs, newblue4,
+newblue3, bigblue4, newblue7, and last bigblue4 again with its recorded-best override
+(`PD39ROUTE_REGION_BATCH_MAX=1`, Part 194's note). Baselines: Part 194's K = 0 runs (one at a time, the same binary
+lineage), newblue7 Part 182 / 192; bigblue2 and newblue1 are Part 197's.
