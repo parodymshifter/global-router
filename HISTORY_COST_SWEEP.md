@@ -14015,3 +14015,16 @@ the one-ended cost and a simple path on the 120 fixtures (70657 expansions; valu
 ground at full heuristic strength 8524 vs 25548 (value 1) vs 8575 (one-ended A*); the batched slow tier identical at
 1 and 4 threads. `gr/e2e_settings.py` 47 of 47. Validation runs of value 2 with the reroute-counted stop queued on
 eight designs (`p199/v2.jobs`, started 16:06).
+
+## Part 200 -- item 2: the ISPD 2024 and 2025 flows with the two-ended search
+
+Queued 2026-11-11 16:12 behind Part 199's validation runs (`~/Code/GlobalRouterRuns/p200/`, `pd39route.p199b`, one
+job at a time). In these flows the MSMV search runs in the slow tier only (`fast24.env` turns the region stage,
+refinement and the fallback off).
+- **2024** (`i24.jobs`): the thirteen designs on `@standard.env @standard24.env @fast24.env PD37ROUTE_THREADS=8`, each
+  as a pair -- one-ended (s0) and `PD39ROUTE_SEARCH_BIDIR=2` (s2) -- through `run_checked24.sh` (`g24_verify` and the
+  contest evaluator).
+- **2025** (`flows25.py`): the one-route standard (`... @standard25.env`) on the visible ariane, bsg_chip,
+  NV_NVDLA_partition_c, mempool_tile_wrap and mempool_group: both routes, the contest's congestion evaluator, and one
+  OpenROAD session per design scoring both (the contest score's change s2 - s0); mempool_cluster routed and
+  evaluated only (its OpenROAD sessions need 80-113 GB, Part 189).
