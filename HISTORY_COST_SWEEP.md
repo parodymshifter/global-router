@@ -13786,3 +13786,33 @@ work. Caveats: heavy region-stage searches of one design only; a two-ended expan
 ties can differ, so runs will not be byte-identical and must be judged on overflow and wire. Next, if taken: an
 unbiased dump (every Nth search, no minimum, slow tier included) for the whole-stage ceiling, then the search itself
 behind a setting, with a self-test that it returns the one-ended search's cost on every fixture.
+
+### Part 195b -- the gate test: K = 64 below 30000
+
+**Runs** (2026-11-11 01:03-06:04, `~/Code/GlobalRouterRuns/p195/`, `pd39route.p195`, one at a time; all six legal,
+`eval2008.pl` agreeing exactly), against each design's K = 0 and ungated K = 64 runs (Parts 182, 193, 194):
+
+| design | gate opened | total: K = 0 / ungated / gated | overflow (max): K = 0 / ungated / gated | scored wire, gated vs K = 0 |
+|---|---|---|---|---|
+| adaptec2 | -- | 248 / 227 / 234 s (-5.4%) | 0 / 0 / 0 | +0.02% |
+| adaptec3 | -- | 727 / 650 / 659 s (-9.4%) | 0 / 0 / 0 | +0.006% |
+| bigblue2, spread 64 | round 15 | 724 / 699 / 778 s (+7.5%) | 0 / 0 / 0 | +0.23% |
+| bigblue2, spread 56 | | 828 / 748 / 725 s (-12.4%) | 0 / 0 / 0 | +0.003% |
+| newblue1 | | 1269 / 1145 / 1246 s (-1.8%) | 26 (2) / 30 (2) / **36** (2) | +0.01% |
+| newblue7 | round 21 | 13029 / 12162 / **11260 s (-13.6%)** | 92 (2) / 94 (4) / **98 (4)** | +0.14% |
+
+- The gate keeps the gain where there was one, and on newblue7 doubles it (slow tier 5290 -> 4130 s, -22%; ungated
+  4696 s): the early, high-overflow rounds are better left on plain batches.
+- Quality drifts the wrong way on both residues: newblue1 26 -> 30 -> 36 (inside its 24-38 spread, but both quota
+  runs above the baseline) and newblue7 92 -> 94 -> 98 with max overflow 4 instead of 2. Each quota run leaves the
+  slow tier with more 2D overflow (newblue7 694 -> 738 / 758; newblue1 282 -> 296 / 290) and the later stages do not
+  fully recover it.
+- bigblue2's two gated runs (778, 725 s) sit in the ungated runs' range (699-761 s), below the typical K = 0 run
+  (796-828 s); its fallback's own swing (path B 97-500 rounds) is larger than the difference.
+
+**Verdict on the search quota (Parts 193-195).** A real slow-tier speedup (11-22%) on designs whose slow tier idles,
+worth 5-14% of the run on five of sixteen designs, bought with a small but consistent rise in the overflow the slow
+tier hands on: +4 to +10 final units on the two residues tested with the gate, and a 17% loss on bigblue4 and
+newblue3 ungated (bigblue4 untested with the gate, which would open there). Not adopted; it stays a setting, off by
+default. Part 196's two-ended search attacks the same stage's work by 28x on the heavy searches and supersedes it as
+the runtime lead.
