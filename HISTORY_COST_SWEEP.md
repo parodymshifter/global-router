@@ -13890,3 +13890,28 @@ time, quickest first (`~/Code/GlobalRouterRuns/p198/`, started 09:05): the ten o
 newblue3, bigblue4, newblue7, and last bigblue4 again with its recorded-best override
 (`PD39ROUTE_REGION_BATCH_MAX=1`, Part 194's note). Baselines: Part 194's K = 0 runs (one at a time, the same binary
 lineage), newblue7 Part 182 / 192; bigblue2 and newblue1 are Part 197's.
+
+**The ten zero-overflow designs** (2026-11-11 09:05-10:57; all legal, overflow 0 / max 0, `eval2008.pl` agreeing
+exactly; every run kept the reclaim path B), one-ended (Part 194's K = 0) / two-ended:
+
+| design | total | change | slow tier | fallback | scored wire | peak RSS |
+|---|---|---|---|---|---|---|
+| newblue2 | 83 / 86 s | +3.1% | 1 / 1 s | 7 / 8 s | +0.002% | 1133 / 1119 MB |
+| adaptec2 | 248 / 124 s | -49.8% | 160 / 32 s | 22 / 24 s | -0.001% | 829 / 919 MB |
+| adaptec4 | 272 / 259 s | -4.8% | 28 / 17 s | 31 / 26 s | +0.005% | 1418 / 1655 MB |
+| bigblue3 | 376 / 230 s | -38.8% | 208 / 53 s | 31 / 34 s | +0.012% | 1814 / 1574 MB |
+| adaptec3 | 727 / 571 s | -21.4% | 368 / 181 s | 99 / 126 s | -0.004% | 2162 / 2602 MB |
+| adaptec1 | 770 / 612 s | -20.4% | 601 / 429 s | 82 / 97 s | +0.009% | 904 / 1068 MB |
+| bigblue1 | 931 / 869 s | -6.7% | 694 / 618 s | 150 / 165 s | -0.125% | 981 / 991 MB |
+| newblue5 | 1595 / 1053 s | -34.0% | 1042 / 488 s | 167 / 183 s | -0.004% | 2587 / 3043 MB |
+| adaptec5 | 1390 / 948 s | -31.8% | 977 / 485 s | 199 / 239 s | +0.006% | 2051 / 2239 MB |
+| newblue6 | 1355 / 893 s | -34.1% | 1017 / 529 s | 161 / 186 s | +0.007% | 2136 / 2247 MB |
+| sum | 7747 / 5646 s | **-27.1%** | | | within +-0.13% | |
+
+- The slow tier is 11-80% shorter on every design with one to speak of; least on adaptec1 and bigblue1, whose slow
+  tiers run at high, chip-wide overflow (expansions 1.32e10 -> 0.77e10 and 1.83e10 -> 1.43e10: both ends of a search
+  in congested ground, so no cheap side to flood), and a two-ended expansion costs 15-30% more task time.
+- The fallback is 3-27% *longer* on eight of ten: on designs that end at zero its searches are light, where two ends
+  cost more than one (Part 197's sample: 41% of searches need more expansions two-ended). A per-stage or per-search
+  choice could take that back; small against the slow tier's gain.
+- Peak RSS -13% to +20% (the backward arrays, and different routes).
