@@ -13858,3 +13858,27 @@ them it fires later or never -- a stage that stopped on it may run longer in rou
 
 **First runs** (queued 08:30 behind the dump, one at a time, `pd39route.p197`): bigblue2 and newblue1 on the
 standard with the setting, one Instruments window each in the slow tier.
+
+**First runs, results** (2026-11-11 08:44-08:59, one at a time; both legal, `eval2008.pl` agreeing exactly):
+
+| | bigblue2, one-ended (4 runs, Part 193) | bigblue2, two-ended | newblue1, one-ended (Part 194) | newblue1, two-ended |
+|---|---|---|---|---|
+| slow tier | 467-500 s | **229 s** | 295 s | **80 s** |
+| fallback (region + refinement) | 122-217 s | 102 s | 926 s | **165 s** |
+| wirelength recovery | 96-108 s | 108 s | 38 s | 43 s |
+| total | 724-828 s | **460 s (-37 to -44%)** | 1269 s | **299 s (-76%, 4.2x)** |
+| CPU | 2596-2765 s | 1447 s | 10059 s | 1549 s |
+| overflow (max) | 0 | 0 | 26 (2) | **24 (2)** |
+| scored wirelength | 9190777-9215120 | 9204769 | 4822950 | 4918573 (+1.98%) |
+| peak RSS | 1071-1447 MB | 1282 MB | 1485 MB | 1242 MB |
+
+- newblue1's portfolio variants ended 32 / 30 / 38 / **24** (one-ended: 26 / 26 / 26 / 32): the routes differ (equal-cost
+  ties break differently, and everything downstream follows), all inside newblue1's 24-38 spread. The kept variant is
+  over=0.075 instead of the margin-120 one, whose shorter wire (Part 175) explains the +1.98%: at 24 against 30 the
+  portfolio keeps overflow first. Not a wire loss of the search itself (bigblue2: inside its range).
+- The two-ended runs settled 9.4e9 (bigblue2) and 8.0e9 (newblue1) nodes; newblue1's one-ended fallback alone
+  expanded ~2.5e10 (Part 138).
+- Instruments, bigblue2 at slow round 20 (CPU Counters, 90 s): 2.89 busy threads of 8 (one-ended: 3.08), useful 22%,
+  back end 35%, front end 19%, discarded 24%. With searches this cheap the batch barrier weighs more: the stage waits
+  on each batch's last search even more of the time (Part 192b's lever, worth re-measuring on top of this). The report
+  took 8 min to write, so newblue1's window opened in its final stages, not its slow tier (no slow-tier profile of it).
