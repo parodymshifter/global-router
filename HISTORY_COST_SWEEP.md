@@ -13726,3 +13726,51 @@ tier above 30000, where the quota's effect on them is unclear (adaptec3's round 
 **Gate test queued** (the user, 2026-11-11 00:08; `~/Code/GlobalRouterRuns/p195/`, starts when Part 194's batch ends,
 one job at a time): K = 64 gated at 30000 on adaptec2, adaptec3, bigblue2 (spreads 64 and 56), newblue1, newblue7,
 compared with their K = 0 and ungated K = 64 runs. newblue3 is left out: its gate never opens.
+
+## Part 196 -- the late searches flood from the wrong end: two-ended search needs 28x fewer expansions
+
+**A correction first.** Asked (2026-11-11) for leads that might have been missed, the reply named a wall-aware search
+heuristic as "recorded in Part 139, never built". Wrong: Part 150 built one (`PD39ROUTE_REGION_WALL_H`), ran it and
+found 0.4-2.2% -- the history search behind the reply used the wrong keywords. Part 150 closed with a diagnosis that
+was argued, not measured: the flood is a near-tie that no admissible heuristic removes. This Part measures it.
+
+**Measure** (2026-11-11 00:38-00:50; `gr/search_bound_sim.py`, `gr/search_bidir_sim.py`; outputs in
+`~/Code/GlobalRouterRuns/p196/`; seconds each) on Part 153's 188 dumped searches (newblue1's region stage, portfolio
+off, every 3000th search with >= 20000 expansions -- the heavy searches that are 90-98% of late region work, Part
+139; not a sample of all searches). Exact distances inside each box from the sources (g*) and to the sinks (h*); all
+188 reproduce the router's found cost C, and the router's own expansions (16.49 M, 97.9% of the boxes' nodes) match
+the count its Manhattan bound predicts. A* with a consistent bound h expands every node with g* + h < C and none
+with g* + h > C:
+
+| bound | expansions, share of box nodes | median instance |
+|---|---|---|
+| none (Dijkstra) | 98.0% | 99.7% |
+| the router's (hScale x Manhattan) | 97.9% | 99.7% |
+| Part 150's column / row minima | 97.8% | 99.7% |
+| ring minima around the sinks' box (Part 150's unbuilt suggestion) | 83.1% | 99.6% |
+| bounded backward search, 256 / 1024 / 4096 nodes from the sinks (incl. those) | 16.8% / 5.6% / 7.2% | 0.3% / 1.0% / 4.1% |
+| perfect (nodes on a cheapest route) | 0.03% | 0.0% |
+
+**Where the cost is.** In the median instance 99.7% of the box is cheaper to *reach* from the sources than the found
+route, and 0.19% is cheaper to *finish from*: the 257th-nearest node to the sinks already has h* = 1.18 C. The sink
+pin sits in a small expensive pocket (the hotspot), the source tree in cheap open ground, and the one-ended search
+floods the open ground before it can afford the pocket's edge. **It is not a near-tie**: only 0.01% of the median
+box's nodes (1.2% overall) lie on routes within 0.1% of the best, 0.03% (22% overall) within 10%. Bounds built from
+minima over columns, rows or rings fail because a pocket is not a wall across the box; a search from the sink end
+sees the pocket exactly.
+
+**Two-ended search** (exact bidirectional Dijkstra, the side with fewer settled nodes expanded next, stop when the
+two queue tops sum to the best meeting; all 188 reproduce C):
+
+| | expansions | vs the router |
+|---|---|---|
+| the router (one-ended A*) | 16,485,988 | -- |
+| one-ended from the sinks | 2,591,418 | 6.4x fewer |
+| **bidirectional** | **596,625** | **27.6x fewer** (median instance 389x; 10th percentile 41x) |
+
+8 of 188 instances gain under 2x (both ends in pockets; one is 0.6x), and 10 instances are 83.5% of the bidirectional
+work. Caveats: heavy region-stage searches of one design only; a two-ended expansion costs more than a one-ended one
+(two queues, a meeting test); the slow tier (38-75% of runs, same search) is not sampled; routes among equal-cost
+ties can differ, so runs will not be byte-identical and must be judged on overflow and wire. Next, if taken: an
+unbiased dump (every Nth search, no minimum, slow tier included) for the whole-stage ceiling, then the search itself
+behind a setting, with a self-test that it returns the one-ended search's cost on every fixture.
