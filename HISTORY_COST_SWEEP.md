@@ -13816,3 +13816,45 @@ tier hands on: +4 to +10 final units on the two residues tested with the gate, a
 newblue3 ungated (bigblue4 untested with the gate, which would open there). Not adopted; it stays a setting, off by
 default. Part 196's two-ended search attacks the same stage's work by 28x on the heavy searches and supersedes it as
 the runtime lead.
+
+## Part 197 -- the two-ended search: whole-run ceiling, and the search itself
+
+The user's go-ahead (2026-11-11 08:18) for both steps Part 196 named.
+
+**The whole-run ceiling** (08:22-08:43; `~/Code/GlobalRouterRuns/p197/`, instances in `~/Code/GlobalRouterTemp/p197/inst`,
+653 MB). `PD39ROUTE_SEARCH_DUMP=prefix,every,minpops,all` (new fourth field) samples every MSMV search of the run and
+tags each instance with its stage. Building it found a Part 148-class fault: the dump setting was read after
+`route()`, so the slow tier could never have been sampled; it is now read before. newblue1 on the standard
+(`@standard.env @fast08.env @speed08.env`, portfolio on), every 5000th search, no minimum: legal, overflow 26, scored
+wire 4822950 -- Part 194's K = 0 route, so the dump changes nothing -- 1232 s, 1527 instances. A uniform sample of
+searches estimates each stage's share of all expansions. `gr/search_bidir_sim.py` (all 1527 reproduce the found cost):
+
+| stage | searches sampled | share of the run's expansions | one-ended -> two-ended | median search |
+|---|---|---|---|---|
+| slow tier | 326 | 15.3% | 2.76 M -> 0.66 M (**4.2x fewer**) | 1.4x |
+| region stage (all portfolio variants) | 1190 | 84.3% | 15.17 M -> 1.00 M (**15.1x fewer**) | 1.7x |
+| elsewhere (refinement, reclaim, rebuild) | 11 | 0.4% | 64786 -> 3290 | 0.6x |
+| **all** | 1527 | 100% | 17.99 M -> 1.67 M (**10.8x fewer**) | 1.5x |
+
+The gain is in the heavy tail, as Part 196's sample said: the median search gains 1.5x and 41% of searches need
+*more* expansions two-ended (two small discs instead of one), costing 0.22 M extra in all against 16.3 M saved.
+The 10 largest two-ended instances are 24% of what is left. Expansions, not seconds: a two-ended expansion does more.
+
+**The search** (commit 50369a5): `PD39ROUTE_SEARCH_BIDIR=1`, off by default (byte-identical off). Exact bidirectional
+Dijkstra inside the same box (`bidirMSMV`): the side with fewer settled nodes expanded next; `mu` the cheapest
+meeting seen when an edge is relaxed onto a node the other side has reached; stop when the queue tops sum to mu
+(with one queue empty, when the other's top reaches it). The route is rebuilt from both parent chains, cut at the
+first sink tile and started at the last source tile (either only across zero-cost edges), zero-cost loops dropped.
+No heuristic, so it is refused with the wall bound and the evidence-driven boxes (and their portfolio keys); the
+box-limit flag keeps a proof (smallest forward distance on a growable border, or the forward queue's top), reported
+limited more often than the one-ended one. A closing trace line counts its searches and both sides' settled nodes.
+Self-tests: the one-ended search's cost on 120 fixtures (walls with and without gaps, pockets at one or both ends,
+trees as sources, several sinks, duplicate tiles, small boxes, 30 with the WL term at exactly 0); every route a
+simple source-to-sink path; a sink in a pocket 9405 vs 59183 expansions; box-limit signal; the batched slow tier
+identical at 1 and 4 threads (29417 searches). `gr/e2e_settings.py` 45 of 45 (new: the closing line and fewer
+slow-tier expansions on the `slow` design; the refusal). Note for the runs: the work-gated plateau stop
+(`PD14ROUTE_REGION_COST_POPS`, 3.2e10 expansions over 150 flat rounds) counts expansions, so with ~10x fewer of
+them it fires later or never -- a stage that stopped on it may run longer in rounds.
+
+**First runs** (queued 08:30 behind the dump, one at a time, `pd39route.p197`): bigblue2 and newblue1 on the
+standard with the setting, one Instruments window each in the slow tier.

@@ -18,7 +18,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from search_bound_sim import load, dijkstra, INF  # noqa: E402
+from search_bound_sim import load, dijkstra, stage_of, INF  # noqa: E402
 
 
 def bidir(w, h, hc, vc, S, T):
@@ -85,7 +85,7 @@ def main():
         rows.append({'file': os.path.basename(p), 'box': sum(1 for d in g if d < INF), 'pops': pops,
                      'ok': abs(mu - C) <= 1e-9 * max(1.0, abs(C)), 'f': st[0], 'b': st[1],
                      'fwd': sum(1 for d in g if d < Cs - tol), 'bwd': sum(1 for v in range(w * h) if g[v] < INF and hb[v] < Cs - tol),
-                     'ns': len(S), 'nt': len(T)})
+                     'ns': len(S), 'nt': len(T), 'stage': stage_of(p)})
     n = len(rows)
     if a.out:
         with open(a.out, 'w') as f:
@@ -102,6 +102,19 @@ def main():
     ratios = sorted(r['pops'] / max(1, r['f'] + r['b']) for r in rows)
     print(f"per instance, router / bidirectional: min {ratios[0]:.1f}x, 10th percentile {ratios[n // 10]:.1f}x, median {med(ratios):.1f}x, "
           f"90th {ratios[(9 * n) // 10]:.1f}x, max {ratios[-1]:.0f}x; instances under 2x: {sum(1 for x in ratios if x < 2)}")
+    names = {1: 'region stage', 2: 'slow tier', 0: 'elsewhere (refinement, reclaim, rebuild)', -1: 'untagged'}
+    if any(r['stage'] >= 0 for r in rows):
+        print('by stage (a uniform sample of searches estimates each stage\'s share of all expansions):')
+        for st in (2, 1, 0, -1):
+            rs = [r for r in rows if r['stage'] == st]
+            if not rs:
+                continue
+            p_, b_ = sum(r['pops'] for r in rs), sum(r['f'] + r['b'] for r in rs)
+            rr = sorted(r['pops'] / max(1, r['f'] + r['b']) for r in rs)
+            worse = sum(1 for x in rr if x < 1)
+            print(f"  {names[st]}: {len(rs)} searches, router expansions {p_:.0f} ({100 * p_ / P:.1f}% of the sample's), "
+                  f"bidirectional {b_} -> {p_ / max(1, b_):.1f}x fewer; median search {med(rr):.1f}x; "
+                  f"{worse} searches ({100 * worse / len(rs):.0f}%) need more, costing {sum(r['f'] + r['b'] - r['pops'] for r in rs if r['f'] + r['b'] > r['pops']):.0f} extra")
     top = sorted(rows, key=lambda r: -(r['f'] + r['b']))[:5]
     print('largest bidirectional instances: ' + '; '.join(f"{r['file']} {r['f'] + r['b']} of box {r['box']} ({r['ns']} sources, {r['nt']} sinks)" for r in top))
     print(f"share of bidirectional work in the 10 largest instances: {100 * sum(r['f'] + r['b'] for r in sorted(rows, key=lambda r: -(r['f'] + r['b']))[:10]) / B:.1f}%")

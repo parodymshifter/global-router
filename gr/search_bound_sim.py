@@ -69,6 +69,14 @@ def load(path):
     return w, h, hc, vc, S, T, C, pops, hs
 
 
+def stage_of(path):
+    """Part 197: the instance's stage tag (1 region stage, 2 slow tier, 0 elsewhere), or -1 for a dump without one."""
+    b = open(path, 'rb').read()
+    x0, y0, w, h, ns, nk = struct.unpack_from('6i', b, 0)
+    o = 24 + 8 * ns + 8 * nk + 8 * ((w - 1) * h + w * (h - 1))
+    return int(struct.unpack_from('d', b, o + 24)[0]) if len(b) >= o + 32 else -1
+
+
 def dijkstra(w, h, hc, vc, starts):
     n = w * h
     dist = [INF] * n
