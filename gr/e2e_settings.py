@@ -195,6 +195,16 @@ def main():
     nslow = len(lines(b, 'slow round '))
     check('PD39ROUTE_SLOW_TASKS dumps every slow round\'s batches', nslow > 0 and len(rounds) == nslow,
           f'{len(rounds)} rounds dumped, {nslow} slow round lines')
+    # Part 197: PD39ROUTE_SEARCH_BIDIR -- its own closing trace line counts the searches it ran from both ends, and the
+    # slow tier (which runs before most settings used to be read) expands fewer nodes than the one-ended run.
+    def slow_pops(text):
+        return sum(int(m.group(1)) for l in lines(text, 'slow round ') for m in [re.search(r' pops (\d+)', l)] if m)
+    b = run('slow', {'PD39ROUTE_SEARCH_BIDIR': '1'}, 'bidir')
+    m = re.search(r'^two-ended search: (\d+) searches, (\d+) nodes settled from the sources, (\d+) from the sinks', b, re.M)
+    pb, p0 = slow_pops(b), slow_pops(run('slow', {}, 'base'))
+    check('PD39ROUTE_SEARCH_BIDIR searches from both ends, slow tier included',
+          bool(m) and int(m.group(1)) > 0 and int(m.group(3)) > 0 and 0 < pb < p0,
+          (m.group(0)[:90] if m else 'no two-ended line') + f'; slow-tier pops {pb} vs {p0}')
     # Part 193: PD39ROUTE_SLOW_SEARCHES -- batches must also hold K nets needing a search: the slow rounds' own trace
     # counts fewer batches than without.
     def slow_batches(text):
@@ -304,7 +314,8 @@ def main():
     # settings that cannot run together are refused at start-up (Part 159: the WALL_H / BOX_EVIDENCE guard sat
     # before BOX_EVIDENCE was parsed and could not fire)
     for combo, needle in [({'PD39ROUTE_REGION_WALL_H': '8', 'PD39ROUTE_REGION_BOX_EVIDENCE': '2'}, 'WALL_H cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE'),
-                          ({'PD39ROUTE_REGION_BATCH': '4', 'PD39ROUTE_REGION_DAMP': '0.5'}, 'REGION_BATCH cannot be combined')]:
+                          ({'PD39ROUTE_REGION_BATCH': '4', 'PD39ROUTE_REGION_DAMP': '0.5'}, 'REGION_BATCH cannot be combined'),
+                          ({'PD39ROUTE_SEARCH_BIDIR': '1', 'PD39ROUTE_REGION_WALL_H': '8'}, 'SEARCH_BIDIR cannot be combined')]:
         env = dict(base)
         env.update({**off, **combo})
         p = subprocess.run([router, os.path.join(work, 'residue.gr'), os.path.join(work, 'refused.route')], env=env,

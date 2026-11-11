@@ -3127,8 +3127,12 @@ struct SearchRegion {
   SearchHeap heap;               // Part 154: the search queue's storage, kept across searches
   std::vector<int> heapPos;      // Part 154: the queue's slot of each node (-1: none), reset with dist
   std::vector<int> sinkOf, sinkStamp; // Part 154: which sink a tile is, valid where sinkStamp == generation
+  // Part 197: the backward side of a two-ended search (PD39ROUTE_SEARCH_BIDIR), valid where stampB == generation
+  std::vector<double> distB;
+  std::vector<int> parentB, stampB, heapPosB;
+  SearchHeap heapB;
 
-  void reset(int x0_, int y0_, int w_, int h_, int nLayers_) {
+  void reset(int x0_, int y0_, int w_, int h_, int nLayers_, bool bidir = false) {
     x0 = x0_;
     y0 = y0_;
     w = w_;
@@ -3142,6 +3146,12 @@ struct SearchRegion {
       sinkOf.resize(needed);
       sinkStamp.resize(needed, -1);
       heapPos.resize(needed, -1);
+    }
+    if (bidir && distB.size() < needed) { // Part 197: only searches that use the backward side pay for it
+      distB.resize(needed);
+      parentB.resize(needed);
+      stampB.resize(needed, -1);
+      heapPosB.resize(needed, -1);
     }
     ++generation;
   }
@@ -3180,6 +3190,23 @@ struct SearchRegion {
     dist[i] = d;
     parent[i] = p;
   }
+  // Part 197: the backward side, and reads of either side that do not touch a node
+  double distAtB(int i) {
+    if (stampB[i] != generation) {
+      stampB[i] = generation;
+      distB[i] = std::numeric_limits<double>::infinity();
+      parentB[i] = -1;
+      heapPosB[i] = -1;
+    }
+    return distB[i];
+  }
+  void setDistB(int i, double d, int p) {
+    stampB[i] = generation;
+    distB[i] = d;
+    parentB[i] = p;
+  }
+  double peek(int i) const { return stamp[i] == generation ? dist[i] : std::numeric_limits<double>::infinity(); }
+  double peekB(int i) const { return stampB[i] == generation ? distB[i] : std::numeric_limits<double>::infinity(); }
 };
 
 struct PathNode {
@@ -3427,13 +3454,19 @@ thread_local int gSearchLimitX0 = 0, gSearchLimitY0 = 0, gSearchLimitX1 = -1, gS
 // that expanded at least `minpops` nodes as a binary instance (prefix.<n>.bin) -- the box, its 2D edge costs as the
 // search saw them, sources, sinks, the cost it found and its pops -- so a parallel scheme's ceiling can be measured
 // offline on real searches (gr/search_parallel_sim.py). Never read by routing.
+// Part 197: a fourth field `all` (prefix,every,minpops,all) samples every MSMV search of the run, not only the
+// sequential region stage's, and each instance's tail carries a fourth value: 1 if the search ran inside a region
+// stage's reroute, 2 inside a slow-tier batch, 0 elsewhere.
 struct SearchDump {
   std::string prefix;
   long long every = 0, minPops = 0;
+  bool all = false;
   std::atomic<long long> seen{0}, written{0};
 };
 SearchDump gSearchDump;
 thread_local bool gSearchDumpHere = false; // set by the region stage around its reroutes
+thread_local int gSlowTaskRoundHere = -1;  // Part 197 (trace): the slow round whose batch task this thread is in
+thread_local bool gRegionTaskHere = false; // Part 197 (trace): this thread is in a batched region stage's task
 // Part 157 (BEST_RESULTS_PLAN.md track A, step A1; trace only): PD39ROUTE_REGION_A1=r1,r2,... -- at the start of
 // each listed round, path A's region stage replays the round's reroutes through the slow tier's batched
 // executor (runSlowBatched: snapshots, commit in net order, "fresh" conflicts carried) on copies of its state,
@@ -3567,6 +3600,178 @@ void wallPrefix(WallBound &wb, int x0, int y0, int x1, int y1) {
   }
 }
 
+// Part 197: PD39ROUTE_SEARCH_BIDIR=1 -- the MSMV search from both ends. Part 196 measured why the late searches
+// flood their boxes: the sink pin sits in a small expensive pocket (the hotspot) and the tree in cheap open ground,
+// so 99.7% of the median heavy search's box is cheaper to reach from the sources than the route found while 0.19%
+// is cheaper to finish from; exact two-ended search needed 27.6x fewer expansions on 188 real searches.
+//
+// Bidirectional Dijkstra inside the same box: one search from the sources, one from the sinks, the side with fewer
+// settled nodes expanded next (so the work is about twice the cheaper side's, whichever that is); `mu` is the
+// cheapest meeting seen when an edge is relaxed onto a node the other side has reached; stop when the two queue
+// tops sum to at least mu (or, with one queue empty, when the other's top reaches mu). Exact: the route costs what
+// the one-ended search's does (the self-test compares them); among equal-cost routes it may be another one, so a
+// run with the setting is not byte-identical to one without. No heuristic is used (the Manhattan bound explains
+// 0.0000% of a late found cost, Part 196), so the wall bound and the evidence-driven boxes, which rest on it, are
+// refused with this setting; boxLimited is still a proof: a route leaving the box passes a growable border node b
+// after a prefix inside the box, so it costs at least g(b) -- the smallest forward distance settled on such a
+// border, or the forward queue's top if the cheapest such node was never settled (so a box with a growable side
+// is reported limited more often than the one-ended proof would; a box covering the grid never is).
+bool gSearchBidir = false;
+std::atomic<long long> gBidirSearches{0}, gBidirFwd{0}, gBidirBwd{0}; // trace: searches and settled nodes per side
+
+bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, SearchRegion &region,
+               const std::vector<PathNode> &sources, const std::vector<Point> &sinks, int width, int x0, int y0,
+               int x1, int y1, MSMVResult &result, double &foundCost) {
+  const double inf = std::numeric_limits<double>::infinity();
+  const int amount = width + g.minSpacing[0];
+  SearchHeap &pf = region.heap, &pb = region.heapB;
+  pf.start(region.heapPos.data());
+  pb.start(region.heapPosB.data());
+  int same = -1; // a source tile that is a sink: the empty route, as the one-ended search finds at its first pop
+  for (const PathNode &s : sources) {
+    if (!region.inRegion(s.x, s.y))
+      continue;
+    const int i = region.idx(s.x, s.y, 0);
+    if (region.sinkAt(i) >= 0 && (same < 0 || i < same))
+      same = i;
+    if (region.distAt(i) != 0.0) { // a source listed twice enters once
+      region.setDist(i, 0.0, -1);
+      pf.push(0.0, i);
+    }
+  }
+  auto nodeOf = [&](int i) {
+    int x, y;
+    region.coordsOf2D(i, x, y);
+    return PathNode{x, y, 0};
+  };
+  if (same >= 0) {
+    ++gSearchPops;
+    result.found = true;
+    result.sinkIndex = region.sinkAt(same);
+    result.path.push_back(nodeOf(same));
+    foundCost = 0.0;
+    return true;
+  }
+  for (size_t k = 0; k < sinks.size(); ++k) {
+    if (!region.inRegion(sinks[k].x, sinks[k].y))
+      continue;
+    const int i = region.idx(sinks[k].x, sinks[k].y, 0);
+    if (region.sinkAt(i) != static_cast<int>(k))
+      continue; // a tile listed twice: its last listing owns it (markSink)
+    region.distAtB(i);
+    region.setDistB(i, 0.0, -1);
+    pb.push(0.0, i);
+  }
+  const bool growX0 = x0 > 0, growX1 = x1 < g.nx - 1, growY0 = y0 > 0, growY1 = y1 < g.ny - 1;
+  double mu = inf, minEdgeG = inf, topF = inf;
+  int meetF = -1, meetB = -1;
+  long long nf = 0, nb = 0;
+  const bool isH = lp.isH(0), isV = lp.isV(0);
+  for (;;) {
+    const bool ef = pf.empty(), eb = pb.empty();
+    topF = ef ? inf : pf.top().priority;
+    const double tb = eb ? inf : pb.top().priority;
+    if (ef && eb)
+      break;
+    if (ef ? tb >= mu : eb ? topF >= mu : topF + tb >= mu)
+      break;
+    const bool fwd = eb || (!ef && nf <= nb);
+    SearchHeap &pq = fwd ? pf : pb;
+    const int i = pq.top().index;
+    pq.pop();
+    ++gSearchPops;
+    int x, y;
+    region.coordsOf2D(i, x, y);
+    const double d = fwd ? region.distAt(i) : region.distAtB(i);
+    if (fwd) {
+      ++nf;
+      if ((x == x0 && growX0) || (x == x1 && growX1) || (y == y0 && growY0) || (y == y1 && growY1))
+        minEdgeG = std::min(minEdgeG, d);
+    } else {
+      ++nb;
+    }
+    auto relax = [&](int ni, double w) {
+      const double nd = d + w;
+      if (fwd) {
+        if (nd < region.distAt(ni)) {
+          region.setDist(ni, nd, i);
+          pf.push(nd, ni);
+        }
+        const double od = region.peekB(ni);
+        if (nd + od < mu) {
+          mu = nd + od;
+          meetF = i;
+          meetB = ni;
+        }
+      } else {
+        if (nd < region.distAtB(ni)) {
+          region.setDistB(ni, nd, i);
+          pb.push(nd, ni);
+        }
+        const double od = region.peek(ni);
+        if (nd + od < mu) {
+          mu = nd + od;
+          meetF = ni;
+          meetB = i;
+        }
+      }
+    };
+    if (isH) {
+      if (region.inRegion(x - 1, y))
+        relax(i - 1, wireCostH(prices, g.hIndex(x - 1, y, 0), amount));
+      if (region.inRegion(x + 1, y))
+        relax(i + 1, wireCostH(prices, g.hIndex(x, y, 0), amount));
+    }
+    if (isV) {
+      if (region.inRegion(x, y - 1))
+        relax(i - region.w, wireCostV(prices, g.vIndex(x, y - 1, 0), amount));
+      if (region.inRegion(x, y + 1))
+        relax(i + region.w, wireCostV(prices, g.vIndex(x, y, 0), amount));
+    }
+  }
+  gBidirSearches.fetch_add(1, std::memory_order_relaxed);
+  gBidirFwd.fetch_add(nf, std::memory_order_relaxed);
+  gBidirBwd.fetch_add(nb, std::memory_order_relaxed);
+  if (meetF < 0)
+    return false;
+  // sources' side first, then the sinks' side; cut at the first sink tile and start at the last source tile before
+  // it (either can only happen across zero-cost edges), and drop any zero-cost loop, so the route is a simple path
+  // from one source tile to one sink tile, as the one-ended search's is.
+  std::vector<int> nodes;
+  for (int i = meetF; i != -1; i = region.parent[i])
+    nodes.push_back(i);
+  std::reverse(nodes.begin(), nodes.end());
+  for (int i = meetB; i != -1; i = region.parentB[i])
+    nodes.push_back(i);
+  size_t end = nodes.size() - 1;
+  for (size_t k = 0; k < nodes.size(); ++k)
+    if (region.sinkAt(nodes[k]) >= 0) {
+      end = k;
+      break;
+    }
+  size_t begin = 0;
+  for (size_t k = 0; k <= end; ++k)
+    if (region.peek(nodes[k]) == 0.0 && region.parent[nodes[k]] == -1)
+      begin = k;
+  std::vector<int> simple;
+  for (size_t k = begin; k <= end; ++k) {
+    const auto it = std::find(simple.begin(), simple.end(), nodes[k]);
+    if (it != simple.end())
+      simple.erase(it + 1, simple.end());
+    else
+      simple.push_back(nodes[k]);
+  }
+  result.found = true;
+  result.sinkIndex = region.sinkAt(simple.back());
+  for (int i : simple)
+    result.path.push_back(nodeOf(i));
+  foundCost = mu;
+  result.boxLimited = (growX0 || growX1 || growY0 || growY1) && std::min(minEdgeG, topF) < mu - 1e-9 * std::max(1.0, mu);
+  if (result.boxLimited)
+    gBoxLimited = true;
+  return true;
+}
+
 MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp,
                                 SearchRegion &region, const std::vector<PathNode> &sources,
                                 const std::vector<Point> &sinks, int width, int margin,
@@ -3593,7 +3798,7 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
   }
   // This file's own new mechanism: one synthetic layer, see boundedDijkstra's
   // own identical comment.
-  region.reset(x0, y0, x1 - x0 + 1, y1 - y0 + 1, 1);
+  region.reset(x0, y0, x1 - x0 + 1, y1 - y0 + 1, 1, gSearchBidir);
 
   // O(1) "is this tile a sink, and which one" lookup, scoped to this call
   // only -- sinks can number in the hundreds for a large net, and a linear
@@ -3650,103 +3855,111 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
   };
   // pd39route: a total order, so ties leave the queue the same way on every standard library; Part 154: the
   // same order in a faster heap (SearchHeap).
-  SearchHeap &pq = region.heap;
-  pq.start(region.heapPos.data());
-
-  for (const PathNode &s : sources) {
-    if (!region.inRegion(s.x, s.y))
-      continue;
-    // vroute's s.l<0 ("reachable at any layer") case collapses to the one
-    // synthetic layer, same as boundedDijkstra's own p1Layer -- there is
-    // no "any layer" to search among anymore.
-    {
-      int i = region.idx(s.x, s.y, 0);
-      region.distAt(i); // Part 154: a node's queue slot is valid once touched
-      region.setDist(i, 0.0, -1);
-      pq.push(heuristic(s.x, s.y), i, /*source=*/true);
-    }
-  }
-
   MSMVResult result;
-  int foundIdx = -1;
+  double foundCost = std::numeric_limits<double>::infinity();
   const long long popsAtSearchStart = gSearchPops; // Part 138 (trace)
-  // Part 138: the smallest f = g + h of any popped node on a box edge that could grow (an edge on the
-  // grid border cannot) -- the proof below the loop.
-  const bool growX0 = x0 > 0, growX1 = x1 < g.nx - 1, growY0 = y0 > 0, growY1 = y1 < g.ny - 1;
-  double minEdgeF = std::numeric_limits<double>::infinity();
-  while (!pq.empty()) {
-    const SearchHeap::Item top = pq.top();
-    pq.pop();
-    const int i = top.index;
-    const double d = region.distAt(i); // Part 158: an entry's distance is its node's (decrease-key)
-    ++gSearchPops;
-    int x, y;
-    const int l = 0;
-    region.coordsOf2D(i, x, y);
-    if (const int sk = region.sinkAt(i); sk >= 0) {
-      foundIdx = i;
-      result.sinkIndex = sk;
-      break;
-    }
-    if ((x == x0 && growX0) || (x == x1 && growX1) || (y == y0 && growY0) || (y == y1 && growY1))
-      minEdgeF = std::min(minEdgeF, top.priority);
-    int amount = width + g.minSpacing[l];
+  if (gSearchBidir) { // Part 197
+    if (!bidirMSMV(g, prices, lp, region, sources, sinks, width, x0, y0, x1, y1, result, foundCost))
+      return result;
+  } else {
+    SearchHeap &pq = region.heap;
+    pq.start(region.heapPos.data());
 
-    if (lp.isH(l)) {
-      for (int nx : {x - 1, x + 1}) {
-        if (!region.inRegion(nx, y))
-          continue;
-        int ex = std::min(x, nx);
-        size_t e = g.hIndex(ex, y, l);
-        double w = wireCostH(prices, e, amount);
-        int ni = region.idx(nx, y, l);
-        if (d + w < region.distAt(ni)) {
-          region.setDist(ni, d + w, i);
-          pq.push(d + w + heuristic(nx, y), ni);
-        }
+    for (const PathNode &s : sources) {
+      if (!region.inRegion(s.x, s.y))
+        continue;
+      // vroute's s.l<0 ("reachable at any layer") case collapses to the one
+      // synthetic layer, same as boundedDijkstra's own p1Layer -- there is
+      // no "any layer" to search among anymore.
+      {
+        int i = region.idx(s.x, s.y, 0);
+        region.distAt(i); // Part 154: a node's queue slot is valid once touched
+        region.setDist(i, 0.0, -1);
+        pq.push(heuristic(s.x, s.y), i, /*source=*/true);
       }
     }
-    if (lp.isV(l)) {
-      for (int ny : {y - 1, y + 1}) {
-        if (!region.inRegion(x, ny))
-          continue;
-        int ey = std::min(y, ny);
-        size_t e = g.vIndex(x, ey, l);
-        double w = wireCostV(prices, e, amount);
-        int ni = region.idx(x, ny, l);
-        if (d + w < region.distAt(ni)) {
-          region.setDist(ni, d + w, i);
-          pq.push(d + w + heuristic(x, ny), ni);
+
+    int foundIdx = -1;
+    // Part 138: the smallest f = g + h of any popped node on a box edge that could grow (an edge on the
+    // grid border cannot) -- the proof below the loop.
+    const bool growX0 = x0 > 0, growX1 = x1 < g.nx - 1, growY0 = y0 > 0, growY1 = y1 < g.ny - 1;
+    double minEdgeF = std::numeric_limits<double>::infinity();
+    while (!pq.empty()) {
+      const SearchHeap::Item top = pq.top();
+      pq.pop();
+      const int i = top.index;
+      const double d = region.distAt(i); // Part 158: an entry's distance is its node's (decrease-key)
+      ++gSearchPops;
+      int x, y;
+      const int l = 0;
+      region.coordsOf2D(i, x, y);
+      if (const int sk = region.sinkAt(i); sk >= 0) {
+        foundIdx = i;
+        result.sinkIndex = sk;
+        break;
+      }
+      if ((x == x0 && growX0) || (x == x1 && growX1) || (y == y0 && growY0) || (y == y1 && growY1))
+        minEdgeF = std::min(minEdgeF, top.priority);
+      int amount = width + g.minSpacing[l];
+
+      if (lp.isH(l)) {
+        for (int nx : {x - 1, x + 1}) {
+          if (!region.inRegion(nx, y))
+            continue;
+          int ex = std::min(x, nx);
+          size_t e = g.hIndex(ex, y, l);
+          double w = wireCostH(prices, e, amount);
+          int ni = region.idx(nx, y, l);
+          if (d + w < region.distAt(ni)) {
+            region.setDist(ni, d + w, i);
+            pq.push(d + w + heuristic(nx, y), ni);
+          }
         }
       }
+      if (lp.isV(l)) {
+        for (int ny : {y - 1, y + 1}) {
+          if (!region.inRegion(x, ny))
+            continue;
+          int ey = std::min(y, ny);
+          size_t e = g.vIndex(x, ey, l);
+          double w = wireCostV(prices, e, amount);
+          int ni = region.idx(x, ny, l);
+          if (d + w < region.distAt(ni)) {
+            region.setDist(ni, d + w, i);
+            pq.push(d + w + heuristic(x, ny), ni);
+          }
+        }
+      }
+      // No via block here -- see boundedDijkstra's own identical comment.
     }
-    // No via block here -- see boundedDijkstra's own identical comment.
-  }
 
-  if (foundIdx < 0)
-    return result;
+    if (foundIdx < 0)
+      return result;
 
-  result.found = true;
-  // Part 138 (nv12route's proof, Part 54, for this cost model): every edge costs at least hScale (the
-  // present-demand cost is wl + hist * cong^5 + lambda * amount with wl = hScale; lambda pricing >= 1;
-  // refinement >= kRefineEps), and h is hScale x a Manhattan distance to the sinks (or to their box), so h
-  // is consistent: nodes pop in nondecreasing f, each popped node's g exact within the box. A route that
-  // leaves the box does so first at some growable edge node b, after a prefix inside the box, so it costs
-  // at least g(b) + hScale x dist(b, nearest sink) >= f(b). If b popped before the sink, minEdgeF <= f(b);
-  // if it never popped, f(b) >= C, the found cost. So unless minEdgeF < C, no route outside is cheaper.
-  {
-    const double found = region.distAt(foundIdx);
-    result.boxLimited = minEdgeF < found - 1e-9 * std::max(1.0, found);
-    if (result.boxLimited)
-      gBoxLimited = true;
-  }
-  for (int i = foundIdx; i != -1; i = region.parent[i]) {
-    int x, y, l;
-    region.coordsOf(i, x, y, l);
-    result.path.push_back({x, y, l});
-  }
-  std::reverse(result.path.begin(), result.path.end());
-  if (gSearchDumpHere && gSearchDump.every > 0 && gSearchPops - popsAtSearchStart >= gSearchDump.minPops &&
+    result.found = true;
+    // Part 138 (nv12route's proof, Part 54, for this cost model): every edge costs at least hScale (the
+    // present-demand cost is wl + hist * cong^5 + lambda * amount with wl = hScale; lambda pricing >= 1;
+    // refinement >= kRefineEps), and h is hScale x a Manhattan distance to the sinks (or to their box), so h
+    // is consistent: nodes pop in nondecreasing f, each popped node's g exact within the box. A route that
+    // leaves the box does so first at some growable edge node b, after a prefix inside the box, so it costs
+    // at least g(b) + hScale x dist(b, nearest sink) >= f(b). If b popped before the sink, minEdgeF <= f(b);
+    // if it never popped, f(b) >= C, the found cost. So unless minEdgeF < C, no route outside is cheaper.
+    {
+      const double found = region.distAt(foundIdx);
+      result.boxLimited = minEdgeF < found - 1e-9 * std::max(1.0, found);
+      if (result.boxLimited)
+        gBoxLimited = true;
+    }
+    for (int i = foundIdx; i != -1; i = region.parent[i]) {
+      int x, y, l;
+      region.coordsOf(i, x, y, l);
+      result.path.push_back({x, y, l});
+    }
+    std::reverse(result.path.begin(), result.path.end());
+    foundCost = region.distAt(foundIdx);
+  } // one-ended
+  if ((gSearchDumpHere || gSearchDump.all) && gSearchDump.every > 0 &&
+      gSearchPops - popsAtSearchStart >= gSearchDump.minPops &&
       gSearchDump.seen.fetch_add(1) % gSearchDump.every == 0) { // Part 153 (trace only)
     const long long n = gSearchDump.written.fetch_add(1);
     FILE *f = std::fopen((gSearchDump.prefix + "." + std::to_string(n) + ".bin").c_str(), "wb");
@@ -3771,7 +3984,8 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
         for (int x = x0; x <= x1; ++x)
           costs.push_back(lp.isV(0) ? wireCostV(prices, g.vIndex(x, y, 0), amount) : -1.0);
       std::fwrite(costs.data(), sizeof(double), costs.size(), f);
-      const double tail[3] = {region.distAt(foundIdx), static_cast<double>(gSearchPops - popsAtSearchStart), hScale};
+      const double tail[4] = {foundCost, static_cast<double>(gSearchPops - popsAtSearchStart), hScale,
+                              gSearchDumpHere || gRegionTaskHere ? 1.0 : gSlowTaskRoundHere >= 0 ? 2.0 : 0.0};
       std::fwrite(tail, sizeof tail, 1, f);
       std::fclose(f);
     }
@@ -3781,7 +3995,7 @@ MSMVResult multiSourceDijkstra(const RoutingGrid &g, const Prices &prices, const
     const double expect = hScale * static_cast<double>(std::abs(a.x - b.x) + std::abs(a.y - b.y));
     const double cells = static_cast<double>(x1 - x0 + 1) * static_cast<double>(y1 - y0 + 1);
     const long long p = gSearchPops - popsAtSearchStart;
-    const double found = region.distAt(foundIdx);
+    const double found = foundCost;
     gSearchTrace.add(expect > 0 ? found / expect : 0.0, !(expect > 0), static_cast<double>(p) / cells, p);
   }
   return result;
@@ -7782,6 +7996,10 @@ RegionBatchStats regionBatchedRound(const RoutingGrid &g, std::vector<RoutedNet>
         if (round > 0 && !netOverflowed(g, u, rn)) // as the sequential loop: no longer overflowed, left alone
           return;
         bool done = false;
+        struct Mark { // Part 197 (trace)
+          Mark() { gRegionTaskHere = true; }
+          ~Mark() { gRegionTaskHere = false; }
+        } mark;
         if (pieces) {
           const PieceStats ps = rerouteNetPieces(g, u, prices, lp, reg, rn, margin, AcceptMode::kKeep, box);
           if (ps.ok) {
@@ -9262,6 +9480,10 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
           [&](Usage &u, SearchRegion &reg, RoutedNet &rn, BatchOut &o) {
             if (round > 0 && !netOverflowed(g, u, rn))
               return;
+            struct Mark { // Part 197 (trace): this thread is in a slow-tier task until the task returns
+              Mark(int r) { gSlowTaskRoundHere = r; }
+              ~Mark() { gSlowTaskRoundHere = -1; }
+            } mark(round);
             assignBoxMarginForSearch(box, round, rn);
             o.ran = true;
             o.margin = rn.boxMargin;
@@ -20468,6 +20690,170 @@ void testWallAwareHeuristic() {
   }
 }
 
+// Part 197: the two-ended search (PD39ROUTE_SEARCH_BIDIR) against the one-ended one, search by search.
+void testBidirSearch() {
+  std::string gr = "grid 40 40 2\nvertical capacity 0 20\nhorizontal capacity 20 0\n"
+                   "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                   "num net 1\nn0 0 2 1\n5 5 1\n15 5 1\n0\n";
+  Design d = parse("pd39route_selftest_bidir.gr", gr.c_str());
+  const RoutingGrid &g = d.grid;
+  LayerPlan lp(g);
+  SearchRegion region;
+  const bool saved = gSearchBidir;
+  int cases = 0, sameCost = 0, valid = 0, sameFound = 0, zeroCases = 0, pocketCases = 0;
+  long long popsOne = 0, popsTwo = 0, pocketOne = 0, pocketTwo = 0;
+  std::string firstBad;
+  for (int f = 0; f < 120; ++f) {
+    Usage u = usageFromCharges(g, std::vector<RoutedNet>{});
+    Prices pr(g);
+    CostSettings cs;
+    cs.model = CostModel::kPresentDemand;
+    configureCostModel(pr, u, cs);
+    const bool zero = f % 4 == 3; // the WL term underflowed to 0: free edges cost exactly nothing
+    pr.pdIter = zero ? 600 : 40;
+    pr.pdFactor = pdFactorForIter(pr.pdIter);
+    const int kind = f % 3; // 0: a wall (with or without a gap); 1: the sink in a pocket; 2: both ends in pockets
+    std::vector<PathNode> src = {{3 + f % 5, 5 + (f * 3) % 30, 0}};
+    std::vector<Point> snk = {{34 + f % 4, 4 + (f * 11) % 32}};
+    if (kind == 1) // the real case (Part 196): a short connection in a box many times its span
+      snk[0] = {src[0].x + 7 + f % 3, std::min(g.ny - 2, std::max(1, src[0].y + f % 5 - 2))};
+    if (f % 5 == 0) { // a tree as the source set, one tile listed twice
+      for (int k = 1; k <= 4; ++k)
+        src.push_back({src[0].x + k, src[0].y, 0});
+      src.push_back(src[1]);
+    }
+    if (f % 7 == 0) { // several sinks, one tile listed twice
+      snk.push_back({30, (snk[0].y + 9) % 38 + 1});
+      snk.push_back({snk[0].x, snk[0].y});
+    }
+    auto pocket = [&](int cx, int cy, int r) {
+      for (int y = std::max(0, cy - r); y <= std::min(g.ny - 1, cy + r); ++y)
+        for (int x = std::max(0, cx - r); x <= std::min(g.nx - 1, cx + r); ++x) {
+          if (x + 1 < g.nx) {
+            const size_t e = g.hIndex(x, y, 0);
+            u.h[e] = u.capH[e] * (5 + (x + f) % 3) / 4;
+            pr.pdHistH[e] = 1 + (x + 2 * y + f) % 8;
+          }
+          if (y + 1 < g.ny) {
+            const size_t e = g.vIndex(x, y, 0);
+            u.v[e] = u.capV[e] * (5 + (y + f) % 3) / 4;
+            pr.pdHistV[e] = 1 + (2 * x + y + f) % 8;
+          }
+        }
+    };
+    if (kind == 0) {
+      const int wx = 16 + f % 6, gap = 3 + (f * 7) % 33;
+      for (int y = 0; y < g.ny; ++y)
+        for (int x = wx; x < wx + 3; ++x)
+          if (f % 2 == 1 || std::abs(y - gap) > 1) {
+            const size_t e = g.hIndex(x, y, 0);
+            u.h[e] = u.capH[e] * (5 + f % 3) / 4;
+            pr.pdHistH[e] = 1 + (x + y + f) % 8;
+          }
+    } else {
+      pocket(snk[0].x, snk[0].y, 2 + f % 3);
+      if (kind == 2)
+        pocket(src[0].x, src[0].y, 2);
+    }
+    const int margin = f % 6 == 5 ? 6 : 60; // a small box now and then (some of its sides can grow)
+    const int amount = 1 + g.minSpacing[0];
+    auto costOf = [&](const MSMVResult &r) {
+      double c = 0;
+      for (size_t k = 0; k + 1 < r.path.size(); ++k) {
+        const PathNode &a = r.path[k], &b = r.path[k + 1];
+        c += a.y == b.y ? wireCostH(pr, g.hIndex(std::min(a.x, b.x), a.y, 0), amount)
+                        : wireCostV(pr, g.vIndex(a.x, std::min(a.y, b.y), 0), amount);
+      }
+      return c;
+    };
+    auto isSrc = [&](const PathNode &n) {
+      for (const PathNode &q : src)
+        if (q.x == n.x && q.y == n.y)
+          return true;
+      return false;
+    };
+    auto isSnk = [&](const PathNode &n) {
+      for (const Point &q : snk)
+        if (q.x == n.x && q.y == n.y)
+          return true;
+      return false;
+    };
+    auto wellFormed = [&](const MSMVResult &r) {
+      if (!r.found || r.path.empty() || r.sinkIndex < 0 || r.sinkIndex >= static_cast<int>(snk.size()))
+        return false;
+      const PathNode &last = r.path.back();
+      bool ok = isSrc(r.path.front()) && snk[r.sinkIndex].x == last.x && snk[r.sinkIndex].y == last.y;
+      for (size_t k = 0; ok && k + 1 < r.path.size(); ++k) {
+        ok = std::abs(r.path[k].x - r.path[k + 1].x) + std::abs(r.path[k].y - r.path[k + 1].y) == 1;
+        ok = ok && !isSnk(r.path[k]) && (k == 0 || !isSrc(r.path[k]));
+        for (size_t m = 0; ok && m < k; ++m)
+          ok = r.path[m].x != r.path[k].x || r.path[m].y != r.path[k].y;
+      }
+      return ok;
+    };
+    gSearchBidir = false;
+    const long long p0 = gSearchPops;
+    MSMVResult a = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, margin);
+    const long long p1 = gSearchPops;
+    gSearchBidir = true;
+    MSMVResult b = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, margin);
+    const long long p2 = gSearchPops;
+    gSearchBidir = saved;
+    ++cases;
+    zeroCases += zero;
+    sameFound += a.found == b.found;
+    const double ca = a.found ? costOf(a) : -1, cb = b.found ? costOf(b) : -2;
+    const bool same = a.found && b.found && std::abs(ca - cb) <= 1e-9 * std::max(1.0, ca);
+    const bool wf = wellFormed(b);
+    sameCost += same;
+    valid += wf;
+    if ((!same || !wf) && firstBad.empty())
+      firstBad = "fixture " + std::to_string(f) + ": cost " + std::to_string(ca) + " vs " + std::to_string(cb) +
+                 (wf ? "" : ", route not a simple source-to-sink path");
+    popsOne += p1 - p0;
+    popsTwo += p2 - p1;
+    if (kind == 1 && margin == 60) {
+      ++pocketCases;
+      pocketOne += p1 - p0;
+      pocketTwo += p2 - p1;
+    }
+  }
+  check(cases == 120 && sameFound == 120 && sameCost == 120,
+        "two-ended search: the one-ended search's cost on 120 fixtures (" + std::to_string(sameCost) + "/120; " +
+            std::to_string(zeroCases) + " with free edges at cost 0)" + (firstBad.empty() ? "" : " -- " + firstBad));
+  check(valid == 120, "two-ended search: every route a simple path from a source tile to its sink (" +
+                          std::to_string(valid) + "/120)");
+  check(pocketCases > 20 && pocketTwo * 4 < pocketOne,
+        "two-ended search: a sink in a pocket takes under a quarter of the expansions (" + std::to_string(pocketTwo) +
+            " vs " + std::to_string(pocketOne) + " on " + std::to_string(pocketCases) + " fixtures; all 120: " +
+            std::to_string(popsTwo) + " vs " + std::to_string(popsOne) + ")");
+  {
+    // the box-limit proof: a wall whose only gap is outside a margin-6 box -> limited; the whole grid -> never
+    Usage u = usageFromCharges(g, std::vector<RoutedNet>{});
+    Prices pr(g);
+    CostSettings cs;
+    cs.model = CostModel::kPresentDemand;
+    configureCostModel(pr, u, cs);
+    pr.pdIter = 40;
+    pr.pdFactor = pdFactorForIter(pr.pdIter);
+    for (int y = 0; y < g.ny; ++y)
+      for (int x = 18; x < 21; ++x)
+        if (y < 30) {
+          const size_t e = g.hIndex(x, y, 0);
+          u.h[e] = u.capH[e] * 2;
+          pr.pdHistH[e] = 8;
+        }
+    std::vector<PathNode> src = {{10, 10, 0}};
+    std::vector<Point> snk = {{30, 10}};
+    gSearchBidir = true;
+    MSMVResult narrow = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 6);
+    MSMVResult whole = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 60);
+    gSearchBidir = saved;
+    check(narrow.found && narrow.boxLimited && whole.found && !whole.boxLimited,
+          "two-ended search: box-limited when the wall's gap lies outside a margin-6 box, never with the whole grid");
+  }
+}
+
 // Part 148: the slow tier's plateau stop. Three nets on a one-row, one-track grid: the overflow is forced, so
 // the slow tier's best never falls. With the stop (window 3, any gain, floor 1) it ends early with the same
 // best and the same routes as the full slow budget; with the floor above the best it runs the full budget.
@@ -21567,6 +21953,25 @@ void testSlowDagSameAtAnyThreadCount() {
   check(sameRoutes(p1, p4) && sp1 == sp4 && hp1 == hp4,
         "batched slow tier, spread over 8x8 tiles: 4 threads = 1 thread, round for round");
   check(hp1 != hc1, "batched slow tier: spreading changes the slow rounds (control)");
+  // Part 197: the two-ended search in the whole flow -- batched slow tier at 1 and 4 threads, round for round.
+  {
+    long long b1 = 0, b4 = 0, u1 = 0;
+    int eb1_ = 0, eb4_ = 0, eu1 = 0;
+    std::vector<SlowRoundRecord> hb1, hb4, hu1;
+    auto plain = run(1, u1, eu1, 16, &hu1);
+    const bool savedBidir = gSearchBidir;
+    gSearchBidir = true;
+    const long long s0 = gBidirSearches.load();
+    auto t1 = run(1, b1, eb1_, 16, &hb1);
+    const long long searches = gBidirSearches.load() - s0;
+    auto t4 = run(4, b4, eb4_, 16, &hb4);
+    gSearchBidir = savedBidir;
+    check(searches > 1000 && sameRoutes(t1, t4) && b1 == b4 && hb1 == hb4,
+          "two-ended search in the batched slow tier: 4 threads = 1 thread, round for round (" +
+              std::to_string(searches) + " searches; 2D overflow " + std::to_string(b1) + " vs " + std::to_string(u1) +
+              " one-ended)");
+    (void)plain;
+  }
   // Part 193: PD39ROUTE_SLOW_SEARCHES. Batches of 4 nets that must also hold 6 nets needing a search: fewer
   // batches than batches of 4 alone, different rounds (control), 4 threads = 1 thread, replicas checked inside.
   {
@@ -22483,6 +22888,7 @@ int run() {
   testSlowCut();
   testSlowOver();
   testWallAwareHeuristic();
+  testBidirSearch();
   testSearchHeapMatchesPriorityQueue();
   testLateralShifts();
   testEvictChains();
@@ -22582,6 +22988,12 @@ int main(int argc, char **argv) {
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_SLOW_CONFLICT must be 0 or 1 (got '" + sv + "')");
     gSlowConflict = sv == "1";
+  }
+  if (const char *v = std::getenv("PD39ROUTE_SEARCH_BIDIR"); v) { // Part 197: read before route()
+    const std::string sv(v);
+    if (sv != "0" && sv != "1")
+      fail("PD39ROUTE_SEARCH_BIDIR must be 0 or 1 (got '" + sv + "')");
+    gSearchBidir = sv == "1";
   }
   if (const char *v = std::getenv("PD39ROUTE_SLOW_SEARCHES"); v) { // Part 193: K; Part 195: K,below
     char *end = nullptr;
@@ -23179,6 +23591,21 @@ int main(int argc, char **argv) {
       fail("PD9ROUTE_SLOW_PIECES must be 0 or 1 (got '" + sv + "')");
     slowPieces = sv == "1";
   }
+  if (const char *v = std::getenv("PD39ROUTE_SEARCH_DUMP"); v && *v) { // Part 153 (trace only): prefix,every,minpops; Part 197: read before route(), so `all` covers the slow tier
+    std::string sv(v);
+    if (sv.size() > 4 && sv.compare(sv.size() - 4, 4, ",all") == 0) { // Part 197: every search of the run
+      gSearchDump.all = true;
+      sv.erase(sv.size() - 4);
+    }
+    const size_t c1 = sv.rfind(','), c0 = c1 == std::string::npos ? std::string::npos : sv.rfind(',', c1 - 1);
+    if (c0 == std::string::npos)
+      fail("PD39ROUTE_SEARCH_DUMP must be prefix,every,minpops (got '" + sv + "')");
+    gSearchDump.prefix = sv.substr(0, c0);
+    gSearchDump.every = std::atoll(sv.substr(c0 + 1, c1 - c0 - 1).c_str());
+    gSearchDump.minPops = std::atoll(sv.substr(c1 + 1).c_str());
+    if (gSearchDump.every <= 0 || gSearchDump.minPops < 0)
+      fail("PD39ROUTE_SEARCH_DUMP: every must be >= 1 and minpops >= 0 (got '" + sv + "')");
+  }
   if (const char *v = std::getenv("PD39ROUTE_SLOW_PLATEAU"); v) { // Part 148: window,gain%,floor -- read before route() runs the slow tier
     int w = -1;
     double gp = -1;
@@ -23436,17 +23863,6 @@ int main(int argc, char **argv) {
                                              : std::string())
                 << "\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_SEARCH_DUMP"); v && *v) { // Part 153 (trace only): prefix,every,minpops
-    const std::string sv(v);
-    const size_t c1 = sv.rfind(','), c0 = c1 == std::string::npos ? std::string::npos : sv.rfind(',', c1 - 1);
-    if (c0 == std::string::npos)
-      fail("PD39ROUTE_SEARCH_DUMP must be prefix,every,minpops (got '" + sv + "')");
-    gSearchDump.prefix = sv.substr(0, c0);
-    gSearchDump.every = std::atoll(sv.substr(c0 + 1, c1 - c0 - 1).c_str());
-    gSearchDump.minPops = std::atoll(sv.substr(c1 + 1).c_str());
-    if (gSearchDump.every <= 0 || gSearchDump.minPops < 0)
-      fail("PD39ROUTE_SEARCH_DUMP: every must be >= 1 and minpops >= 0 (got '" + sv + "')");
-  }
   if (const char *v = std::getenv("PD39ROUTE_REGION_A1"); v && *v) { // Part 157 (trace only): rounds r1,r2,...
     std::stringstream ss(v);
     std::string t;
@@ -23505,6 +23921,19 @@ int main(int argc, char **argv) {
   if (region.wallB > 0 && region.evidenceStep > 0) // Part 150: its bound covers paths inside the box only
     fail("PD39ROUTE_REGION_WALL_H cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE (the box-limit proof "
          "needs a bound that also holds outside the box)");
+  if (gSearchBidir) { // Part 197: both rest on the one-ended search's heuristic
+    std::vector<std::string> specs = gPortfolio;
+    specs.insert(specs.begin(), std::string());
+    for (const std::string &spec : specs) {
+      RegionSettings v = region;
+      std::string err;
+      if (!spec.empty() && !applyRegionVariant(spec, v, err))
+        continue; // reported where the portfolio is parsed
+      if (v.wallB > 0 || v.evidenceStep > 0)
+        fail("PD39ROUTE_SEARCH_BIDIR cannot be combined with PD39ROUTE_REGION_WALL_H or PD39ROUTE_REGION_BOX_EVIDENCE"
+             " (or the portfolio keys wall= / evidence=): both rest on the one-ended search's heuristic");
+    }
+  }
   if (region.batch > 0 && (region.evidenceStep > 0 || region.cooldown > 0 || region.damp > 0 || region.wallB > 0))
     fail("PD39ROUTE_REGION_BATCH cannot be combined with PD39ROUTE_REGION_BOX_EVIDENCE, _COOLDOWN, _DAMP or "
          "_WALL_H (they keep per-net state the batched round does not carry)");
@@ -23818,6 +24247,9 @@ int main(int argc, char **argv) {
   gStages.print(std::cerr);
   auto t1 = std::chrono::steady_clock::now();
 
+  if (gSearchBidir) // Part 197 (trace)
+    std::cerr << "two-ended search: " << gBidirSearches.load() << " searches, " << gBidirFwd.load()
+              << " nodes settled from the sources, " << gBidirBwd.load() << " from the sinks\n";
   std::cerr << "routed " << rep.nets.size() << " nets, " << rep.escalatedCount
             << " escalated to the slow tier\n";
   // "2D overflow" here is still the 2D-collapsed search's own convergence
