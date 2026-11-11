@@ -7197,6 +7197,11 @@ bool gSlowConflict = true;       // PD38ROUTE_SLOW_CONFLICT (1): the "fresh" con
 // last one. A net needs a search if the task's own early return would not fire -- judged against the live usage at
 // batch formation, which every replica equals when the batch's searches start. 0 = off (batches as before).
 int gSlowBatchSearches = 0;
+// Part 195: PD39ROUTE_SLOW_SEARCHES=K,below -- the quota starts with the first slow round entered at <= `below` units of
+// 2D overflow and stays on (as Part 186's over-capacity cost). Part 194: on newblue3 (slow tier never below ~42000) fuller
+// batches collide 2-19x as often and the slow tier ran 23% longer; the designs that gained ran their late rounds at a
+// few hundred to a few thousand units. Without `below`, on from round 0 (Part 193's setting, unchanged).
+long long gSlowBatchSearchesBelow = std::numeric_limits<long long>::max();
 long long gSlowBatchesRun = 0; // self-test: slow batches run, run-wide
 // Part 192 (trace only): PD39ROUTE_SLOW_TASKS=file[,every] -- for every `every`-th slow round, one line per batch:
 // "B round batch n searchWall" then each task in the order the workers took them, "dur_us:pops:outcome" (outcome c
@@ -9188,6 +9193,18 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
                 << "), demand priced at most capacity + " << gSlowOver.slack << " x capacity\n";
   };
   slowOverStep(0, slowCut.realOverflow(g, usage));
+  // Part 195: the search quota's overflow gate; `next` is the first round it applies to.
+  bool quotaOn = false;
+  auto quotaStep = [&](int next, long long overflow) {
+    if (gSlowBatchSearches <= 0 || quotaOn || overflow > gSlowBatchSearchesBelow)
+      return;
+    quotaOn = true;
+    if (trace && gSlowBatchSearchesBelow != std::numeric_limits<long long>::max())
+      std::cerr << "slow tier search quota: from round " << next << " (2D overflow " << overflow << " <= "
+                << gSlowBatchSearchesBelow << "), batches hold at least " << gSlowBatchSearches
+                << " nets that need a search\n";
+  };
+  quotaStep(0, slowCut.realOverflow(g, usage));
   for (int round = 0; round < maxSlowRounds; ++round) {
     int accepted = 0, rejected = 0, keptWorse = 0;
     const long long popsRound0 = gSearchPops; // pd38route: trace
@@ -9287,7 +9304,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
             if (deltaBest)
               slowBest.save(nets, i);
           },
-          gSlowBatchLpt ? &wt : nullptr, nullptr, gSlowBatchSearches > 0 ? &needsSearch : nullptr);
+          gSlowBatchLpt ? &wt : nullptr, nullptr, quotaOn ? &needsSearch : nullptr);
       gSlowTaskRound = -1; // Part 192 trace
       if (gSlowTaskDump)
         std::fflush(gSlowTaskDump);
@@ -9647,6 +9664,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     }
     slowCut.step(g, usage, prices, round, overflow, trace); // Part 173
     slowOverStep(round + 1, overflow);                      // Part 186
+    quotaStep(round + 1, overflow);                         // Part 195
   }
   rep.slowCutRound = slowCut.startRound();
   if (deltaBest) { // the best state, from the delta
@@ -21570,6 +21588,22 @@ void testSlowDagSameAtAnyThreadCount() {
     check(sameRoutes(r1, r4) && k1 == k4 && hk1 == hk4,
           "batched slow tier, at least 6 searches per batch: 4 threads = 1 thread, round for round (2D overflow " +
               std::to_string(k1) + " vs " + std::to_string(k0) + " without)");
+    // Part 195: the overflow gate -- closed throughout (below 0) is the run without a quota, open from the start
+    // (below above any overflow) the ungated quota, both round for round.
+    long long g0 = 0, g1 = 0;
+    int eg0 = 0, eg1 = 0;
+    std::vector<SlowRoundRecord> hg0, hg1;
+    gSlowBatchSearches = 6;
+    gSlowBatchSearchesBelow = 0;
+    auto q0 = run(1, g0, eg0, 4, &hg0);
+    gSlowBatchSearchesBelow = 1000000000;
+    auto q1 = run(1, g1, eg1, 4, &hg1);
+    gSlowBatchSearches = 0;
+    gSlowBatchSearchesBelow = std::numeric_limits<long long>::max();
+    check(sameRoutes(q0, r0) && g0 == k0 && hg0 == hk0,
+          "search quota gated below 0 (never open): the slow rounds without a quota");
+    check(sameRoutes(q1, r1) && g1 == k1 && hg1 == hk1,
+          "search quota gated above every overflow (open from round 0): the ungated quota");
   }
   check(carriedSpread < carried1, "batched slow tier: spread batches collide less (" + std::to_string(carriedSpread) +
                                       " carried vs " + std::to_string(carried1) + ")");
@@ -22549,12 +22583,22 @@ int main(int argc, char **argv) {
       fail("PD38ROUTE_SLOW_CONFLICT must be 0 or 1 (got '" + sv + "')");
     gSlowConflict = sv == "1";
   }
-  if (const char *v = std::getenv("PD39ROUTE_SLOW_SEARCHES"); v) { // Part 193
+  if (const char *v = std::getenv("PD39ROUTE_SLOW_SEARCHES"); v) { // Part 193: K; Part 195: K,below
     char *end = nullptr;
     const long k = std::strtol(v, &end, 10);
-    if (!*v || *end || k < 0 || k > 1000000)
-      fail(std::string("PD39ROUTE_SLOW_SEARCHES must be 0..1000000 (got '") + v + "')");
+    long long below = std::numeric_limits<long long>::max();
+    bool ok = *v && end != v && k >= 0 && k <= 1000000;
+    if (ok && *end == ',') {
+      char *e2 = nullptr;
+      below = std::strtoll(end + 1, &e2, 10);
+      ok = e2 != end + 1 && !*e2 && below >= 0;
+    } else if (ok) {
+      ok = !*end;
+    }
+    if (!ok)
+      fail(std::string("PD39ROUTE_SLOW_SEARCHES must be K[,below] with K 0..1000000 and below >= 0 (got '") + v + "')");
     gSlowBatchSearches = static_cast<int>(k);
+    gSlowBatchSearchesBelow = below;
   }
   if (const char *v = std::getenv("PD39ROUTE_SLOW_TASKS"); v && *v) { // Part 192 (trace only): file[,every]
     std::string sv(v), file = sv;

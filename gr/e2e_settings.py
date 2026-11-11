@@ -202,6 +202,14 @@ def main():
     b = run('slow', {'PD39ROUTE_SLOW_SEARCHES': '200'}, 'slowsearches')
     nb, nb0 = slow_batches(b), slow_batches(run('slow', {}, 'base'))
     check('PD39ROUTE_SLOW_SEARCHES makes fewer, fuller slow-tier batches', 0 < nb < nb0, f'{nb} batches vs {nb0}')
+    # Part 195: K,below -- the quota starts at the first slow round entered at <= below units (its own trace line), so
+    # the run makes fewer batches than without it (not necessarily more than the ungated quota: once routes differ,
+    # batch counts do too).
+    c = run('slow', {'PD39ROUTE_SLOW_SEARCHES': '200,2000'}, 'slowsearchesgate')
+    m = re.search(r'^slow tier search quota: from round (\d+) ', c, re.M)
+    nc = slow_batches(c)
+    check('PD39ROUTE_SLOW_SEARCHES=K,below opens the quota mid-tier', bool(m) and int(m.group(1)) > 0 and nc < nb0,
+          (m.group(0) if m else 'no quota line') + f'; {nc} batches (ungated {nb}, none {nb0})')
     # refinement annealing: the refinement trace reports its temperature.
     prefix3 = os.path.join(work, 'searchdump')
     run('residue', {**off, 'PD39ROUTE_SEARCH_DUMP': prefix3 + ',1,0'}, 'searchdump')

@@ -13692,3 +13692,33 @@ round 30) would leave newblue3 as it is.
 since Part 171 every bigblue4 run has added `PD39ROUTE_REGION_BATCH_MAX=1` (a sequential region stage; the batched
 rounds never helped it, Part 167), and with it variant 2 (over=0) runs 406 -> 332 -> 318 (Part 180) instead of
 406 -> 344 -> 332 here. The settings files do not apply that override; the pair here is compared like for like.
+
+## Part 195 -- an overflow gate for the search quota
+
+The user's order (2026-11-10 23:46): build the gate Part 194 proposed. `PD39ROUTE_SLOW_SEARCHES=K,below` (Part 193's
+`K` alone unchanged: on from round 0): the quota starts with the first slow round entered at <= `below` units of 2D
+overflow and stays on, the same sticky rule as Part 186's over-capacity cost; the trace says when ("slow tier search
+quota: from round N (2D overflow X <= below) ..."). Self-test: a gate that never opens (below 0) gives the rounds
+without a quota, one open from the start the ungated quota, round for round. `gr/e2e_settings.py` 43 of 43 (new: on
+the `slow` design, `200,2000` opens at round 7 and makes fewer batches than no quota). Its two runs overlapped
+bigblue4's K = 64 run (Part 194) for ~6 min at 8 threads each, so that run's time carries a small extra load.
+
+**Where a gate would act** (share of each K = 0 slow tier's time spent in rounds entered at or below the level, from
+the round traces):
+
+| design | 10000 | 30000 | 40000 | 100000 | lowest slow-round overflow |
+|---|---|---|---|---|---|
+| newblue7 | 86% | 88% | 89% | 91% | 694 |
+| bigblue4 | 81% | 84% | 85% | 88% | 406 |
+| newblue1 | 72% | 83% | 86% | 91% | 282 |
+| adaptec2 | 47% | 78% | 81% | 88% | 252 |
+| bigblue2 | 35% | 45% | 50% | 64% | 298 |
+| adaptec3 | 17% | 30% | 34% | 48% | 298 |
+| newblue3 | 0% | 0% | 0% | 99% | 41778 |
+
+newblue3 never enters a slow round below 41778, so any gate under that leaves it exactly as without a quota (the
+gated run equals the K = 0 run until the gate opens, and it never does). bigblue2's early rounds (overflow > 50000)
+ran *slower* with the quota (round 0-9: 15.7-50.3 s vs 13.5-46.2 s) and its later ones faster, which also argues for
+a gate. Not measured yet: the gain kept on the designs that gained. adaptec3 and bigblue2 spend most of their slow
+tier above 30000, where the quota's effect on them is unclear (adaptec3's round 0, identical work either way, ran
+71 s vs 63 s -- the pairs' early rounds carry ~10% noise from the previous job's single-threaded evaluator).
