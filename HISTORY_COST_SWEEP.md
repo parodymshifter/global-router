@@ -13951,3 +13951,41 @@ with a slow tier is faster (5-76%), the residues 2.6-6.0x, quality inside each d
 sixteen. Open before it can be a standard setting: (1) the expansion-count gate; (2) the ISPD 2024 / 2025 flows are
 untested with it; (3) bigblue4's best (318) is a one-ended result; (4) the fallback's light searches are 3-27% slower
 two-ended on the zero-overflow designs -- a per-stage choice would take that back. Adoption is the user's call.
+
+## Part 199 -- the work-gated stop on a basis the search does not change, and scoping the per-search choice
+
+The user's order (2026-11-11 14:40): fix Part 198's item 1, scope item 4 and build it, then item 2.
+
+**Item 1: the work-gated plateau stop.** The rule (Part 80) ends a region stage whose best has not fallen 1% in 150
+rounds when those rounds cost >= 3.2e10 expansions -- a deterministic stand-in for "about 5000 s". Under the
+two-ended search a round's expansions fell by a factor that depends on the design (path A's first 150 region
+rounds: bigblue4 3.38e10 -> 7.83e8, 43x; newblue7 3.42e10 -> 6.73e9, 5x), so no rescaled value of
+`PD14ROUTE_REGION_COST_POPS` fits both. A round's *reroutes* do not depend on how each is searched (bigblue4's first
+150 rounds: 1861401 one-ended, 1878810 two-ended) and are as deterministic. New: `PD39ROUTE_REGION_COST_REROUTES=N`
+(commit 14208cf; 0 = off, byte-identical): the stop also fires when the window's rounds rerouted >= N nets. N =
+1,600,000 is 3.2e10 expansions at bigblue4's one-ended 19060 per reroute. Replayed on the region rounds of all
+sixteen one-ended traces (path A / variant 0, the rounds a trace prints), 1.0-1.5 M per 150 rounds stops exactly
+where the expansion rule did -- bigblue4 at 150 (batched) and 256 (sequential) -- and nowhere else; 2.5 M never.
+Self-test (window 5 at >= 1 reroute stops after 5 rounds, at a million never); `gr/e2e_settings.py` 46 of 46.
+
+bigblue4, two-ended with the rule (`pd39route.p199`, 14:47-15:07; legal, `eval2008.pl` agreeing exactly): the three
+variants that never beat their start stop their batched rounds at 150 and their sequential reruns at 251 / 242 / 150
+(one-ended: 256 / 150 / 247; without the rule 1000, then 500); the kept variant is the same route (408 -> 344 ->
+332, wire 15156635). **Overflow 332 (max 4), scored wire 24945034, 1210 s** (Part 198 without the rule: 1791 s;
+one-ended 10748 s), fallback 1180 -> 612 s, peak RSS 4316 MB.
+
+**Item 4, scoping** (in progress). The fallback's slowdown on the zero-overflow designs is work, not timing: its
+expansions rise 20-60% two-ended (adaptec3 1.01e9 -> 1.62e9, bigblue1 2.63e9 -> 3.19e9 in fewer rounds). Those region
+stages end within ~100 rounds, while the WL term -- the one-ended search's heuristic -- is still strong, and
+`bidirMSMV` uses none. On newblue1's uniform sample (Part 197; `gr/search_bidir_sim.py --astar`, 1527 searches, all
+reproducing the found cost) little is left for a per-search choice:
+
+| policy | slow tier | region stage | all |
+|---|---|---|---|
+| one-ended A* | 2.76 M | 15.17 M | 17.99 M |
+| bidirectional Dijkstra (as built) | 0.66 M | 1.00 M | 1.67 M |
+| bidirectional A* (average potentials: hScale x Manhattan to the sinks' box minus to the sources', halved) | 0.63 M | 0.95 M | 1.58 M |
+| the better of one-ended and two-ended per search (oracle) | 0.55 M | 0.89 M | 1.45 M |
+| one-ended up to N expansions, then restart two-ended, N = 250 ... 8000 | | | 1.84 M ... 5.99 M |
+
+Samples of adaptec3 and bigblue1 (every search, one-ended) are queued to see the other regime before choosing.

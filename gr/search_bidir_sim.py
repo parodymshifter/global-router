@@ -61,6 +61,72 @@ def bidir(w, h, hc, vc, S, T):
     return mu, settled
 
 
+def bidir_astar(w, h, hc, vc, S, T, hs):
+    """Part 199: bidirectional A* with consistent average potentials. h_t(v) = hs x Manhattan distance to the sinks'
+    bounding box, h_s(v) likewise to the sources'; p = (h_t - h_s) / 2 changes by at most hs per step and every edge
+    costs at least hs, so the reduced costs c - p(u) + p(v) are >= 0. A super source at p_S = min over sources of p
+    and a super sink at p_T = max over sinks keep the zero-cost entry edges non-negative. Keys: forward
+    d + p(v) - p_S, backward d - p(v) + p_T; stop when the tops sum to mu + p_T - p_S."""
+    n = w * h
+    w1 = w - 1
+
+    def box(nodes):
+        xs = [v % w for v in nodes]
+        ys = [v // w for v in nodes]
+        return min(xs), max(xs), min(ys), max(ys)
+
+    tb, sb = box(T), box(S)
+
+    def dist(x, y, b):
+        dx = b[0] - x if x < b[0] else x - b[1] if x > b[1] else 0
+        dy = b[2] - y if y < b[2] else y - b[3] if y > b[3] else 0
+        return dx + dy
+
+    def pot(v):
+        x, y = v % w, v // w
+        return 0.5 * hs * (dist(x, y, tb) - dist(x, y, sb))
+
+    pS = min(pot(v) for v in S)
+    pT = max(pot(v) for v in T)
+    dist_ = ([INF] * n, [INF] * n)
+    done = ([False] * n, [False] * n)
+    pq = ([], [])
+    for v in S:
+        dist_[0][v] = 0.0
+        pq[0].append((pot(v) - pS, v))
+    for v in T:
+        dist_[1][v] = 0.0
+        pq[1].append((pT - pot(v), v))
+    heapq.heapify(pq[0])
+    heapq.heapify(pq[1])
+    mu = 0.0 if any(dist_[1][v] == 0.0 for v in S) else INF
+    settled = [0, 0]
+    off = pT - pS
+    while pq[0] and pq[1]:
+        if pq[0][0][0] + pq[1][0][0] >= mu + off:
+            break
+        side = 0 if settled[0] <= settled[1] else 1
+        k, u = heapq.heappop(pq[side])
+        if done[side][u]:
+            continue
+        done[side][u] = True
+        settled[side] += 1
+        D, O = dist_[side], dist_[1 - side]
+        d = D[u]
+        x, y = u % w, u // w
+        for v, c in ((u + 1, hc[y * w1 + x] if x + 1 < w else -1.0), (u - 1, hc[y * w1 + x - 1] if x > 0 else -1.0),
+                     (u + w, vc[y * w + x] if y + 1 < h else -1.0), (u - w, vc[(y - 1) * w + x] if y > 0 else -1.0)):
+            if c < 0:
+                continue
+            nd = d + c
+            if nd < D[v]:
+                D[v] = nd
+                heapq.heappush(pq[side], (nd + pot(v) - pS if side == 0 else nd - pot(v) + pT, v))
+            if O[v] < INF and nd + O[v] < mu:
+                mu = nd + O[v]
+    return mu, settled
+
+
 def med(xs):
     xs = sorted(xs)
     return xs[len(xs) // 2] if xs else 0.0
@@ -70,6 +136,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('pattern')
     ap.add_argument('--out')
+    ap.add_argument('--astar', action='store_true', help='also bidirectional A* and the hybrid policies (Part 199)')
     a = ap.parse_args()
     files = sorted(glob.glob(a.pattern), key=lambda p: (len(p), p))
     rows = []
@@ -78,6 +145,7 @@ def main():
         if not S or not T:
             continue
         mu, st = bidir(w, h, hc, vc, S, T)
+        mua, sta = bidir_astar(w, h, hc, vc, S, T, hs) if a.astar else (mu, st)
         g = dijkstra(w, h, hc, vc, S)
         hb = dijkstra(w, h, hc, vc, T)
         Cs = min(g[t] for t in T)
@@ -85,13 +153,14 @@ def main():
         rows.append({'file': os.path.basename(p), 'box': sum(1 for d in g if d < INF), 'pops': pops,
                      'ok': abs(mu - C) <= 1e-9 * max(1.0, abs(C)), 'f': st[0], 'b': st[1],
                      'fwd': sum(1 for d in g if d < Cs - tol), 'bwd': sum(1 for v in range(w * h) if g[v] < INF and hb[v] < Cs - tol),
-                     'ns': len(S), 'nt': len(T), 'stage': stage_of(p)})
+                     'ns': len(S), 'nt': len(T), 'stage': stage_of(p), 'af': sta[0], 'ab': sta[1],
+                     'aok': abs(mua - C) <= 1e-9 * max(1.0, abs(C))})
     n = len(rows)
     if a.out:
         with open(a.out, 'w') as f:
-            f.write('file\tbox\trouter_pops\tok\tbidir_fwd\tbidir_bwd\tone_ended_fwd\tone_ended_bwd\tsources\tsinks\n')
+            f.write('file\tbox\trouter_pops\tok\tbidir_fwd\tbidir_bwd\tone_ended_fwd\tone_ended_bwd\tsources\tsinks\tstage\tastar_fwd\tastar_bwd\n')
             for r in rows:
-                f.write(f"{r['file']}\t{r['box']}\t{r['pops']:.0f}\t{int(r['ok'])}\t{r['f']}\t{r['b']}\t{r['fwd']}\t{r['bwd']}\t{r['ns']}\t{r['nt']}\n")
+                f.write(f"{r['file']}\t{r['box']}\t{r['pops']:.0f}\t{int(r['ok'])}\t{r['f']}\t{r['b']}\t{r['fwd']}\t{r['bwd']}\t{r['ns']}\t{r['nt']}\t{r['stage']}\t{r['af']}\t{r['ab']}\n")
     P = sum(r['pops'] for r in rows)
     B = sum(r['f'] + r['b'] for r in rows)
     print(f"{n} instances, {sum(r['ok'] for r in rows)} reproduce the found cost (bidirectional)")
@@ -115,6 +184,25 @@ def main():
             print(f"  {names[st]}: {len(rs)} searches, router expansions {p_:.0f} ({100 * p_ / P:.1f}% of the sample's), "
                   f"bidirectional {b_} -> {p_ / max(1, b_):.1f}x fewer; median search {med(rr):.1f}x; "
                   f"{worse} searches ({100 * worse / len(rs):.0f}%) need more, costing {sum(r['f'] + r['b'] - r['pops'] for r in rs if r['f'] + r['b'] > r['pops']):.0f} extra")
+    if a.astar:  # Part 199: what a per-search choice could add
+        print(f"bidirectional A* (average potentials): {sum(r['aok'] for r in rows)} of {n} reproduce the found cost")
+        sts = [st for st in (2, 1, 0, -1) if any(r['stage'] == st for r in rows)] + ['all']
+        hdr = ['policy'] + [names.get(st, 'all') if st != 'all' else 'all' for st in sts]
+        print('\t'.join(hdr))
+
+        def line(label, f):
+            cells = []
+            for st in sts:
+                rs = rows if st == 'all' else [r for r in rows if r['stage'] == st]
+                cells.append(f"{sum(f(r) for r in rs):.0f}")
+            print(label + '\t' + '\t'.join(cells))
+
+        line('one-ended A* (the router)', lambda r: r['pops'])
+        line('bidirectional Dijkstra (PD39ROUTE_SEARCH_BIDIR)', lambda r: r['f'] + r['b'])
+        line('bidirectional A*', lambda r: r['af'] + r['ab'])
+        line('the better of one-ended and bidirectional, per search (oracle)', lambda r: min(r['pops'], r['f'] + r['b']))
+        for N in (250, 500, 1000, 2000, 4000, 8000):
+            line(f'one-ended up to {N} expansions, then restart two-ended', lambda r, N=N: r['pops'] if r['pops'] <= N else N + r['f'] + r['b'])
     top = sorted(rows, key=lambda r: -(r['f'] + r['b']))[:5]
     print('largest bidirectional instances: ' + '; '.join(f"{r['file']} {r['f'] + r['b']} of box {r['box']} ({r['ns']} sources, {r['nt']} sinks)" for r in top))
     print(f"share of bidirectional work in the 10 largest instances: {100 * sum(r['f'] + r['b'] for r in sorted(rows, key=lambda r: -(r['f'] + r['b']))[:10]) / B:.1f}%")
