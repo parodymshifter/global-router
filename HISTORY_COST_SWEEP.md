@@ -13915,3 +13915,39 @@ exactly; every run kept the reclaim path B), one-ended (Part 194's K = 0) / two-
   cost more than one (Part 197's sample: 41% of searches need more expansions two-ended). A per-stage or per-search
   choice could take that back; small against the slow tier's gain.
 - Peak RSS -13% to +20% (the backward arrays, and different routes).
+
+**The residues** (2026-11-11 10:57-13:52; all legal, `eval2008.pl` agreeing exactly), one-ended (Part 194's K = 0;
+newblue7 Part 182) / two-ended:
+
+| design | total | faster | slow tier | fallback | overflow (max) | scored wire | peak RSS |
+|---|---|---|---|---|---|---|---|
+| newblue1 (Part 197) | 1269 / 299 s | 4.2x | 295 / 80 s | 926 / 165 s | 26 (2) / 24 (2) | +1.98% | 1485 / 1242 MB |
+| newblue4 | 2695 / 1029 s | 2.6x | 492 / 200 s | 2055 / 686 s | 136 (2) / 138 (2) | **-3.40%** | 3662 / 3102 MB |
+| newblue3 | 6643 / 2423 s | 2.7x | 4421 / 819 s | 2068 / 1450 s | 33492 (472) / 33354 (564) | +0.05% | 2798 / 3222 MB |
+| bigblue4 | 10748 / 1791 s | 6.0x | 2887 / 373 s | 7622 / 1180 s | 332 (4) / 332 (4) | +0.005% | 3288 / 4107 MB |
+| newblue7 | 13029 / 2848 s | 4.6x | 5290 / 938 s | 7443 / 1621 s | 92 (2) / 96 (2) | -0.00004% | 5308 / 5977 MB |
+| bigblue4, `REGION_BATCH_MAX=1` | 16343 (Part 180, shared machine) / 1554 s | | -- / 388 s | -- / 920 s | **318** (4) / 330 (6) | +0.07% | 3383 / 3263 MB |
+
+- newblue4 keeps the same variant (over=0) with 7.5% less 2D wire (8936357 vs 9657295; every variant is 4-8%
+  shorter), cause not established; newblue1's +1.98% is the portfolio keeping another variant at lower overflow.
+- newblue7's kept variant runs 640 -> 130 -> 98 (one-ended 694 -> 122 -> 92): its recent runs span 90-98.
+- bigblue4's recorded 318 (one-ended, sequential region stage) is not reproduced: the same variant reaches the same
+  332 after the region stage, and refinement takes it to 330, not 318. The record stays the one-ended run's.
+- The work-gated plateau stop no longer fires (as Part 197 expected): bigblue4's variants ran 1000 batched rounds and
+  then 500 sequential ones where the one-ended run stopped at 150 and 256. Harmless here; the gate's 3.2e10 needs a
+  new value (or a wall-clock or round basis) before it means anything again.
+
+**All sixteen, one setting each** (the plain standard, one job at a time):
+
+| | one-ended | two-ended |
+|---|---|---|
+| total run time, sixteen designs | 42855 s (11.9 h) | **14496 s (4.0 h): 2.96x faster** |
+| the eleven zero-overflow designs | 0 on all | 0 on all; scored wire within +-0.13% |
+| residues: newblue1 / newblue4 / bigblue4 / newblue7 / newblue3 | 26 / 136 / 332 / 92 / 33492 | 24 / 138 / 332 / 96 / 33354 |
+| sum of the residues | 34078 | 33944 |
+
+**Verdict.** The two-ended search is the largest runtime gain since the pattern stage was batched: every design
+with a slow tier is faster (5-76%), the residues 2.6-6.0x, quality inside each design's run-to-run spread on all
+sixteen. Open before it can be a standard setting: (1) the expansion-count gate; (2) the ISPD 2024 / 2025 flows are
+untested with it; (3) bigblue4's best (318) is a one-ended result; (4) the fallback's light searches are 3-27% slower
+two-ended on the zero-overflow designs -- a per-stage choice would take that back. Adoption is the user's call.
