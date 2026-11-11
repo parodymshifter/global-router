@@ -13676,7 +13676,7 @@ work. Of the twelve designs run so far, it helps four by 7-11% (newblue7, bigblu
 | newblue1 | 1269 / 1145 s | -9.7% | 26 (2) / 30 (2) | 4822950 / 4823309 |
 | newblue4 | 2695 / 2713 s | +0.6% | 136 (2) / 134 (2) | 13722578 / 13743891 |
 | newblue3 | 6643 / 7751 s | **+16.7%** | 33492 (472) / 33412 (488) | 10776373 / 10780404 |
-| bigblue4 | 10748 s / (running) | | 332 (4) / | 24943899 / |
+| bigblue4 | 10748 / 12569 s | **+16.9%** | 332 (4) / 334 (4) | 24943899 / 24972020 |
 
 Every K = 0 route reproduces its record (newblue1 Part 181, newblue4 Part 181, newblue3 Part 185 at 6643 s against its
 6640 s), except bigblue4 -- see below. newblue1's 30 is inside its 24-38 spread but 4 above this baseline.
@@ -13692,6 +13692,18 @@ round 30) would leave newblue3 as it is.
 since Part 171 every bigblue4 run has added `PD39ROUTE_REGION_BATCH_MAX=1` (a sequential region stage; the batched
 rounds never helped it, Part 167), and with it variant 2 (over=0) runs 406 -> 332 -> 318 (Part 180) instead of
 406 -> 344 -> 332 here. The settings files do not apply that override; the pair here is compared like for like.
+
+**bigblue4, K = 64** (2026-11-10 21:38 - 2026-11-11 01:03; legal, `eval2008.pl` agreeing exactly): slow tier 2887 ->
+2558 s (-11%) but 430 units leaving it instead of 406, and the fallback 7622 -> 9767 s (+28%: from 430 the batched
+region rounds gain nothing on three of four variants, which rerun sequentially); total +16.9%, overflow 334 vs 332,
+wire +0.11%. About 6 min of this run overlapped Part 195's end-to-end checks (two 8-thread runs), a small part of
+the 1821 s difference. All 28 jobs OK.
+
+**Part 194 verdict.** The ungated quota helps four designs (newblue7 -7%, bigblue2 -6%, adaptec3 -11%, adaptec2 -8%)
+and newblue1's time (-10%, overflow 30 vs 26), is neutral on eight, and loses on newblue3 (+17%) and bigblue4 (+17%).
+On both losers the quota leaves the slow tier with more overflow and the later stages pay for it. Not adoptable
+ungated; Part 195's gate protects newblue3 by construction but not bigblue4, whose slow tier runs at 406-430 for 80%
+of its time -- the gate test (Part 195) does not include bigblue4 and would need it before any adoption.
 
 ## Part 195 -- an overflow gate for the search quota
 
