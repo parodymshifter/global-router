@@ -195,6 +195,15 @@ def main():
     nslow = len(lines(b, 'slow round '))
     check('PD39ROUTE_SLOW_TASKS dumps every slow round\'s batches', nslow > 0 and len(rounds) == nslow,
           f'{len(rounds)} rounds dumped, {nslow} slow round lines')
+    # Part 199: PD39ROUTE_REGION_COST_REROUTES -- the work-gated stop counted in reroutes: on the hard design (a
+    # region stage without gain) a 3-round window at >= 1 reroute ends path A's stage after 3 rounds, by that rule.
+    gate = {**off, 'PD14ROUTE_REGION_COST_WINDOW': '3', 'PD14ROUTE_REGION_COST_POPS': '9000000000000000000',
+            'PD39ROUTE_REGION_ABORT': '0,20'}  # the expansion rule cannot fire at that threshold
+    b = run('hard', {**gate, 'PD39ROUTE_REGION_COST_REROUTES': '1'}, 'costreroutes')
+    a = run('hard', gate, 'costreroutesoff')
+    rb, ra = region_rounds(b), region_rounds(a)
+    check('PD39ROUTE_REGION_COST_REROUTES stops a flat region stage',
+          rb is not None and ra is not None and rb == 3 and ra > 3, f'{rb} region rounds vs {ra}')
     # Part 197: PD39ROUTE_SEARCH_BIDIR -- its own closing trace line counts the searches it ran from both ends, and the
     # slow tier (which runs before most settings used to be read) expands fewer nodes than the one-ended run.
     def slow_pops(text):

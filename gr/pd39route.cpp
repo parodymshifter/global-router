@@ -5224,6 +5224,13 @@ struct RegionSettings {
   bool pieces = false;  // pd6route: PD6ROUTE_PIECES
   int costWindow = 0;         // pd14route: PD14ROUTE_REGION_COST_WINDOW (0 = off)
   long long costPops = 0;     // pd14route: PD14ROUTE_REGION_COST_POPS
+  // Part 199: PD39ROUTE_REGION_COST_REROUTES=N (0 = off) -- the work-gated stop also fires when the window's rounds
+  // rerouted at least N nets (the count each round's trace line reports) without the gain. Expansions stopped
+  // measuring a round's cost once the search could run from both ends (Part 198: 43x fewer per round on bigblue4,
+  // 5x on newblue7, so no rescaled PD14ROUTE_REGION_COST_POPS fits both); a round's reroutes do not depend on how
+  // each is searched, and stay deterministic. 1.6 M per 150 rounds is 3.2e10 expansions at bigblue4's one-ended
+  // 19060 per reroute: replayed on the sixteen one-ended traces it stops exactly where the expansion rule did.
+  long long costReroutes = 0;
   int plateau = 0;            // pd12route: PD12ROUTE_REGION_PLATEAU (0 = off)
   double plateauGain = 0.01;  // pd12route: PD12ROUTE_PLATEAU_GAIN / 100
   long long plateauMin = 0;   // pd12route: PD12ROUTE_PLATEAU_MIN
@@ -5581,6 +5588,7 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
   std::vector<long long> bestAfter{rep.after};
   long long popsAtStart = gSearchPops;
   std::vector<long long> popsAfter{gSearchPops};
+  std::vector<long long> reroutesAfter{0}; // Part 199: cumulative reroutes, alongside popsAfter
   std::vector<size_t> members;
   for (size_t i = 0; i < nets.size(); ++i)
     if (!nets[i].giant && nets[i].pts.size() >= 2 && netTouchesBox(nets[i], rep.box))
@@ -5907,6 +5915,7 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
       break;
     bestAfter.push_back(rep.after);
     popsAfter.push_back(gSearchPops);
+    reroutesAfter.push_back(reroutesAfter.back() + rerouted); // Part 199
     spent += batched && adaptive ? 1.0 / rs.batchAdapt : 1.0; // Part 161
     trajBest.push_back(trajBest.empty() ? total : std::min(trajBest.back(), total));
     if (adaptive && batched && plateauReached(trajBest, rs.plateau, rs.plateauGain, 0)) { // Part 161: stalled
@@ -5914,6 +5923,7 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
       rep.switchedAt = r + 1;
       bestAfter.assign(1, rep.after);
       popsAfter.assign(1, gSearchPops);
+      reroutesAfter.assign(1, 0);
       if (trace)
         std::cerr << "region stage: batched rounds stopped improving (best " << trajBest.back() << ", under "
                   << 100 * rs.plateauGain << "% in " << rs.plateau << " rounds) after round " << r
@@ -5922,7 +5932,11 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
       continue;
     }
     const bool plateau = plateauReached(bestAfter, rs.plateau, rs.plateauGain, rs.plateauMin);
-    const bool workStop = !plateau && workGatedPlateau(bestAfter, popsAfter, rs.costWindow, rs.costPops, rs.plateauGain);
+    const bool workStop =
+        !plateau &&
+        (workGatedPlateau(bestAfter, popsAfter, rs.costWindow, rs.costPops, rs.plateauGain) ||
+         (rs.costReroutes > 0 && // Part 199
+          workGatedPlateau(bestAfter, reroutesAfter, rs.costWindow, rs.costReroutes, rs.plateauGain)));
     if (plateau) {
       rep.plateaued = true;
       break;
@@ -19001,6 +19015,28 @@ void testWorkGatedPlateau() {
   RegionReport cheap = runRegion(5, full.pops + 1);
   check(cheap.roundsRun == 40 && !cheap.costStopped,
         "window 5, threshold above all the work done: all 40 rounds (" + std::to_string(cheap.roundsRun) + ")");
+  { // Part 199: the same stop counted in reroutes (the fixture reroutes its 3 nets every round)
+    auto runReroutes = [&](long long n) {
+      Design d = parse("pd14route_selftest_stuck.gr", row);
+      std::vector<RoutedNet> nets(3);
+      for (int i = 0; i < 3; ++i) {
+        nets[i].net = &d.nets[i];
+        nets[i].segs = {{0, 0, 0, 7, 0, 0}};
+      }
+      prepareFor2DRefine(d, nets);
+      RegionSettings rs;
+      rs.enabled = true;
+      rs.rounds = 40;
+      rs.costWindow = 5;
+      rs.costPops = full.pops + 1; // the expansion rule cannot fire
+      rs.costReroutes = n;
+      return regionNegotiate(d, nets, rs, false);
+    };
+    RegionReport few = runReroutes(1), many = runReroutes(1000000);
+    check(few.roundsRun == 5 && few.costStopped && few.after == full.after && many.roundsRun == 40 && !many.costStopped,
+          "work-gated stop counted in reroutes: window 5 at >= 1 reroute stops after 5 rounds (" +
+              std::to_string(few.roundsRun) + "), at a million never (" + std::to_string(many.roundsRun) + ")");
+  }
   int w = 7;
   long long p = 9;
   std::string err;
@@ -23226,6 +23262,13 @@ int main(int argc, char **argv) {
     if (!parseCostPlateau(std::getenv("PD14ROUTE_REGION_COST_WINDOW"), std::getenv("PD14ROUTE_REGION_COST_POPS"),
                           region.costWindow, region.costPops, err))
       fail(err);
+    if (const char *v = std::getenv("PD39ROUTE_REGION_COST_REROUTES"); v) { // Part 199
+      char *end = nullptr;
+      const long long n = std::strtoll(v, &end, 10);
+      if (!*v || *end || n < 0)
+        fail(std::string("PD39ROUTE_REGION_COST_REROUTES must be an integer >= 0 (got '") + v + "')");
+      region.costReroutes = n;
+    }
   }
   if (laFrom && !*laFrom)
     fail("PD3ROUTE_LA_FROM is set but empty");
