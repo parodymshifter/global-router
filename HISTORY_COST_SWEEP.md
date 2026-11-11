@@ -14016,6 +14016,30 @@ ground at full heuristic strength 8524 vs 25548 (value 1) vs 8575 (one-ended A*)
 1 and 4 threads. `gr/e2e_settings.py` 47 of 47. Validation runs of value 2 with the reroute-counted stop queued on
 eight designs (`p199/v2.jobs`, started 16:06).
 
+**Validation of value 2 with the reroute-counted stop** (2026-11-11 16:06-18:13, `p199/v2.jobs`, `pd39route.p199b`,
+one at a time; all eight legal, `eval2008.pl` agreeing exactly), one-ended (Part 194 / 193) / value 1 (Parts 197-198)
+/ value 2:
+
+| design | total | slow tier | fallback | overflow (max) | scored wire, value 2 vs one-ended |
+|---|---|---|---|---|---|
+| adaptec3 | 727 / 571 / **516 s** | 368 / 181 / 161 s | 99 / 126 / 100 s | 0 | -0.02% |
+| adaptec1 | 770 / 612 / **599 s** | 601 / 429 / 428 s | 82 / 97 / 84 s | 0 | -0.04% |
+| bigblue1 | 931 / **869** / 912 s | 694 / 618 / 671 s | 150 / 165 / 154 s | 0 | -0.07% |
+| newblue5 | 1595 / 1053 / **1030 s** | | | 0 | +0.02% |
+| bigblue2 | 724-828 / 460 / **447 s** | | | 0 | inside its range |
+| newblue1 | 1269 / **299** / 316 s | | | 26 / 24 / **36** (2) | +1.97% |
+| newblue4 | 2695 / 1029 / **969 s** | | | 136 / 138 / 138 (2) | +0.24% (value 1: -3.40%) |
+| bigblue4 | 10748 / 1791 (1210 with the stop) / **970 s** | 2887 / 373 / 402 s | 7622 / 1180 (612) / 327 s | 332 / 332 / 332 (4) | -0.07% |
+
+- The fallback's loss is gone (back to the one-ended time on adaptec3, adaptec1, bigblue1, with fewer expansions than
+  one-ended), and value 2 is the fastest of the three on six of eight. bigblue1's slow tier is slower than value 1's
+  at the same expansions (1.43e10): there the potential costs ~8% per expansion and prunes nothing.
+- newblue1's 36 is inside its 24-38 spread but at its top (one-ended 26, value 1 24): to be settled by repeats, which
+  now cost 5 min each.
+- newblue4's -3.4% wire under value 1 does not appear under value 2 (+0.24%): it came from how the heuristic-free
+  search breaks ties there, not from searching from two ends.
+- bigblue4: 970 s for the same 332 -- 11x the one-ended run; the stop fired at 150 rounds on the three flat variants.
+
 ## Part 200 -- item 2: the ISPD 2024 and 2025 flows with the two-ended search
 
 Queued 2026-11-11 16:12 behind Part 199's validation runs (`~/Code/GlobalRouterRuns/p200/`, `pd39route.p199b`, one
