@@ -3617,6 +3617,17 @@ void wallPrefix(WallBound &wb, int x0, int y0, int x1, int y1) {
 // border, or the forward queue's top if the cheapest such node was never settled (so a box with a growable side
 // is reported limited more often than the one-ended proof would; a box covering the grid never is).
 bool gSearchBidir = false;
+// Part 199: PD39ROUTE_SEARCH_BIDIR=2 -- the two-ended search with the one-ended search's heuristic on both sides
+// (bidirectional A*, consistent average potentials). Part 198: without it the fallback of the zero-overflow designs
+// did 20-60% more expansions, their region stages ending while the WL term still guides a search; on uniform samples
+// (adaptec3 5.72 M one-ended, 3.31 M two-ended, 2.60 M with potentials; newblue1 17.99 / 1.67 / 1.58 M) it is as
+// good as choosing the better search per search. With t(v) = hScale x the Manhattan distance to the sinks' bounding
+// box and s(v) likewise to the sources', p = (t - s) / 2 changes by at most hScale per step and every edge costs at
+// least hScale, so the reduced costs c(u, v) - p(u) + p(v) are >= 0. A super source at pS = min over sources of p
+// and a super sink at pT = max over sinks keep their zero-cost entry edges non-negative. Forward key d + p - pS,
+// backward key d - p + pT; a path's reduced cost is its cost + pT - pS, so the stop compares with mu + pT - pS.
+// With hScale 0 (the WL term underflowed) p is 0 and this is value 1's search.
+bool gSearchBidirPotentials = false;
 std::atomic<long long> gBidirSearches{0}, gBidirFwd{0}, gBidirBwd{0}; // trace: searches and settled nodes per side
 
 bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, SearchRegion &region,
@@ -3627,6 +3638,43 @@ bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, 
   SearchHeap &pf = region.heap, &pb = region.heapB;
   pf.start(region.heapPos.data());
   pb.start(region.heapPosB.data());
+  // Part 199: the potentials (all zero unless PD39ROUTE_SEARCH_BIDIR=2)
+  const double hHalf = gSearchBidirPotentials ? 0.5 * heuristicScale(prices) : 0.0;
+  int tx0 = 0, tx1 = 0, ty0 = 0, ty1 = 0, ux0 = 0, ux1 = 0, uy0 = 0, uy1 = 0; // the sinks' box, the sources' box
+  bool haveT = false, haveS = false;
+  for (const Point &q : sinks)
+    if (region.inRegion(q.x, q.y)) {
+      tx0 = haveT ? std::min(tx0, q.x) : q.x;
+      tx1 = haveT ? std::max(tx1, q.x) : q.x;
+      ty0 = haveT ? std::min(ty0, q.y) : q.y;
+      ty1 = haveT ? std::max(ty1, q.y) : q.y;
+      haveT = true;
+    }
+  for (const PathNode &q : sources)
+    if (region.inRegion(q.x, q.y)) {
+      ux0 = haveS ? std::min(ux0, q.x) : q.x;
+      ux1 = haveS ? std::max(ux1, q.x) : q.x;
+      uy0 = haveS ? std::min(uy0, q.y) : q.y;
+      uy1 = haveS ? std::max(uy1, q.y) : q.y;
+      haveS = true;
+    }
+  auto pot = [&](int x, int y) {
+    if (hHalf == 0.0 || !haveT || !haveS)
+      return 0.0;
+    const int dt = std::max({0, tx0 - x, x - tx1}) + std::max({0, ty0 - y, y - ty1});
+    const int ds = std::max({0, ux0 - x, x - ux1}) + std::max({0, uy0 - y, y - uy1});
+    return hHalf * static_cast<double>(dt - ds);
+  };
+  double pS = inf, pT = -inf;
+  for (const PathNode &q : sources)
+    if (region.inRegion(q.x, q.y))
+      pS = std::min(pS, pot(q.x, q.y));
+  for (const Point &q : sinks)
+    if (region.inRegion(q.x, q.y))
+      pT = std::max(pT, pot(q.x, q.y));
+  if (!haveS || !haveT)
+    pS = pT = 0.0;
+  const double off = pT - pS; // reduced cost of a path = its cost + off
   int same = -1; // a source tile that is a sink: the empty route, as the one-ended search finds at its first pop
   for (const PathNode &s : sources) {
     if (!region.inRegion(s.x, s.y))
@@ -3636,7 +3684,7 @@ bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, 
       same = i;
     if (region.distAt(i) != 0.0) { // a source listed twice enters once
       region.setDist(i, 0.0, -1);
-      pf.push(0.0, i);
+      pf.push(pot(s.x, s.y) - pS, i);
     }
   }
   auto nodeOf = [&](int i) {
@@ -3660,7 +3708,7 @@ bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, 
       continue; // a tile listed twice: its last listing owns it (markSink)
     region.distAtB(i);
     region.setDistB(i, 0.0, -1);
-    pb.push(0.0, i);
+    pb.push(pT - pot(sinks[k].x, sinks[k].y), i);
   }
   const bool growX0 = x0 > 0, growX1 = x1 < g.nx - 1, growY0 = y0 > 0, growY1 = y1 < g.ny - 1;
   double mu = inf, minEdgeG = inf, topF = inf;
@@ -3673,7 +3721,7 @@ bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, 
     const double tb = eb ? inf : pb.top().priority;
     if (ef && eb)
       break;
-    if (ef ? tb >= mu : eb ? topF >= mu : topF + tb >= mu)
+    if (ef ? tb >= mu + off : eb ? topF >= mu + off : topF + tb >= mu + off)
       break;
     const bool fwd = eb || (!ef && nf <= nb);
     SearchHeap &pq = fwd ? pf : pb;
@@ -3690,12 +3738,12 @@ bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, 
     } else {
       ++nb;
     }
-    auto relax = [&](int ni, double w) {
+    auto relax = [&](int ni, int nx_, int ny_, double w) {
       const double nd = d + w;
       if (fwd) {
         if (nd < region.distAt(ni)) {
           region.setDist(ni, nd, i);
-          pf.push(nd, ni);
+          pf.push(nd + pot(nx_, ny_) - pS, ni);
         }
         const double od = region.peekB(ni);
         if (nd + od < mu) {
@@ -3706,7 +3754,7 @@ bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, 
       } else {
         if (nd < region.distAtB(ni)) {
           region.setDistB(ni, nd, i);
-          pb.push(nd, ni);
+          pb.push(nd - pot(nx_, ny_) + pT, ni);
         }
         const double od = region.peek(ni);
         if (nd + od < mu) {
@@ -3718,15 +3766,15 @@ bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, 
     };
     if (isH) {
       if (region.inRegion(x - 1, y))
-        relax(i - 1, wireCostH(prices, g.hIndex(x - 1, y, 0), amount));
+        relax(i - 1, x - 1, y, wireCostH(prices, g.hIndex(x - 1, y, 0), amount));
       if (region.inRegion(x + 1, y))
-        relax(i + 1, wireCostH(prices, g.hIndex(x, y, 0), amount));
+        relax(i + 1, x + 1, y, wireCostH(prices, g.hIndex(x, y, 0), amount));
     }
     if (isV) {
       if (region.inRegion(x, y - 1))
-        relax(i - region.w, wireCostV(prices, g.vIndex(x, y - 1, 0), amount));
+        relax(i - region.w, x, y - 1, wireCostV(prices, g.vIndex(x, y - 1, 0), amount));
       if (region.inRegion(x, y + 1))
-        relax(i + region.w, wireCostV(prices, g.vIndex(x, y, 0), amount));
+        relax(i + region.w, x, y + 1, wireCostV(prices, g.vIndex(x, y, 0), amount));
     }
   }
   gBidirSearches.fetch_add(1, std::memory_order_relaxed);
@@ -3766,7 +3814,11 @@ bool bidirMSMV(const RoutingGrid &g, const Prices &prices, const LayerPlan &lp, 
   for (int i : simple)
     result.path.push_back(nodeOf(i));
   foundCost = mu;
-  result.boxLimited = (growX0 || growX1 || growY0 || growY1) && std::min(minEdgeG, topF) < mu - 1e-9 * std::max(1.0, mu);
+  // Part 199: with potentials an unsettled border node b has g(b) + p(b) - pS >= the forward top, and the rest of a
+  // route through it costs at least hScale x its distance to the sinks' box, which is >= max(0, 2 p(b)); so the
+  // route costs at least top + pS + |p(b)| >= top + pS.
+  result.boxLimited =
+      (growX0 || growX1 || growY0 || growY1) && std::min(minEdgeG, topF + pS) < mu - 1e-9 * std::max(1.0, mu);
   if (result.boxLimited)
     gBoxLimited = true;
   return true;
@@ -20736,8 +20788,9 @@ void testBidirSearch() {
   LayerPlan lp(g);
   SearchRegion region;
   const bool saved = gSearchBidir;
-  int cases = 0, sameCost = 0, valid = 0, sameFound = 0, zeroCases = 0, pocketCases = 0;
-  long long popsOne = 0, popsTwo = 0, pocketOne = 0, pocketTwo = 0;
+  const bool savedPot = gSearchBidirPotentials;
+  int cases = 0, sameCost = 0, valid = 0, sameFound = 0, zeroCases = 0, pocketCases = 0, potOk = 0;
+  long long popsOne = 0, popsTwo = 0, pocketOne = 0, pocketTwo = 0, popsPot = 0;
   std::string firstBad;
   for (int f = 0; f < 120; ++f) {
     Usage u = usageFromCharges(g, std::vector<RoutedNet>{});
@@ -20832,9 +20885,17 @@ void testBidirSearch() {
     MSMVResult a = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, margin);
     const long long p1 = gSearchPops;
     gSearchBidir = true;
+    gSearchBidirPotentials = false;
     MSMVResult b = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, margin);
     const long long p2 = gSearchPops;
+    gSearchBidirPotentials = true; // Part 199
+    MSMVResult c = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, margin);
+    const long long p3 = gSearchPops;
     gSearchBidir = saved;
+    gSearchBidirPotentials = savedPot;
+    potOk += a.found == c.found && c.found && wellFormed(c) &&
+             std::abs(costOf(a) - costOf(c)) <= 1e-9 * std::max(1.0, costOf(a));
+    popsPot += p3 - p2;
     ++cases;
     zeroCases += zero;
     sameFound += a.found == b.found;
@@ -20859,6 +20920,57 @@ void testBidirSearch() {
             std::to_string(zeroCases) + " with free edges at cost 0)" + (firstBad.empty() ? "" : " -- " + firstBad));
   check(valid == 120, "two-ended search: every route a simple path from a source tile to its sink (" +
                           std::to_string(valid) + "/120)");
+  check(potOk == 120, "two-ended search with potentials (value 2): the same cost and a simple source-to-sink path on " +
+                          std::to_string(potOk) + "/120 fixtures (" + std::to_string(popsPot) + " expansions; value 1 " +
+                          std::to_string(popsTwo) + ", one-ended " + std::to_string(popsOne) + ")");
+  {
+    // open ground, the heuristic at full strength (the early rounds): the potentials must take back what the
+    // heuristic-free search loses to one-ended A* there
+    long long one = 0, two = 0, pot = 0;
+    int ok = 0;
+    for (int f = 0; f < 30; ++f) {
+      Usage u = usageFromCharges(g, std::vector<RoutedNet>{});
+      Prices pr(g);
+      CostSettings cs;
+      cs.model = CostModel::kPresentDemand;
+      configureCostModel(pr, u, cs);
+      pr.pdIter = 1;
+      pr.pdFactor = pdFactorForIter(pr.pdIter);
+      std::vector<PathNode> src = {{2 + f % 7, 3 + (f * 5) % 33, 0}};
+      std::vector<Point> snk = {{22 + (f * 3) % 16, 2 + (f * 13) % 36}};
+      const int amount = 1 + g.minSpacing[0];
+      auto costOf = [&](const MSMVResult &r) {
+        double c = 0;
+        for (size_t k = 0; k + 1 < r.path.size(); ++k) {
+          const PathNode &a = r.path[k], &b = r.path[k + 1];
+          c += a.y == b.y ? wireCostH(pr, g.hIndex(std::min(a.x, b.x), a.y, 0), amount)
+                          : wireCostV(pr, g.vIndex(a.x, std::min(a.y, b.y), 0), amount);
+        }
+        return c;
+      };
+      gSearchBidir = false;
+      const long long q0 = gSearchPops;
+      MSMVResult a = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 60);
+      const long long q1 = gSearchPops;
+      gSearchBidir = true;
+      gSearchBidirPotentials = false;
+      MSMVResult b = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 60);
+      const long long q2 = gSearchPops;
+      gSearchBidirPotentials = true;
+      MSMVResult c = multiSourceDijkstra(g, pr, lp, region, src, snk, 1, 60);
+      const long long q3 = gSearchPops;
+      gSearchBidir = saved;
+      gSearchBidirPotentials = savedPot;
+      ok += a.found && b.found && c.found && std::abs(costOf(a) - costOf(c)) <= 1e-9 * std::max(1.0, costOf(a)) &&
+            std::abs(costOf(a) - costOf(b)) <= 1e-9 * std::max(1.0, costOf(a));
+      one += q1 - q0;
+      two += q2 - q1;
+      pot += q3 - q2;
+    }
+    check(ok == 30 && pot * 2 < two && pot < one * 2,
+          "two-ended search with potentials: on open ground under half of value 1's expansions and under twice "
+          "one-ended A*'s (" + std::to_string(pot) + " vs " + std::to_string(two) + " vs " + std::to_string(one) + ")");
+  }
   check(pocketCases > 20 && pocketTwo * 4 < pocketOne,
         "two-ended search: a sink in a pocket takes under a quarter of the expansions (" + std::to_string(pocketTwo) +
             " vs " + std::to_string(pocketOne) + " on " + std::to_string(pocketCases) + " fixtures; all 120: " +
@@ -22002,6 +22114,21 @@ void testSlowDagSameAtAnyThreadCount() {
     const long long searches = gBidirSearches.load() - s0;
     auto t4 = run(4, b4, eb4_, 16, &hb4);
     gSearchBidir = savedBidir;
+    {
+      const bool savedPot = gSearchBidirPotentials;
+      gSearchBidir = true;
+      gSearchBidirPotentials = true; // Part 199
+      long long c1 = 0, c4 = 0;
+      int ec1 = 0, ec4 = 0;
+      std::vector<SlowRoundRecord> hp1_, hp4_;
+      auto v1 = run(1, c1, ec1, 16, &hp1_);
+      auto v4 = run(4, c4, ec4, 16, &hp4_);
+      gSearchBidir = savedBidir;
+      gSearchBidirPotentials = savedPot;
+      check(sameRoutes(v1, v4) && c1 == c4 && hp1_ == hp4_,
+            "two-ended search with potentials in the batched slow tier: 4 threads = 1 thread, round for round (2D "
+            "overflow " + std::to_string(c1) + ")");
+    }
     check(searches > 1000 && sameRoutes(t1, t4) && b1 == b4 && hb1 == hb4,
           "two-ended search in the batched slow tier: 4 threads = 1 thread, round for round (" +
               std::to_string(searches) + " searches; 2D overflow " + std::to_string(b1) + " vs " + std::to_string(u1) +
@@ -23027,9 +23154,10 @@ int main(int argc, char **argv) {
   }
   if (const char *v = std::getenv("PD39ROUTE_SEARCH_BIDIR"); v) { // Part 197: read before route()
     const std::string sv(v);
-    if (sv != "0" && sv != "1")
-      fail("PD39ROUTE_SEARCH_BIDIR must be 0 or 1 (got '" + sv + "')");
-    gSearchBidir = sv == "1";
+    if (sv != "0" && sv != "1" && sv != "2")
+      fail("PD39ROUTE_SEARCH_BIDIR must be 0, 1 or 2 (got '" + sv + "')");
+    gSearchBidir = sv != "0";
+    gSearchBidirPotentials = sv == "2"; // Part 199
   }
   if (const char *v = std::getenv("PD39ROUTE_SLOW_SEARCHES"); v) { // Part 193: K; Part 195: K,below
     char *end = nullptr;

@@ -211,6 +211,11 @@ def main():
     b = run('slow', {'PD39ROUTE_SEARCH_BIDIR': '1'}, 'bidir')
     m = re.search(r'^two-ended search: (\d+) searches, (\d+) nodes settled from the sources, (\d+) from the sinks', b, re.M)
     pb, p0 = slow_pops(b), slow_pops(run('slow', {}, 'base'))
+    # Part 199: value 2 adds the heuristic to both ends -- fewer slow-tier expansions again than value 1 on this design
+    c = run('slow', {'PD39ROUTE_SEARCH_BIDIR': '2'}, 'bidir2')
+    pc = slow_pops(c)
+    check('PD39ROUTE_SEARCH_BIDIR=2 adds the heuristic to both ends',
+          bool(re.search(r'^two-ended search: \d+ searches', c, re.M)) and 0 < pc < pb, f'slow-tier pops {pc} vs {pb} (value 1)')
     check('PD39ROUTE_SEARCH_BIDIR searches from both ends, slow tier included',
           bool(m) and int(m.group(1)) > 0 and int(m.group(3)) > 0 and 0 < pb < p0,
           (m.group(0)[:90] if m else 'no two-ended line') + f'; slow-tier pops {pb} vs {p0}')
