@@ -13722,3 +13722,7 @@ ran *slower* with the quota (round 0-9: 15.7-50.3 s vs 13.5-46.2 s) and its late
 a gate. Not measured yet: the gain kept on the designs that gained. adaptec3 and bigblue2 spend most of their slow
 tier above 30000, where the quota's effect on them is unclear (adaptec3's round 0, identical work either way, ran
 71 s vs 63 s -- the pairs' early rounds carry ~10% noise from the previous job's single-threaded evaluator).
+
+**Gate test queued** (the user, 2026-11-11 00:08; `~/Code/GlobalRouterRuns/p195/`, starts when Part 194's batch ends,
+one job at a time): K = 64 gated at 30000 on adaptec2, adaptec3, bigblue2 (spreads 64 and 56), newblue1, newblue7,
+compared with their K = 0 and ungated K = 64 runs. newblue3 is left out: its gate never opens.
