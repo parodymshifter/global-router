@@ -13668,3 +13668,27 @@ The quota pays where the slow tier leaves many workers idle *and* the added conf
 6.75 of 8 busy; newblue5 recovers idle workers but its extra carried searches and memory contention add 18% to the
 work. Of the twelve designs run so far, it helps four by 7-11% (newblue7, bigblue2, adaptec3, adaptec2) and is neutral
 (+-5%) on the other eight; wire is unchanged everywhere except bigblue2's one path-A outcome (Part 193).
+
+**The residues** (2026-11-10 12:10 onward; all legal, `eval2008.pl` agreeing exactly):
+
+| design | total K = 0 / 64 | change | overflow (max) K = 0 / 64 | scored wire K = 0 / 64 |
+|---|---|---|---|---|
+| newblue1 | 1269 / 1145 s | -9.7% | 26 (2) / 30 (2) | 4822950 / 4823309 |
+| newblue4 | 2695 / 2713 s | +0.6% | 136 (2) / 134 (2) | 13722578 / 13743891 |
+| newblue3 | 6643 / 7751 s | **+16.7%** | 33492 (472) / 33412 (488) | 10776373 / 10780404 |
+| bigblue4 | 10748 s / (running) | | 332 (4) / | 24943899 / |
+
+Every K = 0 route reproduces its record (newblue1 Part 181, newblue4 Part 181, newblue3 Part 185 at 6643 s against its
+6640 s), except bigblue4 -- see below. newblue1's 30 is inside its 24-38 spread but 4 above this baseline.
+
+**newblue3 loses.** Its slow tier never falls below ~42000 units, every search crowds the same hotspots, and fuller
+batches collide: carried nets 2-19x K = 0's (round 90: 7676 vs 404), rounds up to 2x as long (round 90: 110 vs 52 s),
+overflow falling more slowly (slow round 45: 47086 vs 45140), the slow tier stopping at round 95 instead of 118 with
+43666 left instead of 41778; slow tier 4421 -> 5454 s. A gate that applies the quota only below some slow-round
+overflow (the designs that gained ran their late rounds at a few hundred to a few thousand units; newblue7 at 5700 by
+round 30) would leave newblue3 as it is.
+
+**bigblue4's record needs a per-design override.** Its K = 0 run on the plain standard gives 332, not the recorded 318:
+since Part 171 every bigblue4 run has added `PD39ROUTE_REGION_BATCH_MAX=1` (a sequential region stage; the batched
+rounds never helped it, Part 167), and with it variant 2 (over=0) runs 406 -> 332 -> 318 (Part 180) instead of
+406 -> 344 -> 332 here. The settings files do not apply that override; the pair here is compared like for like.
