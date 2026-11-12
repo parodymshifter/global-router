@@ -14174,3 +14174,18 @@ on newblue4, newblue7 and newblue3 are inside what reorderings move, but the sig
 shift. So the search is a speed setting with a small overflow price on the residues, not a free one. It is adopted
 nowhere; what it is worth depends on whether the time it frees is spent on overflow (several reorderings and the best
 kept, Part 201a) -- the user's call.
+
+## Part 202 -- a portfolio over slow-tier reorderings (`gr/reorder_portfolio.py`)
+
+The user's choice (2026-11-12 09:18) among Part 201's options: spend part of the two-ended search's time on overflow.
+`gr/reorder_portfolio.py DESIGN.gr WORK_DIR [--out BEST.route] [--spreads 64,56,80,68,60,72] [--jobs 2]
+[--router BUILD]`: routes the design at the standard's spread first; a legal run at zero overflow is the result (a
+design that reaches zero pays nothing); otherwise the remaining spreads are routed, `--jobs` at a time (at most 3),
+and the best kept by the contest's order -- total overflow, max overflow, scored wirelength -- among runs whose
+`gr_verify` and `eval2008.pl` checks both pass. Every run goes through `run_batch.sh` / `run_checked.sh`; settings are
+the 2008 standard with the speed layer plus `PD39ROUTE_SEARCH_BIDIR=2` and `PD39ROUTE_REGION_COST_REROUTES=1600000`.
+It refuses a router build without the two-ended search (the default `./pd39route` here is an older binary, which
+ignores the setting silently: the first run's trace must carry the "two-ended search:" line).
+`--selftest` (09:21, passes): the selection rule on made-up summaries (a lower-overflow run that failed a check is
+never kept; nothing kept when none passed), and end to end on two synthetic designs -- three runs and the best kept
+with its route as `--out`; one run only on a design that reaches zero. Not yet run on the residues.
