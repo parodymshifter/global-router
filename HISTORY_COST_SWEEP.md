@@ -14139,3 +14139,38 @@ agreeing exactly, max overflow 2 everywhere; spread 64 from Parts 194, 197, 199)
 - What the speed buys back: six two-ended runs of newblue1 cost 30 min in a row (one one-ended run: 21 min) and
   their best is 22, the one-ended runs' best; a portfolio over slow-tier reorderings is the obvious use of a 4x faster
   run where overflow is what counts. Not built.
+
+**b: value 2 on the remaining eight designs** (2026-11-12 01:32 - 04:1x, one at a time; all legal, `eval2008.pl`
+agreeing exactly), one-ended (Part 194; newblue7 Part 182) / value 1 (Part 198) / value 2 with the reroute-counted
+stop:
+
+| design | total | overflow (max) | scored wire, value 2 vs one-ended |
+|---|---|---|---|
+| newblue2 | 83 / 86 / 86 s | 0 | -0.002% |
+| adaptec2 | 248 / 124 / 123 s | 0 | +0.02% |
+| adaptec4 | 272 / 259 / 255 s | 0 | +0.007% |
+| bigblue3 | 376 / 230 / 219 s | 0 | -0.002% |
+| adaptec5 | 1390 / 948 / 896 s | 0 | -0.002% |
+| newblue6 | 1355 / 893 / 846 s | 0 | -0.007% |
+| newblue3 | 6643 / 2423 / 2010 s | 33492 (472) / 33354 (564) / **34056** (452) | +0.09% |
+| newblue7 | 13029 / 2848 / 3655 s | 92 (2) / 96 (2) / **100** (2) | -0.02% |
+
+**All sixteen under value 2 with the reroute-counted stop** (Parts 199, 201; the plain standard otherwise):
+
+| | one-ended | value 2 |
+|---|---|---|
+| total run time, sixteen designs | 42855 s (11.9 h) | **13849 s (3.85 h): 3.09x faster** |
+| the eleven zero-overflow designs | 0 | 0 on all eleven; scored wire within +-0.07% |
+| newblue1 (mean of six reorderings) | 24.0 | 27.7 |
+| newblue4 | 136 | 138 |
+| bigblue4 | 332 (318 with its override) | 332 |
+| newblue7 | 92 | 100 |
+| newblue3 | 33492 | 34056 (+1.7%) |
+
+**Verdict.** Speed: 3.1x over the suite, 3-11x on the residues, with the zero-overflow designs unchanged in quality.
+Overflow: every residue but bigblue4 comes out a little worse two-ended -- newblue1 +3.7 on average, newblue7 +8
+(92 -> 96 with value 1, 100 with value 2), newblue4 +2, newblue3 +564 with value 2 (-138 with value 1). Single runs
+on newblue4, newblue7 and newblue3 are inside what reorderings move, but the sign agrees with newblue1's measured
+shift. So the search is a speed setting with a small overflow price on the residues, not a free one. It is adopted
+nowhere; what it is worth depends on whether the time it frees is spent on overflow (several reorderings and the best
+kept, Part 201a) -- the user's call.
