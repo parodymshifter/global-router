@@ -14052,3 +14052,33 @@ refinement and the fallback off).
   NV_NVDLA_partition_c, mempool_tile_wrap and mempool_group: both routes, the contest's congestion evaluator, and one
   OpenROAD session per design scoring both (the contest score's change s2 - s0); mempool_cluster routed and
   evaluated only (its OpenROAD sessions need 80-113 GB, Part 189).
+
+**2024 results** (2026-11-11 18:13-19:04; all 26 runs `status=OK`: `g24_verify` legal and equal to the contest
+evaluator), one-ended (s0) / value 2 (s2):
+
+| design | score s0 | score s2 | change | run time | slow tier | peak RSS |
+|---|---|---|---|---|---|---|
+| mempool_tile_rank | 13699409 | 13699409 | 0 (identical) | 2.3 / 2.3 s | 0.0 / 0.0 s | 382 / 396 MB |
+| mempool_tile | 15106426 | 15106426 | 0 (identical) | 2.6 / 2.6 s | 0.0 / 0.0 s | 412 / 413 MB |
+| ariane133_68 | 19682336 | 19682336 | 0 (identical) | 2.6 / 2.6 s | 0.1 / 0.1 s | 465 / 486 MB |
+| ariane133_51 | 22386813 | 22386813 | 0 (identical) | 2.8 / 2.7 s | 0.1 / 0.0 s | 525 / 547 MB |
+| ariane_68_rank | 22499096 | 22499161 | +0.0003% | 3.8 / 3.6 s | 0.1 / 0.1 s | 509 / 553 MB |
+| nvdla | 48027559 | 48026996 | -0.0012% | 5.1 / 4.9 s | 0.3 / 0.3 s | 1045 / 1079 MB |
+| nvdla_rank | 42950544 | 42949398 | -0.0027% | 5.1 / 5.2 s | 0.3 / 0.3 s | 975 / 991 MB |
+| bsg_chip_rank | 109400663 | 109400648 | -0.00001% | 13.9 / 14.2 s | 0.3 / 0.3 s | 2077 / 2150 MB |
+| bsg_chip | 111837415 | 111837281 | -0.0001% | 15.7 / 15.7 s | 0.5 / 0.4 s | 2277 / 2331 MB |
+| mempool_group_rank | 381374576 | 381374582 | +0.000002% | 58.0 / 73.0 s | 1.1 / 1.2 s | 5874 / 4878 MB |
+| mempool_group | 396208042 | 396205327 | -0.0007% | 70.5 / 67.9 s | 2.4 / 2.4 s | 4693 / 4701 MB |
+| mempool_cluster_ranking | 1771989624 | 1771990110 | +0.00003% | 423.5 / 505.2 s | 28.1 / **42.5 s** | 10289 / 10450 MB |
+| mempool_cluster | 1615288061 | 1615291395 | +0.0002% | 593.4 / 615.8 s | 117.8 / **146.7 s** | 11254 / 10389 MB |
+
+- **Scores are the same** (within +-0.003%; four designs to the last digit -- where the cheapest route is unique an
+  exact search must return it, a check of exactness the 2008 runs could not give).
+- **No speed gain, and a loss where the slow tier is not negligible**: mempool_cluster's slow tier does 12% more
+  expansions two-ended (2.71e9 -> 3.04e9) at 129 -> 167 ns each; mempool_cluster_ranking +10% at 192 -> 302 ns. The
+  2024 slow tier is 2-6 rounds at full heuristic strength in margin-48 boxes: its searches do not flood, so there is
+  nothing for a second end to save, and the second set of arrays costs memory traffic on these large grids. (The
+  other stages' differences in the run times -- pattern stage, layer assignment -- do not use this search: machine
+  noise at 10 GB.)
+- **Verdict for 2024: keep the one-ended search.** The two-ended search belongs to the 2008 flow's long negotiation
+  (150-round slow tiers, 1000-round region stages, decayed heuristic), not to this one.
