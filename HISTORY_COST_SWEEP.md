@@ -14118,3 +14118,24 @@ The user's go-ahead (2026-11-11 23:54) for Part 200's two open points (`~/Code/G
   reroute-counted stop) -- beside each mode's spread-64 run (26 / 24 / 36).
 - **b** (`b.jobs`, one at a time): value 2 with the reroute-counted stop on newblue2, adaptec2, adaptec4, bigblue3,
   adaptec5, newblue6, newblue3 and newblue7, the designs with value-1 runs only.
+
+**a: newblue1's overflow by search mode** (2026-11-11 23:55 - 2026-11-12 01:31; all fifteen legal, `eval2008.pl`
+agreeing exactly, max overflow 2 everywhere; spread 64 from Parts 194, 197, 199):
+
+| search | spread 56 | 60 | 64 | 68 | 72 | 80 | mean | median | range | mean scored wire |
+|---|---|---|---|---|---|---|---|---|---|---|
+| one-ended | 26 | 24 | 26 | 22 | 24 | 22 | **24.0** | 24 | 22-26 | 4.868 M |
+| value 1 | 26 | 28 | 24 | 28 | 32 | 28 | 27.7 | 28 | 24-32 | 4.901 M |
+| value 2 | 22 | 30 | 36 | 26 | 30 | 22 | 27.7 | 28 | 22-36 | 4.897 M |
+
+- **The two-ended search costs newblue1 about 3.7 units of overflow on average** (24.0 -> 27.7, +15%), in either
+  form. Against one-ended, value 1 is worse in rank on 32 of 36 pairs (Mann-Whitney, two-sided p ~ 0.03); value 2 on
+  25 of 36 (p ~ 0.3) with the same mean and twice the scatter -- it holds both the best (22, twice) and the worst (36).
+  The 36 was not an outlier of a neutral change, and the 24 of Part 197 was a lucky draw.
+- One-ended's own spread here is 22-26, tighter than the 24-38 on record (which pooled many configurations).
+- The same sign shows on the other small residues (newblue7 92 -> 96, newblue4 136 -> 138, bigblue4 with its
+  override 318 -> 330), one run each. The searches return equal-cost routes; which of the equal-cost routes they
+  return differs, and over hundreds of negotiation rounds that is not neutral. Not understood beyond that.
+- What the speed buys back: six two-ended runs of newblue1 cost 30 min in a row (one one-ended run: 21 min) and
+  their best is 22, the one-ended runs' best; a portfolio over slow-tier reorderings is the obvious use of a 4x faster
+  run where overflow is what counts. Not built.
