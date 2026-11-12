@@ -14194,3 +14194,14 @@ with its route as `--out`; one run only on a design that reaches zero. Not yet r
 09:29, `pd39route.p199b`): six spreads each, in order newblue1, newblue4, bigblue4, newblue3 (three at a time) and
 newblue7 (two at a time, for memory). Each design's first run is the standard's spread alone, so its time is a clean
 single-run time; the rest overlap. Results below as each design finishes.
+
+**Results so far** (all runs legal, `eval2008.pl` agreeing exactly; `p202/<design>/portfolio.tsv`):
+
+| design | one-ended, one run | portfolio: overflow by spread 64 / 56 / 80 / 68 / 60 / 72 | kept | scored wire, kept vs one-ended | portfolio wall time |
+|---|---|---|---|---|---|
+| newblue1 | 26 (mean of six reorderings 24.0), 1269 s | 36 / 22 / 22 / 26 / 30 / 30 | **22** (max 2), spread 56 | +1.7% | 1301 s |
+| newblue4 | 136, 2695 s | 138 / 134 / 132 / 140 / 136 / 140 | **132** (max 2), spread 80 | -3.4% | 4853 s |
+
+newblue1: the one-ended runs' best in one one-ended run's time. newblue4: a new best (136 before) at 1.8x the
+one-ended run's time (three runs at a time take 29 min each, 16 min alone). bigblue4 started 11:11; newblue3 and
+newblue7 follow from `run.sh` on their own, their results in `p202/run.log` and each design's `portfolio.tsv`.
