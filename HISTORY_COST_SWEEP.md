@@ -14082,3 +14082,29 @@ evaluator), one-ended (s0) / value 2 (s2):
   noise at 10 GB.)
 - **Verdict for 2024: keep the one-ended search.** The two-ended search belongs to the 2008 flow's long negotiation
   (150-round slow tiers, 1000-round region stages, decayed heuristic), not to this one.
+
+**2025 results** (2026-11-11 19:04-20:12; `p200/flows25.tsv`, `flows25.log`; every route 0 open nets), the one-route
+standard, one-ended (s0) / value 2 (s2), each pair scored in one OpenROAD session:
+
+| design (visible) | route time | slow tier | overflow cost | contest score change s2 - s0 (timing, power, overflow) | peak RSS | OpenROAD session |
+|---|---|---|---|---|---|---|
+| ariane | 2 / 2 s | 0.0 / 0.0 s | 11693889 / 11693871 | -0.0000 | 534 / 537 MB | 19:05:05-19:05:58 |
+| bsg_chip | 12 / 12 s | 0.2 / 0.2 s | 48014930 / 48010178 (-0.010%) | -0.0002 (+0.0000, +0.0000, -0.0002) | 2077 / 2085 MB | 19:06:47-19:11:56 |
+| NV_NVDLA_partition_c | 10 / 10 s | 0.2 / 0.2 s | 13874968 / 13872029 (-0.021%) | -0.0003 (-0.0000, +0.0002, -0.0004) | 929 / 919 MB | 19:12:56-19:17:14 |
+| mempool_tile_wrap | 2 / 2 s | 0.0 / 0.0 s | 3894038 / 3894036 | -0.0000 | 417 / 424 MB | 19:17:31-19:18:27 |
+| mempool_group | 160 / 205 s | 101 / **145 s** | 211292787 / 211200621 (-0.044%) | -0.0146 (-0.0010, -0.0108, -0.0028) | 7160 / 7641 MB | 19:26:59-19:54:53 |
+| mempool_cluster (no OpenROAD) | 320 / 341 s | 75 / **96 s** | 613758152 / 613721124 (-0.006%) | overflow term -0.0002 | 11432 / 12154 MB | -- |
+
+The first pass stopped at mempool_group: its `.net` and `.def` were only in the benchmark zip. Unpacked (4.2 GB) into
+`~/Code/GlobalRouterTemp/ispd25/` and linked into the benchmark folder, as mempool_cluster's are, and resumed.
+
+Same verdict as 2024: scores unchanged (mempool_group -0.0146 is routes differing, not a mechanism), and the slow
+tier 28-44% slower where it is not negligible. **Keep the one-ended search for the 2024 and 2025 flows** (the timing
+loop routes with the same settings, so the same holds there).
+
+**Where items 1, 4 and 2 leave the two-ended search.** For ISPD 2008: `PD39ROUTE_SEARCH_BIDIR=2` with
+`PD39ROUTE_REGION_COST_REROUTES=1600000` is the candidate -- fastest of the three modes on six of the eight designs
+re-run with it, the fallback's loss gone, bigblue4 at 332 in 970 s (one-ended 10748 s). Open: newblue1 ended at 36
+with it (26 one-ended, 24 with value 1; spread 24-38) and needs repeats; bigblue4's best (318) remains a one-ended
+result; the remaining eight designs have value-1 runs only. For ISPD 2024 / 2025: not useful -- the settings files are
+separate, so a 2008 adoption does not touch them. Not adopted anywhere yet (the user's call).
