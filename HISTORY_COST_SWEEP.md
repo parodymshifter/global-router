@@ -14189,3 +14189,8 @@ ignores the setting silently: the first run's trace must carry the "two-ended se
 `--selftest` (09:21, passes): the selection rule on made-up summaries (a lower-overflow run that failed a check is
 never kept; nothing kept when none passed), and end to end on two synthetic designs -- three runs and the best kept
 with its route as `--out`; one run only on a design that reaches zero. Not yet run on the residues.
+
+**Runs on the five residues** (the user's go-ahead, 2026-11-12 09:28; `~/Code/GlobalRouterRuns/p202/run.sh`, started
+09:29, `pd39route.p199b`): six spreads each, in order newblue1, newblue4, bigblue4, newblue3 (three at a time) and
+newblue7 (two at a time, for memory). Each design's first run is the standard's spread alone, so its time is a clean
+single-run time; the rest overlap. Results below as each design finishes.
