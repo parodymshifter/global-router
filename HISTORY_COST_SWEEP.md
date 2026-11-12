@@ -14108,3 +14108,13 @@ re-run with it, the fallback's loss gone, bigblue4 at 332 in 970 s (one-ended 10
 with it (26 one-ended, 24 with value 1; spread 24-38) and needs repeats; bigblue4's best (318) remains a one-ended
 result; the remaining eight designs have value-1 runs only. For ISPD 2024 / 2025: not useful -- the settings files are
 separate, so a 2008 adoption does not touch them. Not adopted anywhere yet (the user's call).
+
+## Part 201 -- newblue1's spread by search mode, and value 2 on the remaining eight designs
+
+The user's go-ahead (2026-11-11 23:54) for Part 200's two open points (`~/Code/GlobalRouterRuns/p201/`,
+`pd39route.p199b`, started 23:55).
+- **a** (`a.jobs`, three at a time: overflow only, the routes do not depend on the load): newblue1 on the standard
+  at slow-tier spreads 56 / 60 / 68 / 72 / 80 under each search -- one-ended, value 1 and value 2 (both with the
+  reroute-counted stop) -- beside each mode's spread-64 run (26 / 24 / 36).
+- **b** (`b.jobs`, one at a time): value 2 with the reroute-counted stop on newblue2, adaptec2, adaptec4, bigblue3,
+  adaptec5, newblue6, newblue3 and newblue7, the designs with value-1 runs only.
