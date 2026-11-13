@@ -14242,3 +14242,43 @@ The user's decision (2026-11-13 10:59, Part 202's option 2).
 
 Current ISPD 2008 results: eleven designs at zero overflow; newblue1 22, newblue4 132, newblue7 90, bigblue4 318
 (one-ended; the portfolio's 326), newblue3 33286 -- sum of the residues 33848.
+
+## Part 204 -- delay-aware trees for 2025, scoped: the gain is across nets, not along a tree
+
+The user's order (2026-11-13 11:21): start the delay-aware trees (the midnight review's lead 3: weight the timing
+bias by a segment's place in its tree, and by which sinks are critical). Measured before building
+(`~/Code/GlobalRouterRuns/p204/`: `sinkcrit.py`, `elmore_ceiling.py`, outputs beside them; seconds each).
+
+**What the input gives** (`sinkcrit.py`, the `.net` alone): the first pin of a net is its driver (it holds the net's
+worst slack on 98.9-99.6% of the nets with a negative one) and every sink has its own slack. Of the classed nets'
+sinks only 11-15% have slack >= 0 (ariane 14.1%, bsg_chip 15.1%, NV_NVDLA_partition_c 13.6%, mempool_tile_wrap 11.1%);
+61-67% are within 10% of their net's worst. So "lift only the paths to critical sinks" has little to drop.
+
+**The ceiling** (`elmore_ceiling.py`): every classed net's route as a tree of GCell steps rooted at its driver,
+each step on its routed layer; Elmore delay driver -> sink with NanGate45's R and C per micron, 1.5 fF per sink pin,
+vias ignored; the measure is that delay summed over the critical sinks ("critical delay"). A step's benefit from a
+lower-R layer is (C_step / 2 + C downstream) x critical sinks downstream. Best routes of Part 188 against the
+unbiased routes of Part 134:
+
+| design | steps on metal7-10: unbiased -> best | critical delay: unbiased -> best | each net's own layers handed out by benefit | the same layers pooled inside 8 x 8-GCell blocks | 32 x 32 blocks | design-wide |
+|---|---|---|---|---|---|---|
+| ariane (k540rm2) | 0.2% -> 28.2% | 8.00e5 -> 3.33e5 (-58%) | -5.6% (4% of the bias's gain again) | **-63.8%** (45% again) | -74.3% | -91.1% |
+| mempool_tile_wrap (k180rp1m2) | 0.1% -> 33.7% | 4.99e5 -> 3.18e5 (-36%) | -2.3% (4% again) | **-67.7%** (119% again) | -78.8% | -93.2% |
+
+Pin capacitance 0.5 / 5 fF moves ariane's 8 x 8 figure to -61.5% / -65.9%.
+
+- **Along a tree there is little to gain**: the upper-layer steps of a lifted net are already spread evenly over it
+  (52% in the top half by benefit) and re-ordering them inside the net buys 2-6%. A net the bias lifts is mostly
+  lifted whole. The lead as first stated (trunk before leaves) is small.
+- **Across nets there is a lot**: with the layers used in each 8 x 8-GCell block left where they are and only handed
+  to the steps with the largest benefit, the remaining critical delay falls by about two thirds. The bias gives every
+  step of a classed net the same pull (k by slack class x R_l), while a step's benefit varies by orders of magnitude:
+  a long net with many critical sinks gains far more per track of metal9-10 than a short two-pin one, and today they
+  bid alike.
+- Ceilings, not forecasts: the model is wire Elmore delay summed over critical sinks, not the contest's WNS / TNS
+  (a sink is not an endpoint; a driver's own resistance is left out); a step-by-step reassignment ignores the vias it
+  would need; block pooling keeps demand where it is but not exactly on which tracks.
+
+**What to build** (not built): scale the bias by benefit. For a piece of a net's tree (the 3D pattern stage already
+roots its tree at the first pin): w = (wire below + half the piece + P x sinks below) x sinks below, the bias
+multiplied by (w / a design reference)^g within bounds, so the same k buys the tracks for the steps that pay most.
