@@ -14224,3 +14224,21 @@ at a time). With the eleven zero-overflow designs at one fast run each (Part 201
 sixteen take about 15.4 h against 11.9 h one-ended. The gains are small (0.6% on newblue3, 2-15% on the others):
 the portfolio turns the two-ended search's overflow price into a small overflow gain at a time cost, it is not a
 large move. Nothing adopted (the user's call).
+
+## Part 203 -- adopted: the two-ended search in `speed08.env`, and the reorderings portfolio as the residue flow
+
+The user's decision (2026-11-13 10:59, Part 202's option 2).
+- `gr/speed08.env` gains `PD39ROUTE_SEARCH_BIDIR=2` and `PD39ROUTE_REGION_COST_REROUTES=1600000`, with the record of
+  why and of the price. `standard.env` and `fast08.env` are unchanged; the 2024 / 2025 files do not read `speed08.env`.
+- `gr/reorder_portfolio.py` is the ISPD 2008 flow for a design that does not reach zero (a design that does pays one
+  run). `PD39ROUTE_SEARCH_BIDIR=0` on a job line gives the one-ended search back; bigblue4's best on record stays
+  Part 180's one-ended 318.
+- The default binary `gr/pd39route` was rebuilt from HEAD (the one in place dated from 2026-10-17 and ignored the
+  setting). Parity: adaptec2 on the plain three files, 119 s, legal, `eval2008.pl` agreeing -- its route
+  **byte-identical** to Part 201's value-2 run. `./pd39route --selftest` passes, `reorder_portfolio.py --selftest`
+  passes, `gr/e2e_settings.py` 47 of 47.
+- `CLAUDE.md` (the dated entry) and `BEST_RESULTS_PLAN.md` (the 2008 results row: newblue1 22, newblue4 132,
+  newblue7 90, newblue3 33286, bigblue4 318) updated.
+
+Current ISPD 2008 results: eleven designs at zero overflow; newblue1 22, newblue4 132, newblue7 90, bigblue4 318
+(one-ended; the portfolio's 326), newblue3 33286 -- sum of the residues 33848.

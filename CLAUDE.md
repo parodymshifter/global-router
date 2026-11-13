@@ -284,6 +284,21 @@ Since 2026-11-04 the portfolio is three variants (`PD39ROUTE_PORTFOLIO=expand=12
 capacity, `PD39ROUTE_REGION_OVER`) at slack 0 and 0.075 -- newblue1 26, newblue4 136, bigblue4 318, newblue7 92,
 newblue3 33492 (sum 39540 -> 34064), the only variants Part 181's eight-variant run ever kept; newblue3's slack moved
 0.25 -> 0.075 on 2026-11-05 (Parts 184-185, a flat bottom at 0.05-0.15).
+Since 2026-11-13 (Parts 196-202) `speed08.env` also carries the two-ended search (`PD39ROUTE_SEARCH_BIDIR=2`: every
+MSMV search runs from the sources and the sinks at once, exact in cost) and the work-gated region stop counted in
+reroutes (`PD39ROUTE_REGION_COST_REROUTES=1600000`), and **the ISPD 2008 flow for a design that does not reach zero is
+`python3 gr/reorder_portfolio.py <design.gr> <work dir> --out <route>`**: one run at the standard's slow-tier spread,
+then -- only if it ends above zero -- five reorderings of the slow tier (`PD38ROUTE_SLOW_SPREAD`), the best kept by
+(overflow, max overflow, wirelength) among runs that pass `gr_verify` and `eval2008.pl`. Late searches flood their
+boxes from the source end (the sink pin sits in a small expensive pocket, Part 196); two ends route the sixteen
+designs in 3.85 h against 11.9 h, the eleven zero-overflow designs unchanged, but a single run leaves each residue a
+little worse (newblue1 27.7 on average vs 24.0) -- which equal-cost route a search returns is not neutral. The
+portfolio turns that into a small gain for 1.45x the one-ended time on the residues: newblue1 22, newblue4 132,
+bigblue4 326, newblue3 33286, newblue7 90. bigblue4's best on record stays the one-ended 318 with
+`PD39ROUTE_REGION_BATCH_MAX=1` (Part 180); `PD39ROUTE_SEARCH_BIDIR=0` gives the one-ended search back. Not for the
+2024 / 2025 flows (Part 200: equal scores, slower slow tier). Two lessons: measure a diagnosis before building on it
+(Part 150's "near-tie" was argued, not measured, and was wrong); and a quality-neutral-looking change needs several
+reorderings per design before its overflow is believed (newblue1's first two-ended run was a lucky 24).
 Since 2026-10-22 (Part 146) `fast08.env` also carries the region stage's early stop
 (`PD39ROUTE_REGION_ABORT=1000,20`): above 1000 units of entering 2D overflow, a region stage still no
 better than its start after 20 rounds stops there -- exact (such stages returned their start; routes
