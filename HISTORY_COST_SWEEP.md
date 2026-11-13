@@ -14327,3 +14327,23 @@ unbiased route, lower is better):
 tree: 2-6% in the model; across nets by size: loses with the real timer). What the result suggests instead, not
 measured: a weight by the driver's strength (a weak driver gains more per unit of capacitance removed), which needs
 the cell of each driver from the netlist.
+
+## Part 206 -- joint selection over the portfolio's six routings (in progress)
+
+The user's order (2026-11-13 17:11): the joint exact solve of the 2008 hotspots (Part 151's option 5) first.
+`gr/hotspot_mix.py DESIGN.gr OUT.route ROUTE1 ROUTE2 ...`: the cheapest decisive form -- no candidate generator; the
+candidates are each net's routes in several complete, legal routings (Part 202's six reorderings). Every net with wire
+inside the window (the bounding box of the base's over-capacity edges + 10 tiles) may take its route from any file;
+an integer program picks one per net to minimise overflow, counted per 3D edge as the evaluators count it; the result
+is written as a route file and scored by `gr_verify` / `eval2008.pl`. `highs`, `scip` and `cbc` are installed
+(Homebrew); nothing was added.
+
+**newblue1** (base: spread 56, overflow 22 on 11 edges; window x 168-200, y 41-75): 8407 movable nets, 5160 with more
+than one distinct route (23006 candidates), 31101 edges that can overflow.
+- **The relaxation's bound is ~0** (HiGHS dual bound 0.015, SCIP 0.048, both mostly the wirelength tie-break): a
+  fractional mix of the six routings clears the hotspot.
+- **No integer improvement found yet**: HiGHS, 300 s, no start: best 14232 (it never found the base again); SCIP,
+  600 s, started from the base: the base's 22, nothing better (one solution, time limit). The mixed file it wrote is
+  the base (`gr_verify`: 22, max 2, legal) -- the write path works.
+- Next: the relaxation's fractional solution rounded and repaired (most nets should be integral in it), or a far
+  smaller program (only nets on or beside the over-capacity edges), before more solver time.
