@@ -14205,3 +14205,22 @@ single-run time; the rest overlap. Results below as each design finishes.
 newblue1: the one-ended runs' best in one one-ended run's time. newblue4: a new best (136 before) at 1.8x the
 one-ended run's time (three runs at a time take 29 min each, 16 min alone). bigblue4 started 11:11; newblue3 and
 newblue7 follow from `run.sh` on their own, their results in `p202/run.log` and each design's `portfolio.tsv`.
+
+**All five residues** (2026-11-12 09:29-23:22; every run legal, `eval2008.pl` agreeing exactly):
+
+| design | one-ended, one run: overflow, time | portfolio: overflow by spread 64 / 56 / 80 / 68 / 60 / 72 | kept (max) | portfolio wall time |
+|---|---|---|---|---|
+| newblue1 | 26, 1269 s | 36 / 22 / 22 / 26 / 30 / 30 | **22** (2) | 1301 s |
+| newblue4 | 136, 2695 s | 138 / 134 / 132 / 140 / 136 / 140 | **132** (2) | 4853 s |
+| bigblue4 | 332, 10748 s (318 with its override, Part 180) | 332 / 330 / 332 / 336 / 326 / 338 | **326** (4) | 7850 s |
+| newblue3 | 33492, 6643 s | 34056 / 33298 / 33286 / 33546 / 33370 / 33570 | **33286** (466) | 7571 s |
+| newblue7 | 92, 13029 s | 100 / 90 / 92 / 92 / 96 / 106 | **90** (2) | 28409 s |
+| sum | 34078, 34384 s (9.6 h) | | **33856** | 49984 s (13.9 h) |
+
+**Verdict.** The portfolio beats the one-ended standard's overflow on all five residues -- newblue1 -4, newblue4 -4
+(a new best), bigblue4 -6 (the plain standard's 332; the override's one-ended 318 still stands), newblue3 -206 (a new
+best), newblue7 -2 -- for 1.45x the one-ended runs' time on these five (newblue7 alone 2.2x: its six runs overlap two
+at a time). With the eleven zero-overflow designs at one fast run each (Part 201: 5 600 s against 8 471 s), the
+sixteen take about 15.4 h against 11.9 h one-ended. The gains are small (0.6% on newblue3, 2-15% on the others):
+the portfolio turns the two-ended search's overflow price into a small overflow gain at a time cost, it is not a
+large move. Nothing adopted (the user's call).
