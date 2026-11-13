@@ -10274,7 +10274,12 @@ struct TimingLayerModel {
   // byte-identical.
   std::vector<float> hpwl, sinks; // per net, from the reader (pins' bounding box half-perimeter; pins - 1)
   std::vector<float> mult;        // per net: the timing term's multiplier (empty: off)
-  double benefitG = 0, benefitM = 8, benefitP = 7, benefitRef = 0;
+  // benefitQ (the fourth field): the reference W. In [0, 1]: that quantile of the classed nets' W (0.5: the first
+  // form, which only raised the pull -- the low tail of W is tight, no net fell below 0.78 -- and bought overflow:
+  // ariane -4.054 -> -4.073, mempool_tile_wrap -0.926 -> -0.625, Part 205). -1 (default): the W_ref at which the
+  // wire-weighted mean multiplier is 1, so the total pull is unchanged and only its distribution moves -- what
+  // Part 204's ceiling measured.
+  double benefitG = 0, benefitM = 8, benefitP = 7, benefitRef = 0, benefitQ = -1;
   size_t benefitHi = 0, benefitLo = 0; // trace: nets at the upper / lower bound
   void setBenefit() {
     mult.clear();
@@ -10290,8 +10295,30 @@ struct TimingLayerModel {
       }
     if (classed.empty())
       return;
-    std::nth_element(classed.begin(), classed.begin() + static_cast<std::ptrdiff_t>(classed.size() / 2), classed.end());
-    benefitRef = classed[classed.size() / 2] > 0 ? classed[classed.size() / 2] : 1.0;
+    auto multOf = [&](double wi, double ref) {
+      return std::min(benefitM, std::max(1.0 / benefitM, std::pow(wi / ref, benefitG)));
+    };
+    if (benefitQ >= 0) {
+      const size_t at = std::min(classed.size() - 1, static_cast<size_t>(benefitQ * static_cast<double>(classed.size())));
+      std::nth_element(classed.begin(), classed.begin() + static_cast<std::ptrdiff_t>(at), classed.end());
+      benefitRef = classed[at] > 0 ? classed[at] : 1.0;
+    } else { // the mean multiplier, weighted by wire (HPWL + 1), is 1: bisection on log W_ref (the mean falls as it rises)
+      double lo = std::log(*std::min_element(classed.begin(), classed.end()) / (benefitM * benefitM + 1.0) + 1e-300);
+      double hi = std::log(*std::max_element(classed.begin(), classed.end()) * (benefitM * benefitM + 1.0) + 1e-300);
+      double len = 0;
+      for (size_t i = 0; i < cls.size(); ++i)
+        if (cls[i] > 0)
+          len += hpwl[i] + 1.0;
+      for (int it = 0; it < 80; ++it) {
+        const double mid = 0.5 * (lo + hi), ref = std::exp(mid);
+        double sum = 0;
+        for (size_t i = 0; i < cls.size(); ++i)
+          if (cls[i] > 0)
+            sum += multOf(w[i], ref) * (hpwl[i] + 1.0);
+        (sum > len ? lo : hi) = mid;
+      }
+      benefitRef = std::exp(0.5 * (lo + hi));
+    }
     mult.assign(cls.size(), 1.0f);
     for (size_t i = 0; i < cls.size(); ++i)
       if (cls[i] > 0) {
@@ -22398,11 +22425,24 @@ void testTimingLayerBiasPicksUpperMetal() {
     t.classify();
     t.hpwl = {0, 4, 10, 40, 4000, 1000};
     t.sinks = {1, 1, 1, 4, 60, 30};
-    t.benefitG = 1, t.benefitM = 8, t.benefitP = 6;
+    t.benefitG = 1, t.benefitM = 8, t.benefitP = 6, t.benefitQ = 0.5;
     t.setBenefit(); // W = 6, 10, 16, 256, 261600 (the unclassed net has none); median (of five) 16
     check(t.mult.size() == 6 && t.benefitRef == 16 && t.mult[2] == 1.0f && std::fabs(t.mult[0] - 0.375f) < 1e-6 &&
               t.mult[3] == 8.0f && t.mult[4] == 8.0f && t.mult[5] == 1.0f && t.benefitHi == 2 && t.benefitLo == 0,
           "benefit weight: (W / median)^g within [1/M, M] for classed nets, 1 for the rest");
+    {
+      TimingLayerModel u = t;
+      u.benefitQ = -1;
+      u.setBenefit();
+      double sum = 0, len = 0;
+      for (size_t i = 0; i < 5; ++i) {
+        sum += u.mult[i] * (u.hpwl[i] + 1.0);
+        len += u.hpwl[i] + 1.0;
+      }
+      check(std::fabs(sum / len - 1.0) < 1e-4 && u.mult[0] < 1.0f && u.mult[4] > u.mult[0] && u.mult[5] == 1.0f,
+            "benefit weight at an unchanged total pull: the wire-weighted mean multiplier is 1 (" +
+                std::to_string(sum / len) + "), short nets below 1");
+    }
     TimingLayerModel keep = gTiming;
     gTiming = t;
     Net a, b;
@@ -23716,9 +23756,13 @@ int main(int argc, char **argv) {
                 << " nets, k " << gTiming.k[1] << " / " << gTiming.k[2] << " / " << gTiming.k[3] << ", kp " << gTiming.kp << (gTiming.gate ? ", gated (no bias on a full edge)" : "") << "\n";
       if (const char *bv = std::getenv("PD39ROUTE_TIMING_BENEFIT"); bv && *bv) { // Part 205: g[,M[,P]]
         std::vector<double> v;
-        if (!parseDoubleList(bv, v) || v.empty() || v.size() > 3 || v[0] < 0 || v[0] > 4 ||
-            (v.size() > 1 && !(v[1] >= 1 && v[1] <= 1e6)) || (v.size() > 2 && !(v[2] >= 0 && v[2] <= 1e6)))
-          fail(std::string("PD39ROUTE_TIMING_BENEFIT must be g[,M[,P]] with g 0-4, M >= 1, P >= 0 (got '") + bv + "')");
+        if (!parseDoubleList(bv, v) || v.empty() || v.size() > 4 || v[0] < 0 || v[0] > 4 ||
+            (v.size() > 1 && !(v[1] >= 1 && v[1] <= 1e6)) || (v.size() > 2 && !(v[2] >= 0 && v[2] <= 1e6)) ||
+            (v.size() > 3 && !(v[3] == -1 || (v[3] >= 0 && v[3] <= 1))))
+          fail(std::string("PD39ROUTE_TIMING_BENEFIT must be g[,M[,P[,q]]] with g 0-4, M >= 1, P >= 0, q -1 or 0-1 "
+                           "(got '") + bv + "')");
+        if (v.size() > 3)
+          gTiming.benefitQ = v[3];
         gTiming.benefitG = v[0];
         if (v.size() > 1)
           gTiming.benefitM = v[1];
@@ -23730,7 +23774,10 @@ int main(int argc, char **argv) {
           gTiming.setBenefit();
           std::cerr << "ISPD 2025 timing layers: benefit weighting, the timing term x (W / " << gTiming.benefitRef
                     << ")^" << gTiming.benefitG << " within [1/" << gTiming.benefitM << ", " << gTiming.benefitM
-                    << "], W = (HPWL + " << gTiming.benefitP << " x sinks) x sinks; " << gTiming.benefitHi
+                    << "], W = (HPWL + " << gTiming.benefitP << " x sinks) x sinks, reference "
+                    << (gTiming.benefitQ < 0 ? std::string("at an unchanged total pull")
+                                             : "the " + std::to_string(gTiming.benefitQ) + " quantile")
+                    << "; " << gTiming.benefitHi
                     << " classed nets at the upper bound, " << gTiming.benefitLo << " at the lower\n";
         }
       }

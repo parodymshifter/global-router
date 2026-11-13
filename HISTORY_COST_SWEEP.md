@@ -14282,3 +14282,48 @@ Pin capacitance 0.5 / 5 fF moves ariane's 8 x 8 figure to -61.5% / -65.9%.
 **What to build** (not built): scale the bias by benefit. For a piece of a net's tree (the 3D pattern stage already
 roots its tree at the first pin): w = (wire below + half the piece + P x sinks below) x sinks below, the bias
 multiplied by (w / a design reference)^g within bounds, so the same k buys the tracks for the steps that pay most.
+
+## Part 205 -- the benefit-weighted bias, built and scored: it loses; Part 204's ceiling came from an incomplete model
+
+The user's go-ahead (2026-11-13). `PD39ROUTE_TIMING_BENEFIT=g[,M[,P[,q]]]` (commits 5f365bc and this one; off by
+default, byte-identical off): the timing term of a classed net's bias times (W / W_ref)^g within [1/M, M], W =
+(HPWL + P x sinks) x sinks in GCell steps; W_ref the q-quantile of the classed nets' W, or (q = -1, the default)
+the value at which the wire-weighted mean multiplier is 1, so the total pull is unchanged. Per net, because Part 204
+found nothing along a tree; applied where a net's bias row is chosen (`LayerBiasScope`), so layer assignment, the 3D
+pattern passes and their accept test all see it; the power term is not scaled. Self-tests: the multipliers, the
+unchanged total pull, a net's own row, off = the class's row. No end-to-end check: `gr/e2e_settings.py` has no 2025
+design; the runs below show its trace line and its effect.
+
+**Scored with the contest's OpenROAD** (`~/Code/GlobalRouterRuns/p205/benefit.py`, 16:47-16:59; each design at
+Part 188's best setting, the parity route byte-identical to the stored best; delta = contest score change from the
+unbiased route, lower is better):
+
+| variant | ariane: delta (timing, overflow) | mempool_tile_wrap: delta (timing, power, overflow) |
+|---|---|---|
+| none (Part 188's best) | **-4.0542** (-4.4398, +0.3867) | **-0.9260** (-0.7962, -1.0980, +0.9682) |
+| g 0.5, reference the median | -4.0729 (-4.6292, +0.5574) | -0.6252 (-0.8315, -1.1853, +1.3915) |
+| g 1, median | -4.0550 (-4.6332, +0.5793) | -0.5984 |
+| g 1, median, M 32 | -3.9123 | -0.1435 |
+| g 0.5, median, strength x 2 | -4.0129 | -0.2391 |
+| g 0.5, unchanged total pull | -3.6007 (-3.8935, +0.2934) | -0.7647 (-0.6088, -1.0645, +0.9087) |
+| g 1, unchanged total pull | -3.3861 (-3.6426, +0.2571) | -0.7198 |
+| g 1, unchanged pull, M 32 | -2.8603 | -0.8233 |
+| g 2, unchanged pull, M 32 | -2.3575 | -0.8189 |
+| g 1, unchanged pull, strength x 2 | -3.6850 | -0.6414 |
+
+- With the median as reference no net falls below 0.78 (the low tail of W is tight: most classed nets are short
+  two-pin nets), so the weighting only adds pull: timing a little better, overflow more -- ariane +0.02 (noise),
+  mempool_tile_wrap worse by 0.30.
+- At an unchanged total pull -- the redistribution Part 204's ceiling described -- 10-13 thousand short nets drop
+  to the lower bound and **timing gets worse on both designs** (ariane -4.44 -> -3.64 at g 1).
+- **Why the ceiling was wrong.** The estimator counted wire Elmore delay only and left out the driver's resistance
+  (a caveat it stated). For a short net the wire's own RC is negligible; what lifting it buys is less capacitance
+  on its driver (metal9-10 carry about a third of metal4-8's), a gain per step that does not grow with the net's
+  size. The many short critical nets are where the score's timing is, and the uniform pull by slack class already
+  serves them. Lesson: a ceiling from a model that omits a term is not a ceiling; the real scorer (3 min on ariane)
+  was the measure to start with.
+
+**Verdict.** Not adopted; the setting stays, off. The midnight review's lead 3 is closed in both forms (along a
+tree: 2-6% in the model; across nets by size: loses with the real timer). What the result suggests instead, not
+measured: a weight by the driver's strength (a weak driver gains more per unit of capacitance removed), which needs
+the cell of each driver from the netlist.
