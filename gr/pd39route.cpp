@@ -10264,6 +10264,48 @@ struct TimingLayerModel {
   // GCell edge with room for the net; on a full one the wire pays k[class]
   // (the highest resistance's term), so the bias never buys overflow.
   bool gate = false;
+  // Part 205: PD39ROUTE_TIMING_BENEFIT=g[,M[,P]] -- the timing term of a classed net's bias times
+  // (W / W_ref)^g within [1/M, M], W = (HPWL + P x sinks) x sinks in GCell steps (P: a sink pin's capacitance in
+  // steps of wire), W_ref the median W of the classed nets. Part 204: the bias pulls every step of a classed net
+  // alike, while a step's benefit from a low-R layer -- (C downstream) x (critical sinks downstream) -- varies by
+  // orders of magnitude between nets; the same layers handed out by benefit inside 8 x 8-GCell blocks cut the
+  // modelled critical delay by two thirds, re-ordering inside a net by 2-6%. So the weight is per net: a long net
+  // with many sinks bids more for metal9-10 than a short two-pin one. The power term is not scaled. Off (g 0):
+  // byte-identical.
+  std::vector<float> hpwl, sinks; // per net, from the reader (pins' bounding box half-perimeter; pins - 1)
+  std::vector<float> mult;        // per net: the timing term's multiplier (empty: off)
+  double benefitG = 0, benefitM = 8, benefitP = 7, benefitRef = 0;
+  size_t benefitHi = 0, benefitLo = 0; // trace: nets at the upper / lower bound
+  void setBenefit() {
+    mult.clear();
+    benefitHi = benefitLo = 0;
+    if (!(benefitG > 0) || hpwl.size() != cls.size() || sinks.size() != cls.size())
+      return;
+    std::vector<double> w(cls.size(), 0.0), classed;
+    for (size_t i = 0; i < cls.size(); ++i)
+      if (cls[i] > 0) {
+        const double sk = std::max(1.0f, sinks[i]);
+        w[i] = (static_cast<double>(hpwl[i]) + benefitP * sk) * sk;
+        classed.push_back(w[i]);
+      }
+    if (classed.empty())
+      return;
+    std::nth_element(classed.begin(), classed.begin() + static_cast<std::ptrdiff_t>(classed.size() / 2), classed.end());
+    benefitRef = classed[classed.size() / 2] > 0 ? classed[classed.size() / 2] : 1.0;
+    mult.assign(cls.size(), 1.0f);
+    for (size_t i = 0; i < cls.size(); ++i)
+      if (cls[i] > 0) {
+        double m = std::pow(w[i] / benefitRef, benefitG);
+        if (m >= benefitM) {
+          m = benefitM;
+          ++benefitHi;
+        } else if (m <= 1.0 / benefitM) {
+          m = 1.0 / benefitM;
+          ++benefitLo;
+        }
+        mult[i] = static_cast<float>(m);
+      }
+  }
   const double *biasFor(const Net *n) const {
     if (!on || !n || n->id < 0 || static_cast<size_t>(n->id) >= cls.size())
       return nullptr;
@@ -10359,9 +10401,25 @@ thread_local double tLayerBiasMax = 0; // that net's k[class] (the gate's full-e
 struct LayerBiasScope {
   const double *prev;
   double prevMax;
+  double row[16]; // Part 205: this net's own row when the benefit weighting scales its timing term
   explicit LayerBiasScope(const Net *n) : prev(tLayerBias), prevMax(tLayerBiasMax) {
     tLayerBias = gTiming.biasFor(n);
     tLayerBiasMax = gTiming.biasMaxFor(n);
+    if (tLayerBias && !gTiming.mult.empty()) {
+      const size_t i = static_cast<size_t>(n->id);
+      const uint8_t c = gTiming.cls[i];
+      const size_t L = gTiming.bias[c].size();
+      const double m = gTiming.mult[i];
+      if (c > 0 && m != 1.0 && L <= 16) {
+        double mx = 0;
+        for (size_t l = 0; l < L; ++l) {
+          row[l] = gTiming.bias[c][l] + (m - 1.0) * (l < gTiming.relR.size() ? gTiming.k[c] * gTiming.relR[l] : 0.0);
+          mx = std::max(mx, row[l]);
+        }
+        tLayerBias = row;
+        tLayerBiasMax = mx;
+      }
+    }
   }
   ~LayerBiasScope() {
     tLayerBias = prev;
@@ -14202,6 +14260,18 @@ void readG24Streaming(const std::string &capPath, const std::string &netPath, bo
       gTiming.slack.push_back(lo);
     }
     g24::appendDesignNet(d, n, i++, /*keepName=*/false);
+    if (gTiming.on) { // Part 205: what the benefit weight needs (8 bytes a net)
+      const std::vector<Pin> &ps = d.nets.back().pins;
+      int bx0 = 0, bx1 = 0, by0 = 0, by1 = 0;
+      for (size_t q = 0; q < ps.size(); ++q) {
+        bx0 = q ? std::min(bx0, ps[q].x) : ps[q].x;
+        bx1 = q ? std::max(bx1, ps[q].x) : ps[q].x;
+        by0 = q ? std::min(by0, ps[q].y) : ps[q].y;
+        by1 = q ? std::max(by1, ps[q].y) : ps[q].y;
+      }
+      gTiming.hpwl.push_back(static_cast<float>((bx1 - bx0) + (by1 - by0)));
+      gTiming.sinks.push_back(static_cast<float>(ps.empty() ? 0 : ps.size() - 1));
+    }
   }
   if (!err.empty())
     fail("ISPD 2024 input: " + err);
@@ -22317,6 +22387,48 @@ void testTimingLayerBiasPicksUpperMetal() {
   check(assign(gTiming.bias[3].data()) == std::set<int>{2}, "timing bias, gated, layer 2 with room: it climbs");
   tLayerBiasMax = 0;
   gTiming.gate = false;
+  { // Part 205: the benefit weight -- per classed net, the timing term only, bounded, median net unchanged
+    TimingLayerModel t;
+    t.on = true;
+    t.slack = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 0.5f};
+    t.relR = {1.0, 0.01};
+    t.relC = {1.0, 0.5};
+    t.k[1] = 1, t.k[2] = 5, t.k[3] = 10;
+    t.kp = 2;
+    t.classify();
+    t.hpwl = {0, 4, 10, 40, 4000, 1000};
+    t.sinks = {1, 1, 1, 4, 60, 30};
+    t.benefitG = 1, t.benefitM = 8, t.benefitP = 6;
+    t.setBenefit(); // W = 6, 10, 16, 256, 261600 (the unclassed net has none); median (of five) 16
+    check(t.mult.size() == 6 && t.benefitRef == 16 && t.mult[2] == 1.0f && std::fabs(t.mult[0] - 0.375f) < 1e-6 &&
+              t.mult[3] == 8.0f && t.mult[4] == 8.0f && t.mult[5] == 1.0f && t.benefitHi == 2 && t.benefitLo == 0,
+          "benefit weight: (W / median)^g within [1/M, M] for classed nets, 1 for the rest");
+    TimingLayerModel keep = gTiming;
+    gTiming = t;
+    Net a, b;
+    a.id = 0;
+    b.id = 3;
+    double ra0, ra1, rb0, rb1;
+    {
+      LayerBiasScope sa(&a);
+      ra0 = tLayerBias[0], ra1 = tLayerBias[1];
+    }
+    {
+      LayerBiasScope sb(&b);
+      rb0 = tLayerBias[0], rb1 = tLayerBias[1];
+    }
+    // class 3: timing 10 x R, power 2 x C. Net 0 (x 0.375): 3.75 + 2, 0.0375 + 1; net 3 (x 8): 80 + 2, 0.8 + 1
+    check(std::fabs(ra0 - 5.75) < 1e-9 && std::fabs(ra1 - 1.0375) < 1e-9 && std::fabs(rb0 - 82.0) < 1e-9 &&
+              std::fabs(rb1 - 1.8) < 1e-9,
+          "benefit weight: a net's row is its multiplier x the timing term plus the unscaled power term");
+    gTiming.benefitG = 0;
+    gTiming.setBenefit();
+    {
+      LayerBiasScope sb(&b);
+      check(gTiming.mult.empty() && tLayerBias == gTiming.bias[3].data(), "benefit weight off: the class's own row");
+    }
+    gTiming = keep;
+  }
   // robust classes: one -100 outlier among slacks -1 .. -0.1; against the
   // worst every other net is unclassed (ratio <= 0.01); against the 0.1
   // quantile (-1, after the outlier) they spread over the three classes
@@ -23602,6 +23714,26 @@ int main(int argc, char **argv) {
       std::cerr << "ISPD 2025 timing layers: " << (gTiming.refQ < 0 ? "worst" : "reference") << " slack " << worst
                 << " s; classes 1/2/3: " << gTiming.counts[1] << " / " << gTiming.counts[2] << " / " << gTiming.counts[3]
                 << " nets, k " << gTiming.k[1] << " / " << gTiming.k[2] << " / " << gTiming.k[3] << ", kp " << gTiming.kp << (gTiming.gate ? ", gated (no bias on a full edge)" : "") << "\n";
+      if (const char *bv = std::getenv("PD39ROUTE_TIMING_BENEFIT"); bv && *bv) { // Part 205: g[,M[,P]]
+        std::vector<double> v;
+        if (!parseDoubleList(bv, v) || v.empty() || v.size() > 3 || v[0] < 0 || v[0] > 4 ||
+            (v.size() > 1 && !(v[1] >= 1 && v[1] <= 1e6)) || (v.size() > 2 && !(v[2] >= 0 && v[2] <= 1e6)))
+          fail(std::string("PD39ROUTE_TIMING_BENEFIT must be g[,M[,P]] with g 0-4, M >= 1, P >= 0 (got '") + bv + "')");
+        gTiming.benefitG = v[0];
+        if (v.size() > 1)
+          gTiming.benefitM = v[1];
+        if (v.size() > 2)
+          gTiming.benefitP = v[2];
+        if (gTiming.benefitG > 0) {
+          if (gTiming.hpwl.size() != gTiming.cls.size())
+            fail("PD39ROUTE_TIMING_BENEFIT: the nets' geometry was not read with their slack");
+          gTiming.setBenefit();
+          std::cerr << "ISPD 2025 timing layers: benefit weighting, the timing term x (W / " << gTiming.benefitRef
+                    << ")^" << gTiming.benefitG << " within [1/" << gTiming.benefitM << ", " << gTiming.benefitM
+                    << "], W = (HPWL + " << gTiming.benefitP << " x sinks) x sinks; " << gTiming.benefitHi
+                    << " classed nets at the upper bound, " << gTiming.benefitLo << " at the lower\n";
+        }
+      }
     }
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {
       std::string sv(v);
