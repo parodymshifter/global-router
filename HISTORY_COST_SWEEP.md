@@ -14371,3 +14371,19 @@ files written before that fix were wrong choices and are not results).
   solvers in 40 minutes. A real gain would need candidates made for the purpose (routes around the hotspot generated
   per net) or a search built for this structure; the relaxation alone (2-3 min) can be run on the other residues
   first to see whether any has a larger gap.
+
+**The relaxation on the other residues** (2026-11-14 02:20 on; `p206/relax4.sh`, `relax4.log`, `relax_<design>_m<margin>.txt`;
+six portfolio routings each, the kept one as base; `--relax-only`, HiGHS interior point, optimal):
+
+| design | base overflow | relaxed optimum, margin 3 | margin 10 |
+|---|---|---|---|
+| newblue1 | 22 | 22.2 | 14.6 |
+| newblue4 | 132 | **113.8** | 113.9 |
+| bigblue4 | 326 | **251.9** | 250.3 |
+
+newblue4 and bigblue4 have room that newblue1 has not: 18 and 74 units (14%, 23%) from nets within 3 tiles of the
+over-capacity edges, and nothing more from a wider window -- a small program. These are fractional bounds; the
+integer programs over the margin-3 windows are the next step, not yet run. newblue7's first runs stopped (one
+bounding box around its scattered hotspots held 207831 nets); the window is now the union of the neighbourhoods of
+the over-capacity edges, and newblue7 is queued again with it after newblue3 (`relax_nb7.sh`; results in
+`relax4.log`). newblue3's runs use the new window.

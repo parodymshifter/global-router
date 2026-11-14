@@ -125,9 +125,16 @@ def main():
     m = opt['--margin']
     x0, x1 = min(e[1] for e in over) - m, max(e[1] for e in over) + m
     y0, y1 = min(e[2] for e in over) - m, max(e[2] for e in over) + m
-    inwin = lambda e: x0 <= e[1] <= x1 and y0 <= e[2] <= y1
+    # the window: every tile within `margin` of an over-capacity edge (the union of those neighbourhoods, not their
+    # bounding box: newblue7's overflow sits in several hotspots, and one box around them held 207831 nets)
+    near = set()
+    for e in over:
+        for dx in range(-m, m + 2):
+            for dy in range(-m, m + 2):
+                near.add((e[1] + dx, e[2] + dy))
+    inwin = lambda e: (e[1], e[2]) in near
     print(f'base {os.path.basename(files[0])}: overflow {base_of} on {len(over)} edges; window x {x0}-{x1} y {y0}-{y1} '
-          f'({time.time() - t0:.0f} s)', flush=True)
+          f'({time.time() - t0:.0f} s); the window is {len(near)} tiles around the over-capacity edges', flush=True)
     # pass 2: movable nets (wire inside the window in the base) and their candidates
     cand = defaultdict(list)  # name -> [(edge multiset as dict, block, file index, wirelength)]
     movable = set()
@@ -245,7 +252,12 @@ def main():
     # Part 206, step 1: the relaxation first. A net whose weight sits on one route (>= 0.999) is fixed to it; a split
     # net keeps the routes that carry weight, the heaviest first (the integer program's start); the integer program
     # then runs over the split nets only.
+    if len(movable) > 150000:
+        print(f'{len(movable)} movable nets: too many for this tool (the overflow is not one hotspot)')
+        return
     multi, vid, vals, eid, const = solve(relax=True)
+    if '--relax-only' in sys.argv:  # Part 206: the bound alone
+        return
     whole = split = 0
     if not vals:
         print('relaxation: no solution in the time limit; the integer program keeps every candidate', flush=True)
