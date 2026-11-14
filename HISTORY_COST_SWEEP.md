@@ -14328,7 +14328,7 @@ tree: 2-6% in the model; across nets by size: loses with the real timer). What t
 measured: a weight by the driver's strength (a weak driver gains more per unit of capacitance removed), which needs
 the cell of each driver from the netlist.
 
-## Part 206 -- joint selection over the portfolio's six routings (in progress)
+## Part 206 -- joint selection over the portfolio's six routings: fractional room on two designs, no whole-route mix below the base. Closed in this form
 
 The user's order (2026-11-13 17:11): the joint exact solve of the 2008 hotspots (Part 151's option 5) first.
 `gr/hotspot_mix.py DESIGN.gr OUT.route ROUTE1 ROUTE2 ...`: the cheapest decisive form -- no candidate generator; the
@@ -14398,3 +14398,62 @@ the over-capacity edges, and newblue7 is queued again with it after newblue3 (`r
 newblue7 has no room near its hotspots (89 of 90, as newblue1); newblue3's programs are too large for this
 formulation at 25 minutes. So of the five residues the six routings hold room on two: newblue4 (18 units) and
 bigblue4 (74). Their integer programs (margin 3) started 05:22 (`p206/mip2.sh`).
+
+**The integer stage on newblue4 and bigblue4** (2026-11-14 05:22-08:51; margin 3; `p206/mip2.sh`, `mip3.sh`,
+`mip4.sh`, outputs `mix3_*.txt`, `mix3b_*.txt`, `mix3h_*.txt`, each file written scored by `gr_verify`). Three ways
+of asking a generic solver for a whole-route mix, none of which found one below the base:
+
+| design | base | relaxed optimum | reduce, then SCIP (900 s) | every candidate, SCIP from the base (1800 s) | every candidate, HiGHS from the base (1800 s) |
+|---|---|---|---|---|---|
+| newblue4 | 132 | 113.8 | 486 (1691 split nets; bound 116.9) | 132 = the base (bound -6.0) | 132 = the base (bound 114.1) |
+| bigblue4 | 326 | 251.9 | 2108 (1686 split nets; bound 253.2) | 326 = the base (bound -5.9) | 326 = the base (bound 252.0) |
+
+- *Reduce, then SCIP*: the tool as step 1 left it -- nets whole in the relaxation fixed (newblue4 2458, 1434 of them
+  off the base's route; bigblue4 2336, 1227), the integer program over the split nets. The fixing itself commits
+  to the fractional solution's context: with 41-42% of the free nets split, the best whole-route completion SCIP
+  found is far above the base (486, 2108; `gr_verify` agrees with both counts, legal).
+- *Every candidate, SCIP from the base* (`--no-reduce`): SCIP's simplex never finished the root relaxation (dual
+  bound still negative at the limit; HiGHS's interior point solves the same program in 10-23 s), so it returned
+  its start.
+- *Every candidate, HiGHS from the base* (`--no-reduce --highs`): the root solved (bounds 114.1 and 252.0, the
+  relaxed optima), then 30 minutes of branching and its heuristics without a solution better than the start. On
+  bigblue4 HiGHS's own presolve mapped the start to 348 "in the reduced space" and it ended there; the file written
+  is the base.
+- All six files written are legal; the tool's predicted overflow equals `gr_verify`'s on each.
+
+So generic solvers close neither gap in 15-30 minutes. Before closing the lead a search built for this program was
+added (`--local`, below).
+
+**A search built for the program** (2026-11-14 10:25-11:01; `--local`; `p206/local5.sh`, `local5.log`,
+`local_<design>_m<margin>.txt`). Sweep the free nets in random order; move each to its route with the largest drop
+in overflow; a move that leaves overflow unchanged is taken 3 times in 10 (a walk along the plateau), a move that
+raises it never; stop after 60 sweeps without a gain. Two starts: the base, and each net's heaviest route in the
+relaxation.
+
+| design (margin) | base | relaxed optimum | from the base | from the relaxation's heaviest routes |
+|---|---|---|---|---|
+| newblue1 (10) | 22 | 14.6 | 22 (60 sweeps, 2405 moves, all sideways) | 1558 -> 400 |
+| newblue4 (3) | 132 | 113.8 | 132 (60 sweeps, 6086 sideways moves) | 1318 -> 240 |
+| bigblue4 (3) | 326 | 251.9 | 326 (60 sweeps, 5424 sideways moves) | 2284 -> 392 |
+
+- The base is a local optimum for single-net moves on all three, and stays one along thousands of equal-overflow
+  moves: no net has a route in the other five routings that lowers overflow, from the base or from any state the
+  plateau walk reached.
+- From the relaxation's rounding the search descends a long way (bigblue4 2284 -> 392) and stops above the base on
+  every design.
+- The files written are the plateau walk's end states, not results to keep: the same total overflow as the base
+  but a worse tie-break (newblue4: `gr_verify` 132, max overflow 6 against the base's 2; bigblue4: 326, max 8 against 4;
+  newblue1: 22, max 2; all legal, the tool's count equal to `gr_verify`'s). Runs ended 10:31:33, 10:34:29 and
+  11:00:58 (bigblue4's time is `gr_verify`'s 26 minutes on the file).
+
+**Verdict: choosing among the six portfolio routings is closed.** Five attempts (reduce-and-solve, two generic
+solvers from the base, a local search from two starts) on the three designs whose relaxation shows room, and no
+whole-route mix below the base on any. The fractional room (newblue1 about 7 units, newblue4 18, bigblue4 74) is real as
+a bound and not reachable by whole routes that anything here could find; even reached in full it would be 14-23%,
+and bigblue4's 252 sits against a record of 318, not 326. What the measurements say about the candidates: each of
+the six routings is a negotiated equilibrium of its own, and a net's route from another equilibrium does not fit
+this one -- 41-78% of the free nets are split in the relaxed optimum, so the room exists only when many nets move
+fractionally together. Candidates made for the purpose (per net, several routes around the hotspot priced against
+the base's own usage -- column generation on this same program) are the form that could still pay; that is a
+generator inside the router plus this program, a larger build, and not started. `gr/hotspot_mix.py` keeps all its
+modes (`--relax-only` gives any residue's bound in minutes).

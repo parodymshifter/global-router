@@ -2,6 +2,7 @@
 """hotspot_mix.py -- joint selection over complete routings of one ISPD 2008 design (HISTORY_COST_SWEEP.md Part 206).
 
   python3 gr/hotspot_mix.py DESIGN.gr OUT.route ROUTE1[.gz] ROUTE2[.gz] ... [--margin 10] [--time 600]
+                            [--relax-only] [--no-reduce] [--highs] [--local]
 
 The first test of Part 151's option 5 (choose one route per net jointly, by integer programming), with no new
 candidate generator: the candidates are each net's routes in several complete, legal routings of the design (the
@@ -12,10 +13,15 @@ net to minimise total overflow, counted as the evaluators count it: per 3D edge,
 minimum width + the layer's minimum spacing) above the edge's capacity. Exact for this candidate set (or the best
 found in --time seconds, with the solver's bound). A tiny wirelength term breaks ties. The chosen routes are written
 as OUT.route; score it with gr_verify and eval2008.pl -- the program's own count is only a prediction.
-Standard library only; needs `scip` on the PATH.
+Modes (Part 206): --relax-only stops after the relaxation (HiGHS, interior point: the bound alone); --no-reduce
+keeps every candidate in the integer program and starts it from the base; --highs solves it with HiGHS instead of
+SCIP; --local replaces the integer program by a single-net-move search with plateau walks, from the base and from
+the relaxation's heaviest routes. Standard library only; needs `highs` (and `scip` unless --highs or --local) on the
+PATH.
 """
 import gzip
 import os
+import random
 import re
 import subprocess
 import sys
@@ -234,9 +240,23 @@ def main():
                     o = use[e] + fixed[i] + load[i] - cap_of(g, e)
                     if o > 0:
                         f.write(f'o{i} {o}\n')
-            r = subprocess.run(['scip', '-c', f'read {lp}', '-c', f'read {start}', '-c', f'set limits time {opt["--time"]}',
-                                '-c', 'optimize', '-c', f'write solution {sol}', '-c', 'quit'], capture_output=True, text=True)
-            tail = [l for l in r.stdout.splitlines() if re.search(r'^(SCIP Status|Primal Bound|Dual Bound|Solving Time)', l)]
+            if '--highs' in sys.argv:
+                # HiGHS for the integer program (SCIP's simplex did not finish newblue4's root relaxation in 1800 s:
+                # dual bound -5.98; HiGHS solves it in seconds). Its start must be in its own solution format, so it
+                # writes one itself: the same program with every route variable fixed to the base.
+                fixed_lp, fixed_sol = out + '.fixed.lp', out + '.fixed.sol'
+                text = open(lp).read()
+                fix = ''.join(f' {v} = {1 if k == 0 else 0}\n' for (n_, k), v in vid.items())
+                with open(fixed_lp, 'w') as f:
+                    f.write(text.replace('Binary\n', fix + 'Binary\n'))
+                subprocess.run(['highs', '--solution_file', fixed_sol, fixed_lp], capture_output=True, text=True)
+                r = subprocess.run(['highs', '--time_limit', str(opt['--time']), '--read_solution_file', fixed_sol,
+                                    '--solution_file', sol, lp], capture_output=True, text=True)
+                tail = [l for l in r.stdout.splitlines() if re.search(r'Primal bound|Dual bound|Status|Solution status|MIP start', l)]
+            else:
+                r = subprocess.run(['scip', '-c', f'read {lp}', '-c', f'read {start}', '-c', f'set limits time {opt["--time"]}',
+                                    '-c', 'optimize', '-c', f'write solution {sol}', '-c', 'quit'], capture_output=True, text=True)
+                tail = [l for l in r.stdout.splitlines() if re.search(r'^(SCIP Status|Primal Bound|Dual Bound|Solving Time)', l)]
         print('  ' + ' | '.join(' '.join(l.split()) for l in tail)[:400], flush=True)
         for line in open(sol):
             if line.startswith('# Dual solution'):
@@ -248,6 +268,71 @@ def main():
                 except ValueError:
                     pass
         return multi, vid, vals, eid, const
+
+    def local_search(lp_first):
+        """--local: a search built for this program instead of a generic solver. From a start (the base; then the
+        relaxation's heaviest route per net), sweep the free nets in random order and move each to its route with the
+        largest drop in overflow; a move that leaves overflow unchanged is taken 3 times in 10 (a walk along the
+        plateau), a move that raises it never. Ends after 60 sweeps without a gain or --time seconds per start.
+        Returns the better end state and its overflow."""
+        rng = random.Random(1)
+        free = sorted(n for n in movable if len(cand[n]) > 1)
+        edges = set()
+        for n in movable:
+            for c in cand[n]:
+                edges.update(c[0])
+        capd = {e: cap_of(g, e) for e in edges}
+
+        def run(choice, label):
+            load = {e: use[e] for e in edges}
+            for n in movable:
+                for e, a_ in cand[n][choice.get(n, 0)][0].items():
+                    load[e] += a_
+            obj = start = sum(max(0, load[e] - capd[e]) for e in edges)
+            t1, sweeps, idle, moves = time.time(), 0, 0, 0
+            while idle < 60 and time.time() - t1 < opt['--time']:
+                rng.shuffle(free)
+                before = obj
+                for n in free:
+                    k0 = choice.get(n, 0)
+                    cur = cand[n][k0][0]
+                    best_d, best_k = 1, -1
+                    for k, c in enumerate(cand[n]):
+                        if k == k0:
+                            continue
+                        new, d = c[0], 0
+                        for e, a_ in cur.items():
+                            b_ = new.get(e, 0)
+                            if a_ != b_:
+                                over_ = load[e] - capd[e]
+                                d += max(0, over_ - a_ + b_) - max(0, over_)
+                        for e, b_ in new.items():
+                            if e not in cur:
+                                over_ = load[e] - capd[e]
+                                d += max(0, over_ + b_) - max(0, over_)
+                        if d < best_d:
+                            best_d, best_k = d, k
+                    if best_k >= 0 and (best_d < 0 or (best_d == 0 and rng.random() < 0.3)):
+                        for e, a_ in cur.items():
+                            load[e] -= a_
+                        for e, b_ in cand[n][best_k][0].items():
+                            load[e] += b_
+                        choice[n] = best_k
+                        obj += best_d
+                        moves += 1
+                sweeps += 1
+                idle = 0 if obj < before else idle + 1
+            print(f'local search from {label}: overflow on the candidates\' edges {start} -> {obj} in {sweeps} sweeps, '
+                  f'{moves} moves ({time.time() - t1:.0f} s)', flush=True)
+            return obj, start, choice
+
+        obj_b, start_b, ch_b = run({}, 'the base')
+        best_obj, best_ch = obj_b, ch_b
+        if lp_first:
+            obj_l, _, ch_l = run(dict(lp_first), 'the relaxation\'s heaviest routes')
+            if obj_l < best_obj:
+                best_obj, best_ch = obj_l, ch_l
+        return best_ch, base_of + best_obj - start_b
 
     # Part 206, step 1: the relaxation first. A net whose weight sits on one route (>= 0.999) is fixed to it; a split
     # net keeps the routes that carry weight, the heaviest first (the integer program's start); the integer program
@@ -261,6 +346,13 @@ def main():
     whole = split = 0
     if not vals:
         print('relaxation: no solution in the time limit; the integer program keeps every candidate', flush=True)
+    lp_first = {}  # per net, the route carrying the most weight in the relaxation (the local search's second start)
+    for n in (multi if vals else []):
+        w_ = [vals.get(vid[(n, k)], 0.0) for k in range(len(cand[n]))]
+        lp_first[n] = max(range(len(w_)), key=lambda k: w_[k])
+    if '--no-reduce' in sys.argv or '--local' in sys.argv:  # every candidate kept, started from the base (fixing the
+        vals = {}                  # relaxation's whole nets left a program SCIP ended far above the base: newblue4 486)
+        print('no reduction: the integer program keeps every candidate and starts from the base', flush=True)
     for n in (multi if vals else []):
         w_ = [vals.get(vid[(n, k)], 0.0) for k in range(len(cand[n]))]
         order = sorted(range(len(w_)), key=lambda k: -w_[k])
@@ -272,20 +364,23 @@ def main():
             split += 1
     moved = sum(1 for n in multi if len(cand[n]) == 1 and cand[n][0][2] != 0)
     print(f'relaxation: {whole} nets whole on one route ({moved} of them not the base\'s), {split} split', flush=True)
-    multi, vid, vals, eid, const = solve(relax=False)
-    chosen = {}
-    for (n, k), v in vid.items():
-        if vals.get(v, 0.0) > 0.5:
-            chosen[n] = k
-    pred = const
-    tot = defaultdict(int)
-    for n in movable:
-        c = cand[n][chosen.get(n, 0)]
-        for e, a in c[0].items():
-            if e in eid:
-                tot[e] += a
-    for e in eid:
-        pred += max(0, use[e] + tot[e] - cap_of(g, e))
+    if '--local' in sys.argv:
+        chosen, pred = local_search(lp_first)
+    else:
+        multi, vid, vals, eid, const = solve(relax=False)
+        chosen = {}
+        for (n, k), v in vid.items():
+            if vals.get(v, 0.0) > 0.5:
+                chosen[n] = k
+        pred = const
+        tot = defaultdict(int)
+        for n in movable:
+            c = cand[n][chosen.get(n, 0)]
+            for e, a in c[0].items():
+                if e in eid:
+                    tot[e] += a
+        for e in eid:
+            pred += max(0, use[e] + tot[e] - cap_of(g, e))
     from_file = defaultdict(int)
     for n in movable:
         from_file[cand[n][chosen.get(n, 0)][2]] += 1
