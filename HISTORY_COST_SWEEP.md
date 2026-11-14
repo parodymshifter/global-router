@@ -14387,3 +14387,14 @@ integer programs over the margin-3 windows are the next step, not yet run. newbl
 bounding box around its scattered hotspots held 207831 nets); the window is now the union of the neighbourhoods of
 the over-capacity edges, and newblue7 is queued again with it after newblue3 (`relax_nb7.sh`; results in
 `relax4.log`). newblue3's runs use the new window.
+
+**newblue7 and newblue3** (2026-11-14 02:51-04:31, the union window):
+
+| design | base overflow | margin 3: movable nets, relaxed optimum | margin 10 |
+|---|---|---|---|
+| newblue7 | 90 (45 edges) | 20874 nets: **89.1** (optimal, 394 s) | 66828 nets: not solved in 1500 s |
+| newblue3 | 33286 (1961 edges) | 9857 nets: not solved in 1500 s | 20194 nets: not solved in 1500 s |
+
+newblue7 has no room near its hotspots (89 of 90, as newblue1); newblue3's programs are too large for this
+formulation at 25 minutes. So of the five residues the six routings hold room on two: newblue4 (18 units) and
+bigblue4 (74). Their integer programs (margin 3) started 05:22 (`p206/mip2.sh`).
