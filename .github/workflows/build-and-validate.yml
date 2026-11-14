@@ -122,7 +122,12 @@ jobs:
 
       - name: Build ${{ matrix.router }}
         working-directory: gr
-        run: g++ -std=c++17 -O2 -Wall -Wextra -o ${{ matrix.router }} ${{ matrix.router }}.cpp
+        # -ffp-contract=off: pd39route's documented build line, and what every
+        # router here was validated under. ubuntu-26.04's g++ (the runner since
+        # 2026-10-23) fuses a*b + c into one instruction by default, which
+        # ubuntu-24.04's did not; pd39route's self-test checks for it and failed
+        # on every push from then until this flag was added (2026-11-14).
+        run: g++ -std=c++17 -O2 -Wall -Wextra -ffp-contract=off -pthread -o ${{ matrix.router }} ${{ matrix.router }}.cpp
 
       - name: Run self-test
         working-directory: gr
