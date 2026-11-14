@@ -14457,3 +14457,63 @@ fractionally together. Candidates made for the purpose (per net, several routes 
 the base's own usage -- column generation on this same program) are the form that could still pay; that is a
 generator inside the router plus this program, a larger build, and not started. `gr/hotspot_mix.py` keeps all its
 modes (`--relax-only` gives any residue's bound in minutes).
+
+## Part 207 -- the timing bias weighted by the driver's strength, scored with OpenROAD from the start: no gain. Not adopted
+
+The user's order (2026-11-13, "2 first, 1 later"; Part 206 was the 2). Part 205 ended on an idea it had not
+measured: lifting a short critical net pays by taking capacitance off its driver, a weak driver gains more per unit
+removed, so the timing term's pull could be weighted by the driver's resistance. Measured this time with the
+contest's OpenROAD before anything else (2026-11-14 11:03-15:30, with a usage-limit pause between).
+
+**Driver data** (`~/Code/GlobalRouterRuns/p207/drive.py`, `<design>/drive.tsv`): a net's first pin in the `.net` is
+its driver (`instance/pin`); the DEF's COMPONENTS gives the instance's cell; the Liberty library gives the output
+pin's resistance as the slope of `cell_rise` / `cell_fall` against load (middle input-transition row, both edges,
+all arcs). Nets driven by a port or a memory macro carry none (ariane 2296 of 123900, mempool_tile_wrap 1293 of
+136120) and keep multiplier 1.
+
+| negative-slack nets | count | driver kOhm: 10% / median / 90% | X1 | X2 | X4 and up |
+|---|---|---|---|---|---|
+| ariane | 15799 | 0.60 / 2.37 / 3.68 | 63.1% | 21.1% | 15.2% |
+| mempool_tile_wrap | 15287 | 1.96 / 2.93 / 3.99 | 94.9% | 4.3% | 0.5% |
+
+ariane has a 6x spread to work with, mempool_tile_wrap 2x. The strong drivers hold the long wires: weighted by
+wire, a multiplier of (R / median) averages 0.54 on ariane.
+
+**The setting** (`gr/pd39route.cpp`): `PD39ROUTE_TIMING_MULT=<file>`, one `<net index> <multiplier>` per line, the
+timing term of that net's bias times the multiplier (the power term not scaled; a net not listed keeps 1) -- the
+same per-net row Part 205 built, fed from a file so any weighting can be scored without a rebuild. Refused together
+with `PD39ROUTE_TIMING_BENEFIT`; a malformed line, an index out of range, or a multiplier outside (0, 1e6] stops
+the run. Self-test: the file reader (good, seven bad forms, a missing file). Off: byte-identical (the parity routes
+below equal Part 188's stored bests). No `gr/e2e_settings.py` check -- it has no 2025 design, as for Part 205; the
+runs below show its trace line ("per-net multipliers from ...") and its effect.
+
+**Scored** (`p207/drive_score.py`, `run.out`, `visible.<design>/screen.tsv`; each design at Part 188's best
+setting; multiplier (R_driver / R_ref)^g within [1/M, M]; delta = contest score change from the unbiased route,
+lower is better; one OpenROAD session per design, 161 s and 153 s):
+
+| variant | ariane: delta (timing, overflow) | mempool_tile_wrap: delta (timing, power, overflow) |
+|---|---|---|
+| none (Part 188's best) | **-4.0542** (-4.4398, +0.3867) | **-0.9260** (-0.7962, -1.0980, +0.9682) |
+| g 0.5, reference the median, M 4 | -3.9744 (-4.2871, +0.3136) | -0.9229 (-0.7549, -1.0607, +0.8927) |
+| g 1, median, M 4 | -3.8016 (-4.0884, +0.2885) | -0.8351 (-0.6497, -1.0258, +0.8404) |
+| g 2, median, M 8 | -3.2437 (-3.4868, +0.2445) | -0.8925 (-0.6911, -0.9493, +0.7479) |
+| g 1, unchanged total pull, M 4 | -4.0752 (-4.4169, +0.3435) | -0.8880 (-0.7496, -1.0548, +0.9164) |
+| g 2, unchanged total pull, M 8 | -3.7166 (-4.0003, +0.2853) | -0.8559 (-0.7152, -0.9716, +0.8309) |
+| control: g -1 (strong drivers pulled harder), median, M 4 | -4.0814 (-4.5863, +0.5066) | -0.8114 (-0.8011, -1.1326, +1.1223) |
+
+- **No variant gains.** ariane's two "better" rows (-4.075, -4.081) are 0.02-0.03 from the best, the size Part 205
+  called noise there, and one of them is the control with the weighting turned upside down. mempool_tile_wrap is
+  worse in every row.
+- **The hypothesis is refuted in direction, not just size.** The more the pull follows the weak drivers, the worse
+  timing gets (ariane -4.44 -> -4.09 -> -3.49 at g 1, 2 with the median reference), and pulling the *strong*
+  drivers' nets harder gives the best timing of the table on both designs (-4.586, -0.801), paid for in overflow.
+  The strong drivers are the buffers on the long wires; that is where the upper layers' low resistance and
+  capacitance buy delay, and the uniform pull by slack class already gives those wires their share by length.
+- At an unchanged total pull (weak drivers x 2, strong x 0.5 on ariane) the score is the same as no weighting:
+  moving pull between driver classes does nothing the timer rewards.
+
+**Verdict.** Not adopted; the setting stays, off, as the way to score any further per-net weighting in three
+minutes. With Part 204 (along a tree), Part 205 (by net size) and this (by driver), every per-net redistribution
+of the timing pull tried has ended at or below the uniform pull by slack class. The 2025 score's remaining room
+is where Part 189 put it: the overflow the best routes add (a cheaper way to carry the critical nets), not who
+gets the pull.

@@ -10422,6 +10422,40 @@ bool loadSlackOverride(const std::string &path, size_t nNets, std::vector<float>
   }
   return true;
 }
+// pd39route (Part 207): PD39ROUTE_TIMING_MULT=<file> -- a multiplier per net for the timing term of its bias
+// (the power term is not scaled), in place of PD39ROUTE_TIMING_BENEFIT's own formula: any per-net weighting can
+// then be scored without a rebuild (first use: the driver's resistance, from the DEF and the Liberty library).
+// One line per net: "<net index in the .net's order> <multiplier>"; '#' lines are comments; a net not listed
+// keeps 1. Fails on a malformed line, an index out of range, or a multiplier that is not in (0, 1e6].
+bool loadTimingMult(const std::string &path, size_t nNets, std::vector<float> &mult, size_t &listed, std::string &err) {
+  std::ifstream in(path);
+  if (!in) {
+    err = "cannot open " + path;
+    return false;
+  }
+  mult.assign(nNets, 1.0f);
+  listed = 0;
+  std::string line;
+  size_t lineNo = 0;
+  while (std::getline(in, line)) {
+    ++lineNo;
+    if (line.empty() || line[0] == '#')
+      continue;
+    std::istringstream ls(line);
+    long long idx = -1;
+    double v = 0;
+    std::string extra;
+    if (!(ls >> idx >> v) || (ls >> extra) || idx < 0 || static_cast<size_t>(idx) >= nNets || !std::isfinite(v) ||
+        !(v > 0) || v > 1e6) {
+      err = path + ":" + std::to_string(lineNo) + ": expected '<net index 0.." + std::to_string(nNets - 1) +
+            "> <multiplier in (0, 1e6]>', got '" + line + "'";
+      return false;
+    }
+    mult[static_cast<size_t>(idx)] = static_cast<float>(v);
+    ++listed;
+  }
+  return true;
+}
 // the net being placed: its per-layer multipliers, or nullptr (no bias)
 thread_local const double *tLayerBias = nullptr;
 thread_local double tLayerBiasMax = 0; // that net's k[class] (the gate's full-edge term)
@@ -22625,6 +22659,31 @@ void testSlackOverrideFile() {
   check(badIdx && badNum && badExtra, "routed slack file: an index out of range, a non-number, a trailing field refused");
 }
 
+// pd39route (Part 207): the per-net multiplier file: listed nets get their value, the rest 1; an index out of
+// range, a non-number, zero, a negative, a value above 1e6 or a trailing field is refused.
+void testTimingMultFile() {
+  const std::string path = "pd39route_selftest_mult.txt";
+  auto write = [&](const char *text) {
+    std::ofstream f(path);
+    f << text;
+  };
+  std::vector<float> v;
+  std::string err;
+  size_t listed = 0;
+  write("# driver strength\n0 0.25\n3 4\n");
+  bool ok = loadTimingMult(path, 4, v, listed, err) && v.size() == 4 && v[0] == 0.25f && v[1] == 1.0f && v[2] == 1.0f &&
+            v[3] == 4.0f && listed == 2;
+  bool bad = true;
+  for (const char *text : {"4 2\n", "1 x\n", "1 0\n", "1 -2\n", "1 2e6\n", "1 2 extra\n", "1 nan\n"}) {
+    write(text);
+    bad = bad && !loadTimingMult(path, 4, v, listed, err);
+  }
+  std::remove(path.c_str());
+  check(ok, "timing multiplier file: listed nets get their multiplier, unlisted 1");
+  check(bad, "timing multiplier file: an index out of range, a non-number, 0, a negative, above 1e6, a trailing field, NaN refused");
+  check(!loadTimingMult("pd39route_selftest_no_such_file.txt", 4, v, listed, err), "timing multiplier file: a missing file refused");
+}
+
 // pd39route (Part 133): buildNetTree equals buildNetTreeReference -- nodes
 // (order included), edges, adjacency and the return value -- on 3000 random
 // nets: rectilinear walks with repeated and overlapping legs (cycles), a few
@@ -23223,6 +23282,7 @@ int run() {
   testCriticalPathFirstDag();
   testBuildNetTreeMatchesReference();
   testSlackOverrideFile();
+  testTimingMultFile();
   testLagrangeAndPortfolio();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
@@ -23780,6 +23840,27 @@ int main(int argc, char **argv) {
                     << "; " << gTiming.benefitHi
                     << " classed nets at the upper bound, " << gTiming.benefitLo << " at the lower\n";
         }
+      }
+      if (const char *mf = std::getenv("PD39ROUTE_TIMING_MULT"); mf && *mf) { // Part 207: a multiplier per net
+        if (!gTiming.mult.empty())
+          fail("PD39ROUTE_TIMING_MULT cannot be combined with PD39ROUTE_TIMING_BENEFIT (both set the timing term's "
+               "per-net multiplier)");
+        std::string err;
+        std::vector<float> m;
+        size_t listed = 0;
+        if (!loadTimingMult(mf, gTiming.cls.size(), m, listed, err))
+          fail("PD39ROUTE_TIMING_MULT: " + err);
+        size_t acting = 0;
+        double lo = 1, hi = 1;
+        for (size_t i = 0; i < m.size(); ++i)
+          if (gTiming.cls[i] > 0 && m[i] != 1.0f) {
+            ++acting;
+            lo = std::min(lo, static_cast<double>(m[i]));
+            hi = std::max(hi, static_cast<double>(m[i]));
+          }
+        gTiming.mult.swap(m);
+        std::cerr << "ISPD 2025 timing layers: per-net multipliers from " << mf << ": " << listed << " nets listed, "
+                  << acting << " classed nets with a multiplier other than 1 (" << lo << " to " << hi << ")\n";
       }
     }
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {
