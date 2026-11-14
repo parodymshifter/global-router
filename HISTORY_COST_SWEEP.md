@@ -14340,10 +14340,34 @@ is written as a route file and scored by `gr_verify` / `eval2008.pl`. `highs`, `
 
 **newblue1** (base: spread 56, overflow 22 on 11 edges; window x 168-200, y 41-75): 8407 movable nets, 5160 with more
 than one distinct route (23006 candidates), 31101 edges that can overflow.
-- **The relaxation's bound is ~0** (HiGHS dual bound 0.015, SCIP 0.048, both mostly the wirelength tie-break): a
-  fractional mix of the six routings clears the hotspot.
+- ~~The relaxation's bound is ~0~~ **Wrong (corrected 2026-11-14):** 0.015 and 0.048 were the solvers' dual bounds
+  when they hit their time limits, before the relaxation was solved. Solved (below), it is 14.6.
 - **No integer improvement found yet**: HiGHS, 300 s, no start: best 14232 (it never found the base again); SCIP,
   600 s, started from the base: the base's 22, nothing better (one solution, time limit). The mixed file it wrote is
   the base (`gr_verify`: 22, max 2, legal) -- the write path works.
 - Next: the relaxation's fractional solution rounded and repaired (most nets should be integral in it), or a far
   smaller program (only nets on or beside the over-capacity edges), before more solver time.
+
+**Step 1: the relaxation solved, then the split nets** (2026-11-14 00:24-01:21; `p206/nb1_mix_m*.txt`). The tool now
+solves the relaxation first (HiGHS, interior point: the simplex did not finish the margin-10 program in 600 s), fixes
+every net whose weight sits on one route, and runs the integer program (SCIP, started from each net's heaviest
+route) over the split nets. Two tool faults found and fixed on the way: an unfinished relaxation left the reduction
+nothing to work from (it now keeps every candidate), and an LP's solution file repeats the variable names with
+reduced costs after the primal values (the reader took those; it now stops at the dual section -- the two mixed
+files written before that fix were wrong choices and are not results).
+
+| window margin | movable nets (free) | relaxed optimum | split nets in it | integer result | `gr_verify` on the file written |
+|---|---|---|---|---|---|
+| 1 | 2293 (1766) | 22.2 | -- | -- | -- |
+| 3 | 3276 (2322) | 22.2 | 11 | 24 (optimal over the 11 after fixing the rest) | 24, max 2, legal |
+| 10 | 8407 (5160) | **14.6** | 4042 | 1604 (the rounded start; nothing better in 2307 s) | 1604, max 6, legal |
+
+- The tool's overflow count is the verifier's (24 = 24, 1604 = 1604).
+- Near the hotspot the six routings hold nothing: within 3 tiles the best mix, even fractional, is the base's 22.
+- With 10 tiles a fractional mix reaches about 14 of the 22 -- an upper limit of 8 units on what any whole-route mix
+  of these candidates could gain -- but 78% of the free nets are split in it, so fixing-and-rounding collapses
+  (1604), and neither solver found a whole-route mix below 22.
+- So for newblue1 joint selection over existing routings is worth at most 8 units and is not found by generic
+  solvers in 40 minutes. A real gain would need candidates made for the purpose (routes around the hotspot generated
+  per net) or a search built for this structure; the relaxation alone (2-3 min) can be run on the other residues
+  first to see whether any has a larger gap.

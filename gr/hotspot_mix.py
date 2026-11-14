@@ -152,87 +152,116 @@ def main():
     multi = [n for n in movable if len(cand[n]) > 1]
     print(f'{len(movable)} movable nets, {len(multi)} with more than one distinct route '
           f'({sum(len(cand[n]) for n in multi)} candidates) ({time.time() - t0:.0f} s)', flush=True)
-    # edges that can overflow: frozen + the largest candidate use of every net > capacity
-    worst = defaultdict(int)
-    for n in movable:
-        mx = defaultdict(int)
-        for c in cand[n]:
-            for e, a in c[0].items():
-                if a > mx[e]:
-                    mx[e] = a
-        for e, a in mx.items():
-            worst[e] += a
-    hot = {e for e, a in worst.items() if use[e] + a > cap_of(g, e)}
-    const = sum(max(0, use[e] - cap_of(g, e)) for e in use if e not in hot)
-    # the program
-    lp = out + '.lp'
-    eid = {e: i for i, e in enumerate(sorted(hot))}
-    rows = defaultdict(list)
-    obj = []
-    with open(lp, 'w') as f:
-        f.write('Minimize\n obj:')
-        for e, i in eid.items():
-            f.write(f' + o{i}')
-        vid = {}
-        for ni, n in enumerate(multi):
-            for k, c in enumerate(cand[n]):
-                vid[(n, k)] = f'x{ni}_{k}'
-                f.write(f' + {1e-6 * c[3]:.6f} x{ni}_{k}')
-                for e, a in c[0].items():
-                    if e in eid:
-                        rows[eid[e]].append((a, f'x{ni}_{k}'))
-        f.write('\nSubject To\n')
-        fixed = defaultdict(int)  # nets with one candidate: constant use on hot edges
+    def solve(relax):
+        """Build the program over the current candidates and solve it: the relaxation with HiGHS, or the integer
+        program with SCIP started from every net's first candidate."""
+        multi = [n for n in movable if len(cand[n]) > 1]
+        worst = defaultdict(int)
         for n in movable:
-            if len(cand[n]) == 1:
-                for e, a in cand[n][0][0].items():
-                    if e in eid:
-                        fixed[eid[e]] += a
-        for e, i in eid.items():
-            rhs = use[e] + fixed[i] - cap_of(g, e)
-            terms = ''.join(f' - {a} {v}' for a, v in rows[i])
-            f.write(f' c{i}: o{i}{terms} >= {rhs}\n')
-        for ni, n in enumerate(multi):
-            f.write(f' s{ni}:' + ''.join(f' + x{ni}_{k}' for k in range(len(cand[n]))) + ' = 1\n')
-        f.write('Bounds\n')
-        for i in eid.values():
-            f.write(f' o{i} >= 0\n')
-        f.write('Binary\n')
-        for v in vid.values():
-            f.write(f' {v}\n')
-        f.write('End\n')
-    print(f'program: {len(vid)} route variables, {len(eid)} edges that can overflow, constant {const} '
-          f'({time.time() - t0:.0f} s); solving (limit {opt["--time"]} s)', flush=True)
-    sol = out + '.sol'
-    # the base as the starting solution (every movable net on its first candidate), then SCIP: without a start the
-    # first run (HiGHS, 300 s) never found the base again (primal 14232 against the base's 22, dual bound ~0)
-    start = out + '.start.sol'
-    with open(start, 'w') as f:
-        load = defaultdict(int)
-        for ni, n in enumerate(multi):
-            f.write(f'x{ni}_0 1\n')
-            for e, a_ in cand[n][0][0].items():
-                if e in eid:
-                    load[eid[e]] += a_
-        for e, i in eid.items():
-            o = use[e] + fixed[i] + load[i] - cap_of(g, e)
-            if o > 0:
-                f.write(f'o{i} {o}\n')
-    if os.path.exists(sol):
-        os.remove(sol)
-    r = subprocess.run(['scip', '-c', f'read {lp}', '-c', f'read {start}', '-c', f'set limits time {opt["--time"]}',
-                        '-c', 'optimize', '-c', f'write solution {sol}', '-c', 'quit'], capture_output=True, text=True)
-    tail = [l for l in r.stdout.splitlines() if re.search(r'^(SCIP Status|Primal Bound|Dual Bound|Gap|Solving Time)', l)]
-    print('  ' + ' | '.join(' '.join(l.split()) for l in tail)[:400], flush=True)
+            mx = defaultdict(int)
+            for c in cand[n]:
+                for e, a_ in c[0].items():
+                    if a_ > mx[e]:
+                        mx[e] = a_
+            for e, a_ in mx.items():
+                worst[e] += a_
+        hot = {e for e, a_ in worst.items() if use[e] + a_ > cap_of(g, e)}
+        const = sum(max(0, use[e] - cap_of(g, e)) for e in use if e not in hot)
+        lp = out + ('.relax.lp' if relax else '.lp')
+        eid = {e: i for i, e in enumerate(sorted(hot))}
+        rows = defaultdict(list)
+        vid = {}
+        with open(lp, 'w') as f:
+            f.write('Minimize\n obj:')
+            for i in eid.values():
+                f.write(f' + o{i}')
+            for ni, n in enumerate(multi):
+                for k, c in enumerate(cand[n]):
+                    vid[(n, k)] = f'x{ni}_{k}'
+                    f.write(f' + {1e-6 * c[3]:.6f} x{ni}_{k}')
+                    for e, a_ in c[0].items():
+                        if e in eid:
+                            rows[eid[e]].append((a_, f'x{ni}_{k}'))
+            f.write('\nSubject To\n')
+            fixed = defaultdict(int)
+            for n in movable:
+                if len(cand[n]) == 1:
+                    for e, a_ in cand[n][0][0].items():
+                        if e in eid:
+                            fixed[eid[e]] += a_
+            for e, i in eid.items():
+                f.write(f' c{i}: o{i}' + ''.join(f' - {a_} {v}' for a_, v in rows[i]) + f' >= {use[e] + fixed[i] - cap_of(g, e)}\n')
+            for ni, n in enumerate(multi):
+                f.write(f' s{ni}:' + ''.join(f' + x{ni}_{k}' for k in range(len(cand[n]))) + ' = 1\n')
+            f.write('Bounds\n')
+            for i in eid.values():
+                f.write(f' o{i} >= 0\n')
+            if not relax:
+                f.write('Binary\n')
+                for v in vid.values():
+                    f.write(f' {v}\n')
+            f.write('End\n')
+        print(f'{"relaxation" if relax else "integer program"}: {len(multi)} free nets, {len(vid)} route variables, '
+              f'{len(eid)} edges that can overflow, constant {const} ({time.time() - t0:.0f} s)', flush=True)
+        sol = out + ('.relax.sol' if relax else '.sol')
+        if os.path.exists(sol):
+            os.remove(sol)
+        vals = {}
+        if not vid:
+            return multi, vid, vals, eid, const
+        if relax:
+            # interior point: the simplex did not finish the margin-10 relaxation in 600 s
+            r = subprocess.run(['highs', '--solver', 'ipm', '--time_limit', str(opt['--time']), '--solution_file', sol, lp],
+                               capture_output=True, text=True)
+            tail = [l for l in r.stdout.splitlines() if re.search(r'Objective value|Model status|HiGHS run time', l)]
+        else:
+            start = out + '.start.sol'
+            with open(start, 'w') as f:
+                load = defaultdict(int)
+                for ni, n in enumerate(multi):
+                    f.write(f'x{ni}_0 1\n')
+                    for e, a_ in cand[n][0][0].items():
+                        if e in eid:
+                            load[eid[e]] += a_
+                for e, i in eid.items():
+                    o = use[e] + fixed[i] + load[i] - cap_of(g, e)
+                    if o > 0:
+                        f.write(f'o{i} {o}\n')
+            r = subprocess.run(['scip', '-c', f'read {lp}', '-c', f'read {start}', '-c', f'set limits time {opt["--time"]}',
+                                '-c', 'optimize', '-c', f'write solution {sol}', '-c', 'quit'], capture_output=True, text=True)
+            tail = [l for l in r.stdout.splitlines() if re.search(r'^(SCIP Status|Primal Bound|Dual Bound|Solving Time)', l)]
+        print('  ' + ' | '.join(' '.join(l.split()) for l in tail)[:400], flush=True)
+        for line in open(sol):
+            if line.startswith('# Dual solution'):
+                break  # an LP's file goes on with reduced costs under the same names: primal values only
+            a_ = line.split()
+            if len(a_) >= 2 and a_[0][0] == 'x':
+                try:
+                    vals[a_[0]] = float(a_[1])
+                except ValueError:
+                    pass
+        return multi, vid, vals, eid, const
+
+    # Part 206, step 1: the relaxation first. A net whose weight sits on one route (>= 0.999) is fixed to it; a split
+    # net keeps the routes that carry weight, the heaviest first (the integer program's start); the integer program
+    # then runs over the split nets only.
+    multi, vid, vals, eid, const = solve(relax=True)
+    whole = split = 0
+    if not vals:
+        print('relaxation: no solution in the time limit; the integer program keeps every candidate', flush=True)
+    for n in (multi if vals else []):
+        w_ = [vals.get(vid[(n, k)], 0.0) for k in range(len(cand[n]))]
+        order = sorted(range(len(w_)), key=lambda k: -w_[k])
+        if w_[order[0]] >= 0.999:
+            cand[n] = [cand[n][order[0]]]
+            whole += 1
+        else:
+            cand[n] = [cand[n][k] for k in order if w_[k] > 1e-6]
+            split += 1
+    moved = sum(1 for n in multi if len(cand[n]) == 1 and cand[n][0][2] != 0)
+    print(f'relaxation: {whole} nets whole on one route ({moved} of them not the base\'s), {split} split', flush=True)
+    multi, vid, vals, eid, const = solve(relax=False)
     chosen = {}
-    vals = {}
-    for line in open(sol):
-        a = line.split()
-        if len(a) >= 2 and a[0][0] == 'x':
-            try:
-                vals[a[0]] = float(a[1])
-            except ValueError:
-                pass
     for (n, k), v in vid.items():
         if vals.get(v, 0.0) > 0.5:
             chosen[n] = k
