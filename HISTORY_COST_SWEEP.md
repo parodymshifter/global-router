@@ -14517,3 +14517,83 @@ minutes. With Part 204 (along a tree), Part 205 (by net size) and this (by drive
 of the timing pull tried has ended at or below the uniform pull by slack class. The 2025 score's remaining room
 is where Part 189 put it: the overflow the best routes add (a cheaper way to carry the critical nets), not who
 gets the pull.
+
+## Part 208 -- purpose-made candidate routes around bigblue4's hotspot, by column generation: a fractional bound of 196 and whole-route solutions at 236-242 in 2D (base 326)
+
+The user's question (2026-11-14 19:22): which open lead has more payback -- purpose-made candidates for the 2008
+hotspots, or the 2025 routes' added overflow? Answered for the first, on the record (the published bests show the
+room is real: bigblue4 160 against our 318, newblue7 54 against 90, newblue1 0 against 22; the second has four
+failed attempts and no untried mechanism), with a measurement to run before any generator is built into the
+router; the user's "go" (19:27).
+
+**The measurement** (`gr/hotspot_cg.py DESIGN.gr BASE.route WORK_PREFIX [--margin 30] [--box 10] [--rounds 15]`).
+Part 206's program with the candidates made for it instead of taken from other routings -- column generation:
+- In 2D (the base's 2D overflow equals its 3D overflow, 326 = 326; every net takes width + spacing = 2 on every
+  layer). The window is the bounding box of the over-capacity 2D edges grown by `--margin` tiles.
+- A net with wire inside the window keeps its wire outside; its *parts* -- its pins inside, and the points where
+  its outside wire meets the window -- must be joined again by wire inside.
+- The master program (HiGHS, interior point with crossover) picks the mix of each net's candidates that minimises
+  2D overflow. Its edge prices (the duals; 1 on an edge already full by fixed wire) price one new candidate per
+  net: the parts re-joined by cheapest paths under those prices, growing from one part to the nearest other (the
+  router's own growth rule), inside the parts' bounding box grown by `--box` tiles. A candidate cheaper than the
+  net's current best under the prices is added; repeat until none is found or `--rounds`.
+- Then whole routes: single-net moves with plateau walks (Part 206's `--local`), from the base and from each net's
+  heaviest route in the last mix.
+Every round's optimum is the best fractional mix of the candidates so far: an estimate from above of what such
+candidates can reach (the growth rule is a heuristic, so not a proof nothing lower exists).
+
+**bigblue4** (base: the portfolio's kept route, spread 60, 326; `~/Code/GlobalRouterRuns/p208/cg_bigblue4_m*.txt`;
+box 10, up to 40 rounds, three runs side by side 19:33:51-22:25:10):
+
+| window margin | tiles | movable nets | best fractional mix, by round | final | whole routes from the base | from the mix's heaviest routes |
+|---|---|---|---|---|---|---|
+| 5 (mechanics test, 4 rounds, box 5) | 494 | 8787 | 325.9, 306.0, 269.4, 241.9 | (not converged) | 316 | 290 |
+| 10 | 1044 | 14655 | 326.1, 308.1, 277.5, 247.8, 225.8, 209.1, 201.5, 199.4, 198.2, 196.5 ... | **195.8** (flat from round 19; 68406 routes) | 312 | **236** |
+| 30 | 5244 | 46345 | 326.3, 312.2, 273.4, 238.3, 219.7, 206.5, 200.5, 199.0 ... | **196.0** (flat from round 30; 167487 routes) | 314 | **242** |
+| 60 | 17544 | 156948 | 326.5, 317.8, 287.5, 254.7, 235.8, 224.8 | not solved: master 7 hit its 600 s limit | (316) | (318) |
+
+- **The room is real and it is local.** With candidates made for the purpose the fractional optimum is 196, 40%
+  below the base, against 252 for the six portfolio routings (Part 206) -- and the same at margins 10 and 30, so
+  everything it uses lies within 10 tiles of the over-capacity edges. (Part 191's "saturated out to 60 tiles"
+  was about moving whole blockers out; this re-wires each net between its own fixed parts.)
+- **Whole routes follow this time.** Part 206's mixes were split on 41-78% of their nets and no whole-route
+  solution below the base was found; here 6% of the nets with candidates are split (546 of 9344 at margin 10,
+  1529 of 25880 at margin 30)
+  and a plain single-net-move search from the mix's heaviest routes ends at **236** (margin 10) and 242 (margin
+  30): -28% against the base, -26% against bigblue4's record of 318, in 2D.
+- From the base the same search reaches only 312-316: the candidates matter, but the starting point matters
+  more -- the mix moves many nets together, which single-net moves from the base cannot.
+- Margin 60's master program (260174 routes, 15070 edge rows) did not solve in 600 s; its whole-route lines come
+  from an unsolved mix and say nothing. Margins 10 and 30 agreeing makes it unnecessary.
+- Cost: margin 10 converges in ~10 rounds, about 5 minutes after 90 s of reading the design.
+
+These are 2D counts from the tool's own arithmetic. `--out ROUTE` (added 22:26) writes the better whole-route
+solution as a legal 3D file -- a changed net keeps its outside wire on its layers, its new inside wire goes run by
+run on the layer of that direction with the most room, its vias are rebuilt as one stack per tile over the layers
+its wire and pins touch -- for `gr_verify` and `eval2008.pl` to confirm or refute (`p208/cg_out.sh`; below).
+
+**Confirmed in 3D by both scorers** (`p208/cg_out.sh`, `cg_out.log`, `<tag>.txt` / `.verify` / `.eval`; margin 10,
+box 10; route files in `~/Code/GlobalRouterTemp/p208/`):
+
+| run | rounds | best fractional mix | whole routes, 2D | file written, tool's 3D count | `gr_verify` | `eval2008.pl` |
+|---|---|---|---|---|---|---|
+| `bb4_m10` (22:27:18-23:03:53) | 12 | 197.0 | 260 (from the mix's heaviest routes) | 272 | **272**, max 10, wirelength 25005583, legal | 272 / 10 / 25005583 |
+
+So the first file is a legal bigblue4 at 272 against the record's 318 (Part 180) and the portfolio's 326: both
+scorers agree with each other and with the tool's 3D count. Two things it showed, both fixed the same evening:
+
+- **The whole-route search varies with the candidates** (236 with 40 rounds of them, 260 with 12). Added: the split
+  nets settled by an integer program -- every net whole in the last mix (weight >= 0.999 on one route) stays on
+  it, HiGHS's branch and bound runs over the rest with the routes that carry weight, then the single-net-move
+  search over every net. Part 206's reduction of this kind failed with 41-78% of the nets split; here it is 6%.
+- **The file's 3D count was 12 above its 2D count** (272 against 260). Not odd capacities (bigblue4's 146696
+  adjustments are all even, every net is one track wide; an exact per-layer 2D cost was built for that case
+  anyway and equals the summed capacities here: 326 = 326 = 326). The cause, read off the next file edge by edge:
+  the base leaves the bottom layer of some edges over capacity (metal1 14 of 12) with every other layer full; the
+  re-wiring opens room on an upper layer of the same edge, and the net sitting on metal1 stays there. Added:
+  **layer rebalancing** (`--rebalance DESIGN.gr IN.route OUT.route`, and automatically after `--out`) -- where a
+  layer of a 2D edge is over capacity and another layer of that edge has room for a net, one net's wire on that
+  edge moves there, its vias rebuilt (vias have no capacity in ISPD 2008).
+
+The reported mixes below also leave out the wirelength tie-break's share of the objective (1.4 units at this
+size), which the first table's numbers include.
