@@ -14816,3 +14816,18 @@ steps), the spare-track reward at 1 and 2 tracks and at margins 10 and 30, and e
 them that any method here could find goes below the base: newblue1's zero, if LMgr's routes resemble ours at all,
 was reached by negotiating the whole design toward it, not by repairing a finished route in a window. The tool
 stays as it is for the other three residues, where it pays (Part 209's table).
+
+**Second passes from the new bests** (2026-11-15 14:43:18-15:30:05; same settings as each design's run above;
+`p208/nb4_it2.txt`, `bb4_it3.txt`, `nb7_it2.txt`):
+
+| design (start) | best fractional mix | whole routes (base / heaviest / integer program / dive) | result |
+|---|---|---|---|
+| newblue4 (112) | 104.3 | 112 / 122 / **110** / 114 | 110, max 8, 13293268, legal; `gr_verify` = `eval2008.pl` -- 2 units, inside newblue4's run-to-run noise (Part 78: ~2 units on the residues), max overflow 6 -> 8; not kept as the design's result |
+| bigblue4 (198) | 187.8 | 198 / 214 / 202 / 208 | none below 198 |
+| newblue7 (68) | 58.0 | 68 / 100 / -- / 72 | none below 68 |
+
+A second pass adds nothing that counts: the first pass leaves each design within 6-10 units of its own
+fractional floor (newblue4 112 / 104, bigblue4 198 / 188, newblue7 68 / 58), and one pass is the setting. Results
+of the hotspot repair, one pass on the portfolio's kept route: **newblue4 112, bigblue4 198, newblue7 68**;
+newblue1 22 (no gain); newblue3 not run (33286, 1961 over-capacity edges -- a different scale). Not adopted into
+the 2008 flow: the user's decision.
