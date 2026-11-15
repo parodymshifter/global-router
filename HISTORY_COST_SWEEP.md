@@ -14641,3 +14641,36 @@ Purpose-made candidates priced by the program's own duals reach what six whole r
 file, and newblue4 (00:07:43). Not yet run: newblue7 and newblue3 (several hotspots: the window is one bounding
 box and needs to become a union of neighbourhoods first, as Part 206's did). Nothing is adopted into the 2008 flow
 yet -- that is the user's decision.
+
+**newblue4, and a second pass on bigblue4** (2026-11-15 00:07:43 on; margin 10, box 10, 14 rounds; `nb4_m10.txt`,
+`bb4_it2.txt`):
+
+| design (base) | best fractional mix | whole routes: from the base / heaviest / integer program / dive, each then single-net moves | file | `gr_verify` | `eval2008.pl` |
+|---|---|---|---|---|---|
+| newblue4 (the portfolio's 132) | 105.2 | **128** / 138 / 130 / 134 | 128 after rebalancing 6 wire edges (140 before) | **128**, max 4, 13273951, legal | 128 / 4 / 13273951 |
+| bigblue4, from the 214 file | 195.6 | 214 / 246 / 218 / 214 | none better than its base | -- | -- |
+
+- newblue4: 132 -> **128** (-3%; the published best is 138). Its fractional room is 20% (105), but its split nets
+  (768 of the nets with candidates) round badly: every start except the base ends above the base.
+- bigblue4's second pass finds the same bound (195.6) and nothing below 214: the 19 units between are rounding
+  loss, not missing candidates.
+- The dive (added 23:46: fix the whole nets and a quarter of the split ones, re-solve the relaxation over the
+  rest, repeat) is no better than the integer program on either.
+- Since 00:29 the tool writes no file when nothing beats the base (it had been writing the plateau walk's end
+  state: the same overflow with a worse tie-break).
+
+**newblue1: two more rounding attempts, both far above the base** (2026-11-15 00:29:29 - 01:08; `nb1_dp.txt`,
+`nb1_dp02.txt`; `--dive-price`: after each batch is fixed, the nets still free get new routes priced against the
+fixed ones, up to two pricing rounds per step; `--dive-frac`: the share of the split nets fixed per step):
+
+| dive | relaxations | routes priced on the way | last relaxation | after single-net moves |
+|---|---|---|---|---|
+| a quarter of the split nets per step, no pricing (above) | 14 | -- | 412 | 178 |
+| a quarter per step, with pricing | 51 | 3792 | 200 | 126 |
+| 2% per step, with pricing (1235 s) | 395 | 21150 | 158 | 134 |
+
+Smaller steps and re-pricing help the relaxation on the way down (412 -> 200 -> 158) and still end seven times
+the base. The mix that reaches 0 fills its edges exactly to capacity (the objective is indifferent below
+capacity, and the wirelength tie-break pulls every net onto the shortest route that still fits), so any net fixed
+whole pushes a full edge over; no rounding of *this* mix has slack to work with. Not tried yet: a mix solved
+against capacities reduced by a margin, which would say how much slack the fractional solution really has.

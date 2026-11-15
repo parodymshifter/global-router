@@ -3,7 +3,7 @@
 (HISTORY_COST_SWEEP.md Part 208).
 
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
-                           [--out ROUTE] [--no-dive] [--no-int]
+                           [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -145,6 +145,8 @@ def main():
         rebalance(hm.read_gr(sys.argv[i + 1]), sys.argv[i + 1], sys.argv[i + 2], sys.argv[i + 3])
         return
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if '--dive-frac' in sys.argv:
+        args.remove(sys.argv[sys.argv.index('--dive-frac') + 1])
     opt = {'--margin': 30, '--box': 10, '--rounds': 15, '--time': 600}
     for k in list(opt):
         if k in sys.argv:
@@ -498,6 +500,37 @@ def main():
             tie += EPS * cols[n][k][1] * weights[n][k]
         return (None if obj is None or not x else obj + const - tie), dict(pi), weights, status, len(hot), len(names)
 
+    def price_round(pi, which, free):
+        """One new candidate per net of `which` under the prices, where it beats the net's best (among the columns
+        `free` allows it, if given). Returns (nets priced, routes added); a new column's index joins free[net]."""
+        ph, pv = price_arrays(pi)
+        added = tried = 0
+        for n in which:
+            a = unit[n]
+            cs = cols[n]
+            ks = free[n] if free is not None else range(len(cs))
+            pay = [col_cost(cs[k], ph, pv) for k in ks]
+            if min(pay) <= 1e-9:
+                continue  # it already has a route that pays nothing
+            sigma = min(v + EPS * cs[k][1] for v, k in zip(pay, ks))
+            tried += 1
+            es = regrow(n, ph, pv)
+            if es is None:
+                continue
+            cost = sum(EPS + a * (ph if e[0] == 0 else pv)[e[1] - x0][e[2] - y0] for e in es)
+            if cost < sigma - 1e-7:
+                d = {e: a for e in es}
+                same = next((k for k, c in enumerate(cs) if c[0] == d), None)
+                if same is None:
+                    cs.append((d, len(d)))
+                    same = len(cs) - 1
+                elif free is None or same in free[n]:
+                    continue
+                if free is not None:
+                    free[n].append(same)
+                added += 1
+        return tried, added
+
     fix_edges = sorted({e[:3] for e in fix3})
     # round 0: no program yet -- price 1 on every inside edge the base overflows
     pi = {}
@@ -513,26 +546,8 @@ def main():
     weights = {}
     history = []
     for rnd in range(opt['--rounds'] + 1):
-        ph, pv = price_arrays(pi)
-        added = tried = 0
         t1 = time.time()
-        for n in nets:
-            a = unit[n]
-            cs = cols[n]
-            pay = [col_cost(c, ph, pv) for c in cs]
-            if min(pay) <= 1e-9:
-                continue  # it already has a route that pays nothing
-            sigma = min(v + EPS * c[1] for v, c in zip(pay, cs))
-            tried += 1
-            es = regrow(n, ph, pv)
-            if es is None:
-                continue
-            cost = sum(EPS + a * (ph if e[0] == 0 else pv)[e[1] - x0][e[2] - y0] for e in es)
-            if cost < sigma - 1e-7:
-                d = {e: a for e in es}
-                if all(d != c[0] for c in cs):
-                    cs.append((d, len(d)))
-                    added += 1
+        tried, added = price_round(pi, nets, None)
         print(f'round {rnd}: {tried} nets priced, {added} new routes ({time.time() - t1:.0f} s)', flush=True)
         if added == 0:
             print('no net finds a cheaper route: the candidates are complete for this growth rule', flush=True)
@@ -634,19 +649,35 @@ def main():
         fixed = {n: 0 for n in nets if n not in weights}
         w_now = weights
         free = {n: list(range(len(cols[n]))) for n in weights}
-        solves = 0
+        solves = priced = 0
+        dive_frac = float(sys.argv[sys.argv.index('--dive-frac') + 1]) if '--dive-frac' in sys.argv else 0.25
         last = None
+        base_floor = history[-1] if history else 0.0  # the full mix's overflow: no need to price below it
         while free:
             top = sorted(((max(w_.values()), n) for n, w_ in w_now.items() if n in free), reverse=True)
             whole = [n for v, n in top if v >= 0.999]
             split = [n for v, n in top if v < 0.999]
-            for n in whole + split[:max(1, (len(split) + 3) // 4)]:
+            for n in whole + split[:max(1, int(len(split) * dive_frac + 0.999))]:
                 fixed[n] = max(w_now[n], key=w_now[n].get)
                 del free[n]
             if not free:
                 break
-            obj, _, w_new, status, _, _ = program(free, fixed, False, 'dive')
+            obj, pi_d, w_new, status, _, _ = program(free, fixed, False, 'dive')
             solves += 1
+            for _ in range(2 if obj is not None and '--dive-price' in sys.argv else 0):
+                # the nets still free get new routes priced against the fixed ones (a dive that only re-mixes the
+                # routes made for the full mix ended near 400 on newblue1)
+                if obj < base_floor + 0.5:
+                    break
+                _, more = price_round(pi_d, sorted(free), free)
+                priced += more
+                if not more:
+                    break
+                obj2, pi2, w2, status, _, _ = program(free, fixed, False, 'dive')
+                solves += 1
+                if obj2 is None:
+                    break
+                obj, pi_d, w_new = obj2, pi2, w2
             if obj is None:
                 print(f'dive: {status} with {len(free)} nets left; the rest take their heaviest routes', flush=True)
                 for n in free:
@@ -654,8 +685,10 @@ def main():
                 break
             last = obj
             w_now = w_new
-        print(f'dive: {solves} relaxations, the last at {last if last is None else round(last, 2)} ({time.time() - t1:.0f} s)',
-              flush=True)
+        print(f'dive: {solves} relaxations, {priced} routes priced on the way, the last at '
+              f'{last if last is None else round(last, 2)} ({time.time() - t1:.0f} s)', flush=True)
+        edges = all_edges()
+        free_nets = sorted(n for n in nets if len(cols[n]) > 1)
         o, ch = search(fixed, 'the dive')
         if o < best_of:
             best_of, best = o, ch
@@ -668,6 +701,9 @@ def main():
     # capacity in ISPD 2008, so this adds no overflow; it is not a via-minimal assignment (the wirelength it scores is
     # an upper limit).
     out = sys.argv[sys.argv.index('--out') + 1]
+    if best_of >= model0:
+        print(f'--out: no whole-route solution below the base ({best_of} against {model0}); no file written', flush=True)
+        return
     changed = sorted(n for n in nets if best.get(n, 0) != 0)
     for n in changed:  # take the changed nets' old inside wire out of the 3D usage
         w = unit[n] - sp[0]
