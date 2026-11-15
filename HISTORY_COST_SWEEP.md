@@ -14749,9 +14749,9 @@ cheapest under the prices kept; margin 10, 14 rounds; `p208/bb4_st6.txt`; 01:30:
 
 - Tree shape is worth 5.5 units of the floor (3%), not the 30 between 190 and the published 160; whole routes
   end at 214 again.
-- The mix that clears a third of the overflow uses 5% *less* wire inside the window than the base: the base's
-  routes there are detours the negotiation left behind, and the gain comes from undoing them together, not from
-  detouring further.
+- The mix that clears a third of the overflow uses 5% *less* wire inside the window than the base. A reading,
+  not a measurement: the base's routes there are detours the negotiation left behind, and the gain comes from
+  undoing them together, not from detouring further.
 - The integer program's own bound (202.4 with the whole nets fixed, against a mix of 189.5) says most of the
   rounding loss is already in fixing the whole nets.
 
@@ -14761,3 +14761,40 @@ newblue1's from 22 to 0 are both unexplained by anything inside a window with th
 (02:36:52): bigblue4 with a 30-tile window *and* a 30-tile search box per net (through-traffic allowed to go
 right round the hotspot), and newblue7 for the first time (`--union`: the window as the union of the hotspots'
 neighbourhoods, added 02:36).
+
+**Reach, and newblue7** (2026-11-15 02:36:52-04:08:59; `p208/bb4_m30b30.txt`, `nb7_u10.txt`):
+
+| run | movable nets | best fractional mix | the mix against the base | whole routes (base / heaviest / integer program / dive) |
+|---|---|---|---|---|
+| bigblue4, 30-tile window, 30-tile search box per net, 10 rounds | 46345 | 196.7 (325.3, 308.7, 266.7, 237.8, 217.9, 205.5, 200.0, 198.2, 196.7, 196.7) | 8177 nets mostly on another route, wire inside the window -7.6% | 318 / 252 / -- / -- |
+| newblue7, `--union` (2881 tiles around 34 over-capacity 2D edges), margin 10, 14 rounds | 63294 | **58.0** from round 4 (90.0, 90.0, 67.4, 58.0 ...) | 14303 nets, wire -3.6% | 90 / 272 / 184 (integer program 900, bound 78.8, at its limit) / 176 -- no file |
+
+- **Reach is not bigblue4's limit**: through-traffic free to go 30 tiles round the hotspot ends at the same floor
+  (196.7 against 195-196 with a 10-tile box).
+- **newblue7's fractional floor is 58**, against a forced 54 (Part 91's cut bound) and a published 54: the mix is
+  within 4 of what any router can do.
+- **Whole routes fail on newblue7** as on newblue1: nothing below the base's 90, although only 5% of the nets
+  with candidates are split (2522 of 47931).
+
+**The picture across the four designs** (fractional floor with purpose-made candidates / published best / ours
+now): newblue1 0 / 0 / 22; newblue7 58 / 54 / 90; newblue4 105 / 138 / 128; bigblue4 190 / 160 / 214. On three of
+four the floor is at or below the published best. **The space is found; what is missing is whole routes** --
+rounding the mix. bigblue4 is the one design where the floor itself is short of the published result.
+
+**The spare-track reward on the other three residues** (`--spare 2`: 0.05 per unit in the last track of every edge;
+2026-11-15 04:10:01-05:55:21; `p208/nb4_sp2.txt`, `bb4_sp2.txt`, `nb7_sp2.txt`; all three legal, `gr_verify` =
+`eval2008.pl`; routes kept as `p208/newblue4_112.route.gz`, `bigblue4_198.route.gz`, `newblue7_68.route.gz`):
+
+| design | settings | best fractional mix | whole routes (base / heaviest / integer program / dive), each then single-net moves | both scorers | before this Part | published best |
+|---|---|---|---|---|---|---|
+| newblue4 | margin 10, `--starts 6`, 14 rounds | 104.8 | 130 / 126 / **112** / 116 | **112**, max 6, 13287069 | 128 (Part 208), 132 (portfolio) | 138 |
+| bigblue4 | margin 10, `--starts 6`, 14 rounds | 188.3 | 316 / 218 / **198** / 206 | **198**, max 12, 25022792 | 214 (Part 208), 318 (record) | 160 |
+| newblue7 | `--union`, margin 10, 8 rounds, no integer step | 58.0 | 90 / 96 / -- / **68** | **68**, max 6, 36029340 | 90 (portfolio) | 54 (forced: 54) |
+
+- **The reward pays on all three.** Rounding loss against each design's own fractional floor: newblue4 23 -> 7,
+  bigblue4 25 -> 10, newblue7 none below the base -> 10. The integer step now lands close to its own bound.
+- Against the router's own results: newblue4 132 -> 112 (-15%), bigblue4 318 -> 198 (-38%), newblue7 90 -> 68
+  (-24%). newblue4 is now 26 *below* the published best; newblue7 is 14 above the forced 54.
+- Costs on the other ranking terms: max overflow 6 / 12 / 6 against the bases' 2-4; wirelength +0.1% to +0.3%.
+- newblue1 is the exception (68 whole-route against a base of 22, above): its zero is a packing with no slack
+  at all.

@@ -4,7 +4,7 @@
 
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
                            [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
-                           [--spare S[,g]] [--starts K] [--union]
+                           [--spare S[,g]] [--starts K] [--union] [--lns]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -427,7 +427,7 @@ def main():
                 es.update(c[0])
         return es
 
-    def program(free, choice, integer, tag):
+    def program(free, choice, integer, tag, limit=None):
         """Minimise the exact 2D overflow over the nets in `free` (name -> list of allowed column indices); every
         other net sits on choice.get(net, 0). The relaxation (integer False: interior point with crossover; returns
         the edge prices) or the integer program (HiGHS's branch and bound). Returns (overflow of the whole design in
@@ -490,7 +490,7 @@ def main():
             f.write('End\n')
         if os.path.exists(sol):
             os.remove(sol)
-        cmd = ['highs', '--time_limit', str(opt['--time']), '--solution_file', sol]
+        cmd = ['highs', '--time_limit', str(limit or opt['--time']), '--solution_file', sol]
         r = subprocess.run(cmd + ([] if integer else ['--solver', 'ipm']) + [lp], capture_output=True, text=True)
         out_ = r.stdout.splitlines()
         status = next((' '.join(l.split()) for l in out_ if 'Model status' in l), None) or \
@@ -742,6 +742,65 @@ def main():
         o, ch = search(fixed, 'the dive')
         if o < best_of:
             best_of, best = o, ch
+    if '--lns' in sys.argv:
+        # --lns: neighbourhoods re-solved exactly. Around each over-capacity edge of the best whole-route solution,
+        # every net now using an edge within a few tiles is set free over all its candidates and the integer program
+        # is solved with every other net where it is (seconds: a few hundred nets); the answer is kept when the
+        # whole design's overflow falls. Sweeps repeat until one gains nothing. Single-net moves cannot trade two
+        # nets against each other; fixing the mix's whole nets fixes too much (the integer program over the split
+        # nets has a bound well above the mix); this moves a neighbourhood's nets together from a whole-route start.
+        t1 = time.time()
+
+        def evaluate(choice):
+            load = defaultdict(int)
+            for n in nets:
+                for e, a in cols[n][choice.get(n, 0)][0].items():
+                    load[e] += a
+            return static + sum(cost_e(e, u) for e, u in load.items()), load
+
+        solves = wins = 0
+        cur, load = evaluate(best)
+        start = cur
+        for sweep in range(6):
+            gained = False
+            seeds = sorted((e for e, u in load.items() if cost_e(e, u) > 0), key=lambda e: (-cost_e(e, load[e]), e))
+            for seed in seeds:
+                if cost_e(seed, load[seed]) <= 0 or time.time() - t1 > 6 * opt['--time']:
+                    continue
+                users = defaultdict(list)
+                for n in nets:
+                    if len(cols[n]) > 1:
+                        for e in cols[n][best.get(n, 0)][0]:
+                            if abs(e[1] - seed[1]) <= 4 and abs(e[2] - seed[2]) <= 4:
+                                users[max(abs(e[1] - seed[1]), abs(e[2] - seed[2]))].append(n)
+                free = {}
+                for r in range(5):  # nearest first, up to 250 nets
+                    for n in users[r]:
+                        if n not in free and len(free) < 250:
+                            free[n] = list(range(len(cols[n])))
+                if not free:
+                    continue
+                obj, _, wi, status, _, _ = program(free, best, True, 'lns', 20)
+                solves += 1
+                if obj is None or obj > cur - 0.5:
+                    continue
+                trial = dict(best)
+                for n, w_ in wi.items():
+                    trial[n] = max(w_, key=w_.get)
+                o, l_ = evaluate(trial)
+                if o < cur:
+                    best, cur, load = trial, o, l_
+                    wins += 1
+                    gained = True
+            if not gained:
+                break
+        print(f'neighbourhoods re-solved: overflow {start} -> {cur} in {solves} integer programs, {wins} kept '
+              f'({time.time() - t1:.0f} s)', flush=True)
+        if cur < best_of:
+            best_of = cur
+            o, ch = search(dict(best), 'the re-solved neighbourhoods')
+            if o < best_of:
+                best_of, best = o, ch
     if '--out' not in sys.argv:
         return
     # --out ROUTE: the best whole-route solution as a legal 3D route file. A changed net keeps its base wire outside
