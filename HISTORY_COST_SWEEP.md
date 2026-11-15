@@ -14518,7 +14518,7 @@ of the timing pull tried has ended at or below the uniform pull by slack class. 
 is where Part 189 put it: the overflow the best routes add (a cheaper way to carry the critical nets), not who
 gets the pull.
 
-## Part 208 -- purpose-made candidate routes around bigblue4's hotspot, by column generation: a fractional bound of 196 and whole-route solutions at 236-242 in 2D (base 326)
+## Part 208 -- purpose-made candidate routes around a hotspot, by column generation: bigblue4 318 -> 214, legal and confirmed by both scorers; newblue1's fractional bound 0 but no whole-route solution below 22
 
 The user's question (2026-11-14 19:22): which open lead has more payback -- purpose-made candidates for the 2008
 hotspots, or the 2025 routes' added overflow? Answered for the first, on the record (the published bests show the
@@ -14597,3 +14597,47 @@ scorers agree with each other and with the tool's 3D count. Two things it showed
 
 The reported mixes below also leave out the wirelength tie-break's share of the objective (1.4 units at this
 size), which the first table's numbers include.
+
+**With the integer step and the rebalancing** (2026-11-14 23:06:38 - 2026-11-15 00:04:36; margin 10, box 10, 14
+rounds):
+
+| file | best fractional mix | whole routes: from the base / the mix's heaviest / the integer program, then single-net moves | tool's 3D count | `gr_verify` | `eval2008.pl` |
+|---|---|---|---|---|---|
+| `bb4_m10x` (as written, before rebalancing existed) | 195.0 | 312 / 224 / 228 -> **214** (integer program over 542 split nets: 228.1, bound 211.2 at its 600 s limit) | 238 | 238, max 10, 25006015, legal | 238 / 10 / 25006015 |
+| `bb4_m10x_rb` (the same file, 12 wire edges of 11 nets moved to a layer with room) | | | 214 | **214**, max 10, wirelength 25006095, legal | **214 / 10 / 25006095** |
+
+**bigblue4: 214**, legal, `gr_verify` = `eval2008.pl` = the tool's own count (kept as
+`~/Code/GlobalRouterRuns/p208/bigblue4_214.route.gz`). Against the record's 318 (Part 180): -33%; against the base it
+started from (the portfolio's 326): -34%; the published best is 160. 4125 nets changed, all inside a 29 x 36-tile
+window; wirelength +0.22% over the base (24952102 -> 25006095: the rebuilt via stacks are not via-minimal), max
+overflow 10 against the base's 4 (total overflow ranks first). Cost: 21 minutes of solving (7 of column
+generation, 10 of the integer program at its limit, 4 of searches) plus the two scorers.
+
+**newblue1** (base: the portfolio's kept route, 22; margin 10; `nb1_m10.txt`, `nb1_dive.txt`; 23:33:13 - 00:07:20):
+
+| | value |
+|---|---|
+| movable nets, window | 8631 nets, 34 x 36 tiles |
+| best fractional mix by round | 22.0, 22.0, 22.0, 17.2, 4.6, **0.0** from round 6 |
+| nets split in that mix | 1278 of 7661 with candidates (17%) |
+| whole routes from the base | 22 -> 22 |
+| from the mix's heaviest routes | 1002 -> 224 |
+| integer program over the 1278 split nets (600 s) | 386 (bound 35.4), then single-net moves -> 182 |
+| a dive through the relaxation (fix the whole nets and a quarter of the split ones, re-solve; 14 relaxations) | 412, then single-net moves -> 178 |
+| files written (the base's plateau) | 22, max 2, legal, both scorers agree (4908739; the base 4906332) |
+
+- **Fractionally newblue1 routes with no overflow at all** inside a 10-tile window -- the first evidence here that
+  its 22 is not forced (Part 65's bound tool could not certify any of it; LMgr's published 0 said so from outside).
+- **Whole routes are not found**: with 17% of the nets split, fixing any part of the mix wrecks the rest (the
+  integer program and the dive both end near 400 before polishing). This is Part 206's failure again, not
+  bigblue4's success: there 6% were split and rounding cost 19 units of 195; here the mix spreads a zero-slack
+  hotspot's traffic thinly over many nets. What it needs is a rounding that keeps capacity slack while it fixes
+  nets (randomised rounding against capacities reduced by a margin, or the router's own negotiation started from
+  the mix), not a better solver.
+
+**Verdict so far.** The lead pays where the user's measure is set: bigblue4 -33% against its record, confirmed.
+Purpose-made candidates priced by the program's own duals reach what six whole routings could not (196 against
+252 fractional; whole routes at 214 against none below the base). Running: a second pass on bigblue4 from the 214
+file, and newblue4 (00:07:43). Not yet run: newblue7 and newblue3 (several hotspots: the window is one bounding
+box and needs to become a union of neighbourhoods first, as Part 206's did). Nothing is adopted into the 2008 flow
+yet -- that is the user's decision.

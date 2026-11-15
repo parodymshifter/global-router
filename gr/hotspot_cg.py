@@ -3,7 +3,7 @@
 (HISTORY_COST_SWEEP.md Part 208).
 
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
-                           [--out ROUTE]
+                           [--out ROUTE] [--no-dive] [--no-int]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -611,7 +611,9 @@ def main():
         # 41-78% of the nets split; here it is a few percent), then single-net moves over every net
         t1 = time.time()
         free = {n: sorted(k for k, v in w_.items() if v > 1e-6) for n, w_ in weights.items() if max(w_.values()) < 0.999}
-        obj, _, wi, status, nhot, ncols = program(free, heavy, True, 'int')
+        if '--no-int' in sys.argv:
+            free = {}
+        obj, _, wi, status, nhot, ncols = program(free, heavy, True, 'int') if free else (None, 0, 0, 'skipped', 0, 0)
         if obj is None:
             print(f'integer program over the {len(free)} split nets: {status}; no solution', flush=True)
         else:
@@ -623,6 +625,40 @@ def main():
             o, ch = search(exact, 'the integer program\'s solution')
             if o < best_of:
                 best_of, best = o, ch
+    if weights and '--no-dive' not in sys.argv:
+        # a dive through the relaxation: fix every net that is whole in the mix and the quarter of the split nets
+        # with the largest weight on one route, solve the relaxation over the rest again, repeat until none is left
+        # (the integer program above settles the split nets against one fixed context; the dive lets the rest of
+        # the mix answer each batch that is fixed)
+        t1 = time.time()
+        fixed = {n: 0 for n in nets if n not in weights}
+        w_now = weights
+        free = {n: list(range(len(cols[n]))) for n in weights}
+        solves = 0
+        last = None
+        while free:
+            top = sorted(((max(w_.values()), n) for n, w_ in w_now.items() if n in free), reverse=True)
+            whole = [n for v, n in top if v >= 0.999]
+            split = [n for v, n in top if v < 0.999]
+            for n in whole + split[:max(1, (len(split) + 3) // 4)]:
+                fixed[n] = max(w_now[n], key=w_now[n].get)
+                del free[n]
+            if not free:
+                break
+            obj, _, w_new, status, _, _ = program(free, fixed, False, 'dive')
+            solves += 1
+            if obj is None:
+                print(f'dive: {status} with {len(free)} nets left; the rest take their heaviest routes', flush=True)
+                for n in free:
+                    fixed[n] = max(w_now[n], key=w_now[n].get)
+                break
+            last = obj
+            w_now = w_new
+        print(f'dive: {solves} relaxations, the last at {last if last is None else round(last, 2)} ({time.time() - t1:.0f} s)',
+              flush=True)
+        o, ch = search(fixed, 'the dive')
+        if o < best_of:
+            best_of, best = o, ch
     if '--out' not in sys.argv:
         return
     # --out ROUTE: the best whole-route solution as a legal 3D route file. A changed net keeps its base wire outside
