@@ -5,7 +5,7 @@
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
                            [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
                            [--spare S[,g]] [--starts K] [--union] [--lns] [--lns-size 4,250,20]
-                           [--prices-out FILE [--prices-only]]
+                           [--prices-out FILE [--prices-only]] [--force-out]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -686,9 +686,11 @@ def main():
         return obj, choice
 
     best_of, best = search({}, 'the base')
+    alt = []  # Part 210: every other start's end state, for --force-out (a start for the router's own negotiation)
     if weights:
         heavy = {n: max(w_, key=w_.get) for n, w_ in weights.items()}
         o, ch = search(dict(heavy), "the mix's heaviest routes")
+        alt.append((o, dict(ch)))
         if o < best_of:
             best_of, best = o, ch
         # the split nets settled exactly: every net whole in the mix (weight >= 0.999 on one route) stays there, the
@@ -708,6 +710,7 @@ def main():
             print(f'integer program over the {len(free)} split nets ({ncols} routes, {nhot} edges): {status}; overflow '
                   f'{obj:.2f} ({time.time() - t1:.0f} s)', flush=True)
             o, ch = search(exact, 'the integer program\'s solution')
+            alt.append((o, dict(ch)))
             if o < best_of:
                 best_of, best = o, ch
     if weights and '--no-dive' not in sys.argv:
@@ -760,6 +763,7 @@ def main():
         edges = all_edges()
         free_nets = sorted(n for n in nets if len(cols[n]) > 1)
         o, ch = search(fixed, 'the dive')
+        alt.append((o, dict(ch)))
         if o < best_of:
             best_of, best = o, ch
     if '--lns' in sys.argv:
@@ -833,7 +837,12 @@ def main():
     # capacity in ISPD 2008, so this adds no overflow; it is not a via-minimal assignment (the wirelength it scores is
     # an upper limit).
     out = sys.argv[sys.argv.index('--out') + 1]
-    if best_of >= model0:
+    if '--force-out' in sys.argv and best_of >= model0 and alt:
+        # Part 210: write the best start that is not the base even though it is worse -- a whole-route rounding of
+        # the solved mix, for the router's region stage to negotiate from (PD3ROUTE_LA_FROM)
+        best_of, best = min(alt, key=lambda t: t[0])
+        print(f'--force-out: writing the best start other than the base ({best_of}; base {model0})', flush=True)
+    elif best_of >= model0:
         print(f'--out: no whole-route solution below the base ({best_of} against {model0}); no file written', flush=True)
         return
     changed = sorted(n for n in nets if best.get(n, 0) != 0)

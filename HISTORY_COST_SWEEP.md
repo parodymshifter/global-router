@@ -14857,3 +14857,29 @@ Those are the prices fed back.
 
 **Runs** (17:59:30, `p210/seed1.jobs`, the portfolio's spread-56 settings on `pd39route.p210`): parity (no seed:
 must reproduce the kept route's 22 / 4906332), seed at scale 4 and at scale 16.
+
+**Prices alone, newblue1 from scratch** (17:59:30-18:10:21, `p210/seed1.jobs.summary`; all legal, `gr_verify` =
+`eval2008.pl`):
+
+| run | overflow | max | wirelength | late-stage variants: region stage end -> 2D overflow (kept marked) |
+|---|---|---|---|---|
+| parity (no seed) | **22** | 2 | 4906332 | own 46 -> 36, expand=120 52 -> 40, **over=0 28 -> 22**, over=0.075 40 -> 3x |
+| seed, scale 4 | 30 | 2 | 4821358 | 50 -> 38, 50 -> 42, 48 -> **30**, 46 -> 3x |
+| seed, scale 16 | 28 | 2 | 4900476 | 34 -> **28**, 50 -> 36, 46 -> 28, 42 -> 3x |
+
+Parity is byte-identical to the kept route (22 / 4906332): the new build changes nothing with the setting off.
+The seeded runs end at 28-30, inside newblue1's spread over reorderings (22-36, Part 202) -- no gain. Prices
+solved for one route's window, laid on a run from scratch, steer a different layout: the slow tier ends at 294-298
+(base 290), and the hotspot the prices describe is not quite where the new run's ends up.
+
+**The stronger form: the router's late stages started from the solved mix.** `PD3ROUTE_LA_FROM=<route>` (an old
+setting: read a route as 2D, then run the late stages -- region stage, fallback, portfolio, refinement, layer
+assignment -- on it; checked 18:11 with the base route: 22 again, wirelength 4897484) on a whole-route rounding of
+the spare-reward mix (`hotspot_cg.py --force-out`: the best start other than the base, here the dive's 68, written
+legal in 3D, `nb1_start.route`). The region stage's round 0 rips up every net in its box (with the base as start,
+22 -> 5388 at round 0), which would throw the mix away, so:
+- `PD39ROUTE_REGION_ROUND0=over` (new, `pd39route.p210b`): round 0 reroutes only nets on over-capacity edges, as
+  every later round does; default `all` unchanged. e2e: round 0 reroutes 105 nets against 7193 on the residue
+  design (49 of 49 checks pass).
+Runs started 18:22:12 (`p210/start1.jobs`): from the mix with round 0 limited; the same with the price seed at
+scale 16; and the seed with the blanket round 0 as a control.

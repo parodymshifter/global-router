@@ -1834,6 +1834,11 @@ double score2dCost(double wl, double C, int n, double w, long long D, int amount
 // (x, y) to (x + 1, y)) or "V x y price" ((x, y) to (x, y + 1)); '#' lines are comments; an edge not listed has 0.
 // Prices are >= 0, so the A* heuristic and the two-ended search's potentials stay admissible and consistent.
 std::vector<float> gSeedH, gSeedV; // empty: off
+// Part 210: PD39ROUTE_REGION_ROUND0=over -- the region stage's round 0 reroutes only the nets on over-capacity edges, as
+// every later round does, instead of every net with wire in the box (all, the default). For a start that is already
+// a negotiated answer (PD3ROUTE_LA_FROM: the hotspot program's rounded mix), so the stage rounds it rather than
+// ripping it up: round 0's blanket reroute took newblue1's 22 to 5388 (2026-11-15).
+bool gRegionRound0Over = false;
 double gSeedScale = 1.0;
 bool loadPriceSeed(const std::string &path, const RoutingGrid &g, std::vector<float> &h, std::vector<float> &v,
                    size_t &listed, std::string &err) {
@@ -5824,10 +5829,10 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
       } else {
         std::vector<size_t> list;
         for (size_t k = 0; k < members.size(); ++k)
-          if (r == 0 || netOverflowed(g, usage, nets[members[k]]))
+          if ((r == 0 && !gRegionRound0Over) || netOverflowed(g, usage, nets[members[k]]))
             list.push_back(members[k]);
         regionA1Replay(g, nets, list, usage, prices, lp, stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap),
-                       r == 0 ? &rep.box : nullptr, rs.pieces, r);
+                       (r == 0 && !gRegionRound0Over) ? &rep.box : nullptr, rs.pieces, r);
         a1Chain.assign(static_cast<size_t>(g.nx) * g.ny, 0);
         a1Weight.assign(a1Chain.size(), 0.0);
       }
@@ -5844,17 +5849,17 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
     if (batched) {
       std::vector<size_t> list; // the round's nets: overflowed at its start (every member in round 0)
       for (size_t k = 0; k < members.size(); ++k)
-        if (r == 0 || netOverflowed(g, usage, nets[members[k]]))
+        if ((r == 0 && !gRegionRound0Over) || netOverflowed(g, usage, nets[members[k]]))
           list.push_back(members[k]);
       bstats = regionBatchedRound(g, nets, list, usage, prices, lp, stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap),
-                                  r == 0 ? &rep.box : nullptr, rs.pieces, r, rs.batch, rs.batchSpread, rs.batchBox);
+                                  (r == 0 && !gRegionRound0Over) ? &rep.box : nullptr, rs.pieces, r, rs.batch, rs.batchSpread, rs.batchBox);
       rerouted = static_cast<int>(bstats.rerouted);
       rep.threadsMin = rep.threadsMin > 0 ? std::min(rep.threadsMin, bstats.threads) : bstats.threads;
       rep.threadsMax = std::max(rep.threadsMax, bstats.threads);
     } else
     for (size_t k = 0; k < members.size(); ++k) {
       RoutedNet &rn = nets[members[k]];
-      if (r > 0 && !netOverflowed(g, usage, rn))
+      if ((r > 0 || gRegionRound0Over) && !netOverflowed(g, usage, rn))
         continue;
       const int margin = rs.evidenceStep > 0 ? evMargin[k] : stageMargin(rs.boxInit, rs.boxGrow, r, rs.boxCap);
       // Part 157: what this reroute can read -- the net's box plus the search margin -- and the chain into it
@@ -5906,7 +5911,7 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
       if (rs.pieces) {
         // Round 0: every piece with wire in the box; later: overflowed ones.
         PieceStats ps = rerouteNetPieces(g, usage, prices, lp, region, rn, margin, AcceptMode::kKeep,
-                                         r == 0 ? &rep.box : nullptr);
+                                         (r == 0 && !gRegionRound0Over) ? &rep.box : nullptr);
         if (ps.ok) {
           rerouted += ps.pieces;
           done = true;
@@ -24222,6 +24227,14 @@ int main(int argc, char **argv) {
     gLowMem = lm == "1" || (lm == "auto" && d.nets.size() > kLowMemNets);
     if (gLowMem)
       std::cerr << "low-memory mode: on (" << d.nets.size() << " nets)\n";
+  }
+  if (const char *v = std::getenv("PD39ROUTE_REGION_ROUND0"); v && *v) { // Part 210
+    const std::string sv(v);
+    if (sv != "all" && sv != "over")
+      fail("PD39ROUTE_REGION_ROUND0 must be all or over (got '" + sv + "')");
+    gRegionRound0Over = sv == "over";
+    if (gRegionRound0Over)
+      std::cerr << "region stage: round 0 reroutes only nets on over-capacity edges (PD39ROUTE_REGION_ROUND0=over)\n";
   }
   if (const char *v = std::getenv("PD39ROUTE_PRICE_SEED"); v && *v) { // Part 210: file[,scale]
     std::string sv(v), path = sv;

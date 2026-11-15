@@ -233,6 +233,16 @@ def main():
     check('PD39ROUTE_PRICE_SEED prices wire from the start',
           bool(m) and int(m.group(1)) > 0 and [strip(l) for l in la[:6]] != [strip(l) for l in lb[:6]],
           (m.group(0) if m else 'no closing price-seed line') + f'; slow round 3: {lb[3][:60] if len(lb) > 3 else "none"}')
+    # Part 210: PD39ROUTE_REGION_ROUND0=over -- the region stage's round 0 reroutes only overflowed nets: its own
+    # round-0 trace counts fewer reroutes than the default's blanket round 0 on the residue design.
+    def round0(text):
+        m = re.search(r'^region round 0: 2D overflow \d+ \(rerouted (\d+)', text, re.M)
+        return int(m.group(1)) if m else None
+    b = run('residue', {**off, 'PD39ROUTE_REGION_ROUND0': 'over'}, 'round0over')
+    a = run('residue', {**off}, 'base')
+    rb, ra = round0(b), round0(a)
+    check('PD39ROUTE_REGION_ROUND0=over limits round 0 to overflowed nets', rb is not None and ra is not None and rb < ra,
+          f'round 0 rerouted {rb} vs {ra}')
     # Part 193: PD39ROUTE_SLOW_SEARCHES -- batches must also hold K nets needing a search: the slow rounds' own trace
     # counts fewer batches than without.
     def slow_batches(text):
