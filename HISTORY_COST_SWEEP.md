@@ -14831,3 +14831,29 @@ fractional floor (newblue4 112 / 104, bigblue4 198 / 188, newblue7 68 / 58), and
 of the hotspot repair, one pass on the portfolio's kept route: **newblue4 112, bigblue4 198, newblue7 68**;
 newblue1 22 (no gain); newblue3 not run (33286, 1961 over-capacity edges -- a different scale). Not adopted into
 the 2008 flow: the user's decision.
+
+## Part 210 -- the hotspot program's solved prices fed back into the router (in progress)
+
+The user's direction (2026-11-15 17:51): use what the repair finds as a signal to back up and route the same
+design again with modified priorities, rather than repair a finished route -- tried first on newblue1, the design
+the repair could not finish (Part 209: fractional 0, no whole-route solution below 22).
+
+**Built** (`gr/pd39route.cpp`; binary `pd39route.p210`):
+- `PD39ROUTE_PRICE_SEED=<file>[,scale]`: fixed per-2D-edge prices added to the present-demand cost from the start
+  of the run, scale x price x amount, in every stage that prices wire by present demand (slow tier, region stage,
+  fallback) -- the same seam as the region stage's Lagrangian multipliers (Part 135). Prices >= 0 keep the A*
+  heuristic and the two-ended search's potentials admissible. File: `H x y price` / `V x y price` per edge.
+  Refused for the 2024 / 2025 flows. Trace: a start-up line and a closing count of cost reads that paid a seeded
+  price. Self-tests: the reader (good file, eight bad forms) and the cost seam (a seeded edge +scale x price x
+  amount, unseeded and off unchanged). `gr/e2e_settings.py`: 48 of 48 (the new check: the closing count > 0 and
+  the slow tier's rounds differ from the unseeded run's).
+- `gr/hotspot_cg.py --prices-out FILE [--prices-only]`: writes the last master's edge prices.
+
+**newblue1's prices** (`p210/nb1_*.prices`, from the portfolio's kept route, margin 10, 12 rounds, 17:54-17:59):
+without the spare-track reward the zero-overflow mix's duals are only the wirelength tie-break (1253 edges, max
+6e-5: at an optimum of 0 overflow no edge's capacity is worth anything); with it (`--spare 2`) 2262 edges carry a
+price, median 0.022, max 0.25 per unit of demand -- what the last track of each edge is worth to the best mix.
+Those are the prices fed back.
+
+**Runs** (17:59:30, `p210/seed1.jobs`, the portfolio's spread-56 settings on `pd39route.p210`): parity (no seed:
+must reproduce the kept route's 22 / 4906332), seed at scale 4 and at scale 16.

@@ -5,6 +5,7 @@
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
                            [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
                            [--spare S[,g]] [--starts K] [--union] [--lns] [--lns-size 4,250,20]
+                           [--prices-out FILE [--prices-only]]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -150,6 +151,8 @@ def main():
         args.remove(sys.argv[sys.argv.index('--dive-frac') + 1])
     if '--lns-size' in sys.argv:
         args.remove(sys.argv[sys.argv.index('--lns-size') + 1])
+    if '--prices-out' in sys.argv:
+        args.remove(sys.argv[sys.argv.index('--prices-out') + 1])
     spare, spare_w = 0, 0.05
     if '--spare' in sys.argv:  # --spare S[,g]: the last S units of every edge's capacity cost g per unit in the mix
         v = sys.argv[sys.argv.index('--spare') + 1]
@@ -612,6 +615,21 @@ def main():
               + (f', {program.margin:.1f} units inside the {spare}-unit margin' if spare else '') + f' ({time.time() - t1:.0f} s, '
               f'total {time.time() - t0:.0f} s)', flush=True)
     print(f'best mix by round: {", ".join(f"{h:.1f}" for h in history)} ({time.time() - t0:.0f} s)', flush=True)
+    if '--prices-out' in sys.argv:
+        # Part 210: the last master's edge prices (its duals; what the window needs each edge's capacity to cost for
+        # its best mix), for pd39route's PD39ROUTE_PRICE_SEED
+        pf = sys.argv[sys.argv.index('--prices-out') + 1]
+        pos = {e: v for e, v in pi.items() if v > 1e-9}
+        with open(pf, 'w') as f:
+            f.write(f'# Part 210: hotspot_cg.py edge prices for {os.path.basename(gr)} from {os.path.basename(base)}; '
+                    f'margin {m}, spare {spare},{spare_w}; best mix {history[-1] if history else None}\n')
+            for (d, x, y), v in sorted(pos.items()):
+                f.write(f'{"H" if d == 0 else "V"} {x} {y} {v:.6g}\n')
+        vs = sorted(pos.values())
+        print(f'prices written to {pf}: {len(vs)} edges, median {vs[len(vs) // 2] if vs else 0:.4g}, '
+              f'max {vs[-1] if vs else 0:.4g}', flush=True)
+        if '--prices-only' in sys.argv:
+            return
     if weights:  # what the last mix does to the base
         moved = sum(1 for w_ in weights.values() if max(w_, key=w_.get) != 0)
         wl0 = sum(cols[n][0][1] for n in weights)

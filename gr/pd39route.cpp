@@ -1825,6 +1825,57 @@ double score2dCost(double wl, double C, int n, double w, long long D, int amount
   return std::min(kForbiddenPrice, wl + (gScore2D.hist ? hist : 1) * score2dMarginal(C, n, w, D, amount));
 }
 
+// Part 210: PD39ROUTE_PRICE_SEED=<file>[,scale] -- fixed per-edge prices added to the present-demand cost from the
+// start of the run (every stage that prices wire by present demand: the slow tier, the region stage, the fallback's
+// stages), as scale x price x amount, the way the region stage's Lagrangian multipliers are (Part 135). The file
+// comes from gr/hotspot_cg.py --prices-out: the edge prices at which the hotspot program's best mix clears the
+// window (its duals) -- the router is sent back to route the whole design again under the prices a solved window
+// says it needs, rather than repairing a finished route. One line per 2D edge: "H x y price" (the edge from tile
+// (x, y) to (x + 1, y)) or "V x y price" ((x, y) to (x, y + 1)); '#' lines are comments; an edge not listed has 0.
+// Prices are >= 0, so the A* heuristic and the two-ended search's potentials stay admissible and consistent.
+std::vector<float> gSeedH, gSeedV; // empty: off
+double gSeedScale = 1.0;
+bool loadPriceSeed(const std::string &path, const RoutingGrid &g, std::vector<float> &h, std::vector<float> &v,
+                   size_t &listed, std::string &err) {
+  std::ifstream in(path);
+  if (!in) {
+    err = "cannot open " + path;
+    return false;
+  }
+  h.assign(static_cast<size_t>(g.ny) * std::max(0, g.nx - 1), 0.0f);
+  v.assign(static_cast<size_t>(std::max(0, g.ny - 1)) * g.nx, 0.0f);
+  listed = 0;
+  std::string line;
+  size_t lineNo = 0;
+  while (std::getline(in, line)) {
+    ++lineNo;
+    if (line.empty() || line[0] == '#')
+      continue;
+    std::istringstream ls(line);
+    std::string dir, extra;
+    long long x = -1, y = -1;
+    double p = 0;
+    bool ok = static_cast<bool>(ls >> dir >> x >> y >> p) && !(ls >> extra) && std::isfinite(p) && p >= 0 && p <= 1e6 &&
+              (dir == "H" || dir == "V");
+    if (ok && dir == "H")
+      ok = x >= 0 && x + 1 < g.nx && y >= 0 && y < g.ny;
+    if (ok && dir == "V")
+      ok = x >= 0 && x < g.nx && y >= 0 && y + 1 < g.ny;
+    if (!ok) {
+      err = path + ":" + std::to_string(lineNo) + ": expected 'H|V <x> <y> <price in [0, 1e6]>' on the grid, got '" +
+            line + "'";
+      return false;
+    }
+    if (dir == "H")
+      h[g.hIndex(static_cast<int>(x), static_cast<int>(y), 0)] = static_cast<float>(p);
+    else
+      v[g.vIndex(static_cast<int>(x), static_cast<int>(y), 0)] = static_cast<float>(p);
+    ++listed;
+  }
+  return true;
+}
+std::atomic<long long> gSeedReads{0}; // trace: present-demand cost reads that paid a seeded price
+
 // pd38route: a batched slow-tier worker's own usage copy (null: pr.live).
 thread_local const Usage *gLiveOverride = nullptr;
 inline const Usage *liveOf(const Prices &pr) { return gLiveOverride ? gLiveOverride : pr.live; }
@@ -1841,7 +1892,11 @@ double wireCostH(const Prices &pr, size_t e, int amount) {
   int cap = pr.vredH ? virtualCap(lv->capH[e], (*pr.vredH)[e]) : lv->capH[e];
   const long long d = pr.overSlack < 0 ? lv->h[e] : overClampDemand(lv->h[e], lv->capH[e], pr.overSlack); // Part 179
   const double c = presentDemandCost(d, cap, amount, pr.pdHistH[e], pr.pdIter, pr.pdFactor, pdWl(pr));
-  const double t = pr.lagH ? c + (*pr.lagH)[e] * amount : c;
+  double t = pr.lagH ? c + (*pr.lagH)[e] * amount : c;
+  if (!gSeedH.empty() && gSeedH[e] > 0.0f) { // Part 210: the price seed
+    t = std::min(kForbiddenPrice, t + gSeedScale * gSeedH[e] * amount);
+    gSeedReads.fetch_add(1, std::memory_order_relaxed);
+  }
   if (pr.incH && (*pr.incH)[e] == pr.incStamp) { // Part 144: damping on the net's previous route
     const double wl = pdWl(pr);
     return wl + (1.0 - pr.incBeta) * (t - wl);
@@ -1860,7 +1915,11 @@ double wireCostV(const Prices &pr, size_t e, int amount) {
   int cap = pr.vredV ? virtualCap(lv->capV[e], (*pr.vredV)[e]) : lv->capV[e];
   const long long d = pr.overSlack < 0 ? lv->v[e] : overClampDemand(lv->v[e], lv->capV[e], pr.overSlack); // Part 179
   const double c = presentDemandCost(d, cap, amount, pr.pdHistV[e], pr.pdIter, pr.pdFactor, pdWl(pr));
-  const double t = pr.lagV ? c + (*pr.lagV)[e] * amount : c;
+  double t = pr.lagV ? c + (*pr.lagV)[e] * amount : c;
+  if (!gSeedV.empty() && gSeedV[e] > 0.0f) { // Part 210: the price seed
+    t = std::min(kForbiddenPrice, t + gSeedScale * gSeedV[e] * amount);
+    gSeedReads.fetch_add(1, std::memory_order_relaxed);
+  }
   if (pr.incV && (*pr.incV)[e] == pr.incStamp) { // Part 144: damping on the net's previous route
     const double wl = pdWl(pr);
     return wl + (1.0 - pr.incBeta) * (t - wl);
@@ -22659,6 +22718,60 @@ void testSlackOverrideFile() {
   check(badIdx && badNum && badExtra, "routed slack file: an index out of range, a non-number, a trailing field refused");
 }
 
+// Part 210: the price-seed file: listed edges get their price, the rest 0; a bad direction, an edge off the grid,
+// a negative or non-finite price, or a trailing field is refused; a seeded edge's present-demand cost rises by
+// scale x price x amount, an unseeded one is unchanged.
+void testPriceSeed() {
+  RoutingGrid g;
+  g.nx = 4;
+  g.ny = 3;
+  g.nLayers = 1;
+  const std::string path = "pd39route_selftest_seed.txt";
+  auto write = [&](const char *text) {
+    std::ofstream f(path);
+    f << text;
+  };
+  std::vector<float> h, v;
+  std::string err;
+  size_t listed = 0;
+  write("# seed\nH 2 1 0.5\nV 3 1 2\n");
+  bool ok = loadPriceSeed(path, g, h, v, listed, err) && h.size() == 9 && v.size() == 8 && listed == 2 &&
+            h[g.hIndex(2, 1, 0)] == 0.5f && v[g.vIndex(3, 1, 0)] == 2.0f && h[0] == 0.0f;
+  bool bad = true;
+  for (const char *text : {"H 3 0 1\n", "V 0 2 1\n", "D 0 0 1\n", "H 0 0 -1\n", "H 0 0 nan\n", "H 0 0 1 x\n",
+                           "H -1 0 1\n", "H 0 0\n"}) {
+    write(text);
+    bad = bad && !loadPriceSeed(path, g, h, v, listed, err);
+  }
+  std::remove(path.c_str());
+  check(ok, "price seed file: listed edges get their price, the rest 0");
+  check(bad, "price seed file: off-grid edges, a bad direction, a negative / NaN price, a trailing or missing field refused");
+  // the cost seam: a seeded edge pays scale x price x amount more, an unseeded one nothing
+  Design d = parse("pd1route_selftest_basic.gr", kBasicGr);
+  const RoutingGrid &gb = d.grid;
+  Prices pr(gb);
+  Usage u(gb);
+  CostSettings cs;
+  cs.model = CostModel::kPresentDemand;
+  configureCostModel(pr, u, cs);
+  const size_t eh = gb.hIndex(1, 0, 0), eh2 = gb.hIndex(0, 0, 0), ev = gb.vIndex(0, 0, 0);
+  const double h0 = wireCostH(pr, eh, 2), h20 = wireCostH(pr, eh2, 2), v0 = wireCostV(pr, ev, 2);
+  gSeedH.assign(u.h.size(), 0.0f);
+  gSeedV.assign(u.v.size(), 0.0f);
+  gSeedH[eh] = 0.25f;
+  gSeedV[ev] = 1.0f;
+  gSeedScale = 4.0;
+  const long long reads = gSeedReads.load();
+  const double h1 = wireCostH(pr, eh, 2), h21 = wireCostH(pr, eh2, 2), v1 = wireCostV(pr, ev, 2);
+  const bool counted = gSeedReads.load() == reads + 2;
+  gSeedH.clear();
+  gSeedV.clear();
+  gSeedScale = 1.0;
+  check(std::fabs(h1 - (h0 + 2.0)) < 1e-12 && std::fabs(v1 - (v0 + 8.0)) < 1e-12 && h21 == h20 && counted,
+        "price seed: a seeded edge's cost rises by scale x price x amount (h +2, v +8), an unseeded one is unchanged");
+  check(wireCostH(pr, eh, 2) == h0, "price seed off: the cost is the inherited one exactly");
+}
+
 // pd39route (Part 207): the per-net multiplier file: listed nets get their value, the rest 1; an index out of
 // range, a non-number, zero, a negative, a value above 1e6 or a trailing field is refused.
 void testTimingMultFile() {
@@ -23283,6 +23396,7 @@ int run() {
   testBuildNetTreeMatchesReference();
   testSlackOverrideFile();
   testTimingMultFile();
+  testPriceSeed();
   testLagrangeAndPortfolio();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
@@ -24109,6 +24223,36 @@ int main(int argc, char **argv) {
     if (gLowMem)
       std::cerr << "low-memory mode: on (" << d.nets.size() << " nets)\n";
   }
+  if (const char *v = std::getenv("PD39ROUTE_PRICE_SEED"); v && *v) { // Part 210: file[,scale]
+    std::string sv(v), path = sv;
+    const size_t comma = sv.rfind(',');
+    if (comma != std::string::npos) {
+      path = sv.substr(0, comma);
+      char *end = nullptr;
+      const std::string sc = sv.substr(comma + 1);
+      gSeedScale = std::strtod(sc.c_str(), &end);
+      if (sc.empty() || *end || !std::isfinite(gSeedScale) || gSeedScale < 0 || gSeedScale > 1e6)
+        fail("PD39ROUTE_PRICE_SEED must be <file>[,scale] with scale in [0, 1e6] (got '" + sv + "')");
+    }
+    if (g24Mode)
+      fail("PD39ROUTE_PRICE_SEED is for ISPD 2008 designs (the present-demand cost); not for the 2024 / 2025 flows");
+    std::string err;
+    size_t listed = 0;
+    if (!loadPriceSeed(path, d.grid, gSeedH, gSeedV, listed, err))
+      fail("PD39ROUTE_PRICE_SEED: " + err);
+    double mx = 0;
+    size_t pos = 0;
+    for (float x : gSeedH) {
+      mx = std::max(mx, static_cast<double>(x));
+      pos += x > 0;
+    }
+    for (float x : gSeedV) {
+      mx = std::max(mx, static_cast<double>(x));
+      pos += x > 0;
+    }
+    std::cerr << "price seed: " << listed << " edges listed in " << path << ", " << pos << " priced (max " << mx
+              << "), scale " << gSeedScale << "\n";
+  }
   RunReport rep;
   if (laFrom) {
     rep.nets = readRouteAs2D(d, laFrom);
@@ -24678,6 +24822,8 @@ int main(int argc, char **argv) {
   gStages.print(std::cerr);
   auto t1 = std::chrono::steady_clock::now();
 
+  if (!gSeedH.empty()) // Part 210 (trace): evidence the seed acted
+    std::cerr << "price seed: " << gSeedReads.load() << " wire-cost reads paid a seeded price\n";
   if (gSearchBidir) // Part 197 (trace)
     std::cerr << "two-ended search: " << gBidirSearches.load() << " searches, " << gBidirFwd.load()
               << " nodes settled from the sources, " << gBidirBwd.load() << " from the sinks\n";

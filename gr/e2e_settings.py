@@ -219,6 +219,20 @@ def main():
     check('PD39ROUTE_SEARCH_BIDIR searches from both ends, slow tier included',
           bool(m) and int(m.group(1)) > 0 and int(m.group(3)) > 0 and 0 < pb < p0,
           (m.group(0)[:90] if m else 'no two-ended line') + f'; slow-tier pops {pb} vs {p0}')
+    # Part 210: PD39ROUTE_PRICE_SEED -- fixed per-edge prices from the start: its closing line counts the wire-cost
+    # reads that paid a seeded price (only the cost itself increments it), and the slow tier's rounds differ from the
+    # unseeded run's. Every horizontal edge of the slow design's middle row priced 1 at scale 4.
+    seed = os.path.join(work, 'slow.seed')
+    with open(seed, 'w') as f:
+        f.write('# e2e: one row\n' + ''.join(f'H {x} 30 1\n' for x in range(59)))
+    b = run('slow', {'PD39ROUTE_PRICE_SEED': seed + ',4'}, 'seed')
+    m = re.search(r'^price seed: (\d+) wire-cost reads paid a seeded price', b, re.M)
+    a = run('slow', {}, 'base')
+    strip = lambda l: l.split(' overflow ')[1].split(' (')[0] if ' overflow ' in l else l
+    la, lb = lines(a, 'slow round '), lines(b, 'slow round ')
+    check('PD39ROUTE_PRICE_SEED prices wire from the start',
+          bool(m) and int(m.group(1)) > 0 and [strip(l) for l in la[:6]] != [strip(l) for l in lb[:6]],
+          (m.group(0) if m else 'no closing price-seed line') + f'; slow round 3: {lb[3][:60] if len(lb) > 3 else "none"}')
     # Part 193: PD39ROUTE_SLOW_SEARCHES -- batches must also hold K nets needing a search: the slow rounds' own trace
     # counts fewer batches than without.
     def slow_batches(text):
