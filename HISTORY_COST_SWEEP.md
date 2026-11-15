@@ -14883,3 +14883,25 @@ legal in 3D, `nb1_start.route`). The region stage's round 0 rips up every net in
   design (49 of 49 checks pass).
 Runs started 18:22:12 (`p210/start1.jobs`): from the mix with round 0 limited; the same with the price seed at
 scale 16; and the seed with the blanket round 0 as a control.
+
+**newblue1 reaches zero** (18:22:12-18:26:34, `p210/start1.jobs.summary`; the route kept as
+`~/Code/GlobalRouterRuns/p210/newblue1_0.route.gz`). The router's late stages started from the solved mix rounded
+to whole routes (68):
+
+| run | start | region stage (path A) | total overflow | max | scored wirelength | `eval2008.pl` | wall time |
+|---|---|---|---|---|---|---|---|
+| control (18:11) | the base route (22) | 22 -> 22 (500 rounds after 1000 batched) | 22 | 2 | 4897484 | -- | -- |
+| round 0 limited | the solved mix, rounded (68) | 68 -> **0** (882 rounds, 42 s) | **0** | 0 | 4902141 | 0 / 0 / 4902141 | 117 s |
+| round 0 limited + price seed 16 | the same | 68 -> **0** (861 rounds) | **0** | 0 | 4904900 | 0 / 0 / 4904900 | 123 s |
+| blanket round 0 + price seed 16 | the same | 68 -> **0** (806 rounds) | **0** | 0 | 4899524 | 0 / 0 / 4899524 | 139 s |
+
+All legal (no disconnected, incomplete or unrouted nets, no malformed segments), `gr_verify` = `eval2008.pl` on all
+three. **newblue1: 22 -> 0**, the published best (LMgr), for the first time in this project (Part 68: 66; Part 202:
+22). Wirelength 4902141 against the base's 4906332 (-0.09%).
+
+What did it: the start. The same late stages from the base route stay at 22; from the program's rounded mix --
+68, three times worse than the base by overflow -- they reach 0 in all three variants, with or without the price
+seed and with either round-0 rule. The mix moved 2538 nets into a layout the router's negotiation can finish; the
+negotiation, in turn, finishes what no rounding method in Part 209 could. Controls running (18:27:07,
+`p210/ctrl1.jobs`): the mix with neither new setting, and the late stages started from two other complete routings
+(the portfolio's spread 80 at 22 and spread 64 at 36), to separate "a different start" from "this start".
