@@ -14905,3 +14905,20 @@ seed and with either round-0 rule. The mix moved 2538 nets into a layout the rou
 negotiation, in turn, finishes what no rounding method in Part 209 could. Controls running (18:27:07,
 `p210/ctrl1.jobs`): the mix with neither new setting, and the late stages started from two other complete routings
 (the portfolio's spread 80 at 22 and spread 64 at 36), to separate "a different start" from "this start".
+
+**Controls** (18:27:07-18:36:xx, `p210/ctrl1.jobs.summary`; all legal, `gr_verify` = `eval2008.pl`), and the zero
+route re-scored at 18:37 by both scorers from the kept file (0 / 0 / 4902141, no malformed, disconnected,
+incomplete or unrouted nets):
+
+| start for the late stages | new settings | region stage (path A) | total overflow |
+|---|---|---|---|
+| the solved mix, rounded (68) | none (blanket round 0, no seed) | 68 -> 0 (761 rounds) | **0** (wirelength 4903776) |
+| the portfolio's spread 80 route (22) | round 0 limited | 22 -> 22 | 22 |
+| the portfolio's spread 64 route (36) | round 0 limited | 36 -> 22 | 18 |
+| the base, spread 56 (22) -- 18:11 | none | 22 -> 22 | 22 |
+
+The start is the whole effect: from the program's rounded mix the late stages reach 0 in all four variants,
+neither new setting needed; from three other complete routings of the same design they end at 18-22. **The flow
+that reaches zero: router -> hotspot program (`hotspot_cg.py --spare 2 --out ... --force-out`) -> the router's late
+stages from its rounded mix (`PD3ROUTE_LA_FROM`).** Next (18:39): the same on newblue4, bigblue4 and newblue7,
+starting the late stages from each design's repaired route (112 / 198 / 68).
