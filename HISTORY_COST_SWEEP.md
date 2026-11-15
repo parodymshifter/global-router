@@ -14674,3 +14674,90 @@ the base. The mix that reaches 0 fills its edges exactly to capacity (the object
 capacity, and the wirelength tie-break pulls every net onto the shortest route that still fits), so any net fixed
 whole pushes a full edge over; no rounding of *this* mix has slack to work with. Not tried yet: a mix solved
 against capacities reduced by a margin, which would say how much slack the fractional solution really has.
+
+## Part 209 -- after Part 208: rewarding spare tracks halves newblue1's rounding loss (still 3x the base); no zero-overflow reference exists here; better trees move bigblue4's floor 195 -> 189.5
+
+The user's questions (2026-11-15 01:08, 01:14): what is our router missing that keeps newblue1 from the published
+0, would the same thing bring bigblue4 and newblue4 near their published bests, and are the experiments already
+proposed still in scope? Answered: of Part 151's five "make room" options four are measured (lateral shifts and
+eviction chains found nothing, annulus pressure was close to a change that had made newblue1 worse, joint
+selection is Part 208) and window re-solve is subsumed by Part 208; what Part 208 shows the router lacks is
+*solved* prices and *coordinated* moves (the same growth rule under the program's duals made routes six router runs
+never did; whole-route search from the base reached 312-316 on bigblue4, from the mix 214). Three experiments,
+in the order agreed: (1) a mix rewarded for leaving spare tracks, (3) a diff against a solution that reaches 0,
+(2) better trees in pricing. The user also asked for ways to reward spare tracks; the six given:
+
+1. **Capacity margin**: solve the mix against capacity less s tracks, count overflow against the real capacity.
+2. **Graded price on the last tracks**: a small cost per unit inside the last s units of every edge (and full
+   cost above capacity) -- the mix uses the last track only where it saves overflow. *(Built: `--spare S[,g]`.)*
+3. **Smallest spare share as a second objective**: with overflow held at its optimum, minimise the largest
+   utilisation (load <= lambda x capacity), so the tightest edge is as loose as it can be.
+4. **Count the edges that keep a spare track**: with overflow held, maximise the number of hot edges with at
+   least one track free (a reward r_e <= spare_e / track, r_e <= 1).
+5. **A congestion-aware tie-break in pricing**: a floor price on edges that are full or nearly full in the base
+   in place of pure wirelength, so equal-cost candidates avoid them (the router's analogue is virtual capacity,
+   Part 89, which moved newblue1 48 -> 24-38).
+6. **Slack-seeking rounding**: when fixing split nets, fix first the nets whose heaviest route has room to spare
+   and re-solve with the spare-track objective after each batch, instead of fixing by weight alone.
+
+**(1) The graded price, newblue1** (`--spare S`: 0.05 per unit inside the last S units; margin 10, 16 rounds;
+`p208/nb1_sp2.txt`, `nb1_sp4.txt`; 01:17:05-01:29:29):
+
+| mix | overflow of the mix | units inside the margin, last round | nets split | whole routes from the mix's heaviest | from the dive |
+|---|---|---|---|---|---|
+| no reward (Part 208) | 0.0 | -- | 1278 | 224 | 178 (126-134 with pricing in the dive) |
+| last track priced (S = 2) | 0.0 | 1247 of 4756 (2378 hot edges x 2), still falling by round (2361 at round 6) | 1793 | **86** | **68** |
+| last two tracks priced (S = 4) | 0.0 | 4109 of 9512 | 1664 | 162 | 96 |
+
+- The reward does what it was meant to: rounding loss falls 2.6x (178 -> 68, 224 -> 86).
+- It is still three times the base's 22. Even paid to avoid it, the zero-overflow mix keeps the last track in
+  use on about 620 of the 2378 edges it touches: inside a 10-tile window newblue1 at zero is a near-exact
+  packing, not a hotspot with room around it.
+- Pricing two tracks is worse than one: the mix then spreads wire to protect a second track it does not need and
+  splits the last track's use more widely.
+
+**(3) A zero-overflow reference** (`p209/nthu.sh`, `nthu_nb1.*`; 01:16:11-01:22:26). NTHU-Route 2.0's local port
+(`~/Code/nthu-route`, contest settings for newblue1): 2D stage ends at "2D sum overflow = 18, max 4"; the file it
+writes scores 859138 on both scorers (max 2, 4133320) -- the port's layer assignment puts wires on layers of the
+other direction on this design. This repeats a run already on record (the note at Part 57, same numbers), which
+should have been checked first; five minutes lost. NTHU-Route 2.0 is not the router with 0 on newblue1 (164 in
+LMgr's re-run table, Part 75); LMgr is, and no LMgr binary or solution is on this machine. So there is no whole
+zero-overflow newblue1 to diff against. The fractional one is the nearest thing; the tool now prints what its
+last mix does to the base (nets mostly on another route, wire inside the window).
+
+**(1b) A wider window, newblue1** (margin 30, last track priced; `p208/nb1_m30sp2.txt`; 01:30:41-02:35:28). 30912
+movable nets; the mix is at 0 from round 6; master 11 hit its 600 s limit (140920 routes, 10228 edge rows), and a
+fault then sent the later steps to the base (a failed master's empty weights replaced the last solved mix: fixed
+02:36; the run's whole-route lines are not results). What it does show, round for round against margin 10:
+
+| round | margin 10: units inside the last-track margin | margin 30 |
+|---|---|---|
+| 6 | 2361 | 3110 |
+| 8 | 1826 | 2110 |
+| 10 | 1502 | 1622 |
+
+Three times the window and the mix still needs the last track on as many edges: the tightness is the hotspot's
+core, not a lack of room to detour around it.
+
+**(2) Better trees, bigblue4** (`--starts 6`: each net's tree grown from each of its first six parts in turn, the
+cheapest under the prices kept; margin 10, 14 rounds; `p208/bb4_st6.txt`; 01:30:41-02:32:56):
+
+| pricing | best fractional mix | the mix against the base | whole routes (base / heaviest / integer program / dive) | file | both scorers |
+|---|---|---|---|---|---|
+| growth from the first part (Part 208) | 195.0 | -- | 312 / 224 / 214 / -- | 214 | 214, max 10, 25006095 |
+| growth from up to six parts | **189.5** | 3050 of 14655 movable nets mostly on another route; their wire inside the window -5.2% | 308 / 246 / 214 / 214 | 214 | 214, max 12, 25010526 |
+
+- Tree shape is worth 5.5 units of the floor (3%), not the 30 between 190 and the published 160; whole routes
+  end at 214 again.
+- The mix that clears a third of the overflow uses 5% *less* wire inside the window than the base: the base's
+  routes there are detours the negotiation left behind, and the gain comes from undoing them together, not from
+  detouring further.
+- The integer program's own bound (202.4 with the whole nets fixed, against a mix of 189.5) says most of the
+  rounding loss is already in fixing the whole nets.
+
+**Where this leaves the three steps.** (1) Rewarding spare tracks is right and not sufficient on newblue1, whose
+zero is a near-exact packing. (3) Not possible here. (2) Small. bigblue4's gap from 190 to the published 160 and
+newblue1's from 22 to 0 are both unexplained by anything inside a window with the outside wire fixed. Running
+(02:36:52): bigblue4 with a 30-tile window *and* a 30-tile search box per net (through-traffic allowed to go
+right round the hotspot), and newblue7 for the first time (`--union`: the window as the union of the hotspots'
+neighbourhoods, added 02:36).

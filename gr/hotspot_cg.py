@@ -4,6 +4,7 @@
 
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
                            [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
+                           [--spare S[,g]] [--starts K] [--union]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -147,12 +148,19 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     if '--dive-frac' in sys.argv:
         args.remove(sys.argv[sys.argv.index('--dive-frac') + 1])
-    opt = {'--margin': 30, '--box': 10, '--rounds': 15, '--time': 600}
+    spare, spare_w = 0, 0.05
+    if '--spare' in sys.argv:  # --spare S[,g]: the last S units of every edge's capacity cost g per unit in the mix
+        v = sys.argv[sys.argv.index('--spare') + 1]
+        args.remove(v)
+        spare = int(v.split(',')[0])
+        spare_w = float(v.split(',')[1]) if ',' in v else 0.05
+    opt = {'--margin': 30, '--box': 10, '--rounds': 15, '--time': 600, '--starts': 1}
     for k in list(opt):
         if k in sys.argv:
             opt[k] = int(sys.argv[sys.argv.index(k) + 1])
             args.remove(sys.argv[sys.argv.index(k) + 1])
     gr, base, prefix = args[0], args[1], args[2]
+    starts = opt['--starts']
     t0 = time.time()
     g = hm.read_gr(gr)
     sp, nl = g['spacing'], g['nl']
@@ -186,15 +194,29 @@ def main():
     y0 = max(0, min(e[2] for e in over) - m)
     y1 = min(g['ny'] - 1, max(e[2] + (e[0] == 1) for e in over) + m)
 
+    # --union: the window is the tiles within the margin of an over-capacity edge (several hotspots: one box around
+    # newblue7's holds most of the design), not their bounding box
+    win = None
+    if '--union' in sys.argv:
+        win = set()
+        for d, x, y in over:
+            for dx in range(-m, m + 2 if d == 0 else m + 1):
+                for dy in range(-m, m + 2 if d == 1 else m + 1):
+                    if 0 <= x + dx < g['nx'] and 0 <= y + dy < g['ny']:
+                        win.add((x + dx, y + dy))
+
+    def in_win(n):
+        return x0 <= n[0] <= x1 and y0 <= n[1] <= y1 and (win is None or n in win)
+
     def inside(e):
         d, x, y = e
         if d == 0:
-            return x0 <= x and x + 1 <= x1 and y0 <= y <= y1
-        return x0 <= x <= x1 and y0 <= y and y + 1 <= y1
+            return in_win((x, y)) and in_win((x + 1, y))
+        return in_win((x, y)) and in_win((x, y + 1))
 
     of_out = sum(v for e, v in over.items() if not inside(e))
     print(f'base {os.path.basename(base)}: overflow {of3} (3D), {of2} in 2D on {len(over)} 2D edges; window x {x0}-{x1} '
-          f'y {y0}-{y1} ({(x1 - x0 + 1) * (y1 - y0 + 1)} tiles), 2D overflow outside it {of_out} ({time.time() - t0:.0f} s)',
+          f'y {y0}-{y1} ({len(win) if win is not None else (x1 - x0 + 1) * (y1 - y0 + 1)} tiles), 2D overflow outside it {of_out} ({time.time() - t0:.0f} s)',
           flush=True)
 
     # pass 2: the nets with wire inside the window
@@ -250,7 +272,7 @@ def main():
                     par[ra] = rb
         comp = defaultdict(list)
         for node in par:
-            if x0 <= node[0] <= x1 and y0 <= node[1] <= y1:
+            if in_win(node):
                 comp[find(node)].append(node)
         if len(comp) < 2:  # nothing to join inside: its inside wire (if any) stays as it is
             kept += 1
@@ -325,7 +347,7 @@ def main():
             s += (ph if e[0] == 0 else pv)[e[1] - x0][e[2] - y0] * dem
         return s
 
-    def regrow(name, ph, pv):
+    def regrow(name, ph, pv, first=0):
         """The net's parts joined again by cheapest paths under the prices: grow from the first part to the nearest
         other, add it and the path, repeat. Returns the set of inside edges, or None if a part cannot be reached."""
         ps = parts[name]
@@ -339,8 +361,8 @@ def main():
         for i, p in enumerate(ps):
             for n in p:
                 owner[n] = i
-        tree = set(ps[0])
-        joined = {0}
+        tree = set(ps[first])
+        joined = {first}
         edges = set()
         while len(joined) < len(ps):
             dist = {n: 0.0 for n in tree}
@@ -357,28 +379,28 @@ def main():
                     hit = n
                     break
                 x, y = n
-                if x < bx1:
+                if x < bx1 and (win is None or (x + 1, y) in win):
                     nd = d + EPS + a * ph[x - x0][y - y0]
                     q = (x + 1, y)
                     if nd < dist.get(q, 1e30):
                         dist[q] = nd
                         prev[q] = (n, (0, x, y))
                         heapq.heappush(heap, (nd, q))
-                if x > bx0:
+                if x > bx0 and (win is None or (x - 1, y) in win):
                     nd = d + EPS + a * ph[x - 1 - x0][y - y0]
                     q = (x - 1, y)
                     if nd < dist.get(q, 1e30):
                         dist[q] = nd
                         prev[q] = (n, (0, x - 1, y))
                         heapq.heappush(heap, (nd, q))
-                if y < by1:
+                if y < by1 and (win is None or (x, y + 1) in win):
                     nd = d + EPS + a * pv[x - x0][y - y0]
                     q = (x, y + 1)
                     if nd < dist.get(q, 1e30):
                         dist[q] = nd
                         prev[q] = (n, (1, x, y))
                         heapq.heappush(heap, (nd, q))
-                if y > by0:
+                if y > by0 and (win is None or (x, y - 1) in win):
                     nd = d + EPS + a * pv[x - x0][y - 1 - y0]
                     q = (x, y - 1)
                     if nd < dist.get(q, 1e30):
@@ -424,7 +446,7 @@ def main():
             else:
                 for e, a in cols[n][choice.get(n, 0)][0].items():
                     load[e] += a
-        hot = sorted(e for e, a in worst.items() if load[e] + a > edge_info(e)[0])
+        hot = sorted(e for e, a in worst.items() if load[e] + a > edge_info(e)[0] - spare)
         eid = {e: i for i, e in enumerate(hot)}
         const = float(of_out) + sum(edge_info(e)[2] for e in fix_edges)
         const += sum(cost_e(e, u) for e, u in load.items() if e not in eid)
@@ -435,6 +457,8 @@ def main():
             f.write('Minimize\n obj:')
             for i in eid.values():
                 f.write(f' + o{i}')
+                if spare:
+                    f.write(f' + {spare_w} q{i}')
             for ni, n in enumerate(sorted(free)):
                 for k in free[n]:
                     c = cols[n][k]
@@ -450,11 +474,15 @@ def main():
                 f.write(f' c{i}: o{i}' + ''.join(f' - {a} {v}' for a, v in rows[i]) + f' >= {load[e] - T - M}\n')
                 if M > 0:
                     f.write(f' h{i}: o{i}' + ''.join(f' - {0.5 * a} {v}' for a, v in rows[i]) + f' >= {0.5 * (load[e] - T)}\n')
+                if spare:  # q: the units used inside the margin (the last `spare` units below capacity, and beyond)
+                    f.write(f' m{i}: q{i}' + ''.join(f' - {a} {v}' for a, v in rows[i]) + f' >= {load[e] - T + spare}\n')
             for ni, n in enumerate(sorted(free)):
                 f.write(f' s{ni}:' + ''.join(f' + x{ni}_{k}' for k in free[n]) + ' = 1\n')
             f.write('Bounds\n')
             for i in eid.values():
                 f.write(f' o{i} >= 0\n')
+                if spare:
+                    f.write(f' q{i} >= 0\n')
             if integer:
                 f.write('Binary\n')
                 for v in names.values():
@@ -470,6 +498,7 @@ def main():
         pi, x = defaultdict(float), {}
         obj = None
         section = 0
+        margin = 0.0
         if os.path.exists(sol):
             for line in open(sol):
                 if line.startswith('# Dual solution'):
@@ -481,13 +510,17 @@ def main():
                 a = line.split()
                 if len(a) == 2 and a[0] == 'Objective' and section == 1:
                     obj = float(a[1])
-                elif len(a) == 2 and a[0][0] in 'xch' and a[0][1:2].isdigit():
+                elif len(a) == 2 and a[0][0] in 'xchqm' and a[0][1:2].isdigit():
                     try:
                         v = float(a[1])
                     except ValueError:
                         continue
                     if section == 1 and a[0][0] == 'x':
                         x[a[0]] = v
+                    elif section == 1 and a[0][0] == 'q':
+                        margin += v
+                    elif section == 2 and a[0][0] == 'm':
+                        pi[hot[int(a[0][1:])]] += min(1.0, abs(v))
                     elif section == 2 and a[0][0] == 'c':
                         pi[hot[int(a[0][1:])]] += min(1.0, abs(v))
                     elif section == 2 and a[0][0] == 'h':
@@ -498,7 +531,8 @@ def main():
         for (n, k), v in names.items():
             weights[n][k] = x.get(v, 0.0)
             tie += EPS * cols[n][k][1] * weights[n][k]
-        return (None if obj is None or not x else obj + const - tie), dict(pi), weights, status, len(hot), len(names)
+        program.margin = margin  # units of the mix inside the margin (reported, not part of the overflow)
+        return (None if obj is None or not x else obj + const - tie - spare_w * margin), dict(pi), weights, status, len(hot), len(names)
 
     def price_round(pi, which, free):
         """One new candidate per net of `which` under the prices, where it beats the net's best (among the columns
@@ -514,10 +548,18 @@ def main():
                 continue  # it already has a route that pays nothing
             sigma = min(v + EPS * cs[k][1] for v, k in zip(pay, ks))
             tried += 1
-            es = regrow(n, ph, pv)
+            es, cost = None, 1e30
+            for first in range(min(starts, len(parts[n])) if len(parts[n]) > 2 else 1):
+                # --starts K: the growth begun from each of the first K parts, the cheapest tree kept (the tree a
+                # growth rule finds depends on where it starts; two parts have one answer)
+                t_ = regrow(n, ph, pv, first)
+                if t_ is None:
+                    continue
+                c_ = sum(EPS + a * (ph if e[0] == 0 else pv)[e[1] - x0][e[2] - y0] for e in t_)
+                if c_ < cost - 1e-12:
+                    es, cost = t_, c_
             if es is None:
                 continue
-            cost = sum(EPS + a * (ph if e[0] == 0 else pv)[e[1] - x0][e[2] - y0] for e in es)
             if cost < sigma - 1e-7:
                 d = {e: a for e in es}
                 same = next((k for k, c in enumerate(cs) if c[0] == d), None)
@@ -556,16 +598,24 @@ def main():
             break
         t1 = time.time()
         free = {n: list(range(len(cols[n]))) for n in nets if len(cols[n]) > 1}
-        obj, pi, weights, status, nhot, ncols = program(free, {}, False, f'r{rnd + 1}')
-        if obj is None:
-            print(f'  master {rnd + 1}: {status}; stopping', flush=True)
+        obj, pi_new, w_new, status, nhot, ncols = program(free, {}, False, f'r{rnd + 1}')
+        if obj is None:  # keep the last solved mix (a failed master's empty weights sent every later step to the base)
+            print(f'  master {rnd + 1}: {status}; stopping with the mix of round {rnd}', flush=True)
             break
+        pi, weights = pi_new, w_new
         split = sum(1 for w_ in weights.values() if max(w_.values()) < 0.999)
         history.append(obj)
         print(f'  master {rnd + 1}: {status}; overflow of the best mix {obj:.2f} (base {model0}); {len(weights)} nets with '
-              f'candidates, {ncols} routes, {nhot} edges that can overflow, {split} nets split ({time.time() - t1:.0f} s, '
+              f'candidates, {ncols} routes, {nhot} edges that can overflow, {split} nets split'
+              + (f', {program.margin:.1f} units inside the {spare}-unit margin' if spare else '') + f' ({time.time() - t1:.0f} s, '
               f'total {time.time() - t0:.0f} s)', flush=True)
     print(f'best mix by round: {", ".join(f"{h:.1f}" for h in history)} ({time.time() - t0:.0f} s)', flush=True)
+    if weights:  # what the last mix does to the base
+        moved = sum(1 for w_ in weights.values() if max(w_, key=w_.get) != 0)
+        wl0 = sum(cols[n][0][1] for n in weights)
+        wl1 = sum(v * cols[n][k][1] for n, w_ in weights.items() for k, v in w_.items())
+        print(f'the last mix against the base: {moved} of {len(nets)} movable nets mostly on another route; their wire '
+              f'inside the window {wl0} -> {wl1:.0f} edges ({100 * (wl1 / max(1, wl0) - 1):+.2f}%)', flush=True)
 
     # whole routes
     rng = random.Random(1)
