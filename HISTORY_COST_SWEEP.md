@@ -14798,3 +14798,21 @@ rounding the mix. bigblue4 is the one design where the floor itself is short of 
 - Costs on the other ranking terms: max overflow 6 / 12 / 6 against the bases' 2-4; wirelength +0.1% to +0.3%.
 - newblue1 is the exception (68 whole-route against a base of 22, above): its zero is a packing with no slack
   at all.
+
+**newblue1: neighbourhoods re-solved exactly** (`--lns`: around each over-capacity edge of the best whole-route
+solution, the nets using an edge within 4 tiles -- up to 250, nearest first -- freed over all their candidates and
+the integer program solved with every other net held, kept if the design's overflow falls; with `--spare 2`; margin
+10, 12 rounds; `p208/nb1_lns.txt`, 12:46:29-12:54:58): the base's 22 is untouched -- 10 integer programs, none
+better, 21 s in all. The other whole-route lines repeat the spare-track run (104 from the heaviest routes, 68 from
+the dive). Small neighbourhoods around the over-capacity edges hold no exchange that helps; rerun with 12 tiles,
+up to 2000 nets and 300 s per solve (`--lns-size 12,2000,300`, 13:18).
+Result (13:18:09-14:14:50, `p208/nb1_lns12.txt`): 22 -> 22 again -- 10 integer programs of up to 2000 nets within
+12 tiles, 300 s each (3005 s), none better than the base.
+
+**newblue1, closed in this form.** Eight whole-route attempts from a zero-overflow fractional mix -- the
+mix's heaviest routes, the integer program over the split nets, three dives (with and without pricing, 25% and 2%
+steps), the spare-track reward at 1 and 2 tracks and at margins 10 and 30, and exact re-solves of neighbourhoods of
+250 and 2000 nets -- and none below 22. The candidates exist (fractionally 0), but no whole-route selection of
+them that any method here could find goes below the base: newblue1's zero, if LMgr's routes resemble ours at all,
+was reached by negotiating the whole design toward it, not by repairing a finished route in a window. The tool
+stays as it is for the other three residues, where it pays (Part 209's table).

@@ -4,7 +4,7 @@
 
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
                            [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
-                           [--spare S[,g]] [--starts K] [--union] [--lns]
+                           [--spare S[,g]] [--starts K] [--union] [--lns] [--lns-size 4,250,20]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -148,6 +148,8 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     if '--dive-frac' in sys.argv:
         args.remove(sys.argv[sys.argv.index('--dive-frac') + 1])
+    if '--lns-size' in sys.argv:
+        args.remove(sys.argv[sys.argv.index('--lns-size') + 1])
     spare, spare_w = 0, 0.05
     if '--spare' in sys.argv:  # --spare S[,g]: the last S units of every edge's capacity cost g per unit in the mix
         v = sys.argv[sys.argv.index('--spare') + 1]
@@ -758,6 +760,9 @@ def main():
                     load[e] += a
             return static + sum(cost_e(e, u) for e, u in load.items()), load
 
+        lns_r, lns_n, lns_t = 4, 250, 20  # --lns-size R,N,T: radius in tiles, nets per neighbourhood, seconds per solve
+        if '--lns-size' in sys.argv:
+            lns_r, lns_n, lns_t = (int(v) for v in sys.argv[sys.argv.index('--lns-size') + 1].split(','))
         solves = wins = 0
         cur, load = evaluate(best)
         start = cur
@@ -771,16 +776,16 @@ def main():
                 for n in nets:
                     if len(cols[n]) > 1:
                         for e in cols[n][best.get(n, 0)][0]:
-                            if abs(e[1] - seed[1]) <= 4 and abs(e[2] - seed[2]) <= 4:
+                            if abs(e[1] - seed[1]) <= lns_r and abs(e[2] - seed[2]) <= lns_r:
                                 users[max(abs(e[1] - seed[1]), abs(e[2] - seed[2]))].append(n)
                 free = {}
-                for r in range(5):  # nearest first, up to 250 nets
+                for r in range(lns_r + 1):  # nearest first, up to lns_n nets
                     for n in users[r]:
-                        if n not in free and len(free) < 250:
+                        if n not in free and len(free) < lns_n:
                             free[n] = list(range(len(cols[n])))
                 if not free:
                     continue
-                obj, _, wi, status, _, _ = program(free, best, True, 'lns', 20)
+                obj, _, wi, status, _, _ = program(free, best, True, 'lns', lns_t)
                 solves += 1
                 if obj is None or obj > cur - 0.5:
                     continue
