@@ -14940,3 +14940,12 @@ bigblue4 (196 against 160) and newblue7 (62 against 54) is the floor itself, whi
 outside the window staying where the base put it. Routes kept: `p210/newblue7_62.route.gz`, `bigblue4_196.route.gz`.
 Next: the loop once more -- the hotspot program from these new routes (the outside wire has moved), then the late
 stages again.
+
+**The loop once more** (2026-11-16 01:02:56-01:30:04; the hotspot program from the new routes; `p208/bb4_loop2.txt`,
+`nb7_loop2.txt`): bigblue4 from 196 -- floor 188.0 (unchanged), whole routes 196 at best (the integer program over
+560 split nets solved to optimality: 229.8 with the whole nets fixed); newblue7 from 62 -- floor 60.0 (16
+over-capacity edges, a smaller window), whole routes 62 at best. Nothing below either start; the floors did not
+move with the outside wire. **Next (07:41:01, `p210/chain.sh`, `chain.log`):** newblue1's exact recipe on the
+other three -- the program's best rounding *other than* the base, written even when worse (`--force-out`), as
+the late stages' start -- to test whether a rough start the negotiation can descend from is the active
+ingredient beyond newblue1.
