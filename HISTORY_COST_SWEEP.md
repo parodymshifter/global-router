@@ -14990,3 +14990,31 @@ selection rule, and end to end on a synthetic 60 x 60 design (base 22, late stag
 **Reruns** (17:25:32, `~/Code/GlobalRouterRuns/p211/run.sh`, `run.log`), each from the portfolio's kept route,
 router `pd39route.p210b`: newblue1 then newblue4, newblue7, bigblue4. To reproduce: newblue1 0, newblue4 112,
 newblue7 62, bigblue4 196 (Parts 209-210, made with per-design settings).
+
+**First rerun: newblue1 reproduces zero** (17:25:32-17:54:33, `p211/newblue1/flow.tsv`): base 22 -> the repair
+none -> the late stages from the rough rounding **0** (max 0, wirelength 4898257, legal, both scorers), 1741 s for
+the whole flow. newblue4, newblue7 and bigblue4 still running.
+
+**Option 2, first measurements: what holds bigblue4's floor.**
+- *Who is on the over-capacity edges* (`hotspot_cg.py --stats`, on the 196 route, margin 10, `--union`): 1727
+  nets cross the 23 over-capacity edges inside the window; 70% of them must join three or more parts (43% nine or
+  more), and those many-part nets carry 40.5% of the window's wire. 97% of their 12861 parts hold a pin (the rest
+  are points where the net's outside wire meets the window); by pin tiles over the whole design, 26% of the demand
+  on the over-capacity edges is from nets of 1-2 pin tiles, **67% from nets of 6-20 pin tiles**, ~0 from nets
+  above 50. So the hotspot is local, medium-sized multi-pin nets whose pins are inside it -- not big nets passing
+  through, and not the wire fixed outside the window (Part 191b said as much for the 120-tile box: its demand is
+  its own pins').
+- *Better trees for those nets* (`--kpe`, key-path exchange on every new candidate of a net with 3+ parts: remove
+  each key path and rejoin the two pieces by the cheapest path under the prices, recomputed after every change; a
+  guard checks every tree still joins all parts -- a first version that did not recompute left 37-322 trees
+  disconnected per round, all caught by the guard, now 0; `p211/bb4_kpe.txt`, 17:33:32-18:07:06): floor **186.8**
+  against 188.3 without (14 rounds, still falling ~0.1 a round). Tree quality is worth ~1.5 units, not the 28
+  between the floor and the published 160.
+
+So with pins fixed, outside wire irrelevant, reach (Part 209) and tree quality both ruled out, the window's
+fractional floor of ~187 looks like a property of these nets' pins and the edges' capacities -- which the
+published 160 (NTHU-Route 2.0's page; LMgr's re-run of it: 166) contradicts, unless our capacity model or our
+pricing still misses something. The direct test: NTHU-Route's own 2D routes for bigblue4 (the local port,
+`~/Code/nthu-route`, prints its 2D overflow; its own layer assignment is broken on newblue1, Part 209, but
+`PD3ROUTE_LA_FROM` reads any route as 2D and our layer assignment and late stages can finish it). To run once a
+router slot is free (memory: three flows running).

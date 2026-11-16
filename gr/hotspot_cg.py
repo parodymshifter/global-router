@@ -5,7 +5,7 @@
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
                            [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
                            [--spare S[,g]] [--starts K] [--union] [--lns] [--lns-size 4,250,20]
-                           [--prices-out FILE [--prices-only]] [--force-out] [--alt-out ROUTE]
+                           [--prices-out FILE [--prices-only]] [--force-out] [--alt-out ROUTE] [--kpe] [--stats]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -169,6 +169,8 @@ def main():
             args.remove(sys.argv[sys.argv.index(k) + 1])
     gr, base, prefix = args[0], args[1], args[2]
     starts = opt['--starts']
+    kpe = '--kpe' in sys.argv
+    kpe_broken = [0]  # trees the exchange left disconnected (a fault: the original is kept)
     t0 = time.time()
     g = hm.read_gr(gr)
     sp, nl = g['spacing'], g['nl']
@@ -296,6 +298,40 @@ def main():
     del route2
     print(f'{len(nets)} movable nets ({kept} others keep their inside wire: one part only); '
           f'{sum(len(p) for p in parts.values())} part nodes ({time.time() - t0:.0f} s)', flush=True)
+    if '--stats' in sys.argv:  # Part 211: how many parts the movable nets have, and how much wire the multi-part ones carry
+        from collections import Counter
+        cnt = Counter(min(len(parts[n]), 9) for n in nets)
+        hot_edges = {e for e in over if inside(e)}
+        on_hot = [n for n in nets if any(e in hot_edges for e in cols[n][0][0])]
+        cnt_hot = Counter(min(len(parts[n]), 9) for n in on_hot)
+        wire = Counter()
+        for n in nets:
+            wire[min(len(parts[n]), 9)] += cols[n][0][1]
+        tot = sum(wire.values())
+        print('parts per movable net (9 = 9 or more): ' + ', '.join(f'{k}: {cnt[k]}' for k in sorted(cnt)), flush=True)
+        print(f'  on the {len(hot_edges)} over-capacity edges inside ({len(on_hot)} nets): '
+              + ', '.join(f'{k}: {cnt_hot[k]}' for k in sorted(cnt_hot)), flush=True)
+        print('  share of the inside wire: ' + ', '.join(f'{k}: {100 * wire[k] / tot:.1f}%' for k in sorted(wire)), flush=True)
+        # the nets on the over-capacity edges: their pin tiles over the whole design, and how many of their parts
+        # inside the window hold a pin (the others are only points where the net's outside wire meets the window)
+        bins = (2, 3, 5, 10, 20, 50, 100, 1000000)
+        lab = lambda v: next(f'<={b}' if b < 1000000 else '>100' for b in bins if v <= b)
+        pc = Counter(lab(len(pins.get(n, {}))) for n in on_hot)
+        print(f'  pin tiles of those {len(on_hot)} nets (whole design): ' + ', '.join(
+            f'{b}: {pc[b]}' for b in [lab(b) for b in bins] if pc[b]), flush=True)
+        pin_parts = sum(1 for n in on_hot for p in parts[n] if any(t in pins.get(n, {}) for t in p))
+        all_parts = sum(len(parts[n]) for n in on_hot)
+        dem = Counter()
+        for e in hot_edges:
+            for n in nets:
+                if e in cols[n][0][0]:
+                    dem[lab(len(pins.get(n, {})))] += cols[n][0][0][e]
+        dt = sum(dem.values())
+        print(f'  their parts: {all_parts}, of which {pin_parts} hold a pin ({100 * pin_parts / max(1, all_parts):.0f}%); '
+              f'demand on the over-capacity edges by pin tiles: ' + ', '.join(
+                  f'{b}: {100 * dem[b] / dt:.0f}%' for b in [lab(b) for b in bins] if dem[b]), flush=True)
+        if '--stats-only' in sys.argv:
+            return
 
     # The exact 2D cost of an edge (Part 208: summing the layers' capacities was 12 units optimistic on bigblue4 --
     # a layer with an odd number of units left takes one more net for 1 unit of overflow, not 0). With every movable
@@ -427,6 +463,170 @@ def main():
             joined.add(o)
             tree.update(ps[o])
         return edges
+
+    def improve(name, es, ph, pv):
+        """--kpe (Part 211): key-path exchange on a net's tree under the prices. A key path joins two key nodes (a
+        part, or a tree node of degree >= 3) through degree-2 tree nodes; remove it, and if the two pieces left can
+        be joined again more cheaply (one multi-source search, inside the same box as regrow), take the cheaper
+        path. Repeat until a pass gains nothing (at most 4 passes); dangling branches are pruned after each change.
+        The growth rule alone is a 2-approximation for many-part nets; on bigblue4's hot edges 43% of the nets
+        have 9 or more parts."""
+        ps = parts[name]
+        a = unit[name]
+        b = opt['--box']
+        bx0 = max(x0, min(n[0] for p in ps for n in p) - b)
+        bx1 = min(x1, max(n[0] for p in ps for n in p) + b)
+        by0 = max(y0, min(n[1] for p in ps for n in p) - b)
+        by1 = min(y1, max(n[1] for p in ps for n in p) + b)
+        owner = {}
+        for i, p in enumerate(ps):
+            for n in p:
+                owner[n] = i
+        price = lambda e: EPS + a * (ph if e[0] == 0 else pv)[e[1] - x0][e[2] - y0]
+        orig = set(es)
+        es = set(es)
+
+        def adjacency(es):
+            adj = defaultdict(list)
+            for e in es:
+                u, v = ends(e)
+                adj[u].append((v, e))
+                adj[v].append((u, e))
+            return adj
+
+        def prune(es):
+            while True:
+                adj = adjacency(es)
+                leaves = [e for e in es for u in ends(e) if len(adj[u]) == 1 and u not in owner]
+                if not leaves:
+                    return es
+                es = es - set(leaves)
+
+        es = prune(es)
+        changes = 0
+        for _ in range(200):  # one change per pass: the key paths are recomputed after every change (a new path that
+            gained = False    # attaches inside another key path would make that path's removal split the tree in three)
+            adj = adjacency(es)
+            key = {u for u in adj if u in owner or len(adj[u]) != 2}
+            seen_e = set()
+            paths = []
+            for k in key:
+                for v, e in adj[k]:
+                    if e in seen_e:
+                        continue
+                    path = [e]
+                    seen_e.add(e)
+                    prev, cur = k, v
+                    while cur not in key:
+                        nxt = [(w, f) for w, f in adj[cur] if f not in seen_e]
+                        if not nxt:
+                            break
+                        w, f = nxt[0]
+                        path.append(f)
+                        seen_e.add(f)
+                        prev, cur = cur, w
+                    paths.append((k, path))
+            paths.sort(key=lambda kp: -sum(price(e) for e in kp[1]))
+            for k0, pth in paths:
+                if not set(pth) <= es:
+                    continue
+                rest = es - set(pth)
+                par = {}
+
+                def find(x):
+                    while par[x] != x:
+                        par[x] = par[par[x]]
+                        x = par[x]
+                    return x
+
+                def union(x, y):
+                    rx, ry = find(x), find(y)
+                    if rx != ry:
+                        par[rx] = ry
+                for p in ps:
+                    for n in p:
+                        par.setdefault(n, n)
+                    for n in p[1:]:
+                        union(p[0], n)
+                for e in rest:
+                    u, v = ends(e)
+                    par.setdefault(u, u)
+                    par.setdefault(v, v)
+                    union(u, v)
+                for e in pth:
+                    for u in ends(e):
+                        par.setdefault(u, u)
+                side = find(k0)
+                nodes = [n for n in par if n in owner] + [u for e in rest for u in ends(e)]
+                src = {n for n in nodes if find(n) == side}
+                dst = {n for n in nodes if find(n) != side}
+                if not dst:  # the parts stay joined without it (a part's outside wire closes a loop): drop it
+                    es = prune(rest)
+                    gained = True
+                    break
+                if not src:
+                    continue
+                old = sum(price(e) for e in pth)
+                dist = {n: 0.0 for n in src}
+                prev = {}
+                heap = [(0.0, n) for n in src]
+                heapq.heapify(heap)
+                hit = None
+                while heap:
+                    d, n = heapq.heappop(heap)
+                    if d >= old - 1e-9:
+                        break  # nothing cheaper than the path removed
+                    if d > dist.get(n, 1e30):
+                        continue
+                    if n in dst:
+                        hit = n
+                        break
+                    x, y = n
+                    for q, e in (((x + 1, y), (0, x, y)), ((x - 1, y), (0, x - 1, y)), ((x, y + 1), (1, x, y)),
+                                 ((x, y - 1), (1, x, y - 1))):
+                        if not (bx0 <= q[0] <= bx1 and by0 <= q[1] <= by1) or (win is not None and q not in win):
+                            continue
+                        nd = d + price(e)
+                        if nd < dist.get(q, 1e30):
+                            dist[q] = nd
+                            prev[q] = (n, e)
+                            heapq.heappush(heap, (nd, q))
+                if hit is None or dist[hit] >= old - 1e-9:
+                    continue
+                newp = []
+                n = hit
+                while n not in src:
+                    n, e = prev[n]
+                    newp.append(e)
+                es = prune(rest | set(newp))
+                gained = True
+                break
+            if not gained:
+                break
+            changes += 1
+        # safety: every part still joined (else the original tree)
+        par2 = {}
+
+        def f2(x):
+            while par2[x] != x:
+                par2[x] = par2[par2[x]]
+                x = par2[x]
+            return x
+        for p in ps:
+            for n in p:
+                par2.setdefault(n, n)
+            for n in p[1:]:
+                par2[f2(n)] = f2(p[0])
+        for e in es:
+            u, v = ends(e)
+            par2.setdefault(u, u)
+            par2.setdefault(v, v)
+            if f2(u) != f2(v):
+                par2[f2(u)] = f2(v)
+        if len({f2(p[0]) for p in ps}) != 1:
+            kpe_broken[0] += 1
+            return set(orig)
+        return es
 
     def all_edges():
         es = set()
@@ -568,6 +768,9 @@ def main():
                     es, cost = t_, c_
             if es is None:
                 continue
+            if kpe and len(parts[n]) > 2:
+                es = improve(n, es, ph, pv)
+                cost = sum(EPS + a * (ph if e[0] == 0 else pv)[e[1] - x0][e[2] - y0] for e in es)
             if cost < sigma - 1e-7:
                 d = {e: a for e in es}
                 same = next((k for k, c in enumerate(cs) if c[0] == d), None)
@@ -598,7 +801,8 @@ def main():
     for rnd in range(opt['--rounds'] + 1):
         t1 = time.time()
         tried, added = price_round(pi, nets, None)
-        print(f'round {rnd}: {tried} nets priced, {added} new routes ({time.time() - t1:.0f} s)', flush=True)
+        print(f'round {rnd}: {tried} nets priced, {added} new routes ({time.time() - t1:.0f} s)'
+              + (f'; key-path exchange left {kpe_broken[0]} trees disconnected so far' if kpe else ''), flush=True)
         if added == 0:
             print('no net finds a cheaper route: the candidates are complete for this growth rule', flush=True)
             break
