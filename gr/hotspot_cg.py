@@ -5,7 +5,7 @@
   python3 gr/hotspot_cg.py DESIGN.gr BASE.route[.gz] WORK_PREFIX [--margin 30] [--box 10] [--rounds 15] [--time 600]
                            [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
                            [--spare S[,g]] [--starts K] [--union] [--lns] [--lns-size 4,250,20]
-                           [--prices-out FILE [--prices-only]] [--force-out]
+                           [--prices-out FILE [--prices-only]] [--force-out] [--alt-out ROUTE]
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -153,6 +153,9 @@ def main():
         args.remove(sys.argv[sys.argv.index('--lns-size') + 1])
     if '--prices-out' in sys.argv:
         args.remove(sys.argv[sys.argv.index('--prices-out') + 1])
+    for k in ('--out', '--alt-out'):
+        if k in sys.argv:
+            args.remove(sys.argv[sys.argv.index(k) + 1])
     spare, spare_w = 0, 0.05
     if '--spare' in sys.argv:  # --spare S[,g]: the last S units of every edge's capacity cost g per unit in the mix
         v = sys.argv[sys.argv.index('--spare') + 1]
@@ -828,7 +831,7 @@ def main():
             o, ch = search(dict(best), 'the re-solved neighbourhoods')
             if o < best_of:
                 best_of, best = o, ch
-    if '--out' not in sys.argv:
+    if '--out' not in sys.argv and '--alt-out' not in sys.argv:
         return
     # --out ROUTE: the best whole-route solution as a legal 3D route file. A changed net keeps its base wire outside
     # the window on its layers; its new inside wire goes, one straight run at a time, on the layer of that direction
@@ -836,6 +839,86 @@ def main():
     # rebuilt -- at every tile of the net one stack over the layers its wire and pins touch there. Vias have no
     # capacity in ISPD 2008, so this adds no overflow; it is not a via-minimal assignment (the wirelength it scores is
     # an upper limit).
+    def write_route(choice, model_of, out):
+        """The whole-route solution `choice` as a legal 3D route file (see above); the 3D usage is restored after,
+        so a second file can be written from the same state."""
+        undo = []
+
+        def add(e, v):
+            use3[e] = use3.get(e, 0) + v
+            undo.append((e, v))
+
+        changed = sorted(n for n in nets if choice.get(n, 0) != 0)
+        for n in changed:  # take the changed nets' old inside wire out of the 3D usage
+            w = unit[n] - sp[0]
+            for e in base3[n]:
+                if inside(e[:3]):
+                    add(e, -(w + sp[e[3]]))
+        hlay = [l for l in range(nl) if g['hcap'][l] > 0]
+        vlay = [l for l in range(nl) if g['vcap'][l] > 0]
+        new3 = {}
+        lost = 0
+        for n in changed:
+            a = unit[n]
+            es = sorted(cols[n][choice[n]][0])
+            seen = set(es)
+            wire = [e for e in base3[n] if not inside(e[:3])]
+            runs = []
+            for e in es:  # maximal straight runs
+                d, x, y = e
+                if ((d, x - 1, y) if d == 0 else (d, x, y - 1)) in seen:
+                    continue
+                run = [e]
+                while True:
+                    x, y = (x + 1, y) if d == 0 else (x, y + 1)
+                    if (d, x, y) not in seen:
+                        break
+                    run.append((d, x, y))
+                runs.append(run)
+            for run in runs:
+                lays = hlay if run[0][0] == 0 else vlay
+                slack = {l: min(hm.cap_of(g, e + (l,)) - use3.get(e + (l,), 0) for e in run) for l in lays}
+                l = max(lays, key=lambda l_: slack[l_])
+                if slack[l] >= a:
+                    for e in run:
+                        add(e + (l,), a)
+                        wire.append(e + (l,))
+                else:
+                    for e in run:
+                        l = max(lays, key=lambda l_: hm.cap_of(g, e + (l_,)) - use3.get(e + (l_,), 0))
+                        if hm.cap_of(g, e + (l,)) - use3.get(e + (l,), 0) < a:
+                            lost += 1
+                        add(e + (l,), a)
+                        wire.append(e + (l,))
+            new3[n] = wire
+        of_new = sum(u - hm.cap_of(g, e) for e, u in use3.items() if u > hm.cap_of(g, e))
+        print(f'{os.path.basename(out)}: {len(changed)} nets changed; predicted 3D overflow {of_new} (the 2D model '
+              f'{model_of}; base {of3}); {lost} edges placed on a layer without room for a whole net', flush=True)
+        raw = out + '.raw'
+        with open(raw, 'w') as f:
+            for name, block, _ in hm.nets_of(base):
+                if name not in new3:
+                    f.write(block)
+                else:
+                    f.write(net_block(g, block.split('\n', 1)[0], new3[name], pins.get(name, {})))
+        rebalance(g, gr, raw, out)
+        os.remove(raw)
+        for e, v in undo:
+            use3[e] -= v
+        print(f'wrote {out} ({time.time() - t0:.0f} s)', flush=True)
+
+    if '--alt-out' in sys.argv:
+        # Part 210 (gr/hotspot_flow.py): the best whole-route rounding other than the base, written whatever its
+        # overflow -- a start for the router's late stages (newblue1: a rounding at 68 against a base of 22 let them
+        # reach 0)
+        if alt:
+            o, ch = min(alt, key=lambda t: t[0])
+            print(f'--alt-out: the best start other than the base ({o}; base {model0})', flush=True)
+            write_route(ch, o, sys.argv[sys.argv.index('--alt-out') + 1])
+        else:
+            print('--alt-out: no start other than the base; no file written', flush=True)
+    if '--out' not in sys.argv:
+        return
     out = sys.argv[sys.argv.index('--out') + 1]
     if '--force-out' in sys.argv and best_of >= model0 and alt:
         # Part 210: write the best start that is not the base even though it is worse -- a whole-route rounding of
@@ -845,63 +928,7 @@ def main():
     elif best_of >= model0:
         print(f'--out: no whole-route solution below the base ({best_of} against {model0}); no file written', flush=True)
         return
-    changed = sorted(n for n in nets if best.get(n, 0) != 0)
-    for n in changed:  # take the changed nets' old inside wire out of the 3D usage
-        w = unit[n] - sp[0]
-        for e in base3[n]:
-            if inside(e[:3]):
-                use3[e] -= w + sp[e[3]]
-    hlay = [l for l in range(nl) if g['hcap'][l] > 0]
-    vlay = [l for l in range(nl) if g['vcap'][l] > 0]
-    new3 = {}
-    lost = 0
-    for n in changed:
-        a = unit[n]
-        es = sorted(cols[n][best[n]][0])
-        seen = set(es)
-        wire = [e for e in base3[n] if not inside(e[:3])]
-        runs = []
-        for e in es:  # maximal straight runs
-            d, x, y = e
-            if ((d, x - 1, y) if d == 0 else (d, x, y - 1)) in seen:
-                continue
-            run = [e]
-            while True:
-                x, y = (x + 1, y) if d == 0 else (x, y + 1)
-                if (d, x, y) not in seen:
-                    break
-                run.append((d, x, y))
-            runs.append(run)
-        for run in runs:
-            lays = hlay if run[0][0] == 0 else vlay
-            slack = {l: min(hm.cap_of(g, e + (l,)) - use3.get(e + (l,), 0) for e in run) for l in lays}
-            l = max(lays, key=lambda l_: slack[l_])
-            if slack[l] >= a:
-                for e in run:
-                    use3[e + (l,)] += a
-                    wire.append(e + (l,))
-            else:
-                for e in run:
-                    l = max(lays, key=lambda l_: hm.cap_of(g, e + (l_,)) - use3.get(e + (l_,), 0))
-                    if hm.cap_of(g, e + (l,)) - use3.get(e + (l,), 0) < a:
-                        lost += 1
-                    use3[e + (l,)] += a
-                    wire.append(e + (l,))
-        new3[n] = wire
-    of_new = sum(u - hm.cap_of(g, e) for e, u in use3.items() if u > hm.cap_of(g, e))
-    print(f'--out: {len(changed)} nets changed; predicted 3D overflow {of_new} (the 2D model {best_of}; base {of3}); '
-          f'{lost} edges placed on a layer without room for a whole net', flush=True)
-    raw = out + '.raw'
-    with open(raw, 'w') as f:
-        for name, block, _ in hm.nets_of(base):
-            if name not in new3:
-                f.write(block)
-            else:
-                f.write(net_block(g, block.split('\n', 1)[0], new3[name], pins.get(name, {})))
-    rebalance(g, gr, raw, out)
-    os.remove(raw)
-    print(f'wrote {out} ({time.time() - t0:.0f} s)')
-
+    write_route(best, best_of, out)
 
 if __name__ == '__main__':
     main()

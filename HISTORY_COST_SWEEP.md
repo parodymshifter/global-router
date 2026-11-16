@@ -14970,3 +14970,23 @@ router -> `hotspot_cg.py` (repair, and for a design whose floor is far below its
 router's late stages from that route (`PD3ROUTE_LA_FROM`). Not adopted into the 2008 flow (the user's decision).
 What would take bigblue4 and newblue7 further is a lower floor, and neither a wider window (Part 209: 30 tiles,
 196.7), a wider search box (30 tiles) nor a moved outside wire (this Part's second loop, 188.0) lowers bigblue4's.
+
+## Part 211 -- one command for the hotspot flow, then what holds bigblue4's floor (in progress)
+
+The user's order (2026-11-16 17:22): first a reproducible flow (one command, one setting for every design, the
+reruns to confirm it), then option 2 -- what limits bigblue4's and newblue7's windows' floors.
+
+**Built: `gr/hotspot_flow.py DESIGN.gr BASE.route WORK_DIR [--out BEST.route] [--router ...] [--settings ...]
+[--set ...] [--cg-args ...] | --selftest`.** Scores the base (a legal zero is the result); runs `hotspot_cg.py`
+with one setting (`--margin 10 --rounds 14 --spare 2 --starts 6 --union`, integer step and dive on), writing its
+repair (when it beats the base) and its best rounding other than the base (`--alt-out`, new: written whatever its
+overflow; the writer now restores the 3D usage, so both files come from one run); runs the router's late stages
+(`PD3ROUTE_LA_FROM`) from the repair and from the rough rounding when it is a different file, through
+`run_batch.sh` (gr_verify, eval2008.pl, summary); keeps the best of base, repair and late-stage runs by (overflow,
+max, wirelength) among those legal with both scorers agreeing; writes `flow.tsv` and `--out`. Self-test: the
+selection rule, and end to end on a synthetic 60 x 60 design (base 22, late stages from the rough start 22,
+`--out` re-scored legal) -- pass.
+
+**Reruns** (17:25:32, `~/Code/GlobalRouterRuns/p211/run.sh`, `run.log`), each from the portfolio's kept route,
+router `pd39route.p210b`: newblue1 then newblue4, newblue7, bigblue4. To reproduce: newblue1 0, newblue4 112,
+newblue7 62, bigblue4 196 (Parts 209-210, made with per-design settings).
