@@ -14949,3 +14949,24 @@ move with the outside wire. **Next (07:41:01, `p210/chain.sh`, `chain.log`):** n
 other three -- the program's best rounding *other than* the base, written even when worse (`--force-out`), as
 the late stages' start -- to test whether a rough start the negotiation can descend from is the active
 ingredient beyond newblue1.
+
+**newblue1's recipe on the other three** (2026-11-16 07:41:01-10:12:04, `p210/chain.log`; all legal, `gr_verify` =
+`eval2008.pl`):
+
+| design | rounding written (`--force-out`) | late stages: region stage | final | before |
+|---|---|---|---|---|
+| newblue4 (from 112) | 110 (below the base, written as a result) | 110 -> 110 | 110, max 8, 13215748 | 112 |
+| bigblue4 (from 196) | 196 (the integer program's, equal to the base) | 196 -> 196 | 196, max 12, 24855181 | 196 |
+| newblue7 (from 62) | 64 (the dive's) | 64 -> 64, refinement -> 62 | 62, max 4, 35867407 | 62 |
+
+No gain (newblue4's 2 units are its noise). The roundings here are not rough: each design's best rounding other
+than its base is within 0-2 units of it, because each base is already within 4-8 of its window's floor (newblue4
+104.8, bigblue4 188.0, newblue7 60.0). newblue1's start was rough *and* its floor was 0. So the recipe takes each
+design to about its window's floor; it does not lower the floor.
+
+**Where Part 210 leaves the four residues** (best legal routes, both scorers agreeing; published best in brackets):
+newblue1 **0** (0), newblue4 **112** (138), newblue7 **62** (54, forced >= 54), bigblue4 **196** (160). The flow:
+router -> `hotspot_cg.py` (repair, and for a design whose floor is far below its base, the rounded mix) -> the
+router's late stages from that route (`PD3ROUTE_LA_FROM`). Not adopted into the 2008 flow (the user's decision).
+What would take bigblue4 and newblue7 further is a lower floor, and neither a wider window (Part 209: 30 tiles,
+196.7), a wider search box (30 tiles) nor a moved outside wire (this Part's second loop, 188.0) lowers bigblue4's.
