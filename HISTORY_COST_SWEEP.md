@@ -14922,3 +14922,21 @@ neither new setting needed; from three other complete routings of the same desig
 that reaches zero: router -> hotspot program (`hotspot_cg.py --spare 2 --out ... --force-out`) -> the router's late
 stages from its rounded mix (`PD3ROUTE_LA_FROM`).** Next (18:39): the same on newblue4, bigblue4 and newblue7,
 starting the late stages from each design's repaired route (112 / 198 / 68).
+
+**The other residues: the late stages from their repaired routes** (2026-11-15 18:39:25-19:19, `p210/res1.jobs.summary`;
+all legal, `gr_verify` = `eval2008.pl`):
+
+| design | start (Part 209's repair) | region stage, path A and all four variants | after refinement and the rest | fractional floor (Part 209) | published best |
+|---|---|---|---|---|---|
+| newblue4 | 112 | 112 -> 112 (batched rounds reached only 146-194) | **112**, max 6, 13220733 | 104.8 | 138 |
+| bigblue4 | 198 | 198 -> 198 (batched 284-370) | **196**, max 12, 24873239 | 188.3 | 160 |
+| newblue7 | 68 | 68 -> 68 (batched 344-528) | **62**, max 4, 35881333 | 58.0 | 54 (forced 54) |
+
+newblue7 68 -> 62 and bigblue4 198 -> 196 come from refinement; the region stage never beats a start that is
+already the repair's polished optimum. newblue1's start was different in kind: a rounding of a mix whose floor is
+0, three times worse than the base by overflow, with room for the negotiation to descend (68 -> 0). Here every
+design now sits within 4-8 units of its own window's fractional floor -- what is left to the published bests on
+bigblue4 (196 against 160) and newblue7 (62 against 54) is the floor itself, which is conditional on the wire
+outside the window staying where the base put it. Routes kept: `p210/newblue7_62.route.gz`, `bigblue4_196.route.gz`.
+Next: the loop once more -- the hotspot program from these new routes (the outside wire has moved), then the late
+stages again.
