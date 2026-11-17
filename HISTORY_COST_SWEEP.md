@@ -15149,7 +15149,9 @@ spread-64 single run's 56 stays newblue7's best (Part 212 above); six orderings 
 hotspot program 2323 s -> repair **114** (max 6) -> late stages from the repair **114** (max 6, wirelength 13154674;
 legal, both scorers) kept; 4938 s. Part 209's 112 (nets routed) stays newblue4's record, 2 better.
 Then (11:15) the same flow on bigblue4's 130 (`p212/pf/bigblue4/best.route.gz`) and newblue7's 56
-(`p212/nb7_skip_sp64.route.gz`), `p212/flow/`.
+(`p212/nb7_skip_sp64.route.gz`), `p212/flow/`. **bigblue4: 130 -> repair 90 (max 8) -> late stages from the repair 90** (max 8,
+wirelength 24740030; legal, both scorers agree) kept; 11379 s -- **70 under the published 160**, against 196 for
+the same flow with the exempt nets routed (Part 210).
 
 
 ## Part 213 -- how much of the residue is forced: the exact fractional bound (in progress)
