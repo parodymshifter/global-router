@@ -15032,3 +15032,33 @@ pricing still misses something. The direct test: NTHU-Route's own 2D routes for 
 (max 4, wirelength 20915898; legal, both scorers agree), as on newblue1 -- the port's 3D stage is broken, its 2D
 stage is not. Next (Part 212): our late stages and layer assignment from its 2D routes, and a 2D comparison of its
 routes with ours around the hotspot.
+
+## Part 212 -- the nets the contest exempts (in progress)
+
+**What NTHU-Route's bigblue4 routes have that ours do not** (`~/Code/GlobalRouterRuns/p212/compare2d.py`, our 196
+route against NTHU-Route 2.0's, 2D, in the window around our over-capacity edges, margin 10; `p212/cmp_bb4.txt`):
+2D overflow 196 on 23 edges against 184 on 39, both entirely inside the window; inside demand 292416 against 288400.
+The two nets with the biggest drop inside the window are **n0 (20766 pins) and n787 (15214 pins): 424 and 388
+units of demand inside the window in ours, 0 in NTHU's -- NTHU-Route does not route them at all** (22530 and 50686
+units of demand over the whole design in ours). ISPD 2008 exempts nets above 1000 pins from routing; gr_verify and
+eval2008.pl both skip a missing route for them (eval2008.pl lines 360 and 419: the unrouted check runs only when
+`$netnumpin <= 1000`). Our router has routed them since its first generation -- Part 36 found them the worst or
+second-worst overflow offender on every benchmark it ranked and made them negotiate; leaving them out was never
+tried. Every residue design has exactly two: newblue1 n71 (12335), n1211 (4682); newblue4 n618 (13518), n34676
+(1754); bigblue4 n0 (20766), n787 (15214); newblue7 n146 (13187), n1479 (17324); newblue3 n0 (11443), n7 (16008).
+
+**NTHU-Route's 2D routes finished by our late stages** (`pd39route.p210b @standard.env @fast08.env @speed08.env
+PD3ROUTE_LA_FROM=<nthu_bb4.route>`, 21:16 start, `p212/bigblue4_late_nthu.*`): region stage 184 -> 140 (variant
+over=0 kept), refinement -> 2D 134, layer assignment reports real overflow 136 (scorers pending). The route has no
+block for n0 / n787 (`readRouteAs2D` routes only the nets the file holds).
+
+**Dropping the two nets from our kept routes, nothing rerouted** (`p212/drop_giants.py`, `score_drop.sh`):
+newblue4 112 -> **112** (max 6; both scorers) -- its exempt nets cross none of its over-capacity edges.
+bigblue4 and newblue7 pending.
+
+**`PD39ROUTE_SKIP_GIANT=1`** (pd39route, 2008 only, refused for 2024 / 2025; commit 0474fb9): drops the exempt nets
+right after the design is read -- never routed, charged or written; a `PD3ROUTE_LA_FROM` route still holding them
+has those blocks skipped. Self-test (dropped exactly above 1000 pins, ids recorded, route reader skips them) and
+`e2e_settings.py` (a synthetic design plus an 1100-pin net: the route has no block for it, one net fewer) -- 50 of 50.
+First runs (21:54, `p212/skip1.jobs`, binary `pd39route.p212`, Part 202's single-run setting at spread 64, so the
+comparison is its spread-64 run): newblue1 (36), newblue4 (138), bigblue4 (332), then newblue7 (100).
