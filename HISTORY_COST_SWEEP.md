@@ -15067,7 +15067,8 @@ comparison is its spread-64 run): newblue1 (36), newblue4 (138), bigblue4 (332),
 **newblue1: 36 -> 0** (`p212/nb1_skip_sp64.*`, 21:54-22:00): overflow **0**, max 0, wirelength 4673330 (legal, both
 scorers agree), one run of 340 s -- against 36 (wirelength 4918054) for the same run with the exempt nets routed,
 and against Parts 210-211's hotspot flow (0 at wirelength 4898257, ~30 min). Dropping the two nets from the kept 196
-bigblue4 route afterwards, nothing rerouted: **194** (max 12, wirelength 24803423; both scorers).
+bigblue4 route afterwards, nothing rerouted: **194** (max 12, wirelength 24803423; both scorers). The same on newblue7's 62
+route (Part 210): **58** (max 4, wirelength 35772565; both scorers) -- 4 above its certified forced 54 (Part 91).
 
 **newblue4: 138 -> 142** (`p212/nb4_skip_sp64.*`): max 2, wirelength 13208160 (both scorers), 1927 s -- inside
 the spread of its six Part 202 single runs (132-140); its exempt nets cross none of its over-capacity edges.
