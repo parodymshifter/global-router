@@ -15151,7 +15151,8 @@ legal, both scorers) kept; 4938 s. Part 209's 112 (nets routed) stays newblue4's
 Then (11:15) the same flow on bigblue4's 130 (`p212/pf/bigblue4/best.route.gz`) and newblue7's 56
 (`p212/nb7_skip_sp64.route.gz`), `p212/flow/`. **bigblue4: 130 -> repair 90 (max 8) -> late stages from the repair 90** (max 8,
 wirelength 24740030; legal, both scorers agree) kept; 11379 s -- **70 under the published 160**, against 196 for
-the same flow with the exempt nets routed (Part 210).
+the same flow with the exempt nets routed (Part 210). **newblue7: 56 -> repair none -> late stages from the rough start 56** -- base kept (11480 s);
+the 2 units on H (161, 329) survive the margin-10 window.
 
 
 ## Part 213 -- how much of the residue is forced: the exact fractional bound (in progress)
