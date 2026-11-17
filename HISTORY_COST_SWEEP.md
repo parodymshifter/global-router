@@ -15131,3 +15131,15 @@ newblue1 **0** (was 22 with the portfolio), bigblue4 **132** (published 160; was
 newblue7 **56** (forced >= 54; was 62), newblue4 142 (best on record 112, Part 209), newblue3 33328 (forced >= 26264;
 best published ~31024). Not adopted: `PD39ROUTE_SKIP_GIANT=1` into `fast08.env` / the 2008 flow awaits the user's
 approval.
+
+**Adopted 2026-11-17 08:43 (the user's approval): `PD39ROUTE_SKIP_GIANT=1` is part of the ISPD 2008 standard**, in
+`gr/fast08.env` (2008 only; `standard.env` is shared with the 2024 / 2025 flows, which pd39route refuses it for).
+`reorder_portfolio.py` and `hotspot_flow.py` pick it up through their default settings. `e2e_settings.py`'s check
+now turns it off explicitly for its comparison run (fast08.env is the check's base) -- 50 of 50 with the rebuilt
+`gr/pd39route`; `--selftest` passes.
+
+**The reorderings portfolio with the exempt nets left out** (01:45-, `p212/pf/run.log`; spreads 56/80/68/60/72, spread
+64 being the single runs above): newblue4 **134** (spread 80; 138 / 136 / 134 / 136 / 142, max 2, wirelength 13194210),
+bigblue4 **130** (spread 80; 132 / 134 / 132 / 130 / 142, max 2, wirelength 24817311), newblue3 **33318** (spread 80;
+33562 / 33386 / 33344 / 33318 / 33626, max 472, wirelength 10680838); newblue7 running.
+

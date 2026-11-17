@@ -311,6 +311,17 @@ slower (Part 156). Track A step A1 (Part 157): an exact split of the region stag
 is the whole round), batched rounds (64 per batch, spread over tiles) are 3.7-7.4x faster but end one round
 10-26% higher in overflow -- step A2 must measure the final residue.
 
+**2026-11-17: the exempt nets are left unrouted -- `fast08.env` carries `PD39ROUTE_SKIP_GIANT=1`** (Part 212).
+ISPD 2008 does not require nets with more than 1000 pins to be routed (gr_verify and eval2008.pl skip a missing
+route for them; every design has one or two). NTHU-Route 2.0 leaves them out; this router had routed them since its
+first generation (Part 36 even found them the worst overflow offenders and made them negotiate). Found by comparing
+NTHU-Route's bigblue4 routes with ours net by net. Left out, single runs: **newblue1 36 -> 0, bigblue4 332 -> 132
+(published 160), newblue7 100 -> 56 (forced >= 54)**, newblue3 34056 -> 33328, newblue4 138 -> 142 (inside its
+spread); all eleven zero-overflow designs stay at 0 and get shorter (mean -0.50%; four now under NTHU-Route 2.0).
+With the reorderings portfolio: newblue4 134, bigblue4 130, newblue3 33318. ISPD 2008 only (refused for 2024 /
+2025, which route every net). The lesson, bigger than any algorithm this project has tuned: **audit the model
+against the contest's rules before tuning** -- a modelling error cost more than every late-stage mechanism gained.
+
 **2026-10-14: the ISPD 2025 standard is `./pd39route @standard.env @standard24.env @fast24.env
 @standard25.env`** (Part 133). `gr/standard25.env` adds timing plus capacitance to the 2024
 standard: nets with negative input pin slack pay resistance-weighted wirelength by class, every net

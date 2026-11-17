@@ -255,7 +255,7 @@ def main():
     src[k + 1:k + 1] = [f'gbig {count} 1100 1'] + pins
     with open(os.path.join(work, 'giant.gr'), 'w') as f:
         f.write('\n'.join(src))
-    a = run('giant', {}, 'base')
+    a = run('giant', {'PD39ROUTE_SKIP_GIANT': '0'}, 'base')  # fast08.env sets it (Part 212): off for the comparison
     b = run('giant', {'PD39ROUTE_SKIP_GIANT': '1'}, 'skipgiant')
     heads = lambda tag: [l.split()[0] for l in open(os.path.join(work, f'giant.{tag}.route')) if l[:1].isalpha()]
     ha, hb = heads('base'), heads('skipgiant')
