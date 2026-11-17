@@ -15151,3 +15151,25 @@ legal, both scorers) kept; 4938 s. Part 209's 112 (nets routed) stays newblue4's
 Then (11:15) the same flow on bigblue4's 130 (`p212/pf/bigblue4/best.route.gz`) and newblue7's 56
 (`p212/nb7_skip_sp64.route.gz`), `p212/flow/`.
 
+
+## Part 213 -- how much of the residue is forced: the exact fractional bound (in progress)
+
+Step 1 of Part 212's plan (the user: "try step 1 and then continue with step 2 depending on the outcome of 1"). The
+question: is newblue3's 33318 (published ~31024, cut-certified >= 26264) and newblue7's 56 (cut-certified >= 54)
+near what any router must leave, or is there room?
+
+**`gr/cgbound.cpp`** (new; links the HiGHS C++ library from Homebrew -- this tool only, no router links it; not in
+the CI matrix, which has no HiGHS): the same weak-duality bound as `lpbound` (Part 65) -- for any lengths 0 <= l <= 1,
+overflow >= sum_k d_k T_k(l) - sum_e c_e l_e on a region graph whose outside tiles merge into one free node (valid
+for the whole chip; exempt nets left out) -- but at the *optimal* lengths: the duals of the fractional problem itself,
+solved exactly by column generation in memory (master LP over generated trees per net; HiGHS simplex, warm-started
+round to round). T_k is an exact Steiner tree (Dreyfus-Wagner on the region graph) for nets of up to 7 pin nodes --
+the same tree is the priced column, so pricing is exact for them -- and for larger nets the exact Steiner tree of a
+7-node subset (still a lower bound) with a shortest-path heuristic column. Self-test (pass): Dreyfus-Wagner equals
+brute force on a 3 x 3 grid and its tree costs what it reports; the forced corridor certifies 8 = the fractional
+optimum; a detour instance 0 / 0; outside merging only lowers; six random 5 x 5 instances: bound <= master always,
+and equal at convergence when every net is exact.
+
+**newblue7, main hotspot** (x 202-248, y 226-270: Part 91's tightest cut x 222-228 y 246-250 plus 20 tiles; 2116
+nodes, 4322 edges, 33616 nets with two or more nodes, 2334 above 7; `~/Code/GlobalRouterRuns/p213/nb7_main.*`,
+12:2x start): running.
