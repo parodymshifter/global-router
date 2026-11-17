@@ -15172,4 +15172,28 @@ and equal at convergence when every net is exact.
 
 **newblue7, main hotspot** (x 202-248, y 226-270: Part 91's tightest cut x 222-228 y 246-250 plus 20 tiles; 2116
 nodes, 4322 edges, 33616 nets with two or more nodes, 2334 above 7; `~/Code/GlobalRouterRuns/p213/nb7_main.*`,
-12:2x start): running.
+12:2x start). With simplex (warm-started) the fourth master solve took 2598 s -- stopped; HiGHS's interior point without
+crossover (`--solver ipm`, now the default: each solve from scratch, central duals -- a known stabilizer for column
+generation) ran the same four rounds in 118 s. **Converged in 10 rounds (408 s): the fractional routing's overflow
+is exactly 54** (rounds 6-9 at 54; the certificate itself 46.0, short by the 2334 nets above 7 pin nodes that only
+get a subset bound). With the cut bound (>= 54, valid for fractional routings too) **the fractional optimum of
+newblue7's main hotspot is exactly 54.**
+
+**Where newblue7's 56 sits** (`p213/where_over.py` on `p212/nb7_skip_sp64.route.gz`): 54 inside the main hotspot (28
+edges, x 221-228 y 245-250) -- *at the optimum* -- and **2 on one edge elsewhere, H (161, 329)**: 2D use 214 of 212
+(layers 1/3/5/7: 14/66/66/68 of 14/66/66/66), 107 nets on it. `cgbound` on x 141-181 y 309-349 (20 tiles around
+it): fractional routing overflow **0**, bound 0, converged in 6 rounds (178 s). So newblue7's floor is 54 (main
+hotspot, fractional = cut bound) and the extra 2 is very likely avoidable (a region relaxation reaching 0 does not
+prove a whole-chip routing does). The hotspot flow running on the 56 route (`p212/flow/newblue7*`) covers that edge.
+
+**newblue3, where the 33318 sits** (the portfolio's kept route, `p212/pf/newblue3/best.route.gz`; 2D overflow = 3D
+overflow = 33318 on 972 2D edges): the three isolated tiles hold 380 / 292 / 256 = 928 -- **exactly** their cut
+bounds (Part 91), so already optimal; **32390 within 20 tiles of (487, 668)**, against that hotspot's cut-certified
+25336 (21228 within 5 tiles, 30536 within 10). All of newblue3's open question is ~7000 units in one hotspot.
+
+**newblue3 main hotspot, `cgbound` x 457-517 y 638-698** (3722 nodes, 7564 edges, 14648 nets, 723 above 7): the
+interior point stopped short once (round 2: status Unknown, a wrong objective 29469 between Optimal 143433 and
+136494) -- such rounds are now re-solved with simplex; it converges far more slowly than newblue7 (master 150922 ->
+143433 -> 136494 -> 132798 in rounds 0-4: a single tile needing ~18x its capacity saturates every nearby length at
+1). Rerun with 400 rounds / 4 h started 13:06.
+

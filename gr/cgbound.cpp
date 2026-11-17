@@ -34,6 +34,9 @@
 //       -L/opt/homebrew/lib -lhighs -Wl,-rpath,/opt/homebrew/lib
 //
 // Usage: cgbound <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T]
+//                [--solver ipm|simplex]   (ipm, the default: interior point without crossover -- each master solve
+//                from scratch, but central duals; simplex warm-starts but its vertex duals swing, and on newblue7
+//                its fourth solve took 38 minutes)
 //        cgbound --selftest
 
 #include "gr_io.h"
@@ -341,6 +344,8 @@ struct Settings {
   int exact = 7;
   int threads = 8;
   bool trace = true;
+  double gapTol = 0.5; // stop once the certificate is this close to the fractional routing
+  bool ipm = true; // interior point without crossover: central duals, which stabilize column generation
 };
 
 struct Result {
@@ -359,7 +364,12 @@ Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &
                              [&](const NetTerms &n) { return static_cast<int>(n.terms.size()) <= st.exact; });
   Highs h;
   h.setOptionValue("output_flag", false);
-  h.setOptionValue("threads", 1);
+  if (st.ipm) {
+    h.setOptionValue("solver", "ipm");
+    h.setOptionValue("run_crossover", "off");
+  } else {
+    h.setOptionValue("threads", 1);
+  }
   std::vector<int> edgeRow(E, -1);
   int nRows = 0, nCols = 0;
   // convexity rows
@@ -414,12 +424,21 @@ Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &
   std::vector<char> better(K);
   for (int r = 0; r < st.rounds; ++r) {
     h.run();
+    if (st.ipm && h.getModelStatus() != HighsModelStatus::kOptimal) {
+      // Interior point stopped short (newblue3 round 2: status Unknown, a wrong objective): re-solve this round
+      // with simplex, then go back to interior point.
+      h.setOptionValue("solver", "simplex");
+      h.run();
+      h.setOptionValue("solver", "ipm");
+    }
+    const HighsSolution &sol = h.getSolution();
     if (h.getModelStatus() != HighsModelStatus::kOptimal) {
-      std::cerr << "master LP not optimal (status " << static_cast<int>(h.getModelStatus()) << "); stopping\n";
+      std::cerr << "master LP not solved (status " << static_cast<int>(h.getModelStatus()) << "); stopping\n";
       break;
     }
     res.master = h.getInfo().objective_function_value;
-    const HighsSolution &sol = h.getSolution();
+    const std::string status = h.modelStatusToString(h.getModelStatus());
+    const long long ipmIters = h.getInfo().ipm_iteration_count;
     for (size_t e = 0; e < E; ++e) {
       len[e] = edgeRow[e] >= 0 ? std::min(1.0, std::max(0.0, -sol.row_dual[edgeRow[e]])) : 0.0;
       lenEps[e] = len[e] + kEps;
@@ -478,10 +497,13 @@ Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &
     res.rounds = r + 1;
     double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     if (st.trace)
-      std::cerr << "round " << r << ": master (fractional routing) " << res.master << ", bound at these lengths "
+      std::cerr << "round " << r << " [" << status << ", " << ipmIters << " ipm iterations]: master (fractional routing) " << res.master
+                << ", bound at these lengths "
                 << bound << " (best " << res.lower << "), " << added << " new trees, " << nRows - K
                 << " edge rows, " << secs << " s\n";
-    if (added == 0) {
+    // Converged: no cheaper column anywhere, or the certificate within half a unit of the fractional routing
+    // (overflow comes in whole units, so the remaining gap cannot hide one).
+    if (added == 0 || res.master - res.lower < st.gapTol) {
       res.converged = true;
       break;
     }
@@ -670,8 +692,12 @@ void testRandomTight() {
     Settings st;
     st.trace = false;
     st.threads = 2;
+    st.gapTol = 1e-6;
     Result res = solve(G, nets, st);
     ok = ok && res.lower <= res.master + 1e-6;
+    if (!(res.converged && res.allExact && std::fabs(res.lower - res.master) < 1e-4))
+      std::cout << "    trial " << trial << ": converged " << res.converged << ", exact " << res.allExact << ", bound "
+                << res.lower << ", master " << res.master << "\n";
     tight = tight && res.converged && res.allExact && std::fabs(res.lower - res.master) < 1e-4;
   }
   check(ok, "random 5 x 5 instances: bound <= fractional routing overflow");
@@ -693,7 +719,7 @@ int main(int argc, char **argv) {
   }
   if (argc < 6) {
     std::cerr << "usage: " << argv[0]
-              << " <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T]\n"
+              << " <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T] [--solver ipm|simplex]\n"
               << "       " << argv[0] << " --selftest\n";
     return 2;
   }
@@ -708,6 +734,8 @@ int main(int argc, char **argv) {
       st.exact = std::atoi(argv[i + 1]);
     else if (a == "--threads")
       st.threads = std::atoi(argv[i + 1]);
+    else if (a == "--solver" && (std::string(argv[i + 1]) == "ipm" || std::string(argv[i + 1]) == "simplex"))
+      st.ipm = std::string(argv[i + 1]) == "ipm";
     else {
       std::cerr << "unknown option " << a << "\n";
       return 2;
