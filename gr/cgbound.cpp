@@ -34,7 +34,8 @@
 //       -L/opt/homebrew/lib -lhighs -Wl,-rpath,/opt/homebrew/lib
 //
 // Usage: cgbound <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T]
-//                [--solver ipm|simplex]   (ipm, the default: interior point without crossover -- each master solve
+//                [--solver ipm|simplex] [--seed ROUTE]   (--seed: start the master from a route file's trees;
+//                ipm, the default: interior point without crossover -- each master solve
 //                from scratch, but central duals; simplex warm-starts but its vertex duals swing, and on newblue7
 //                its fourth solve took 38 minutes)
 //        cgbound --selftest
@@ -54,7 +55,10 @@
 #include <limits>
 #include <queue>
 #include <string>
+#include <cstdio>
+#include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 using namespace gr_io;
@@ -77,11 +81,14 @@ struct Graph {
   std::vector<Edge> edges;
   std::vector<std::vector<std::pair<int, int>>> adj; // node -> (neighbor, edge)
   int w = 0;                                          // region width (for node coordinates)
+  std::unordered_map<long long, int> gridEdge;        // (x, y, dir) of a chip edge -> its region edge (--seed)
+  static long long key(int x, int y, int dir) { return (static_cast<long long>(y) << 32) | (x << 1) | dir; }
 };
 
 struct NetTerms {
   std::vector<int> terms; // distinct nodes, sorted
   double demand;
+  std::string name;
 };
 
 int nodeOf(const Region &r, int x, int y, int outside) {
@@ -120,6 +127,7 @@ Graph buildGraph(const RoutingGrid &g, const Region &r) {
       int a = nodeOf(r, x, y, O), b = nodeOf(r, x + 1, y, O);
       if (a == O && b == O)
         continue;
+      G.gridEdge[Graph::key(x, y, 0)] = static_cast<int>(G.edges.size());
       add(a, b, hcap2d(x, y));
     }
   for (int y = std::max(0, r.y0 - 1); y + 1 < g.ny && y <= r.y1; ++y)
@@ -127,6 +135,7 @@ Graph buildGraph(const RoutingGrid &g, const Region &r) {
       int a = nodeOf(r, x, y, O), b = nodeOf(r, x, y + 1, O);
       if (a == O && b == O)
         continue;
+      G.gridEdge[Graph::key(x, y, 1)] = static_cast<int>(G.edges.size());
       add(a, b, vcap2d(x, y));
     }
   return G;
@@ -147,7 +156,72 @@ std::vector<NetTerms> buildNets(const Design &d, const Region &r, int O) {
     t.erase(std::unique(t.begin(), t.end()), t.end());
     if (t.size() < 2)
       continue;
-    out.push_back({t, static_cast<double>(n.minWidth + sp)});
+    out.push_back({t, static_cast<double>(n.minWidth + sp), n.name});
+  }
+  return out;
+}
+
+// --seed: a route file's nets projected onto the region graph (their wire edges with at least one end in the
+// region; vias and outside wire dropped), one starting column per net -- a real routing projects to a connected
+// subgraph holding the net's nodes, so each is a valid column and the master starts at that routing's overflow
+// instead of at shortest trees piled into the hotspot (newblue3: 150922 after round 0, still 95960 after 22).
+// Returns per net (index into nets) its edges; nets the file lacks get none. A .gz file is read through gzip -dc.
+std::vector<std::vector<int>> readSeed(const std::string &path, const RoutingGrid &g, const Graph &G,
+                                       const std::vector<NetTerms> &nets, size_t &found) {
+  std::unordered_map<std::string, size_t> byName;
+  for (size_t k = 0; k < nets.size(); ++k)
+    byName[nets[k].name] = k;
+  std::vector<std::vector<int>> out(nets.size());
+  bool gz = path.size() > 3 && path.compare(path.size() - 3, 3, ".gz") == 0;
+  FILE *f = gz ? popen(("gzip -dc '" + path + "'").c_str(), "r") : std::fopen(path.c_str(), "r");
+  if (!f) {
+    std::cerr << "cannot read " << path << "\n";
+    std::exit(2);
+  }
+  found = 0;
+  long cur = -1;
+  char buf[512];
+  while (std::fgets(buf, sizeof buf, f)) {
+    if (buf[0] == '!') {
+      cur = -1;
+      continue;
+    }
+    if (buf[0] == '(') {
+      if (cur < 0)
+        continue;
+      long long x1, y1, l1, x2, y2, l2;
+      if (std::sscanf(buf, "(%lld,%lld,%lld)-(%lld,%lld,%lld)", &x1, &y1, &l1, &x2, &y2, &l2) != 6 || l1 != l2)
+        continue;
+      int a = g.colOf(x1), b = g.rowOf(y1), c = g.colOf(x2), e = g.rowOf(y2);
+      if (b == e)
+        for (int x = std::min(a, c); x < std::max(a, c); ++x) {
+          auto it = G.gridEdge.find(Graph::key(x, b, 0));
+          if (it != G.gridEdge.end())
+            out[cur].push_back(it->second);
+        }
+      else if (a == c)
+        for (int y = std::min(b, e); y < std::max(b, e); ++y) {
+          auto it = G.gridEdge.find(Graph::key(a, y, 1));
+          if (it != G.gridEdge.end())
+            out[cur].push_back(it->second);
+        }
+      continue;
+    }
+    std::istringstream hs(buf);
+    std::string name;
+    hs >> name;
+    auto it = byName.find(name);
+    cur = it == byName.end() ? -1 : static_cast<long>(it->second);
+    if (cur >= 0)
+      ++found;
+  }
+  if (gz)
+    pclose(f);
+  else
+    std::fclose(f);
+  for (auto &v : out) {
+    std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
   }
   return out;
 }
@@ -356,7 +430,8 @@ struct Result {
   bool allExact = false;  // every net priced exactly (then lower == master at convergence)
 };
 
-Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &st) {
+Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &st,
+             const std::vector<std::vector<int>> *seed = nullptr) {
   auto t0 = std::chrono::steady_clock::now();
   const size_t E = G.edges.size(), K = nets.size();
   Result res;
@@ -417,6 +492,10 @@ Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &
       t.join();
     for (size_t k = 0; k < K; ++k)
       addColumn(k, init[k]);
+    if (seed)
+      for (size_t k = 0; k < K; ++k)
+        if (!(*seed)[k].empty() && (*seed)[k] != init[k])
+          addColumn(k, (*seed)[k]);
   }
   std::vector<double> len(E), lenEps(E);
   std::vector<double> lb(K);
@@ -653,6 +732,32 @@ void testDetourZero() {
             std::to_string(res.master) + ")");
 }
 
+// --seed: a route for the detour instance with both nets on the bottom row -- read back, it gives each net the two
+// bottom-row edges, and seeded the solve still converges to 0.
+void testSeed() {
+  Design d = parseText("cgbound_selftest_seed.gr",
+                       "grid 3 2 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                       "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
+                       "num net 2\na 0 2 1\n5 5 1\n25 5 1\nb 1 2 1\n5 5 1\n25 5 1\n0\n");
+  Region r{0, 0, 2, 1};
+  Graph G = buildGraph(d.grid, r);
+  std::vector<NetTerms> nets = buildNets(d, r, G.nNodes - 1);
+  const std::string path = "cgbound_selftest_seed.route";
+  std::ofstream(path) << "a 0 1\n(5,5,1)-(25,5,1)\n!\nb 1 3\n(5,5,1)-(25,5,1)\n(5,5,1)-(5,5,2)\n!\nzz 9 1\n(5,5,1)-(15,5,1)\n!\n";
+  size_t found = 0;
+  std::vector<std::vector<int>> seed = readSeed(path, d.grid, G, nets, found);
+  std::remove(path.c_str());
+  int h00 = G.gridEdge.at(Graph::key(0, 0, 0)), h10 = G.gridEdge.at(Graph::key(1, 0, 0));
+  std::vector<int> want{std::min(h00, h10), std::max(h00, h10)};
+  check(found == 2 && seed.size() == 2 && seed[0] == want && seed[1] == want,
+        "seed route read back: both nets on the bottom-row edges, the via and the unknown net skipped");
+  Settings st;
+  st.trace = false;
+  st.threads = 2;
+  Result res = solve(G, nets, st, &seed);
+  check(res.converged && res.lower <= 1e-6 && res.master <= 1e-6, "seeded with an overflowing route, still 0 / 0");
+}
+
 // The same corridor with the region cut to the middle tile: the end pins fall outside and merge into O, so every
 // net costs 0 and the bound must fall to 0 (never above what the whole-chip problem forces).
 void testOutsideMergeOnlyLowers() {
@@ -713,17 +818,19 @@ int main(int argc, char **argv) {
     testForcedCorridor();
     testDetourZero();
     testOutsideMergeOnlyLowers();
+    testSeed();
     testRandomTight();
     std::cout << "\n" << (failures == 0 ? "SELF TEST PASS" : "SELF TEST FAIL") << "\n";
     return failures == 0 ? 0 : 1;
   }
   if (argc < 6) {
     std::cerr << "usage: " << argv[0]
-              << " <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T] [--solver ipm|simplex]\n"
+              << " <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T] [--solver ipm|simplex] [--seed ROUTE]\n"
               << "       " << argv[0] << " --selftest\n";
     return 2;
   }
   Settings st;
+  std::string seedPath;
   for (int i = 6; i + 1 < argc; i += 2) {
     std::string a = argv[i];
     if (a == "--rounds")
@@ -734,6 +841,8 @@ int main(int argc, char **argv) {
       st.exact = std::atoi(argv[i + 1]);
     else if (a == "--threads")
       st.threads = std::atoi(argv[i + 1]);
+    else if (a == "--seed")
+      seedPath = argv[i + 1];
     else if (a == "--solver" && (std::string(argv[i + 1]) == "ipm" || std::string(argv[i + 1]) == "simplex"))
       st.ipm = std::string(argv[i + 1]) == "ipm";
     else {
@@ -759,7 +868,13 @@ int main(int argc, char **argv) {
   std::cerr << "region x " << r.x0 << "-" << r.x1 << " y " << r.y0 << "-" << r.y1 << ": " << G.nNodes << " nodes, "
             << G.edges.size() << " edges, " << nets.size() << " nets with two or more nodes (" << big
             << " above --exact " << st.exact << ": subset bound, heuristic trees)\n";
-  Result res = solve(G, nets, st);
+  std::vector<std::vector<int>> seed;
+  if (!seedPath.empty()) {
+    size_t found = 0;
+    seed = readSeed(seedPath, d.grid, G, nets, found);
+    std::cerr << "seed " << seedPath << ": " << found << " of " << nets.size() << " nets found\n";
+  }
+  Result res = solve(G, nets, st, seedPath.empty() ? nullptr : &seed);
   std::cout << "certified lower bound on total overflow: " << res.lower << "\nfractional routing overflow (master): "
             << res.master << "\nrounds " << res.rounds << (res.converged ? ", converged" : ", not converged")
             << (res.allExact ? ", every net exact" : "") << "\n";

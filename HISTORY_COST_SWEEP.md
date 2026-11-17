@@ -15195,5 +15195,12 @@ bounds (Part 91), so already optimal; **32390 within 20 tiles of (487, 668)**, a
 interior point stopped short once (round 2: status Unknown, a wrong objective 29469 between Optimal 143433 and
 136494) -- such rounds are now re-solved with simplex; it converges far more slowly than newblue7 (master 150922 ->
 143433 -> 136494 -> 132798 in rounds 0-4: a single tile needing ~18x its capacity saturates every nearby length at
-1). Rerun with 400 rounds / 4 h started 13:06.
+1). Rerun with 400 rounds / 4 h started 13:06: after 22 rounds (~30 min) the master was still 95960 (our route has
+32390 there) -- every net starts on its shortest tree, all piled into the hotspot. Stopped.
+
+**`--seed ROUTE`** (new): the master starts from a route file's nets projected onto the region graph (a real routing
+projects to a connected subgraph holding each net's nodes -- a valid column). Self-test (pass): a route with both
+detour nets on the bottom row reads back as those two edges per net (a via and an unknown net skipped), and the
+seeded solve still converges to 0 / 0. **newblue3 seeded with the portfolio's route** (13:47): master 32230 after
+round 0 (our 32390 there), 31820 by round 3, the certificate positive from round 3 (2775); running.
 
