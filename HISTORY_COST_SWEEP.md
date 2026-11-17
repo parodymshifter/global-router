@@ -15062,3 +15062,8 @@ has those blocks skipped. Self-test (dropped exactly above 1000 pins, ids record
 `e2e_settings.py` (a synthetic design plus an 1100-pin net: the route has no block for it, one net fewer) -- 50 of 50.
 First runs (21:54, `p212/skip1.jobs`, binary `pd39route.p212`, Part 202's single-run setting at spread 64, so the
 comparison is its spread-64 run): newblue1 (36), newblue4 (138), bigblue4 (332), then newblue7 (100).
+
+**newblue1: 36 -> 0** (`p212/nb1_skip_sp64.*`, 21:54-22:00): overflow **0**, max 0, wirelength 4673330 (legal, both
+scorers agree), one run of 340 s -- against 36 (wirelength 4918054) for the same run with the exempt nets routed,
+and against Parts 210-211's hotspot flow (0 at wirelength 4898257, ~30 min). Dropping the two nets from the kept 196
+bigblue4 route afterwards, nothing rerouted: **194** (max 12, wirelength 24803423; both scorers).
