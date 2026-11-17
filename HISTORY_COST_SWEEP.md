@@ -15142,4 +15142,9 @@ now turns it off explicitly for its comparison run (fast08.env is the check's ba
 64 being the single runs above): newblue4 **134** (spread 80; 138 / 136 / 134 / 136 / 142, max 2, wirelength 13194210),
 bigblue4 **130** (spread 80; 132 / 134 / 132 / 130 / 142, max 2, wirelength 24817311), newblue3 **33318** (spread 80;
 33562 / 33386 / 33344 / 33318 / 33626, max 472, wirelength 10680838); newblue7 running.
+newblue7 (06:47-11:12): best of the five **58** (spread 56; 58 / 64 / 64 / 62 / 66, max 2, wirelength 35741372) -- the
+spread-64 single run's 56 stays newblue7's best (Part 212 above); six orderings span 56-66, so 56 was the lucky end.
+
+**Hotspot flow on newblue4's 134** (09:52-, `p212/flow/newblue4*`, `gr/pd39route` with the adopted standard): base 134;
+hotspot program 2323 s (repair and rough start written); late stages running.
 
