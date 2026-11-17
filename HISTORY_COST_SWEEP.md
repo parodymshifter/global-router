@@ -15146,5 +15146,8 @@ newblue7 (06:47-11:12): best of the five **58** (spread 56; 58 / 64 / 64 / 62 / 
 spread-64 single run's 56 stays newblue7's best (Part 212 above); six orderings span 56-66, so 56 was the lucky end.
 
 **Hotspot flow on newblue4's 134** (09:52-, `p212/flow/newblue4*`, `gr/pd39route` with the adopted standard): base 134;
-hotspot program 2323 s (repair and rough start written); late stages running.
+hotspot program 2323 s -> repair **114** (max 6) -> late stages from the repair **114** (max 6, wirelength 13154674;
+legal, both scorers) kept; 4938 s. Part 209's 112 (nets routed) stays newblue4's record, 2 better.
+Then (11:15) the same flow on bigblue4's 130 (`p212/pf/bigblue4/best.route.gz`) and newblue7's 56
+(`p212/nb7_skip_sp64.route.gz`), `p212/flow/`.
 
