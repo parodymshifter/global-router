@@ -15077,6 +15077,10 @@ the spread of its six Part 202 single runs (132-140); its exempt nets cross none
 agree), one run of 2273 s -- **below the published 160**, below Part 210's 196 (a hotspot flow of ~3 h on top of a
 portfolio) and below the 136 from NTHU-Route's 2D routes. 2D overflow after the slow tier 300 (408 with the nets).
 
+**newblue3: 34056 -> 33328** (`p212/nb3_skip_sp64.*`, 23:23-00:08): max 478, wirelength 10679938 (legal, both
+scorers), 2261 s -- -2.1%, inside the spread of Part 202's six newblue3 runs (33286-34056 at the six spreads), so
+not a clear gain; newblue3's overflow is mostly forced (Part 91: >= 26264).
+
 **NTHU-Route's newblue4 routes finished by our late stages** (`p209/nthu_nb4.*`, its contest settings from
 `~/Code/nthu-route/bin/benchmark.sh`: 2D sum overflow 148; our late stages `p212/newblue4_late_nthu.*`): **134**
 (max 2, wirelength 13014783, both scorers) -- worse than our 112; its start helps bigblue4, not newblue4.
