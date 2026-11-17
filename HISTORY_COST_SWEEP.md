@@ -14993,7 +14993,15 @@ newblue7 62, bigblue4 196 (Parts 209-210, made with per-design settings).
 
 **First rerun: newblue1 reproduces zero** (17:25:32-17:54:33, `p211/newblue1/flow.tsv`): base 22 -> the repair
 none -> the late stages from the rough rounding **0** (max 0, wirelength 4898257, legal, both scorers), 1741 s for
-the whole flow. newblue4, newblue7 and bigblue4 still running.
+the whole flow.
+
+**newblue4** (17:54:33-19:05:15, `p211/newblue4/flow.tsv`): base 132 -> repair 116 (max 6) -> late stages from the
+repair 116 (max 6, wirelength 13219285, legal, both scorers) kept; 4242 s. Part 210's 112 came from a per-design
+setting; the shared setting is 4 worse (newblue4's run-to-run spread ~2), still 16 under the base and 22 under the
+published 138.
+
+**bigblue4** (17:25:32-20:28:04, `p211/bigblue4/flow.tsv`): base 326 -> repair 200 (max 10) -> late stages from the
+repair 200 (max 10, wirelength 24875119, legal, both scorers) kept; 10951 s. Part 210: 196.
 
 **Option 2, first measurements: what holds bigblue4's floor.**
 - *Who is on the over-capacity edges* (`hotspot_cg.py --stats`, on the 196 route, margin 10, `--union`): 1727
@@ -15016,5 +15024,11 @@ fractional floor of ~187 looks like a property of these nets' pins and the edges
 published 160 (NTHU-Route 2.0's page; LMgr's re-run of it: 166) contradicts, unless our capacity model or our
 pricing still misses something. The direct test: NTHU-Route's own 2D routes for bigblue4 (the local port,
 `~/Code/nthu-route`, prints its 2D overflow; its own layer assignment is broken on newblue1, Part 209, but
-`PD3ROUTE_LA_FROM` reads any route as 2D and our layer assignment and late stages can finish it). To run once a
-router slot is free (memory: three flows running).
+`PD3ROUTE_LA_FROM` reads any route as 2D and our layer assignment and late stages can finish it). 
+
+*NTHU-Route 2.0 on bigblue4* (`~/Code/GlobalRouterRuns/p209/nthu.sh nthu_bb4`, its contest settings, 19:05:18-
+19:39:17, `p209/nthu_bb4.out`): **its 2D stage ends at 184** (2D max 18) in 1962 s -- below our window's floor
+(~187), our best (196) and our flow's 200, in a third of the time. Its own layer assignment then scores 3573860
+(max 4, wirelength 20915898; legal, both scorers agree), as on newblue1 -- the port's 3D stage is broken, its 2D
+stage is not. Next (Part 212): our late stages and layer assignment from its 2D routes, and a 2D comparison of its
+routes with ours around the hotspot.
