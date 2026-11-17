@@ -15099,3 +15099,35 @@ same settings with the nets routed, Parts 199 (`p199/v2.jobs.summary`) and 201b 
 2008 design has one or two exempt nets (adaptec1 one: n7807, 2271 pins; the rest two, 1342-20766 pins). Expected:
 overflow stays 0, scored wirelength drops by the exempt nets' share -- and the wirelength comparison with
 NTHU-Route 2.0, whose files omit them, becomes like for like.
+
+**Step 0 result: all eleven stay at zero, every one shorter** (00:20-01:43, `p212/zero.jobs.summary`; all legal,
+gr_verify and eval2008.pl agree exactly). NTHU-Route 2.0's wirelength from LMgr's re-run table (Part 75, three
+significant figures; its files omit the exempt nets, so "after" is the like-for-like comparison):
+
+| design | overflow | scored wire, nets routed | exempt nets left out | change | vs NTHU-Route 2.0 before -> after | time (s) before / after |
+|---|---|---|---|---|---|---|
+| adaptec1 | 0 | 5405058 | **5393807** | -0.21% | +0.8% -> +0.6% | 599 / 1148 |
+| adaptec2 | 0 | 5244023 | **5225738** | -0.35% | +0.1% -> -0.3% | 123 / 183 |
+| adaptec3 | 0 | 13139394 | **13099039** | -0.31% | -0.1% -> -0.4% | 516 / 1017 |
+| adaptec4 | 0 | 12205112 | **12164706** | -0.33% | +0.2% -> -0.1% | 255 / 349 |
+| adaptec5 | 0 | 15650040 | **15589182** | -0.39% | +0.7% -> +0.3% | 896 / 1292 |
+| bigblue1 | 0 | 5698054 | **5672146** | -0.45% | +2.3% -> +1.8% | 912 / 1693 |
+| bigblue2 | 0 | 9212826 | **9085065** | -1.39% | +2.4% -> +0.9% | 447 / 582 |
+| bigblue3 | 0 | 13164727 | **13118976** | -0.35% | +0.7% -> +0.4% | 219 / 301 |
+| newblue2 | 0 | 7618651 | **7576529** | -0.55% | +0.4% -> -0.2% | 86 / 128 |
+| newblue5 | 0 | 23329629 | **23193385** | -0.58% | +0.8% -> +0.2% | 1030 / 1176 |
+| newblue6 | 0 | 17940147 | **17825794** | -0.64% | +1.4% -> +0.8% | 846 / 1334 |
+
+Eleven of eleven shorter (sign test p = 1/2048), mean -0.50%; four designs now under NTHU-Route 2.0 (adaptec2-4,
+newblue2), the rest +0.2% to +1.8%. Times are not like for like: the baselines ran one at a time (Part 201b) or
+quieter; these ran three at a time beside newblue7 / newblue3 runs and their scorers.
+
+**NTHU-Route's newblue7 routes finished by our late stages** (with the exempt nets left out; `p209/nthu_nb7.*` 2D sum
+overflow 82; `p212/newblue7_late_nthu.*`): **86** (max 2, wirelength 35475992, both scorers) -- worse than our own
+56. Its start helped only bigblue4 (136), and our own run with the nets left out beats that too (132).
+
+**Where the sixteen stand** (single runs with `PD39ROUTE_SKIP_GIANT=1`, otherwise the standard): eleven at zero;
+newblue1 **0** (was 22 with the portfolio), bigblue4 **132** (published 160; was 196 with portfolio + hotspot flow),
+newblue7 **56** (forced >= 54; was 62), newblue4 142 (best on record 112, Part 209), newblue3 33328 (forced >= 26264;
+best published ~31024). Not adopted: `PD39ROUTE_SKIP_GIANT=1` into `fast08.env` / the 2008 flow awaits the user's
+approval.
