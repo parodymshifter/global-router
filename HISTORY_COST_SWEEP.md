@@ -15069,6 +15069,17 @@ scorers agree), one run of 340 s -- against 36 (wirelength 4918054) for the same
 and against Parts 210-211's hotspot flow (0 at wirelength 4898257, ~30 min). Dropping the two nets from the kept 196
 bigblue4 route afterwards, nothing rerouted: **194** (max 12, wirelength 24803423; both scorers).
 
+**newblue4: 138 -> 142** (`p212/nb4_skip_sp64.*`): max 2, wirelength 13208160 (both scorers), 1927 s -- inside
+the spread of its six Part 202 single runs (132-140); its exempt nets cross none of its over-capacity edges.
+
+**bigblue4: 332 -> 132** (`p212/bb4_skip_sp64.*`): overflow **132**, max 2, wirelength 24807301 (legal, both scorers
+agree), one run of 2273 s -- **below the published 160**, below Part 210's 196 (a hotspot flow of ~3 h on top of a
+portfolio) and below the 136 from NTHU-Route's 2D routes. 2D overflow after the slow tier 300 (408 with the nets).
+
+**NTHU-Route's newblue4 routes finished by our late stages** (`p209/nthu_nb4.*`, its contest settings from
+`~/Code/nthu-route/bin/benchmark.sh`: 2D sum overflow 148; our late stages `p212/newblue4_late_nthu.*`): **134**
+(max 2, wirelength 13014783, both scorers) -- worse than our 112; its start helps bigblue4, not newblue4.
+
 **Step 1 reruns finished** (Part 211's shared setting): newblue7 base 90 -> repair 68 -> late stages **64** (max 4,
 wirelength 35877045, both scorers; 16885 s; Part 210: 62). All four: newblue1 0, newblue4 116, bigblue4 200,
 newblue7 64 (per-design settings: 0 / 112 / 196 / 62).
