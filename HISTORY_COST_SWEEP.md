@@ -15049,7 +15049,8 @@ tried. Every residue design has exactly two: newblue1 n71 (12335), n1211 (4682);
 
 **NTHU-Route's 2D routes finished by our late stages** (`pd39route.p210b @standard.env @fast08.env @speed08.env
 PD3ROUTE_LA_FROM=<nthu_bb4.route>`, 21:16 start, `p212/bigblue4_late_nthu.*`): region stage 184 -> 140 (variant
-over=0 kept), refinement -> 2D 134, layer assignment reports real overflow 136 (scorers pending). The route has no
+over=0 kept), refinement -> 2D 134, layer assignment **136** (max 4, wirelength 23367603; legal, gr_verify and eval2008.pl agree;
+969 s) -- **below the published 160 (NTHU-Route 2.0's page) and our 196**, with 6% less wirelength than our 196 route. The route has no
 block for n0 / n787 (`readRouteAs2D` routes only the nets the file holds).
 
 **Dropping the two nets from our kept routes, nothing rerouted** (`p212/drop_giants.py`, `score_drop.sh`):
@@ -15067,3 +15068,7 @@ comparison is its spread-64 run): newblue1 (36), newblue4 (138), bigblue4 (332),
 scorers agree), one run of 340 s -- against 36 (wirelength 4918054) for the same run with the exempt nets routed,
 and against Parts 210-211's hotspot flow (0 at wirelength 4898257, ~30 min). Dropping the two nets from the kept 196
 bigblue4 route afterwards, nothing rerouted: **194** (max 12, wirelength 24803423; both scorers).
+
+**Step 1 reruns finished** (Part 211's shared setting): newblue7 base 90 -> repair 68 -> late stages **64** (max 4,
+wirelength 35877045, both scorers; 16885 s; Part 210: 62). All four: newblue1 0, newblue4 116, bigblue4 200,
+newblue7 64 (per-design settings: 0 / 112 / 196 / 62).
