@@ -15077,6 +15077,10 @@ the spread of its six Part 202 single runs (132-140); its exempt nets cross none
 agree), one run of 2273 s -- **below the published 160**, below Part 210's 196 (a hotspot flow of ~3 h on top of a
 portfolio) and below the 136 from NTHU-Route's 2D routes. 2D overflow after the slow tier 300 (408 with the nets).
 
+**newblue7: 100 -> 56** (`p212/nb7_skip_sp64.*`): overflow **56**, max 2, wirelength 35741132 (legal, both scorers
+agree), one run of 4062 s -- 2 above its certified forced 54 (Part 91) and the published 54; Part 210's hotspot flow
+gave 62 (~4.7 h on top of a portfolio). 2D after the slow tier 522 (638 with the nets).
+
 **newblue3: 34056 -> 33328** (`p212/nb3_skip_sp64.*`, 23:23-00:08): max 478, wirelength 10679938 (legal, both
 scorers), 2261 s -- -2.1%, inside the spread of Part 202's six newblue3 runs (33286-34056 at the six spreads), so
 not a clear gain; newblue3's overflow is mostly forced (Part 91: >= 26264).
