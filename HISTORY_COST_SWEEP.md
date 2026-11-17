@@ -15088,3 +15088,10 @@ not a clear gain; newblue3's overflow is mostly forced (Part 91: >= 26264).
 **Step 1 reruns finished** (Part 211's shared setting): newblue7 base 90 -> repair 68 -> late stages **64** (max 4,
 wirelength 35877045, both scorers; 16885 s; Part 210: 62). All four: newblue1 0, newblue4 116, bigblue4 200,
 newblue7 64 (per-design settings: 0 / 112 / 196 / 62).
+
+**Step 0 of the next plan: the eleven zero-overflow designs with the exempt nets left out** (00:20, `p212/zero.jobs`,
+`pd39route.p212 @standard.env @fast08.env @speed08.env PD39ROUTE_SKIP_GIANT=1`, quick designs first; baselines: the
+same settings with the nets routed, Parts 199 (`p199/v2.jobs.summary`) and 201b (`p201/b.jobs.summary`)). Every ISPD
+2008 design has one or two exempt nets (adaptec1 one: n7807, 2271 pins; the rest two, 1342-20766 pins). Expected:
+overflow stays 0, scored wirelength drops by the exempt nets' share -- and the wirelength comparison with
+NTHU-Route 2.0, whose files omit them, becomes like for like.
