@@ -1881,6 +1881,25 @@ bool loadPriceSeed(const std::string &path, const RoutingGrid &g, std::vector<fl
 }
 std::atomic<long long> gSeedReads{0}; // trace: present-demand cost reads that paid a seeded price
 
+// Part 212: PD39ROUTE_SKIP_GIANT=1 (ISPD 2008 only) -- the nets the contest exempts from routing (more than
+// kGiantNetPins = 1000 pins; gr_verify and eval2008.pl skip them when their route is empty) are dropped from the design
+// right after it is read: never routed, never charged, never written. The router has routed them since its first
+// generation (Part 36 found them the worst or second-worst overflow offender on every benchmark it ranked, and made
+// them negotiate). NTHU-Route 2.0 leaves them out, and its 2D routes, finished by this router's late stages, took
+// bigblue4 to 136 against our 196 (2026-11-16). The ids of the dropped nets: a PD3ROUTE_LA_FROM route that still holds
+// them has those blocks skipped.
+std::set<long long> gSkippedIds;
+size_t dropGiantNets(Design &d, std::set<long long> &ids) {
+  ids.clear();
+  for (const Net &n : d.nets)
+    if (n.pins.size() > kGiantNetPins)
+      ids.insert(n.id);
+  d.nets.erase(std::remove_if(d.nets.begin(), d.nets.end(),
+                              [](const Net &n) { return n.pins.size() > kGiantNetPins; }),
+               d.nets.end());
+  return ids.size();
+}
+
 // pd38route: a batched slow-tier worker's own usage copy (null: pr.live).
 thread_local const Usage *gLiveOverride = nullptr;
 inline const Usage *liveOf(const Prices &pr) { return gLiveOverride ? gLiveOverride : pr.live; }
@@ -14576,15 +14595,19 @@ std::vector<RoutedNet> readRouteAs2D(const Design &d, const std::string &path) {
   std::vector<RoutedNet> nets;
   std::string line;
   RoutedNet *cur = nullptr;
+  bool skipping = false;
   std::set<std::tuple<int, int, int, int>> seen;
   while (std::getline(in, line)) {
     if (line.empty())
       continue;
     if (line[0] == '!') {
       cur = nullptr;
+      skipping = false;
       continue;
     }
     if (line[0] == '(') {
+      if (skipping)
+        continue;
       if (!cur)
         fail("route file: segment outside a net: " + line);
       long long x1, y1, l1, x2, y2, l2;
@@ -14609,8 +14632,13 @@ std::vector<RoutedNet> readRouteAs2D(const Design &d, const std::string &path) {
     if (!(hs >> name >> id))
       fail("route file: malformed net header: " + line);
     auto it = byId.find(id);
+    if (it == byId.end() && gSkippedIds.count(id)) {
+      skipping = true; // Part 212: a net PD39ROUTE_SKIP_GIANT dropped
+      continue;
+    }
     if (it == byId.end())
       fail("route file: unknown net id " + std::to_string(id));
+    skipping = false;
     nets.emplace_back();
     cur = &nets.back();
     cur->net = &d.nets[it->second];
@@ -22777,6 +22805,43 @@ void testPriceSeed() {
   check(wireCostH(pr, eh, 2) == h0, "price seed off: the cost is the inherited one exactly");
 }
 
+// pd39route (Part 212): PD39ROUTE_SKIP_GIANT -- dropGiantNets removes exactly the nets above kGiantNetPins and
+// records their ids, and a PD3ROUTE_LA_FROM route that still holds a dropped net has that block skipped (not a
+// failure) while every other net is read as before.
+void testSkipGiant() {
+  std::string gr = "grid 4 2 1\nvertical capacity 10\nhorizontal capacity 1\nminimum width 1\nminimum spacing 0\n"
+                   "via spacing 0\n0 0 1 1\nnum net 2\n";
+  gr += "giant 1 1006 1\n";
+  for (int i = 0; i < 1005; ++i)
+    gr += "0 0 1\n";
+  gr += "3 1 1\nblocker 2 2 1\n1 0 1\n2 0 1\n0\n";
+  Design d = parse("pd39route_selftest_skipgiant.gr", gr.c_str());
+  const bool before = d.nets.size() == 2;
+  std::set<long long> ids;
+  const size_t k = dropGiantNets(d, ids);
+  check(before && k == 1 && ids == std::set<long long>{1} && d.nets.size() == 1 && d.nets[0].name == "blocker",
+        "skip giant nets: the 1006-pin net is dropped and its id recorded, the 2-pin net kept");
+  const std::string path = "pd39route_selftest_skipgiant.route";
+  {
+    std::ofstream f(path);
+    f << "giant 1 2\n(0,0,1)-(3,0,1)\n(3,0,1)-(3,1,1)\n!\nblocker 2 1\n(1,0,1)-(2,0,1)\n!\n";
+  }
+  gSkippedIds = ids;
+  std::vector<RoutedNet> rn = readRouteAs2D(d, path);
+  gSkippedIds.clear();
+  std::remove(path.c_str());
+  check(rn.size() == 1 && rn[0].net == &d.nets[0] && rn[0].segs.size() == 1,
+        "skip giant nets: a route file holding the dropped net reads as the other nets alone");
+  Design d2 = parse("pd39route_selftest_skipgiant.gr", gr.c_str());
+  std::set<long long> none;
+  bool small = true;
+  for (Net &n : d2.nets)
+    if (n.name == "giant")
+      n.pins.resize(1000); // exactly the threshold: not exempt
+  small = dropGiantNets(d2, none) == 0 && d2.nets.size() == 2;
+  check(small, "skip giant nets: a net of exactly 1000 pins is not exempt and stays");
+}
+
 // pd39route (Part 207): the per-net multiplier file: listed nets get their value, the rest 1; an index out of
 // range, a non-number, zero, a negative, a value above 1e6 or a trailing field is refused.
 void testTimingMultFile() {
@@ -23402,6 +23467,7 @@ int run() {
   testSlackOverrideFile();
   testTimingMultFile();
   testPriceSeed();
+  testSkipGiant();
   testLagrangeAndPortfolio();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
@@ -24100,6 +24166,16 @@ int main(int argc, char **argv) {
         std::cerr << "3D pattern reroute passes (ISPD 2008 cost): " << k << "\n";
     }
     d = readGr(argv[1]);
+    if (const char *v = std::getenv("PD39ROUTE_SKIP_GIANT"); v) { // Part 212
+      std::string sv(v);
+      if (sv != "0" && sv != "1")
+        fail("PD39ROUTE_SKIP_GIANT must be 0 or 1 (got '" + sv + "')");
+      if (sv == "1") {
+        size_t k = dropGiantNets(d, gSkippedIds);
+        std::cerr << "skip giant nets: " << k << " nets with more than " << kGiantNetPins
+                  << " pins left unrouted (the contest exempts them; PD39ROUTE_SKIP_GIANT)\n";
+      }
+    }
     gStages.mark("read input", nullptr, -1, std::numeric_limits<double>::quiet_NaN(),
                  std::to_string(d.nets.size()) + " nets");
   }
@@ -24236,6 +24312,8 @@ int main(int argc, char **argv) {
     if (gRegionRound0Over)
       std::cerr << "region stage: round 0 reroutes only nets on over-capacity edges (PD39ROUTE_REGION_ROUND0=over)\n";
   }
+  if (g24Mode && std::getenv("PD39ROUTE_SKIP_GIANT")) // Part 212: the 2024 / 2025 contests route every net
+    fail("PD39ROUTE_SKIP_GIANT is for ISPD 2008 designs (that contest exempts nets above 1000 pins)");
   if (const char *v = std::getenv("PD39ROUTE_PRICE_SEED"); v && *v) { // Part 210: file[,scale]
     std::string sv(v), path = sv;
     const size_t comma = sv.rfind(',');

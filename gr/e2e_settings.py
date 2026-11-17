@@ -243,6 +243,26 @@ def main():
     rb, ra = round0(b), round0(a)
     check('PD39ROUTE_REGION_ROUND0=over limits round 0 to overflowed nets', rb is not None and ra is not None and rb < ra,
           f'round 0 rerouted {rb} vs {ra}')
+    # Part 212: PD39ROUTE_SKIP_GIANT=1 -- the residue design plus one 1100-pin net (ISPD 2008 exempts nets above 1000
+    # pins): the default run writes that net's route; with the setting the route file has no block for it (and one
+    # net fewer), and the run's own trace names one dropped net.
+    src = open(os.path.join(work, 'residue.gr')).read().split('\n')
+    nx, ny = int(src[0].split()[1]), int(src[0].split()[2])
+    k = next(i for i, l in enumerate(src) if l.startswith('num net'))
+    count = int(src[k].split()[2])
+    pins = [f'{(i * 37) % nx * 10 + 5} {(i * 53) % ny * 10 + 5} 1' for i in range(1100)]
+    src[k] = f'num net {count + 1}'
+    src[k + 1:k + 1] = [f'gbig {count} 1100 1'] + pins
+    with open(os.path.join(work, 'giant.gr'), 'w') as f:
+        f.write('\n'.join(src))
+    a = run('giant', {}, 'base')
+    b = run('giant', {'PD39ROUTE_SKIP_GIANT': '1'}, 'skipgiant')
+    heads = lambda tag: [l.split()[0] for l in open(os.path.join(work, f'giant.{tag}.route')) if l[:1].isalpha()]
+    ha, hb = heads('base'), heads('skipgiant')
+    check('PD39ROUTE_SKIP_GIANT leaves the exempt net unrouted',
+          re.search(r'^skip giant nets: 1 nets with more than 1000 pins', b, re.M) is not None and 'gbig' in ha and
+          'gbig' not in hb and len(hb) == len(ha) - 1, f'route blocks {len(hb)} vs {len(ha)}; gbig written: '
+          f'{"gbig" in hb} vs {"gbig" in ha}')
     # Part 193: PD39ROUTE_SLOW_SEARCHES -- batches must also hold K nets needing a search: the slow rounds' own trace
     # counts fewer batches than without.
     def slow_batches(text):
