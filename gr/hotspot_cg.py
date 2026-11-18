@@ -6,6 +6,7 @@
                            [--out ROUTE] [--no-dive] [--no-int] [--dive-price] [--dive-frac 0.25]
                            [--spare S[,g]] [--starts K] [--union] [--lns] [--lns-size 4,250,20]
                            [--prices-out FILE [--prices-only]] [--force-out] [--alt-out ROUTE] [--kpe] [--stats]
+                           [--only x0,y0,x1,y1]   (only the over-capacity edges in that box; the rest stay)
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -153,9 +154,14 @@ def main():
         args.remove(sys.argv[sys.argv.index('--lns-size') + 1])
     if '--prices-out' in sys.argv:
         args.remove(sys.argv[sys.argv.index('--prices-out') + 1])
-    for k in ('--out', '--alt-out'):
+    for k in ('--out', '--alt-out', '--only'):
         if k in sys.argv:
             args.remove(sys.argv[sys.argv.index(k) + 1])
+    only = None  # --only x0,y0,x1,y1 (Part 213): work on the over-capacity edges inside this box only
+    if '--only' in sys.argv:
+        only = [int(v) for v in sys.argv[sys.argv.index('--only') + 1].split(',')]
+        if len(only) != 4:
+            sys.exit('--only takes x0,y0,x1,y1')
     spare, spare_w = 0, 0.05
     if '--spare' in sys.argv:  # --spare S[,g]: the last S units of every edge's capacity cost g per unit in the mix
         v = sys.argv[sys.argv.index('--spare') + 1]
@@ -195,6 +201,8 @@ def main():
     of3 = sum(u - hm.cap_of(g, e) for e, u in use3.items() if u > hm.cap_of(g, e))
     over = {e: u - cap2(e) for e, u in use2.items() if u > cap2(e)}
     of2 = sum(over.values())
+    if only is not None:  # the other hotspots stay as they are (their overflow counts as outside the window)
+        over = {e: v for e, v in over.items() if only[0] <= e[1] <= only[2] and only[1] <= e[2] <= only[3]}
     if not over:
         print('the base has no 2D overflow')
         return

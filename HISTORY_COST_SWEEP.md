@@ -15206,4 +15206,31 @@ projects to a connected subgraph holding each net's nodes -- a valid column). Se
 detour nets on the bottom row reads back as those two edges per net (a via and an unknown net skipped), and the
 seeded solve still converges to 0 / 0. **newblue3 seeded with the portfolio's route** (13:47): master 32230 after
 round 0 (our 32390 there), 31820 by round 3, the certificate positive from round 3 (2775); running.
+Stopped at its 4 h limit after 18 rounds (13:47-17:4x; `p213/nb3_main.*`), not converged:
+
+| round | 0 | 3 | 6 | 9 | 12 | 15 | 17 |
+|---|---|---|---|---|---|---|---|
+| fractional routing (master) | 32230 | 31820 | 31636 | 31502 | 31370 | 31270 | **31213** |
+| certificate (best so far) | 0 | 2775 | 12480 | 19429 | 20464 | 21131 | **22020** |
+
+Rounds grow from ~25 s to ~45 min (each interior-point solve from scratch over 140000+ columns). The certificate
+(22020) is still below the hotspot's cut bound (25336), so the floor stays the cut bound; the fractional routing
+(31213, still falling ~35 a round) is 1177 under our route's 32390 there. With the isolated hotspots' 928 (at their
+bounds): **newblue3's fractional optimum is between 26264 and 32141** (ours 33318, best published ~31024). Not the
+settled answer step 1 hoped for: the master still falls, and the exact optimum needs a faster master (a warm-started
+dual simplex on a column-limited master, or column aging) -- days of solver work for a design every published router
+leaves at ~31000.
+
+**newblue7's last 2 units** (`hotspot_cg.py --only 150,318,172,340 --margin 20`, new: work on the over-capacity edges
+in one box only, the rest stay; window x 141-182 y 309-349, 32148 movable nets; `p213/nb7_161_cg.txt`, 14:29-15:2x):
+the fractional mix reaches **0** from round 5 (2, 2, 2, 2, 1, 0, 0, 0) -- but every rounding ends at **2**: whole
+routes from the base 2, from the mix's heaviest routes 502 -> 14, the integer program over the 2182 split nets
+(time limit, primal 159, dual 30) -> 2, the dive 18 -> 2. **The fractional optimum is 0 here and rounding loses
+exactly the 2 units newblue7 has above its floor.**
+
+**Outcome of step 1.** newblue7: its main hotspot is at its fractional optimum (54); the other 2 are a rounding loss.
+newblue3: room exists in the fractional sense (>= 1177 units in the main hotspot) but its floor is not pinned. Both
+point at the same place -- turning a fractional mix into whole routes -- so step 2 (discrepancy-style rounding in
+`hotspot_cg.py`) goes next, as planned, with newblue7's edge (161, 329) as its first test: a mix at 0 that every
+current rounding leaves at 2.
 
