@@ -15255,3 +15255,31 @@ without a solution below 2 (HiGHS's status line is not printed: unverified wheth
 its default 0.01% gap). The mix that reaches 0 moves 4032 of 32148 nets: the last 2 units need a coordinated change
 over many nets, not a local one -- the case discrepancy rounding is for. Step 2 next: the random-walk rounding,
 `gr/dwalk.cpp` (Eigen, installed).
+
+**Step 2, `gr/dwalk.cpp`** (new; Eigen, header only, Homebrew -- this tool only; like `cgbound` it is not in the CI
+matrix, whose machines have neither Eigen nor HiGHS, so only its Mac self-test checks it): the Lovett-Meka "walk on
+the edges" rounding of a fractional mix -- move the split nets' weights along a random direction projected (Eigen's
+least-squares conjugate gradient, the held rows' Gram matrix never formed) onto the null space of each net's
+convexity row and every edge at its capacity T, step to the first weight reaching 0 / 1 or the first edge reaching T
+(it is then held), release the held edge with the least movable demand only when no direction is left. Self-test
+(pass): two nets that must split over two one-net edges and a four-net chain over five one-net edges -- every one of
+20 seeds reaches 0 (taking each net's heaviest route overflows); three nets over two one-net edges -- exactly 2, an
+edge released; 20 random instances -- one route per net, held rows kept (residual < 1e-6); a strict reader.
+`hotspot_cg.py --dwalk K` (new) writes the split nets' mix (`<prefix>.dwalk.in`), runs K seeds and finishes each with
+the same single-net search as the other roundings.
+
+**newblue7's edge (161, 329), six seeds** (01:04-02:28, `p213/nb7_161_dwalk.txt`; window and mix as above, 2117 split
+nets, 4340 routes, 3353 edges): the walk ends at 646-802 (cost over those edges; the mix itself 120 there in the
+integer-ceiling model -- sub-unit excesses, none above 1e-6) after ~3050 steps, **1105-1173 edges released** (at most
+~800 held at once); the search then takes them to **16 / 34 / 22 / 20 / 26 / 22** -- every seed worse than the
+search from the base (2) and no better than from the heaviest routes (12). Checked from the dump: only 294 edges are
+at capacity in the mix against 2223 free dimensions, so the start is not over-constrained; edges fill as weights
+freeze, and late in the walk the held edges outnumber the moving weights, so it must release them -- each release
+can then go over by about one net's demand (2 units). Reading (unverified, from the theory rather than a
+measurement): discrepancy rounding bounds each edge's excess by about one net's demand -- here 2 units, exactly
+newblue7's residue -- so it cannot be expected to clear it; clearing it needs exact integer search over coordinated
+moves.
+
+**Next, overnight:** the integer program over the split nets with 3 h instead of 600 s (`hotspot_cg.py --only ...
+--time 10800 --no-dive`): Part 213's 600 s run ended at primal 159 / dual 30 in its model; a dual bound above 0 at
+the end would certify, within the generated routes, that the 2 units cannot be cleared there.
