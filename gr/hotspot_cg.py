@@ -7,6 +7,7 @@
                            [--spare S[,g]] [--starts K] [--union] [--lns] [--lns-size 4,250,20]
                            [--prices-out FILE [--prices-only]] [--force-out] [--alt-out ROUTE] [--kpe] [--stats]
                            [--only x0,y0,x1,y1]   (only the over-capacity edges in that box; the rest stay)
+                           [--dwalk K]   (K seeds of gr/dwalk's random-walk rounding of the split nets, Part 213)
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -154,7 +155,7 @@ def main():
         args.remove(sys.argv[sys.argv.index('--lns-size') + 1])
     if '--prices-out' in sys.argv:
         args.remove(sys.argv[sys.argv.index('--prices-out') + 1])
-    for k in ('--out', '--alt-out', '--only'):
+    for k in ('--out', '--alt-out', '--only', '--dwalk'):
         if k in sys.argv:
             args.remove(sys.argv[sys.argv.index(k) + 1])
     only = None  # --only x0,y0,x1,y1 (Part 213): work on the over-capacity edges inside this box only
@@ -908,6 +909,53 @@ def main():
         alt.append((o, dict(ch)))
         if o < best_of:
             best_of, best = o, ch
+        if '--dwalk' in sys.argv:
+            # Part 213: random-walk (discrepancy-style) rounding of the split nets by gr/dwalk, K seeds, each finished
+            # by the same single-net search
+            K = int(sys.argv[sys.argv.index('--dwalk') + 1])
+            split = sorted(n for n, w_ in weights.items() if max(w_.values()) < 0.999)
+            ks = {n: [k for k, v in sorted(weights[n].items()) if v > 1e-6] for n in split}
+            fixed_load = defaultdict(int)
+            for n in nets:
+                if n not in ks:
+                    for e, a in cols[n][heavy.get(n, 0)][0].items():
+                        fixed_load[e] += a
+            eidx = {}
+            for n in split:
+                for k in ks[n]:
+                    for e in cols[n][k][0]:
+                        eidx.setdefault(e, len(eidx))
+            dump = f'{prefix}.dwalk.in'
+            with open(dump, 'w') as f:
+                f.write(f'dwalk 1 {len(split)} {len(eidx)}\n')
+                for e in sorted(eidx, key=eidx.get):
+                    T, M, _ = edge_info(e)
+                    f.write(f'E {T} {M} {fixed_load.get(e, 0)}\n')
+                for n in split:
+                    tot = sum(weights[n][k] for k in ks[n])
+                    f.write(f'N {len(ks[n])}\n')
+                    for k in ks[n]:
+                        c = cols[n][k][0]
+                        f.write(f'C {weights[n][k] / tot:.12f} {len(c)} ' + ' '.join(f'{eidx[e]} {a}' for e, a in c.items()) + '\n')
+            print(f'random walk: {len(split)} split nets, {sum(len(v) for v in ks.values())} routes, {len(eidx)} edges '
+                  f'({dump})', flush=True)
+            exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dwalk')
+            for seed in range(1, K + 1):
+                outp = f'{prefix}.dwalk.{seed}'
+                r = subprocess.run([exe, dump, outp, '--seed', str(seed)], capture_output=True, text=True)
+                last = [l for l in r.stderr.splitlines() if l.startswith('dwalk: cost')]
+                if r.returncode != 0 or not os.path.exists(outp):
+                    print(f'random walk seed {seed}: dwalk failed ({r.returncode}): {r.stderr[-300:]}', flush=True)
+                    continue
+                picks = [int(l) for l in open(outp)]
+                ch = dict(heavy)
+                for n, j in zip(split, picks):
+                    ch[n] = ks[n][j]
+                print(f'random walk seed {seed}: {last[0][7:] if last else "?"}', flush=True)
+                o, ch = search(ch, f'the random walk (seed {seed})')
+                alt.append((o, dict(ch)))
+                if o < best_of:
+                    best_of, best = o, ch
         # the split nets settled exactly: every net whole in the mix (weight >= 0.999 on one route) stays there, the
         # integer program runs over the rest with the routes that carry weight (Part 206's reduction failed with
         # 41-78% of the nets split; here it is a few percent), then single-net moves over every net
