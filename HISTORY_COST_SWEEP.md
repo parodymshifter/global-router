@@ -15246,3 +15246,12 @@ adaptec1, newblue1 and bigblue4 is on layer 1 (942705 / 1237104 / 8899095 pins).
 scope. (2) "The random-walk rounding needs linear-algebra libraries that aren't installed" was based only on Python's
 `import numpy` failing; Eigen 5.0.1 and OpenBLAS 0.3.34 are installed (Homebrew) and Apple Accelerate (with sparse
 QR) ships with macOS. CLAUDE.md now has a "Claims and evidence" rule.
+
+**newblue7's edge (161, 329), exact neighbourhoods** (`hotspot_cg.py --only 150,318,172,340 --margin 20 --rounds 8
+--no-int --no-dive --lns --lns-size 6,600,120`, 00:25-01:01, `p213/nb7_161_lns.txt`): the mix reaches 0 again (round
+6); whole routes from the base 2, from the heaviest routes 472 -> 12; the integer program over the up-to-600 nets
+within 6 tiles of the edge with all their candidates (every other net fixed) finished in 5 s, under its 120 s limit,
+without a solution below 2 (HiGHS's status line is not printed: unverified whether it proved optimality or stopped at
+its default 0.01% gap). The mix that reaches 0 moves 4032 of 32148 nets: the last 2 units need a coordinated change
+over many nets, not a local one -- the case discrepancy rounding is for. Step 2 next: the random-walk rounding,
+`gr/dwalk.cpp` (Eigen, installed).
