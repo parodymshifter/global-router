@@ -15283,3 +15283,10 @@ moves.
 **Next, overnight:** the integer program over the split nets with 3 h instead of 600 s (`hotspot_cg.py --only ...
 --time 10800 --no-dive`): Part 213's 600 s run ended at primal 159 / dual 30 in its model; a dual bound above 0 at
 the end would certify, within the generated routes, that the 2 units cannot be cleared there.
+Result (02:29-06:1x, `p213/nb7_161_ip3h.txt`): HiGHS hit the 3 h limit -- primal 76.14, dual 32.09 in the program's
+objective; its solution scores 14, the search takes it to 8 -- the base's 2 stands. **Not a certificate:** the
+objective includes the spare-track term (`--spare 2`: 0.05 per unit inside the last 2 units of capacity; the
+fractional mix's own value is about 0.05 x 618.8 = 30.9 at zero overflow), so a dual bound of 32.09 says nothing about
+overflow; and only the 2117 split nets were free, the rest fixed at their heaviest routes. A certificate would need
+the run without `--spare` and with every net free -- not attempted: newblue7's 2 units (3.6% above its floor) are
+below the size of change this project counts as progress.
