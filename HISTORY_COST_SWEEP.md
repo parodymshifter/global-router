@@ -15316,3 +15316,13 @@ anywhere at no cost.
   route's 33318 -- the heaviest-route rounding is rough, as newblue1's was (68 against its route's 22, Part 210).
   Late stages from it started 12:05 (`p213/nb3_late_cg.*`); the region stage enters at 61166 (sequential: above
   `PD39ROUTE_REGION_BATCH_MAX`).
+
+**Option 1 result: no gain** (12:05-12:27, `p213/nb3_late_cg.*`; legal, gr_verify and eval2008.pl agree): **33326** (max
+472, wirelength 10668250) against the portfolio route's 33318 -- inside newblue3's spread over reorderings
+(33318-33626, Part 212). The late stages forget their start: from the merged start's 61166 the region stage (kept
+variant over=0.075) ends at **33530** in 62 rounds and refinement at 33326; from the slow tier's 42104 (the same
+standard run, `p212/pf/newblue3/*sp80*`) it ended at 33546 and 33318. Two starts 19000 units apart end within 16
+units of each other: newblue3's ~33300 is the late stages' own floor on this design, not the start's. newblue1's
+recipe worked there because its floor was 0 and only the start was in the way; on newblue3 the start is not what
+holds the number. Not tried further. What would have to change is the model inside the hotspot (its single tile's
+pins need ~18x its capacity, Part 213; the cut bound certifies 25336 of its overflow), not the rounding or the start.
