@@ -686,6 +686,15 @@ capacity, text after the end of the design -- instead of silently repairing or s
 reads a design without routing it (`./input_check design.gr`, `./input_check design.cap design.net`); a new input
 rule gets a broken-file case in its `--selftest`.
 
+**Claims and evidence** (2026-11-18). Every statement that something is possible, impossible, installed, absent,
+already tried, forced, optimal, or "not found" must name the check that established it -- the command, file or
+source, and what it showed -- with a scope that covers the claim. A narrow check supports only a narrow claim
+(`import numpy` failing says nothing about Eigen or Accelerate). Anything not checked is written as **unverified**
+(an inference, with its basis). When a claim proves wrong, say so, correct the record, and re-check the other claims
+made alongside it. Why: the user judges the project's direction by these statements; on 2026-11-18 two of them
+were made without checks ("linear-algebra libraries aren't installed" -- Eigen 5.0.1, OpenBLAS and Accelerate
+were; "model audit found no other mismatch" -- no audit had been run; it was then run, Part 213).
+
 **Run the Perl evaluator every time, not just when something looks wrong.**
 After any round that produces a new result on all three ISPD benchmarks
 (adaptec1, newblue1, bigblue1) — a new router, a tuning change, a bug fix —

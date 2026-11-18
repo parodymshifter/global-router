@@ -15234,3 +15234,15 @@ point at the same place -- turning a fractional mix into whole routes -- so step
 `hotspot_cg.py`) goes next, as planned, with newblue7's edge (161, 329) as its first test: a mix at 0 that every
 current rounding leaves at 2.
 
+
+**Two unverified claims, corrected (2026-11-18 00:3x).** (1) Part 212's report said "Model audit: I checked the other
+contest rules ... no other mismatch" -- no checks had been run. Run now, against `gr/eval2008/eval2008.pl` and the
+sixteen `.gr` files: vias carry no capacity (eval2008.pl only adds `$via_cost * ($l2 - $l1)` to wirelength, line 466;
+"via spacing ... is not used", line 146); edge usage is max(net width, layer width) + layer spacing (lines 304-311)
+-- every 2008 design has layer widths and spacings of 1 and every net width 1, so demand is 2 per net per edge as the
+router models it; an empty route is accepted for nets above 1000 pins (lines 360, 419) and for single-tile nets
+(line 433) -- newblue1 has 60948 single-tile nets and our route writes no block for any of them; every pin of
+adaptec1, newblue1 and bigblue4 is on layer 1 (942705 / 1237104 / 8899095 pins). No other mismatch found within that
+scope. (2) "The random-walk rounding needs linear-algebra libraries that aren't installed" was based only on Python's
+`import numpy` failing; Eigen 5.0.1 and OpenBLAS 0.3.34 are installed (Homebrew) and Apple Accelerate (with sparse
+QR) ships with macOS. CLAUDE.md now has a "Claims and evidence" rule.
