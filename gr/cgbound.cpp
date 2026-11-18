@@ -34,7 +34,9 @@
 //       -L/opt/homebrew/lib -lhighs -Wl,-rpath,/opt/homebrew/lib
 //
 // Usage: cgbound <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T]
-//                [--solver ipm|simplex] [--seed ROUTE]   (--seed: start the master from a route file's trees;
+//                [--solver ipm|simplex] [--seed ROUTE] [--export FILE]
+//                (--export: each net's heaviest tree in the last master, for gr/cg_merge.py;
+//                 --seed: start the master from a route file's trees;
 //                ipm, the default: interior point without crossover -- each master solve
 //                from scratch, but central duals; simplex warm-starts but its vertex duals swing, and on newblue7
 //                its fourth solve took 38 minutes)
@@ -45,6 +47,7 @@
 #include "Highs.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <climits>
@@ -82,6 +85,7 @@ struct Graph {
   std::vector<std::vector<std::pair<int, int>>> adj; // node -> (neighbor, edge)
   int w = 0;                                          // region width (for node coordinates)
   std::unordered_map<long long, int> gridEdge;        // (x, y, dir) of a chip edge -> its region edge (--seed)
+  std::vector<std::array<int, 3>> edgeXY;             // region edge -> (x, y, dir) of its chip edge (--export)
   static long long key(int x, int y, int dir) { return (static_cast<long long>(y) << 32) | (x << 1) | dir; }
 };
 
@@ -128,6 +132,7 @@ Graph buildGraph(const RoutingGrid &g, const Region &r) {
       if (a == O && b == O)
         continue;
       G.gridEdge[Graph::key(x, y, 0)] = static_cast<int>(G.edges.size());
+      G.edgeXY.push_back({x, y, 0});
       add(a, b, hcap2d(x, y));
     }
   for (int y = std::max(0, r.y0 - 1); y + 1 < g.ny && y <= r.y1; ++y)
@@ -136,6 +141,7 @@ Graph buildGraph(const RoutingGrid &g, const Region &r) {
       if (a == O && b == O)
         continue;
       G.gridEdge[Graph::key(x, y, 1)] = static_cast<int>(G.edges.size());
+      G.edgeXY.push_back({x, y, 1});
       add(a, b, vcap2d(x, y));
     }
   return G;
@@ -428,6 +434,7 @@ struct Result {
   int rounds = 0;
   bool converged = false; // no cheaper column for any net
   bool allExact = false;  // every net priced exactly (then lower == master at convergence)
+  std::vector<std::vector<int>> heaviest; // per net, the edges of its heaviest column in the last solved master
 };
 
 Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &st,
@@ -453,6 +460,8 @@ Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &
     ++nRows;
   }
   std::vector<std::vector<std::vector<int>>> cols(K); // net -> its columns' edges
+  std::vector<std::vector<int>> colIndex(K);          // net -> its columns' HiGHS indices
+  res.heaviest.assign(K, {});
   auto ensureRow = [&](int e) {
     if (edgeRow[e] >= 0)
       return;
@@ -472,6 +481,7 @@ Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &
       val.push_back(nets[k].demand);
     }
     h.addCol(0.0, 0.0, kHighsInf, static_cast<HighsInt>(idx.size()), idx.data(), val.data());
+    colIndex[k].push_back(nCols);
     ++nCols;
     cols[k].push_back(tree);
   };
@@ -516,6 +526,13 @@ Result solve(const Graph &G, const std::vector<NetTerms> &nets, const Settings &
       break;
     }
     res.master = h.getInfo().objective_function_value;
+    for (size_t k = 0; k < K; ++k) { // --export: the heaviest column per net in this (the last solved) master
+      size_t bj = 0;
+      for (size_t j = 1; j < colIndex[k].size(); ++j)
+        if (sol.col_value[colIndex[k][j]] > sol.col_value[colIndex[k][bj]])
+          bj = j;
+      res.heaviest[k] = cols[k][bj];
+    }
     const std::string status = h.modelStatusToString(h.getModelStatus());
     const long long ipmIters = h.getInfo().ipm_iteration_count;
     for (size_t e = 0; e < E; ++e) {
@@ -825,12 +842,12 @@ int main(int argc, char **argv) {
   }
   if (argc < 6) {
     std::cerr << "usage: " << argv[0]
-              << " <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T] [--solver ipm|simplex] [--seed ROUTE]\n"
+              << " <benchmark.gr> <x0> <y0> <x1> <y1> [--rounds N] [--time S] [--exact K] [--threads T] [--solver ipm|simplex] [--seed ROUTE] [--export FILE]\n"
               << "       " << argv[0] << " --selftest\n";
     return 2;
   }
   Settings st;
-  std::string seedPath;
+  std::string seedPath, exportPath;
   for (int i = 6; i + 1 < argc; i += 2) {
     std::string a = argv[i];
     if (a == "--rounds")
@@ -843,6 +860,8 @@ int main(int argc, char **argv) {
       st.threads = std::atoi(argv[i + 1]);
     else if (a == "--seed")
       seedPath = argv[i + 1];
+    else if (a == "--export")
+      exportPath = argv[i + 1];
     else if (a == "--solver" && (std::string(argv[i + 1]) == "ipm" || std::string(argv[i + 1]) == "simplex"))
       st.ipm = std::string(argv[i + 1]) == "ipm";
     else {
@@ -878,5 +897,23 @@ int main(int argc, char **argv) {
   std::cout << "certified lower bound on total overflow: " << res.lower << "\nfractional routing overflow (master): "
             << res.master << "\nrounds " << res.rounds << (res.converged ? ", converged" : ", not converged")
             << (res.allExact ? ", every net exact" : "") << "\n";
+  if (!exportPath.empty()) {
+    // --export FILE: per net, its heaviest column in the last solved master as chip edges -- 'net <name> <edges>'
+    // then '<x> <y> <H|V>' lines (an H edge joins tiles (x, y) and (x + 1, y), a V edge (x, y) and (x, y + 1)); an
+    // edge to the outside node is the chip edge that leaves the region. gr/cg_merge.py joins these with the seed.
+    std::ofstream f(exportPath);
+    f << "# cgbound export: region x " << r.x0 << "-" << r.x1 << " y " << r.y0 << "-" << r.y1 << ", master "
+      << res.master << ", rounds " << res.rounds << "\n";
+    size_t written = 0;
+    for (size_t k = 0; k < nets.size(); ++k) {
+      if (res.heaviest[k].empty())
+        continue;
+      f << "net " << nets[k].name << " " << res.heaviest[k].size() << "\n";
+      for (int e : res.heaviest[k])
+        f << G.edgeXY[e][0] << " " << G.edgeXY[e][1] << " " << (G.edgeXY[e][2] == 0 ? 'H' : 'V') << "\n";
+      ++written;
+    }
+    std::cerr << "export " << exportPath << ": " << written << " nets\n";
+  }
   return 0;
 }

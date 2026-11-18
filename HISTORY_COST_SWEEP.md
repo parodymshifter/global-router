@@ -15290,3 +15290,22 @@ fractional mix's own value is about 0.05 x 618.8 = 30.9 at zero overflow), so a 
 overflow; and only the 2117 split nets were free, the rest fixed at their heaviest routes. A certificate would need
 the run without `--spare` and with every net free -- not attempted: newblue7's 2 units (3.6% above its floor) are
 below the size of change this project counts as progress.
+
+**Option 1 (the user's choice, 2026-11-18 09:21): newblue1's recipe on newblue3** -- the late stages from a rough
+rounding of a fractional mix (on newblue1 that start, not the repair, reached 0; Parts 210-211). The mix comes from
+`cgbound` (newblue3's hotspot programs in `hotspot_cg.py` did not solve, Part 203). First, a correction to step 1's
+reading: `cgbound` drops nets with no pin in its region (outside is free), so its 31213 routes only pin nets. Checked
+on the portfolio route (`p212/pf/newblue3/best.route.gz`, window x 457-517 y 638-698): 17009 nets have a pin inside,
+111 others pass through with 5280 of the window's 486760 units of demand, and the window's 2D overflow is 32390 with
+or without them -- so the comparison holds, with one caveat that remains: the relaxation lets a net leave the region
+anywhere at no cost.
+- `cgbound --export FILE` (new): each net's heaviest tree in the last solved master as chip edges (an edge to the
+  outside node is the chip edge leaving the region). Self-test still passes.
+- `gr/cg_merge.py` (new): per exported net, those edges plus the seed's wire wholly outside the region; pieces that
+  no longer meet (the tree may leave the region elsewhere than the seed's outside wire enters) are joined by shortest
+  grid paths inside the net's box plus 8, then wire serving no pin is pruned; other nets keep their seed blocks; writes a
+  2D start for `PD3ROUTE_LA_FROM` (not a legal 3D file) and prints its 2D overflow. Self-test (pass): a tree leaving
+  the region away from the outside wire is joined into one tree whose only leaves are the pins (7 edges); a dangling
+  branch is pruned; a lone pin is joined.
+- Run (09:23-, `p213/nb3_exp.*`, `nb3_chain.sh` / `.log`): `cgbound` seeded from the portfolio route, 2 h, then the
+  merge, then `pd39route @standard.env @fast08.env @speed08.env PD3ROUTE_LA_FROM=<merged>` through `run_batch.sh`.
