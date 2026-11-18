@@ -15309,3 +15309,10 @@ anywhere at no cost.
   branch is pruned; a lone pin is joined.
 - Run (09:23-, `p213/nb3_exp.*`, `nb3_chain.sh` / `.log`): `cgbound` seeded from the portfolio route, 2 h, then the
   merge, then `pd39route @standard.env @fast08.env @speed08.env PD3ROUTE_LA_FROM=<merged>` through `run_batch.sh`.
+- `cgbound` (09:23-12:03): 16 rounds, master 31270, certificate 21131 (round 14 ended at 7128 s, under the 2 h limit
+  checked between rounds, so one more round ran); export 14648 nets. The chain's merge step failed on an unquoted path
+  with a space (`$GR` in `nb3_chain.sh`; fixed); run by hand at 12:04: 2553 nets needed joining (3171 paths), 24393
+  dangling edges pruned; **the merged start's 2D overflow is 61166** (51928 inside the region) against the portfolio
+  route's 33318 -- the heaviest-route rounding is rough, as newblue1's was (68 against its route's 22, Part 210).
+  Late stages from it started 12:05 (`p213/nb3_late_cg.*`); the region stage enters at 61166 (sequential: above
+  `PD39ROUTE_REGION_BATCH_MAX`).
