@@ -4404,6 +4404,9 @@ struct RefineSettings {
   int boxInit = 10; // NTHU's init_box_size_p3
   int boxInc = 15;  // NTHU's box_size_inc_p3
   AcceptMode accept = AcceptMode::kKeep; // NTHU keeps every reroute
+  // Part 213: PD39ROUTE_REFINE_KEEP_ABOVE=N (0 = off): a refinement entered at N or more units of 2D overflow keeps
+  // every reroute whatever `accept` says (newblue3: revert threw away half its reroutes, 33318 -> 31434 with keep).
+  long long keepAbove = 0;
   // pd5route: PD5ROUTE_REFINE_ORDER=shuffle reroutes each iteration's
   // overflowed nets in a seeded random order (seed PD5ROUTE_SEED, mixed with
   // the iteration) instead of NTHU's fixed (overflow, bbox) order, which on
@@ -5119,6 +5122,11 @@ EvictOutcome evictChains(const RoutingGrid &g, Usage &usage, Prices &prices, Lay
   return out;
 }
 
+// Part 213: refinement's acceptance for a stage entered at `total` units of 2D overflow.
+AcceptMode refineAcceptFor(const RefineSettings &rs, long long total) {
+  return (rs.keepAbove > 0 && total >= rs.keepAbove) ? AcceptMode::kKeep : rs.accept;
+}
+
 RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const RefineSettings &rs,
                       bool trace, const std::atomic<bool> *cancel = nullptr) {
   const RoutingGrid &g = d.grid;
@@ -5167,8 +5175,16 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
     rep.after = total;
     bestAfter.assign(1, rep.after);
   }
+  // Part 213: the acceptance this stage uses -- keep when it enters at or above rs.keepAbove.
+  const AcceptMode accept = refineAcceptFor(rs, total);
+  if (trace && rs.keepAbove > 0)
+    std::cerr << "refinement: entering at " << total << " units of 2D overflow, "
+              << (accept == AcceptMode::kKeep && rs.accept != AcceptMode::kKeep
+                      ? "keeping every reroute (PD39ROUTE_REFINE_KEEP_ABOVE)"
+                      : "acceptance unchanged")
+              << "\n";
   // Part 147: annealed acceptance, on this thread for this stage only.
-  const bool anneal = rs.annealT0 > 0 && rs.accept == AcceptMode::kRevert;
+  const bool anneal = rs.annealT0 > 0 && accept == AcceptMode::kRevert;
   if (anneal) {
     gAnneal = AnnealState{};
     gAnneal.on = true;
@@ -5207,7 +5223,7 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
         continue; // an earlier reroute this iteration already cleared it
       best.save(nets, i);
       if (rs.pieces) {
-        PieceStats ps = rerouteNetPieces(g, usage, prices, lp, region, rn, margin, rs.accept, nullptr);
+        PieceStats ps = rerouteNetPieces(g, usage, prices, lp, region, rn, margin, accept, nullptr);
         if (ps.ok) {
           rerouted += ps.pieces;
           reverted += ps.reverted;
@@ -5221,7 +5237,7 @@ RefineReport refine2D(const Design &d, std::vector<RoutedNet> &nets, const Refin
       routeNetSlowMSMV(g, prices, usage, lp, region, 0.0, rn);
       ++rerouted;
       long long localAfter = overflowOverUnion(g, usage, oldCharges, rn.charges);
-      if (revertReroute(rs.accept, localBefore, localAfter)) {
+      if (revertReroute(accept, localBefore, localAfter)) {
         for (const ChargeRecord &c : rn.charges)
           undoCharge(g, usage, c);
         rn.charges = oldCharges;
@@ -19311,6 +19327,20 @@ void testStageMarginCap() {
 // Part 168: PD39ROUTE_REFINE_STOP. On the stuck one-row fixture (no gain is possible) refinement stops after W
 // iterations without gain and returns what all 40 iterations return; with the best at or above the floor the rule
 // does not act; on the clearing fixture it changes nothing. The gain trace: no gain -> -1, else the last one.
+// Part 213: PD39ROUTE_REFINE_KEEP_ABOVE -- off (0) leaves the configured acceptance; at or above N a revert stage
+// keeps; below N it stays revert; a keep stage stays keep.
+void testRefineKeepAbove() {
+  RefineSettings rs;
+  rs.accept = AcceptMode::kRevert;
+  bool ok = refineAcceptFor(rs, 1000000) == AcceptMode::kRevert;
+  rs.keepAbove = 1000;
+  ok = ok && refineAcceptFor(rs, 1000) == AcceptMode::kKeep && refineAcceptFor(rs, 33000) == AcceptMode::kKeep &&
+       refineAcceptFor(rs, 999) == AcceptMode::kRevert && refineAcceptFor(rs, 0) == AcceptMode::kRevert;
+  rs.accept = AcceptMode::kKeep;
+  ok = ok && refineAcceptFor(rs, 5) == AcceptMode::kKeep;
+  check(ok, "refine keep-above: off leaves revert; >= N keeps, < N reverts; keep stays keep");
+}
+
 void testRefineLowStop() {
   const char *row = "grid 8 1 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
                     "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\n"
@@ -23587,6 +23617,7 @@ int run() {
   testPriceSeed();
   testSkipGiant();
   testSplitInteriorCrossings();
+  testRefineKeepAbove();
   testLagrangeAndPortfolio();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
@@ -23856,6 +23887,13 @@ int main(int argc, char **argv) {
       refine.evictMargin = m;
       refine.evictBlockers = b;
       refine.evictPasses = p;
+    }
+    if (const char *v = std::getenv("PD39ROUTE_REFINE_KEEP_ABOVE"); v) { // Part 213: N
+      char *end = nullptr;
+      const long long x = std::strtoll(v, &end, 10);
+      if (!*v || *end || x < 0)
+        fail(std::string("PD39ROUTE_REFINE_KEEP_ABOVE must be an integer >= 0 (got '") + v + "')");
+      refine.keepAbove = x;
     }
     if (const char *v = std::getenv("PD39ROUTE_REFINE_STOP"); v) { // Part 168: W
       char *end = nullptr;

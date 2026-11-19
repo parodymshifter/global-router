@@ -263,6 +263,20 @@ def main():
           re.search(r'^skip giant nets: 1 nets with more than 1000 pins', b, re.M) is not None and 'gbig' in ha and
           'gbig' not in hb and len(hb) == len(ha) - 1, f'route blocks {len(hb)} vs {len(ha)}; gbig written: '
           f'{"gbig" in hb} vs {"gbig" in ha}')
+    # Part 213: PD39ROUTE_REFINE_KEEP_ABOVE -- refinement's own line when it starts: with N = 1 every refinement
+    # entered with overflow keeps every reroute (no reverts in its iteration lines); with N far above, the configured
+    # revert stays (the same refinement lines as without the setting).
+    b = run('hard', {**off, 'PD39ROUTE_REFINE_KEEP_ABOVE': '1'}, 'keepabove1')
+    c = run('hard', {**off, 'PD39ROUTE_REFINE_KEEP_ABOVE': '1000000000'}, 'keepabovehuge')
+    a = run('hard', {**off}, 'base')
+    rv = lambda t: [m.group(1) for m in re.finditer(r'^refine iter \d+ margin \d+: .*reverted (\d+)\)', t, re.M)]
+    check('PD39ROUTE_REFINE_KEEP_ABOVE keeps every reroute above N',
+          re.search(r'^refinement: entering at \d+ units of 2D overflow, keeping every reroute', b, re.M) is not None
+          and rv(b) and all(v == '0' for v in rv(b)) and any(v != '0' for v in rv(a)),
+          f'reverted per iteration {rv(b)[:4]} vs {rv(a)[:4]}')
+    check('PD39ROUTE_REFINE_KEEP_ABOVE leaves revert below N',
+          re.search(r'^refinement: entering at \d+ units of 2D overflow, acceptance unchanged', c, re.M) is not None
+          and rv(c) == rv(a), f'{rv(c)[:4]} vs {rv(a)[:4]}')
     # Part 193: PD39ROUTE_SLOW_SEARCHES -- batches must also hold K nets needing a search: the slow rounds' own trace
     # counts fewer batches than without.
     def slow_batches(text):
