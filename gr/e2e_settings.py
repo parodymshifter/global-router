@@ -268,7 +268,7 @@ def main():
     # revert stays (the same refinement lines as without the setting).
     b = run('hard', {**off, 'PD39ROUTE_REFINE_KEEP_ABOVE': '1'}, 'keepabove1')
     c = run('hard', {**off, 'PD39ROUTE_REFINE_KEEP_ABOVE': '1000000000'}, 'keepabovehuge')
-    a = run('hard', {**off}, 'base')
+    a = run('hard', {**off, 'PD39ROUTE_REFINE_KEEP_ABOVE': '0'}, 'keepaboveoff')  # fast08.env sets it (Part 213)
     rv = lambda t: [m.group(1) for m in re.finditer(r'^refine iter \d+ margin \d+: .*reverted (\d+)\)', t, re.M)]
     check('PD39ROUTE_REFINE_KEEP_ABOVE keeps every reroute above N',
           re.search(r'^refinement: entering at \d+ units of 2D overflow, keeping every reroute', b, re.M) is not None

@@ -15452,3 +15452,8 @@ Results with N = 1000 (legal, both scorers agree): **newblue3 31434** (max 422, 
 **newblue4 142** (max 2, wirelength 13208160 -- identical in score to Part 212's single run), **adaptec1 0** (wirelength
 5393807 -- identical to Part 212 step 0). The gate acts only where refinement enters at >= 1000 (newblue3), and the
 other designs score exactly as before. Not adopted: awaiting the user.
+
+**Adopted 2026-11-19 06:55 (the user's approval): `PD39ROUTE_REFINE_KEEP_ABOVE=1000` in `gr/fast08.env`.** `e2e_settings.py`'s
+check now turns it off explicitly for its comparison run (fast08.env is the check's base) -- 52 of 52 with the rebuilt
+`gr/pd39route`; `--selftest` passes. Confirmation runs on the designs not yet measured with it: bigblue4, newblue7 and
+the ten zero-overflow designs other than adaptec1 (`p213/confirm.jobs`).

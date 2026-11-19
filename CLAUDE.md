@@ -322,6 +322,15 @@ With the reorderings portfolio: newblue4 134, bigblue4 130, newblue3 33318. ISPD
 2025, which route every net). The lesson, bigger than any algorithm this project has tuned: **audit the model
 against the contest's rules before tuning** -- a modelling error cost more than every late-stage mechanism gained.
 
+**2026-11-19: refinement keeps every reroute above 1000 units -- `fast08.env` carries `PD39ROUTE_REFINE_KEEP_ABOVE=1000`**
+(Part 213). Found by comparing NTHU-Route 2.0's last phase with our refinement from the same routes (its phase-II
+output, run as a diagnostic): the same 1-if-full cost, but NTHU keeps every reroute and ours (`PD4ROUTE_REFINE_ACCEPT=revert`,
+Part 63b) reverted half of them -- NTHU -7550, ours -308. Our own pipeline with refinement keeping its reroutes:
+**newblue3 33318 -> 31434** (NTHU-Route 2.0 31810, best published 31024). Keeping everywhere hurt the small residues
+(newblue4 146, bigblue4 142), whose refinement starts at <= 196 units, so the rule switches on at 1000: newblue4 and
+adaptec1 score exactly as before. The user's rule since 2026-11-18: a result counts only from our own pipeline --
+other routers' routes (NTHU-Route's port is GPL v3) are diagnostics.
+
 **2026-10-14: the ISPD 2025 standard is `./pd39route @standard.env @standard24.env @fast24.env
 @standard25.env`** (Part 133). `gr/standard25.env` adds timing plus capacitance to the 2024
 standard: nets with negative input pin slack pay resistance-weighted wirelength by class, every net
