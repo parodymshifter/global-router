@@ -15416,8 +15416,10 @@ refinement barely moves the slow tier's 41870; NTHU's phase-III schedule changes
 variant): in the variant whose region stage stopped and returned the start, **our refinement takes 39074 -> 38766
 (-308)**, where NTHU's phase III takes the same routes to 31524 (-7550). **The difference is in refinement itself,
 not in the start.** Visible difference: ours reverts about half its reroutes (5550-5710 of ~11800 per iteration,
-`PD4ROUTE_REFINE_ACCEPT=revert` in `standard.env`) when local overflow gets worse; NTHU's phase III keeps its reroutes
-(unverified -- read from the code path, not tested). CLAUDE.md's design note says under a present-demand price keep
-every reroute; refinement was never re-tested that way on newblue3 (unverified: not searched for in HISTORY yet).
+`PD4ROUTE_REFINE_ACCEPT=revert` in `standard.env`) when local overflow gets worse; NTHU's phase III keeps every reroute
+(Part 63 read `Post_processing.cpp` in full: "every reroute kept"). Checked in this file (`grep REFINE_ACCEPT`): keep
+was tested once, Part 63a, with whole-net reroutes -- bigblue1 60 -> 0, newblue1 1108 -> 7850 at iteration 0 (best
+state kept, so 1108 passed through); Part 63b then chose revert (newblue1 -> 484), and `standard.env` has carried it
+since. Keep has never been run on newblue3, nor since refinement reroutes 2-pin pieces (pd6route).
 K1 (our pipeline, refinement keeps every reroute) and K2 (the same from NTHU's phase-II routes, diagnostic) started
 22:59 (`p213/K.jobs`).
