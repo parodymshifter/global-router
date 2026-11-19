@@ -15457,3 +15457,9 @@ other designs score exactly as before. Not adopted: awaiting the user.
 check now turns it off explicitly for its comparison run (fast08.env is the check's base) -- 52 of 52 with the rebuilt
 `gr/pd39route`; `--selftest` passes. Confirmation runs on the designs not yet measured with it: bigblue4, newblue7 and
 the ten zero-overflow designs other than adaptec1 (`p213/confirm.jobs`).
+Confirmation (07:02-09:5x, `p213/confirm.jobs.summary`, `gr/pd39route` at ae3d102 with the adopted standard; all
+legal, gr_verify and eval2008.pl agree): the ten zero-overflow designs all at 0 with wirelength **identical** to Part
+212 step 0 (adaptec2 5225738, newblue2 7576529, adaptec4 12164706, bigblue3 13118976, adaptec3 13099039, bigblue2
+9085065, bigblue1 5672146, adaptec5 15589182, newblue6 17825794, newblue5 23193385); bigblue4 **132** (max 2,
+24807301) and newblue7 **56** (max 2, 35741132) -- identical to their Part 212 single runs. With adaptec1, newblue4
+and newblue3 above, all sixteen are measured on the new standard: only newblue3 changes (33318 -> 31434).
