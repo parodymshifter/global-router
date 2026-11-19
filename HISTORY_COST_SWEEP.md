@@ -15384,3 +15384,7 @@ is used). Correction: an earlier version of this line said the port is MIT-licen
 `LICENSE` is the **GNU GPL v3**. The port lives outside this repository (`~/Code/nthu-route`); whether any of its code
 was ever copied into this repository has not been checked. Whether a flow that depends on running a GPL program fits this project's
 Apache-2.0 / CC BY 4.0 licensing is the user's decision, not settled here.
+
+**The user's decision (2026-11-18 21:53): newblue3's result counts only if our own pipeline produces it.** The 31504
+above is a diagnostic, not a result; our best stays 33318. Next: why NTHU-Route's 2D stage reaches 31524 where ours
+stops near 33300 -- compared net by net in the main hotspot.
