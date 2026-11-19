@@ -15438,7 +15438,8 @@ other residues with keep (newblue1, newblue4, bigblue4, then newblue7), single r
 
 **Keep everywhere is not the answer** (`p213/Kres.jobs`, single runs, legal, both scorers): newblue1 **0** (wirelength
 4673330, byte-identical in score to Part 212's run -- it reaches 0 before refinement matters); newblue4 **146** (max 6;
-Part 212 single run 142, max 2; its reorderings 132-142); bigblue4 **142** (Part 212 single run 132); newblue7 running.
+Part 212 single run 142, max 2; its reorderings 132-142); bigblue4 **142** (Part 212 single run 132); newblue7 **58** (max 4, wirelength 35419257; Part 212 single
+run 56, max 2; its reorderings 56-66) -- inside its spread, shorter wire, not a gain.
 Small residues lose with keep, as newblue1 did in Part 63a. **`PD39ROUTE_REFINE_KEEP_ABOVE=N`** (new, commit 1021888):
 refinement keeps every reroute only when it enters at N or more units of 2D overflow, else the configured revert;
 it prints which on entry. Self-test (off leaves revert; >= N keeps; < N reverts; keep stays keep) and an
