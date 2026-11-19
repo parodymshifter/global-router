@@ -15447,3 +15447,7 @@ same iterations as without) -- 52 of 52. Entry levels, checked from the Part 212
 stage's end per variant): newblue4 148-196, bigblue4 142-152, newblue7 82-102, newblue1 0, newblue3 33514-38946 -- N
 = 1000 separates them. Runs with N = 1000 (00:53, `p213/KA.jobs`, `pd39route.p213b`): newblue3 (expect ~31434),
 newblue4 and adaptec1 (expect their standard runs exactly).
+Results with N = 1000 (legal, both scorers agree): **newblue3 31434** (max 422, wirelength 10697322 -- identical to K1),
+**newblue4 142** (max 2, wirelength 13208160 -- identical in score to Part 212's single run), **adaptec1 0** (wirelength
+5393807 -- identical to Part 212 step 0). The gate acts only where refinement enters at >= 1000 (newblue3), and the
+other designs score exactly as before. Not adopted: awaiting the user.
