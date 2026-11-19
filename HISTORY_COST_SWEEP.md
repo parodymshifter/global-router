@@ -15435,3 +15435,15 @@ Results (legal, gr_verify and eval2008.pl agree):
 `PD4ROUTE_REFINE_ACCEPT=revert`, chosen in Part 63b on newblue1). Not adopted: keep cost newblue1 its refinement gain
 in Part 63a (best state kept, so never worse than refinement's start, but none of revert's 1108 -> 484). Next: the
 other residues with keep (newblue1, newblue4, bigblue4, then newblue7), single runs against Part 212's single runs.
+
+**Keep everywhere is not the answer** (`p213/Kres.jobs`, single runs, legal, both scorers): newblue1 **0** (wirelength
+4673330, byte-identical in score to Part 212's run -- it reaches 0 before refinement matters); newblue4 **146** (max 6;
+Part 212 single run 142, max 2; its reorderings 132-142); bigblue4 **142** (Part 212 single run 132); newblue7 running.
+Small residues lose with keep, as newblue1 did in Part 63a. **`PD39ROUTE_REFINE_KEEP_ABOVE=N`** (new, commit 1021888):
+refinement keeps every reroute only when it enters at N or more units of 2D overflow, else the configured revert;
+it prints which on entry. Self-test (off leaves revert; >= N keeps; < N reverts; keep stays keep) and an
+`e2e_settings.py` check on the hard design (N = 1: 0 reverts in every iteration against 1577-1579 without; N huge: the
+same iterations as without) -- 52 of 52. Entry levels, checked from the Part 212 single runs' traces (the region
+stage's end per variant): newblue4 148-196, bigblue4 142-152, newblue7 82-102, newblue1 0, newblue3 33514-38946 -- N
+= 1000 separates them. Runs with N = 1000 (00:53, `p213/KA.jobs`, `pd39route.p213b`): newblue3 (expect ~31434),
+newblue4 and adaptec1 (expect their standard runs exactly).
