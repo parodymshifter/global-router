@@ -15326,3 +15326,11 @@ units of each other: newblue3's ~33300 is the late stages' own floor on this des
 recipe worked there because its floor was 0 and only the start was in the way; on newblue3 the start is not what
 holds the number. Not tried further. What would have to change is the model inside the hotspot (its single tile's
 pins need ~18x its capacity, Part 213; the cut bound certifies 25336 of its overflow), not the rounding or the start.
+
+**Next (the user, 2026-11-18 20:45): our late stages from NTHU-Route's newblue3 routes.** NTHU-Route 2.0's local port
+with its contest settings for newblue3 (`~/Code/nthu-route/bin/benchmark.sh` lines 65-68, case n3: p2 20 iterations,
+box 10/+1, overflow threshold 20, p3 20 iterations, monotonic routing off; published result 31810 in LMgr's re-run
+table, Part 75), then `pd39route @standard.env @fast08.env @speed08.env PD3ROUTE_LA_FROM=<its route>`
+(`p213/nthu_nb3.sh`, `.log`; 20:45 start). Question: do the late stages end below newblue3's ~33300 from another
+router's 2D routes? On bigblue4 (Part 212) NTHU's start gave 136 against our then 196; on newblue4 (134) and
+newblue7 (86) it was worse than ours.
