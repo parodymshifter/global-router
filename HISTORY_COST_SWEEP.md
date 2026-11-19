@@ -15354,3 +15354,29 @@ gr_verify and eval2008.pl agree: 32832, max 394, wirelength 10760731; NTHU-Route
   newblue3's published 31024 (NTUgr) / 31810 (NTHU-Route 2.0 in LMgr's table).
 Rerun started 21:16 with `PD39ROUTE_REGION_ROUND0=over` (Part 210: round 0 reroutes only nets on over-capacity edges,
 so the region stage refines NTHU's start instead of ripping it up) -- `p213/newblue3_late_nthu_r0.*`.
+
+**`PD39ROUTE_REGION_ROUND0=over` from NTHU's routes** (21:16, `newblue3_late_nthu_r0.*`): the same 32832 (both scorers)
+-- round 0 now reroutes only the 19665 nets on over-capacity edges and still goes 31524 -> 46878; the stage stops at
+round 20 and returns NTHU's routes, as before. Our region stage cannot improve this start.
+
+**Why layer assignment lost 1324 units** (measured): a new trace line (`layer assignment round 0: N nets with wire
+took the greedy per-segment path (... tree build failed T, DP failed D)`) shows **1679 nets** falling back -- all of
+them because their tree could not be built, none in the DP. NTHU-Route's own routes are clean as 2D wire (checked on
+all 442005 nets: none disconnected, none with a cycle). The cause, seen on the first named net (n502836): NTHU writes
+straight segments that **cross inside both** (an "X": the vertical at tile column 598 crosses rows 670 and 671
+mid-segment). `buildNetTree` joins legs only at their endpoints and at nodes lying on a leg, so an X reads as two
+pieces, the build fails, and the net takes the greedy per-segment path -- a whole straight segment on one layer,
+never revisited by later rounds -- which is exactly the pattern on the 642 edges. Our router never writes an X, so
+its own routes lose nothing.
+
+**Fix** (`splitInteriorCrossings`, applied in `readRouteAs2D`, i.e. to every `PD3ROUTE_LA_FROM` start): split a net's
+H and V segments where they cross inside both; a net without such a crossing is returned unchanged, so starts written
+by our own router read exactly as before. The reader prints how many crossings it split. Self-test (pass): an X
+fails to build before and builds as a 4-leg tree after; a T junction is unchanged; n502836's segments (two crossings)
+build after. Run from NTHU's newblue3 routes with the fix: 21:39 (`newblue3_late_nthu_x.*`, binary `pd39route.p213`).
+Result (21:39-21:4x, `p213/newblue3_late_nthu_x.*`): the reader split **6062 crossings in 4796 nets**; layer assignment
+round 0: **0** nets on the greedy path (was 1679); refinement 31524 -> 31504; **real overflow 31504 = 2D** (max 394,
+wirelength 10648523; legal, gr_verify and eval2008.pl agree). **newblue3: 33318 -> 31504 (-5.4%)**, below NTHU-Route
+2.0's 31810 (LMgr's re-run table, Part 75) and 1.5% above the best published 31024 (NTUgr); wirelength also shorter
+(10680838 -> 10648523). The route is NTHU-Route's 2D stage plus our refinement and our layer assignment -- the start
+comes from another router (MIT-licensed local port, `~/Code/nthu-route`), not from ours.

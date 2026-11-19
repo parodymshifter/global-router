@@ -13849,6 +13849,9 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     return unpacked;
   };
   std::vector<char> usesTreeDP(nets.size(), 0);
+  std::atomic<long long> laFailTree{0}, laFailDp{0}; // Part 213
+  std::mutex laFailMu;
+  std::vector<std::string> laFailNames;
   auto buildLaTree = [&](size_t i, NetTree &t, std::vector<std::pair<int, int>> &pr) -> bool {
     // pd37route: per-thread scratch, reused across nets (t is rebuilt in
     // full by splitToUnitEdges; on failure the caller does not read it);
@@ -13977,6 +13980,12 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
                                              pr0.empty() ? nullptr : &pr0);
     if (laTrace)
       ph2 = PhClock::now();
+    if (!dpOk) { // Part 213: which half failed (the tree, or the DP on a built tree), and a few names
+      (built ? laFailDp : laFailTree).fetch_add(1, std::memory_order_relaxed);
+      std::lock_guard<std::mutex> lk(laFailMu);
+      if (laFailNames.size() < 8)
+        laFailNames.push_back(rn.net->name + (built ? " (dp)" : " (tree)"));
+    }
     if (dpOk) {
       commitNetTree(g, ru, rvu, rn.net->minWidth, tree, edgeLayer, nodeStackRange, rn,
                     &charges[i]);
@@ -14043,6 +14052,23 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   }
 
   laLap("round 0 (graph build and run)");
+  { // Part 213: nets whose tree or DP failed take the greedy per-segment path and are never revisited -- count them
+    size_t greedy = 0, greedyWire = 0;
+    for (size_t i = 0; i < nets.size(); ++i)
+      if (!usesTreeDP[i] && nets[i].net && nets[i].net->pins.size() >= 2) {
+        bool wire = false;
+        for (const Seg &sg : nets[i].segs)
+          wire = wire || (sg.l1 == sg.l2 && (sg.x1 != sg.x2 || sg.y1 != sg.y2));
+        greedy += 1;
+        greedyWire += wire;
+      }
+    std::cerr << "layer assignment round 0: " << greedyWire << " nets with wire took the greedy per-segment path ("
+              << greedy << " without a tree DP in all; tree build failed " << laFailTree.load() << ", DP failed "
+              << laFailDp.load() << ")";
+    for (const std::string &nm : laFailNames)
+      std::cerr << (&nm == &laFailNames.front() ? ": " : ", ") << nm;
+    std::cerr << "\n";
+  }
   if (laTrace) { // Part 132: where round 0's per-net time goes, all nets and nets >= 10 ms
     double all[3] = {0, 0, 0}, big[3] = {0, 0, 0};
     size_t nBig = 0;
@@ -14574,6 +14600,62 @@ g24::SolutionReport writeG24Solution(const std::string &path, const G24Input &in
   return rep;
 }
 
+// Part 213: split a net's 2D wire segments where an H and a V segment cross inside both (an "X"). buildNetTree joins
+// legs only at their endpoints (and at nodes lying on a leg), so such a crossing reads as two pieces, the tree build
+// fails, and the net takes layer assignment's greedy per-segment path, never revisited. Our router never writes an X;
+// NTHU-Route 2.0 does (newblue3: 1679 nets, and 1324 units of real overflow on edges with room on another layer).
+// A net without one is returned unchanged. Returns the number of crossings split.
+size_t splitInteriorCrossings(std::vector<Seg> &segs) {
+  std::vector<size_t> hs, vs;
+  for (size_t i = 0; i < segs.size(); ++i) {
+    const Seg &sg = segs[i];
+    if (sg.l1 != sg.l2 || (sg.x1 == sg.x2 && sg.y1 == sg.y2))
+      continue;
+    (sg.y1 == sg.y2 ? hs : vs).push_back(i);
+  }
+  if (hs.empty() || vs.empty())
+    return 0;
+  std::vector<std::vector<int>> cut(segs.size()); // per segment, the interior coordinates to split at
+  size_t crossings = 0;
+  for (size_t a : hs) {
+    const Seg &h = segs[a];
+    const int hx0 = std::min(h.x1, h.x2), hx1 = std::max(h.x1, h.x2);
+    for (size_t b : vs) {
+      const Seg &v = segs[b];
+      const int vy0 = std::min(v.y1, v.y2), vy1 = std::max(v.y1, v.y2);
+      if (v.x1 > hx0 && v.x1 < hx1 && h.y1 > vy0 && h.y1 < vy1) {
+        cut[a].push_back(v.x1);
+        cut[b].push_back(h.y1);
+        ++crossings;
+      }
+    }
+  }
+  if (!crossings)
+    return 0;
+  std::vector<Seg> out;
+  out.reserve(segs.size() + 2 * crossings);
+  for (size_t i = 0; i < segs.size(); ++i) {
+    const Seg &sg = segs[i];
+    if (cut[i].empty()) {
+      out.push_back(sg);
+      continue;
+    }
+    std::vector<int> &c = cut[i];
+    std::sort(c.begin(), c.end());
+    c.erase(std::unique(c.begin(), c.end()), c.end());
+    const bool hz = sg.y1 == sg.y2;
+    int lo = hz ? std::min(sg.x1, sg.x2) : std::min(sg.y1, sg.y2);
+    const int hi = hz ? std::max(sg.x1, sg.x2) : std::max(sg.y1, sg.y2);
+    for (int k : c) {
+      out.push_back(hz ? Seg(lo, sg.y1, sg.l1, k, sg.y1, sg.l1) : Seg(sg.x1, lo, sg.l1, sg.x1, k, sg.l1));
+      lo = k;
+    }
+    out.push_back(hz ? Seg(lo, sg.y1, sg.l1, hi, sg.y1, sg.l1) : Seg(sg.x1, lo, sg.l1, sg.x1, hi, sg.l1));
+  }
+  segs.swap(out);
+  return crossings;
+}
+
 // pd3route: PD3ROUTE_LA_FROM=<route file> reruns layer assignment alone on
 // an existing solution. Each net's segments are projected back to the 2D
 // stage's form -- wire segments onto the one synthetic layer 0, vias
@@ -14644,6 +14726,14 @@ std::vector<RoutedNet> readRouteAs2D(const Design &d, const std::string &path) {
     cur->net = &d.nets[it->second];
     seen.clear();
   }
+  size_t crossings = 0, netsSplit = 0; // Part 213
+  for (RoutedNet &rn : nets) {
+    size_t c = splitInteriorCrossings(rn.segs);
+    crossings += c;
+    netsSplit += c > 0;
+  }
+  if (crossings)
+    std::cerr << "route file: " << crossings << " interior wire crossings split in " << netsSplit << " nets\n";
   return nets;
 }
 
@@ -18021,6 +18111,34 @@ void testReadRouteAs2DProjectsWiresAndDropsVias() {
   for (const Seg &sg : nets[0].segs)
     layer0 = layer0 && sg.l1 == 0 && sg.l2 == 0;
   check(layer0, "every projected wire is on the 2D stage's synthetic layer 0");
+}
+
+// Part 213: an X crossing (the vertical segment crosses the horizontal one inside both) is split into four legs and
+// the net then builds as a tree; a T junction and a net with no crossing are left exactly as they were.
+void testSplitInteriorCrossings() {
+  std::vector<Seg> x = {{0, 2, 0, 4, 2, 0}, {2, 0, 0, 2, 4, 0}};
+  std::vector<Point> pins = {{0, 2}, {4, 2}, {2, 0}, {2, 4}};
+  NetTree t0;
+  const bool before = buildNetTree(x, t0, true, &pins);
+  const size_t c = splitInteriorCrossings(x);
+  NetTree t1;
+  const bool after = buildNetTree(x, t1, true, &pins);
+  check(!before && c == 1 && x.size() == 4 && after && t1.edges.size() == 4,
+        "X crossing: the tree build fails before, the split gives 4 legs and a tree after");
+  std::vector<Seg> tj = {{0, 2, 0, 4, 2, 0}, {2, 2, 0, 2, 4, 0}};
+  std::vector<Seg> tj0 = tj;
+  const size_t ct = splitInteriorCrossings(tj);
+  bool same = ct == 0 && tj.size() == tj0.size();
+  for (size_t i = 0; same && i < tj.size(); ++i)
+    same = tj[i].x1 == tj0[i].x1 && tj[i].y1 == tj0[i].y1 && tj[i].x2 == tj0[i].x2 && tj[i].y2 == tj0[i].y2;
+  check(same, "T junction (an endpoint on the other segment): unchanged");
+  // NTHU-Route's newblue3 net n502836 (tiles): the vertical at x 598 crosses the rows 670 and 671 inside both
+  std::vector<Seg> n = {{596, 669, 0, 596, 671, 0}, {598, 669, 0, 598, 672, 0}, {595, 669, 0, 596, 669, 0},
+                        {597, 670, 0, 599, 670, 0}, {596, 671, 0, 599, 671, 0}, {597, 672, 0, 599, 672, 0}};
+  std::vector<Point> np = {{596, 669}, {597, 670}, {597, 671}, {599, 670}, {595, 669}, {596, 670}};
+  NetTree tn;
+  const size_t cn = splitInteriorCrossings(n);
+  check(cn == 2 && buildNetTree(n, tn, true, &np), "newblue3's n502836 (NTHU-Route): two crossings split, a tree after");
 }
 
 // End to end, nthu mode: route() -> nthu layer assignment on the
@@ -23468,6 +23586,7 @@ int run() {
   testTimingMultFile();
   testPriceSeed();
   testSkipGiant();
+  testSplitInteriorCrossings();
   testLagrangeAndPortfolio();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
