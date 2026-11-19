@@ -15334,3 +15334,17 @@ table, Part 75), then `pd39route @standard.env @fast08.env @speed08.env PD3ROUTE
 (`p213/nthu_nb3.sh`, `.log`; 20:45 start). Question: do the late stages end below newblue3's ~33300 from another
 router's 2D routes? On bigblue4 (Part 212) NTHU's start gave 136 against our then 196; on newblue4 (134) and
 newblue7 (86) it was worse than ours.
+
+**Result: 32832 -- below all six of our newblue3 reorderings** (`p213/nthu_nb3.*`, `newblue3_late_nthu.*`; legal,
+gr_verify and eval2008.pl agree: 32832, max 394, wirelength 10760731; NTHU-Route 1268 s, our late stages 284 s).
+- NTHU-Route's 2D stage ends at **2D 31524** (max 1178) -- 1794 below the 33318 our pipeline ends at (on our own
+  routes newblue3's 2D and 3D overflow are equal).
+- Our region stage then rips up every net in its box in round 0 (31524 -> 55730), does not get back below its start
+  by round 20 and stops (`PD39ROUTE_REGION_ABORT=1000,20`), returning NTHU's routes; refinement 31524 -> 31508.
+- **Layer assignment then adds 1324 units: 2D 31508 -> real 32832.** (Unverified why; the likely reading is the
+  layer remainders Part 208 found -- a 2D model that sums the layers' capacities lets an edge hold one more net per
+  layer with an odd unit left than any layer assignment can place.)
+- 32832 is 486 below the best of six reorderings (33318; spread 33318-33626, Part 212) and 1.5% under, against
+  newblue3's published 31024 (NTUgr) / 31810 (NTHU-Route 2.0 in LMgr's table).
+Rerun started 21:16 with `PD39ROUTE_REGION_ROUND0=over` (Part 210: round 0 reroutes only nets on over-capacity edges,
+so the region stage refines NTHU's start instead of ripping it up) -- `p213/newblue3_late_nthu_r0.*`.
