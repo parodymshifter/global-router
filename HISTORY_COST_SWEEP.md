@@ -15423,3 +15423,15 @@ state kept, so 1108 passed through); Part 63b then chose revert (newblue1 -> 484
 since. Keep has never been run on newblue3, nor since refinement reroutes 2-pin pieces (pd6route).
 K1 (our pipeline, refinement keeps every reroute) and K2 (the same from NTHU's phase-II routes, diagnostic) started
 22:59 (`p213/K.jobs`).
+Results (legal, gr_verify and eval2008.pl agree):
+- **K2** (diagnostic, from NTHU's phase-II routes): refinement iteration 0 39074 -> 33208 (-5866; NTHU's own phase III
+  -6422 in its iteration 1); final **31424** (max 414) -- below NTHU's own 31524 from the same start.
+- **K1 -- our own pipeline, from scratch, `PD4ROUTE_REFINE_ACCEPT=keep`: newblue3 31434** (max 422, wirelength
+  10697322; 2091 s) against the standard's 33318 (-5.7%, below every one of its six reorderings, 33318-33626), below
+  NTHU-Route 2.0's 31810 (LMgr's table) and 1.3% above the best published 31024. Kept variant over=0.075: region
+  41870 -> 33514, refinement (keep) -> 31434 in 12 iterations; the other three variants, whose region stages ended
+  at 38172-38946, refined to 31840-31962 -- keep-refinement gets most of the way from any of them.
+**The cause of newblue3's gap is found and it is ours to fix: refinement's revert rule** (`standard.env`'s
+`PD4ROUTE_REFINE_ACCEPT=revert`, chosen in Part 63b on newblue1). Not adopted: keep cost newblue1 its refinement gain
+in Part 63a (best state kept, so never worse than refinement's start, but none of revert's 1108 -> 484). Next: the
+other residues with keep (newblue1, newblue4, bigblue4, then newblue7), single runs against Part 212's single runs.
