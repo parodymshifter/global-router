@@ -15341,9 +15341,15 @@ gr_verify and eval2008.pl agree: 32832, max 394, wirelength 10760731; NTHU-Route
   routes newblue3's 2D and 3D overflow are equal).
 - Our region stage then rips up every net in its box in round 0 (31524 -> 55730), does not get back below its start
   by round 20 and stops (`PD39ROUTE_REGION_ABORT=1000,20`), returning NTHU's routes; refinement 31524 -> 31508.
-- **Layer assignment then adds 1324 units: 2D 31508 -> real 32832.** (Unverified why; the likely reading is the
-  layer remainders Part 208 found -- a 2D model that sums the layers' capacities lets an edge hold one more net per
-  layer with an odd unit left than any layer assignment can place.)
+- **Layer assignment then adds 1324 units: 2D 31508 -> real 32832.** My first reading (layer remainders, Part 208)
+  is **wrong** -- checked: newblue3 has no odd capacity anywhere (defaults h 8/36/36, v 8/36/36; all 2016672
+  adjustments even). Measured instead (`newblue3_late_nthu.route.gz`): all 1324 units sit on 642 edges that are
+  **within their 2D capacity** -- 99 with 0 units to spare, the rest with 2-14+ spare, i.e. another layer of that
+  edge had room -- 547 of them on layer 3 and 95 on layer 4, and only 1 within 20 tiles of the hotspot. So layer
+  assignment put a wire on a full layer while the same edge had room on another layer of its direction. On our own
+  routes the same layer assignment loses nothing (2D = 3D = 33318). Cause not yet found (unverified candidates:
+  the per-net DP's via cost outweighing capacity on long NTHU segments; layer assignment's own negotiation stopping
+  at round 1 of 22, as its trace says).
 - 32832 is 486 below the best of six reorderings (33318; spread 33318-33626, Part 212) and 1.5% under, against
   newblue3's published 31024 (NTUgr) / 31810 (NTHU-Route 2.0 in LMgr's table).
 Rerun started 21:16 with `PD39ROUTE_REGION_ROUND0=over` (Part 210: round 0 reroutes only nets on over-capacity edges,
