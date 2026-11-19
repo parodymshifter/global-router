@@ -15388,3 +15388,23 @@ Apache-2.0 / CC BY 4.0 licensing is the user's decision, not settled here.
 **The user's decision (2026-11-18 21:53): newblue3's result counts only if our own pipeline produces it.** The 31504
 above is a diagnostic, not a result; our best stays 33318. Next: why NTHU-Route's 2D stage reaches 31524 where ours
 stops near 33300 -- compared net by net in the main hotspot.
+
+**What NTHU-Route does differently on newblue3** (`p213/cmp_nb3.py`, `cmp_nb3.txt`; 2D, our portfolio route against
+NTHU's): the same 4614 units leave the centre tile (487, 668) through its four sides in both (forced), but NTHU splits
+them evenly (1058-1240 per side) and runs four straight corridors along the tile's own row and column, every edge
+beside them exactly at capacity (62 / 80); ours sends 632 up and 1432-1478 left / right, then turns nets through the
+neighbouring rows and columns (column 488: 708-984 against 80) -- each turn inside the congested area crosses one
+more over-capacity edge. Ours: 972 over-capacity edges, NTHU 408; the difference (1794) is almost all within 2 tiles of
+the centre (ring 1: 5914 vs 4244). NTHU's source (`~/Code/nthu-route/src/router`, GPL v3 -- read for the method, nothing
+copied): its last phase (`Post_processing.cpp:90`) prices an edge 1 if full, else 0 (`Congestion.cpp:61`,
+`DataDef.h:103`), and on newblue3 its own log shows that phase doing 19% of the work: phase II (20 negotiation
+iterations, the contest setting for this design; 150 on most others) ends at 39074 units, phase III takes it to
+31524 (6422 in its first iteration). Ours has the same 1-if-full cost in refinement (`refineCost`, Part 66), but
+there it gains only 228 (33546 -> 33318): our negotiation (slow tier 42104 -> region stage 33546) does almost
+everything, and refinement starts from its end. Unverified which difference matters: NTHU stops negotiating early and
+hands a less-settled start to the 1-if-full phase; its phase III grows the box +15 per iteration (ours +5) for 20
+iterations with no plateau stop (ours stops after 10 flat iterations above 1000).
+
+**E1-E3** (our own pipeline only, from scratch; `p213/E.jobs`, binary `pd39route.p213`, 21:57): E1 region stage off
+(refinement straight after the slow tier); E2 = E1 + NTHU's phase-III schedule (`PD4ROUTE_REFINE_BOX_INC=15
+PD4ROUTE_REFINE_ITERS=20 PD12ROUTE_REFINE_PLATEAU=0`); E3 = region stage on + that schedule.
