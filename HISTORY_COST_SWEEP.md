@@ -15408,3 +15408,16 @@ iterations with no plateau stop (ours stops after 10 flat iterations above 1000)
 **E1-E3** (our own pipeline only, from scratch; `p213/E.jobs`, binary `pd39route.p213`, 21:57): E1 region stage off
 (refinement straight after the slow tier); E2 = E1 + NTHU's phase-III schedule (`PD4ROUTE_REFINE_BOX_INC=15
 PD4ROUTE_REFINE_ITERS=20 PD12ROUTE_REFINE_PLATEAU=0`); E3 = region stage on + that schedule.
+Results (all legal, both scorers agree): **E1 41620, E2 41612, E3 33326** (standard 33318). Without the region stage
+refinement barely moves the slow tier's 41870; NTHU's phase-III schedule changes nothing (E2 vs E1, E3 vs standard).
+
+**The deciding diagnostic** (`p213/nthu_nb3_p2.sh`): NTHU-Route with its phase III off (`--p3-max-iteration=0`) ends at
+2D 39074 -- its phase-II routes. Our late stages from them (`newblue3_late_nthup2.*`, 33418 in the end via a region
+variant): in the variant whose region stage stopped and returned the start, **our refinement takes 39074 -> 38766
+(-308)**, where NTHU's phase III takes the same routes to 31524 (-7550). **The difference is in refinement itself,
+not in the start.** Visible difference: ours reverts about half its reroutes (5550-5710 of ~11800 per iteration,
+`PD4ROUTE_REFINE_ACCEPT=revert` in `standard.env`) when local overflow gets worse; NTHU's phase III keeps its reroutes
+(unverified -- read from the code path, not tested). CLAUDE.md's design note says under a present-demand price keep
+every reroute; refinement was never re-tested that way on newblue3 (unverified: not searched for in HISTORY yet).
+K1 (our pipeline, refinement keeps every reroute) and K2 (the same from NTHU's phase-II routes, diagnostic) started
+22:59 (`p213/K.jobs`).
