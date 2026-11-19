@@ -15381,6 +15381,6 @@ wirelength 10648523; legal, gr_verify and eval2008.pl agree). **newblue3: 33318 
 (10680838 -> 10648523). The route is NTHU-Route's 2D stage plus our refinement and our layer assignment -- the start
 comes from another router (the local port `~/Code/nthu-route`, run as a separate program; only its output route file
 is used). Correction: an earlier version of this line said the port is MIT-licensed -- written without checking; its
-`LICENSE` is the **GNU GPL v3**. Nothing from it is in this repository (`.gitignore`d? not applicable: it lives outside
-the repo, `~/Code/nthu-route`). Whether a flow that depends on running a GPL program fits this project's
+`LICENSE` is the **GNU GPL v3**. The port lives outside this repository (`~/Code/nthu-route`); whether any of its code
+was ever copied into this repository has not been checked. Whether a flow that depends on running a GPL program fits this project's
 Apache-2.0 / CC BY 4.0 licensing is the user's decision, not settled here.
