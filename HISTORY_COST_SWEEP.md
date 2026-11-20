@@ -15463,3 +15463,21 @@ legal, gr_verify and eval2008.pl agree): the ten zero-overflow designs all at 0 
 9085065, bigblue1 5672146, adaptec5 15589182, newblue6 17825794, newblue5 23193385); bigblue4 **132** (max 2,
 24807301) and newblue7 **56** (max 2, 35741132) -- identical to their Part 212 single runs. With adaptec1, newblue4
 and newblue3 above, all sixteen are measured on the new standard: only newblue3 changes (33318 -> 31434).
+
+## Part 214 -- after Part 213: newblue3's reorderings, a wirelength post-pass, the 2024 / 2025 rule audit (in progress)
+
+The user's order (2026-11-19 21:29): try 1 (newblue3's reorderings under the adopted standard), start 3 (the
+wirelength post-pass, plan B5), queue 2 (audit the 2024 / 2025 flows against their contests' rules) after 1.
+
+**1. newblue3's reorderings** (`p214/run1.sh`, `reorder_portfolio.py --spreads 56,80,68,60,72 --jobs 3 --router
+./pd39route` at ae3d102; spread 64 is Part 213's 31434): started 21:29.
+
+**3. The wirelength post-pass -- first, the ceiling** (`p214/wl_ceiling.py`, on bigblue1's standard route
+`p212/z_bigblue1_skip.route.gz` -- the zero-overflow design furthest above NTHU-Route 2.0, +1.8%): scored 5672146 =
+2D wire 3706693 + **via units 1965453 (34.7%)**. Nets of 2-3 pin tiles (exact minimum = their HPWL): 140246 nets, wire
+1185565 against 1107802 -- **77763 units (7.0%) of detour, all in 3870 nets** (~20 tiles each). Nets of 4+ pin tiles:
+56639, wire 2521128, HPWL 1878061, rectilinear MST 2449195 (their Steiner minimum lies between; not measured). The
+whole gap to NTHU-Route 2.0 is ~102000 units (LMgr's table, three significant figures), so the small nets' detour
+alone is of its size -- if it can be removed, which the saturated reclaim pass (Parts 137, 187) says needs other nets
+to move too. Where it sits: at 16 x 16-tile cells, 141 of 225 cells hold any; the top 20 hold 55% -- clustered enough
+for windows.
