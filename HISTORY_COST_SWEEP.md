@@ -15678,3 +15678,11 @@ worst path's nets present. So every routed-slack classification and every refine
 the failing paths, the worst ones missing; other designs are not yet checked (the loop never logged SKIPPEDPATHS).
 Test running: blind mempool_tile through the loop with the fixed script (a copy in `p215/fixloop/`, `gr/` unchanged),
 `~/Code/GlobalRouterTemp/p215/tile_fix`, log `p215/tile_fix.log`.
+**Result** (03:25-03:44; `p215/tile_fix/` -- loop.tsv, scores.jsonl, the best route; contest score by `contest25.py`): with
+the fixed slack script the routed-slack classes now move timing on blind mempool_tile (k20r WNS -0.481, k180r -0.428;
+before, every `r` candidate stayed at -0.5864), the loop picks **k180rp1m2, contest 0.9238 (was 1.6415, -44%)**, and
+refinement keeps gaining past its default 2 rounds (`--resume --refine 6`): m3 0.7763, m4 0.6741, m5 0.6714, **m6 0.6174
+(WNS -0.3417, TNS -1285, congestion 2.757M)** -- WNS level with 1st place (-0.342), TNS better (-1356), congestion still
+above (2.23M): the gap to 1st place's 0.3576 is now congestion. Other blind designs with the fixed script (their best
+routes, `~/Code/GlobalRouterTemp/p215/skipchk/`): ariane, bsg_chip, NV_NVDLA_partition_c -- 0 bad points, the same net
+counts as the loop's files, so unaffected. mempool_group / mempool_cluster: being checked.
