@@ -15503,3 +15503,28 @@ bigblue1's scored wirelength, Part 214).
 **1. Result** (21:29-23:41, `p214/run1.log`, `p214/newblue3/`; all legal, gr_verify and eval2008.pl agree): overflow by
 spread 56: 31504, **60: 31402** (max 420, wirelength 10701357), 68: 31422, 80: 31450, 72: 31416 (Part 213's spread 64:
 31434). Kept spread 60: **newblue3 31402** -- 1.2% above the best published 31024; the six orderings span 31402-31504.
+
+**2. The 2024 / 2025 rule audit** (23:43-00:1x; the question: does the router optimize what each contest's evaluator
+scores? -- the kind of mismatch that gave Parts 212 and 213 their gains). Checked, point by point:
+- *Cost formula*: the router's `g24Loss` is the 2024 evaluator's line for line (`exp(0.5 (d - 2c) / 2)`, `exp(0.75 d)`
+  at c <= 0.001; `evaluator.cpp` 589-596, 786-789). **The 2025 congestion evaluator** (its source is in the repository,
+  `gr/bench/ispd25/ISPD2025_benchmarks/evaluation/evaluator.cpp`) **has the same cost lines** -- its diff against the
+  2024 evaluator touches only input parsing: DEF coordinates divided by a hard-coded GCell size of 4200 (every 2025
+  design's pitch is 4200 in both directions, checked on all seven `.cap` files) and vias limited to one layer step.
+- *Layer 0*: unscored by both evaluators and by `g24_verify`; the router's score gives it weight 5 but it carries no
+  demand -- its term is 0 (checked with a probe build on ariane 2025).
+- *2D pitch*: 2024 pitches are 3800 (x) by 2800 (y) -- a horizontal step costs 1.36 vertical ones; the standard's 2D
+  stage counts steps, but Part 106's score-aware 2D cost (pitches included) changed nothing (+-0.02%).
+- *`minLength`*: read by the evaluator, never used in scoring (only its declaration and getter).
+- **Found: the stage report's score overstated the overflow cost by up to 2x.** `routerScore` summed both edge planes
+  of every layer; the 2024 reader gives a layer's capacity to both planes, and the plane against the layer's direction
+  never carries demand (wires and via demand go only to the layer's own direction, `forViaDemandEdges`), so each
+  GCell's idle floor exp(-c/2) was counted twice. ariane133_51: report 32164652 against the evaluator's 22386813 (the
+  code comment said "slightly below"); per layer the ratio was 1.1 on the busy lower layers and exactly 2.0 on the idle
+  upper ones. **Routing decisions never read it** (its four call sites are stage-report marks), so no route or result
+  changes -- but this is the column CLAUDE.md says to read before tuning anything. Fixed (sum the layer's own-direction
+  plane only): ariane133_51 22341913 vs evaluator 22386813 (-0.20%), ariane 2025 18373905 vs 18426011 (-0.28%) -- the
+  documented remainder, pin-access segments the writer adds after the report; routes byte-identical before and after
+  (`cmp`). Self-test `testRouterScoreOnePlane` (both planes given capacity, no demand: the score is the own-direction
+  floor; the old loop gives about twice it). Binary `pd39route.p214`.
+**Audit result: no mismatch in what the 2024 / 2025 flows optimize; one misleading report, fixed.**

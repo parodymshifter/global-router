@@ -13744,16 +13744,23 @@ Pattern3DStats pattern3DPass(const RoutingGrid &g, RealUsage &ru, RealViaUsage &
 // included), plus unitLength x pitch per wire GCell and unitVia per via of
 // the nets' segments. The evaluator also counts the solution writer's pin
 // fixes, so the final row sits slightly below g24_verify's total.
+// Part 214: one plane per layer -- the layer's own direction (gViaDemand.dir). The reader gives a layer's capacity to
+// both its edge planes, and the plane against the direction never carries demand (wires and via demand go to the
+// layer's own direction), so summing it added a second idle-GCell floor exp(-c/2) per GCell: the report read 32.2M on
+// ariane133_51 against the evaluator's 22.4M. Routing decisions never read this function (stage report only).
 double routerScore(const RoutingGrid &g, const RealUsage &ru, const std::vector<RoutedNet> &nets) {
   double total = 0;
   const size_t planeH = static_cast<size_t>(g.ny) * static_cast<size_t>(g.nx - 1);
   const size_t planeV = static_cast<size_t>(g.ny - 1) * static_cast<size_t>(g.nx);
   for (int l = 0; l < g.nLayers; ++l) {
     double layerSum = 0;
-    for (size_t i = l * planeH; i < (l + 1) * planeH; ++i)
-      layerSum += edgeLoss(true, i, ru.h[i]);
-    for (size_t i = l * planeV; i < (l + 1) * planeV; ++i)
-      layerSum += edgeLoss(false, i, ru.v[i]);
+    const int dir = l < static_cast<int>(gViaDemand.dir.size()) ? gViaDemand.dir[l] : -1;
+    if (dir != 1)
+      for (size_t i = l * planeH; i < (l + 1) * planeH; ++i)
+        layerSum += edgeLoss(true, i, ru.h[i]);
+    if (dir != 0)
+      for (size_t i = l * planeV; i < (l + 1) * planeV; ++i)
+        layerSum += edgeLoss(false, i, ru.v[i]);
     total += gScore.w[l] * layerSum;
   }
   long long vias = 0;
@@ -22990,6 +22997,43 @@ void testSkipGiant() {
   check(small, "skip giant nets: a net of exactly 1000 pins is not exempt and stays");
 }
 
+// Part 214: the stage report's score sums each layer's own-direction plane only. Both planes carry the layer's
+// capacity (as the ISPD 2024 reader fills them); with no demand anywhere the score is the idle floor w x exp(-c/2) of
+// the own-direction edges -- the old loop added the other plane's floor too (2x on an idle layer).
+void testRouterScoreOnePlane() {
+  Design d = parse("pd39route_selftest_onelane.gr", "grid 4 3 3\nvertical capacity 0 0 10\n"
+                                                     "horizontal capacity 0 10 0\nminimum width 1 1 1\n"
+                                                     "minimum spacing 0 0 0\nvia spacing 0 0 0\n0 0 10 10\n"
+                                                     "num net 0\n0\n");
+  const RoutingGrid &g = d.grid;
+  const ScoreModel savedScore = gScore;
+  const std::vector<int> savedDir = gViaDemand.dir;
+  gScore = ScoreModel{};
+  gScore.on = true;
+  gScore.w = {1, 1, 1};
+  gScore.capH.assign(g.hCount(), 0.0);
+  gScore.capV.assign(g.vCount(), 0.0);
+  for (int z = 1; z < 3; ++z) { // both planes of layers 1-2 get capacity 4, as the reader fills them
+    for (int y = 0; y < g.ny; ++y)
+      for (int x = 0; x + 1 < g.nx; ++x)
+        gScore.capH[g.hIndex(x, y, z)] = 4;
+    for (int y = 0; y + 1 < g.ny; ++y)
+      for (int x = 0; x < g.nx; ++x)
+        gScore.capV[g.vIndex(x, y, z)] = 4;
+  }
+  gViaDemand.dir = {-1, 0, 1}; // layer 1 horizontal, layer 2 vertical
+  RealUsage ru(g);
+  std::vector<RoutedNet> nets;
+  const double got = routerScore(g, ru, nets);
+  const double floor1 = 3.0 * 3.0 * std::exp(-2.0); // layer 1: 3 rows x 3 H edges, exp(0.5 (0 - 8) / 2)
+  const double floor2 = 2.0 * 4.0 * std::exp(-2.0); // layer 2: 2 rows of V edges x 4 columns
+  gScore = savedScore;
+  gViaDemand.dir = savedDir;
+  check(std::fabs(got - (floor1 + floor2)) < 1e-9,
+        "router score: each layer's own-direction plane only (" + std::to_string(got) + " vs " +
+            std::to_string(floor1 + floor2) + ")");
+}
+
 // pd39route (Part 207): the per-net multiplier file: listed nets get their value, the rest 1; an index out of
 // range, a non-number, zero, a negative, a value above 1e6 or a trailing field is refused.
 void testTimingMultFile() {
@@ -23618,6 +23662,7 @@ int run() {
   testSkipGiant();
   testSplitInteriorCrossings();
   testRefineKeepAbove();
+  testRouterScoreOnePlane();
   testLagrangeAndPortfolio();
   testTimingLayerBiasPicksUpperMetal();
   testThreadedLayerAssignmentIsExact();
