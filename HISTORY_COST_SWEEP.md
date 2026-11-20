@@ -15495,3 +15495,7 @@ less detour): at most ~37000 units, ~0.65% of the score, inside the 1.6-3.6% wir
 **Reading: a 2D wirelength post-pass is not worth building out on these designs.** The larger lever on the scored
 wirelength is vias -- 34.7% of bigblue1's score -- i.e. layer assignment, not 2D routing (not yet measured how far
 its via count sits above any bound).
+
+**Queue (the user, 2026-11-19 22:38):** after item 1 (newblue3's reorderings, ~23:25) and item 2 (the 2024 / 2025 rule
+audit), **scope the wirelength step on vias**: how far our via count sits from what is achievable (vias are 34.7% of
+bigblue1's scored wirelength, Part 214).
