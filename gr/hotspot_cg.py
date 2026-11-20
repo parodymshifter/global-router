@@ -1091,6 +1091,8 @@ def main():
                     continue
                 obj, _, wi, status, _, _ = program(free, best, True, 'lns', lns_t)
                 solves += 1
+                print(f'  neighbourhood around {seed}: {len(free)} nets, {status}; objective '
+                      f'{"none" if obj is None else round(obj, 3)} (current {cur})', flush=True)
                 if obj is None or obj > cur - 0.5:
                     continue
                 trial = dict(best)

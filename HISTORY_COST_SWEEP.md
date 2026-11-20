@@ -15595,3 +15595,9 @@ present-demand price with history negotiates toward its own equilibrium, which i
 1-if-full refinement with every reroute kept (Part 213) is what goes below it. Test of the consequence, our own
 pipeline: newblue3 with the region stage off (`PD5ROUTE_REGION=0`, refinement straight from the slow tier, keeping
 its reroutes above 1000 per fast08) -- `p214/N.jobs`, queued 01:09.
+**N1 -- region stage off, our own pipeline** (`p214/N1_noregion_keep.*`; legal, both scorers): **32404** (max 420,
+wirelength 10951622; 1003 s, half the standard's time) against 31434 with the region stage. Refinement (keeping its
+reroutes) took the slow tier's 41870 -> 32404 in 16 iterations, 31 s, stopped by the plateau rule while still gaining
+(last gain at iteration 14). So the region stage helps our pipeline: its ~33500 is a better start for refinement than
+the slow tier's 41870. The plateau rule also stopped refinement in K1 (12 iterations). N2 (region off) and N3 (region
+on), both with `PD12ROUTE_REFINE_PLATEAU=0 PD4ROUTE_REFINE_ITERS=60`, started 01:38.
