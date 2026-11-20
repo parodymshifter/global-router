@@ -15686,3 +15686,7 @@ refinement keeps gaining past its default 2 rounds (`--resume --refine 6`): m3 0
 above (2.23M): the gap to 1st place's 0.3576 is now congestion. Other blind designs with the fixed script (their best
 routes, `~/Code/GlobalRouterTemp/p215/skipchk/`): ariane, bsg_chip, NV_NVDLA_partition_c -- 0 bad points, the same net
 counts as the loop's files, so unaffected. mempool_group / mempool_cluster: being checked.
+`--refine 12` from there (03:44-03:47): m7 0.4959, **m8 0.4879 (WNS -0.3233, TNS -1252, congestion 2.757M)**, round 9
+"the classes did not change, stopped". Blind mempool_tile **1.6415 -> 0.4879 (-70%)**; WNS and TNS now better than 1st
+place's, congestion still 24% above its 2.23M (1st 0.3576). Blind six-design sum with this alone: 7.8668 -> 6.7132
+(1st place 8.0604). Route `p215/tile_fix/k180rp1m8.route.xz`.
