@@ -15555,3 +15555,16 @@ unverified), the route's own 1965453. So any layer assignment of this 2D route c
 to the uncapacitated floor is forced by capacity (layers 1-2 hold a fifth of layers 3-6). Layer assignment is within
 8.8% of its bound here -- below the size of change this project counts as progress. The remaining lever on vias is
 the 2D shape (bends raise the floor capacity builds on): not measured.
+
+**Via scoping, step 3: the 2D shapes** (the user's choice, 2026-11-20 00:58; `p214/bends.py` on bigblue1's standard route,
+12 s). A tile where a net's 2D wire meets both directions needs at least one via whatever the layers. Nets of 2 pin
+tiles (exact minimum: 0 turns if the pins share a row or column, else 1): 111112 nets, 49489 turn tiles against 26998
+-- **excess 22491, all in 5574 nets** (105538 have none); their vias 331318 (~3 per net: pin-access stacks to the upper
+layers). Nets of 3+ pin tiles: 85773, 434548 turn / mixed-branch tiles, 0.73 per pin tile (an L per connection would
+be ~1; no exact minimum computed -- unverified that it is near-minimal), vias 1634135. Straightening the detoured
+2-pin nets could save very roughly 22000-45000 vias (<= ~0.8% of the score; an estimate, not measured), and those are
+the capacity-forced detours of the wirelength ceiling above.
+**The via scoping's conclusion (bigblue1):** layer assignment <= 2.8% of the score left (certified), 2D shape <= ~0.8%
+(estimated), the 2D wirelength post-pass ~1% in its best window. Vias are dominated by pin-access stacks under
+capacity (pins on layer 1; layers 1-2 a fifth of layers 3-6), not by layer-assignment or 2D-shape choices. No
+wirelength lever on the 2008 designs reaches the size this project counts as progress.
