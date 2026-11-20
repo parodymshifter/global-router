@@ -15537,3 +15537,21 @@ standard route (`p212/z_bigblue1_skip.route.gz`, all 196885 nets with wire, none
 layers 1 / 2 (pins on layer 1) hold 10 units each, layers 3-6 hold 50 (header), and the uncapacitated optimum keeps
 nearly every wire on layers 1-2. The gap is mostly capacity forcing wires up (2-4 vias per pin to reach layers 3-6);
 how much of it any capacitated layer assignment can recover is the open question.
+
+**`gr/labound.cpp`** (new, standard library only; the user's go-ahead 2026-11-20 00:45): a certified lower bound on the
+vias any layer assignment of a fixed 2D route needs without overflow -- Lagrangian relaxation of the per-(edge, layer)
+wire capacities; the inner problem is an exact per-net tree DP over **unit** edges (a leg may switch layers part-way,
+so a per-leg DP would over-estimate the relaxation and void the bound), cost = via stack spans with pin layers;
+projected subgradient with Polyak steps; every 10 iterations a sequential repair (nets one at a time, filled layers
+near-forbidden) gives a feasible assignment as an upper value. Self-test (pass): a straight net with room, 0 vias; two
+nets on a row whose layer 0 holds one -- bound 3.25 (rounded up 4) meets the feasible 4; a blocked middle edge -- up
+and back down around it, 4 vias, the part-way switch priced exactly.
+
+**bigblue1** (its standard route, 196885 nets; 300 iterations, 55 s, `p214/bb1_labound.*`): iteration 0 (zero prices)
+gives **820812 -- the uncapacitated floor `via_floor.py` computed independently**. Final: **certified lower bound
+1807213**, best feasible assignment found 1928214 (in the tool's own capacity model; not written out or scored --
+unverified), the route's own 1965453. So any layer assignment of this 2D route can save **at most 158240 via units
+(2.8% of the scored 5672146)**, at least ~37000 (0.66%) if the tool's assignment holds up; the other ~986000 of the gap
+to the uncapacitated floor is forced by capacity (layers 1-2 hold a fifth of layers 3-6). Layer assignment is within
+8.8% of its bound here -- below the size of change this project counts as progress. The remaining lever on vias is
+the 2D shape (bends raise the floor capacity builds on): not measured.
