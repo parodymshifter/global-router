@@ -15568,3 +15568,20 @@ the capacity-forced detours of the wirelength ceiling above.
 (estimated), the 2D wirelength post-pass ~1% in its best window. Vias are dominated by pin-access stacks under
 capacity (pins on layer 1; layers 1-2 a fifth of layers 3-6), not by layer-assignment or 2D-shape choices. No
 wirelength lever on the 2008 designs reaches the size this project counts as progress.
+
+## Part 215 -- why the region stage degrades a good start; then newblue7's last 2 units (in progress)
+
+The user's order (2026-11-20 01:05): the open questions first (#3), then the 2024 / 2025 scores (#1).
+
+**Question: why the region stage makes an already-good start worse.** Part 213: from NTHU-Route's newblue3 2D routes
+(31524) round 0 went to 55730 (every net in the box rerouted) / 46878 (only overflowed nets); the stage never got back
+below its start in 20 rounds and stopped. Runs (diagnostic -- NTHU's routes as the good start; `p214/R.jobs`, binary
+`pd39route.p214`, portfolio off, early stop off `PD39ROUTE_REGION_ABORT=0,20`, `PD39ROUTE_REGION_ROUND0=over`; 01:06):
+| run | round 0 from 31524 |
+|---|---|
+| R1 `PD39ROUTE_REGION_OVER=0` (an over-full edge costs what a just-full one does) | 47506 |
+| R2 `PD39ROUTE_REGION_OVER=0.075` | 42066 |
+| R3 plain present-demand price | 46382 |
+Two hypotheses ruled out: (a) cong^5 pushing nets off forced-overflow edges onto just-full ones -- capping the price
+does not stop the jump; (b) the wire-length weight decayed to ~0 -- checked in the code, `configureCostModel` starts
+the region stage at iteration 1 (factor ~0.99). Running to the end to see whether, and how far, the stage recovers.
