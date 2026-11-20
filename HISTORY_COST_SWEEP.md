@@ -15640,3 +15640,7 @@ above both winners. On mempool_tile the congestion the bias adds (~1.06 of score
 (0.36), and 1st place also has better WNS / TNS there (-0.342 / -1356 vs our -0.410 / -1637). The winners buy timing
 for far less congestion; a cheaper way to carry the critical nets on the mempool designs is the 2025 lever (Part 189's
 reading, now measured against the winners).
+**First test of the lever** (02:44): on all three mempool designs the loop's pick used its lowest strength, k3 = 20 --
+the ladder may start too high there. `timing_loop.py --k3 a,b,c` (new; the strengths to try, default 20,180,540;
+self-test passes). Run: blind mempool_tile with `--k3 2,5,10,20 --refine 2`, router `gr/pd39route` (ae3d102),
+`p215/tile_k3/`, scored afterwards with `contest25.py`'s exact contest formula.

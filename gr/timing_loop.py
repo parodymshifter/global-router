@@ -8,7 +8,7 @@ candidate with the contest's own OpenROAD (timing, power -- one session for all 
 evaluator, and keep the best by the contest score's change against the unbiased route.
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
-      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] | --selftest
+      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -438,6 +438,11 @@ def main():
         ROUTER = os.path.abspath(sys.argv[sys.argv.index('--router') + 1])
     # Part 188 (the user, 2026-11-06): two rounds of sticky re-classification by default; --refine 0 turns it off
     rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else 2
+    global K3_LADDER
+    if '--k3' in sys.argv:  # Part 215: the timing strengths to try, e.g. --k3 2,5,10,20 (default 20,180,540)
+        K3_LADDER = [int(v) for v in sys.argv[sys.argv.index('--k3') + 1].split(',')]
+        if not K3_LADDER or min(K3_LADDER) <= 0:
+            raise SystemExit('timing_loop.py: --k3 takes positive integers, e.g. 2,5,10,20')
     if '--reuse' in sys.argv:
         top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), max(rounds, 1), t0)
         if out:
