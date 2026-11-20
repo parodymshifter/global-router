@@ -15644,3 +15644,12 @@ reading, now measured against the winners).
 the ladder may start too high there. `timing_loop.py --k3 a,b,c` (new; the strengths to try, default 20,180,540;
 self-test passes). Run: blind mempool_tile with `--k3 2,5,10,20 --refine 2`, router `gr/pd39route` (ae3d102),
 `p215/tile_k3/`, scored afterwards with `contest25.py`'s exact contest formula.
+
+**Second open question: newblue7's last 2 units** (`hotspot_cg.py --only 150,318,172,340 --margin 20 --rounds 8 --no-int
+--no-dive --lns --lns-size 10,5000,3600`, every net within 10 tiles free over all its candidates, no spare term;
+`p214/nb7_lns5k.txt`, 01:25-02:46; the neighbourhood program now prints HiGHS's status): one program of 5000 nets,
+**Time limit reached, primal bound 690.95, dual bound 2.95** (in the program's objective: overflow plus the 1e-5-per-edge
+wire tie-break) -- no solution below the base's 2. Not a certificate: the dual bound mixes overflow with the tie-break,
+whose size was not recorded (at ~1e-5 x ~100000 edges it would be ~1, leaving ~2 -- an estimate, unverified), and it
+holds only over the generated candidates. **Closed without a gain:** newblue7 stays at 56 (forced >= 54); further
+attempts would cost hours for at most 2 units (3.6%), below this project's progress threshold.
