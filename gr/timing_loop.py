@@ -18,9 +18,10 @@ Stage 0 (Part 134): the unbiased route is scored and OpenROAD measures its slack
 endpoint's worst path. Stage 1 runs the ladder twice: classes from that routed slack (PD39ROUTE_TIMING_SLACK,
 replace mode: other nets unclassed; tag suffix r) and from the input pin slack (suffix i) -- neither wins
 everywhere (routed: visible ariane -3.31 vs -2.27; input: blind mempool_tile_wrap -1.15 vs -0.21, whose
-unbiased route fails on only 665 nets). `--classes routed|input` runs one. Stage 2: at the best, the power
+unbiased route seemed to fail on only 665 nets -- Part 215: a slack-script bug dropped 81% of its failing paths;
+fixed, 9263 nets, and routed classes win there too). `--classes routed|input` runs one. Stage 2: at the best, the power
 term at KP_LADDER with the same classes. Stage 3 (Part 188, default since 2026-11-06; `--refine N`, 0 = off,
-default 2): sticky re-classification -- the best route's own failing-path slack merged with every slack
+default 2, 12 since 2026-11-20, Part 215): sticky re-classification -- the best route's own failing-path slack merged with every slack
 measured before (per net, the worst), and a re-route at the best's setting, while it gains (ten designs
 -23.97 -> -25.11, none worse). Every candidate is logged to WORK_DIR/loop.tsv.
 `--lean` (Part 189, for designs whose routes are ~11 GB each, mempool_cluster): every route that can no
@@ -53,7 +54,8 @@ KP_LADDER = [1, 4]
 ROUTER = os.path.join(GR, 'pd39route')  # --router PATH to use another build
 LEAN = False  # --lean (Part 189)
 CKPT, RESUME, DONE, N_SAVED = None, False, {}, None  # scores.jsonl and --resume (Part 189)
-SAVED = ('tag', 'k3', 'kp', 'src', 'of', 'opens', 'wns', 'tns', 'power', 'slack_nets', 'slack_unmatched', 'classed')
+SAVED = ('tag', 'k3', 'kp', 'src', 'of', 'opens', 'wns', 'tns', 'power', 'slack_nets', 'slack_unmatched', 'classed',
+         'slack_skipped', 'slack_badpoints')
 SCORED = ('wns', 'tns', 'power')
 
 
@@ -233,6 +235,9 @@ def sta_slack(d, name, c, work, idx):
     txt = subprocess.run([OPENROAD, '-exit', tcl], cwd=EVAL_DIR, env=env, capture_output=True, text=True).stdout
     if 'SLACKNETS' not in txt:
         raise SystemExit('timing_loop.py: OpenROAD (slack) failed:\n' + txt[-2000:])
+    c['slack_skipped'], c['slack_badpoints'] = slack_counts(txt)
+    print(f"{name}: slack of {c['tag']}: {c['slack_skipped']} failing paths skipped, {c['slack_badpoints']} "
+          f"unnamed points skipped", flush=True)
     c['tns'] = float(re.search(r'^tns (\S+)', txt, re.M).group(1))
     c['wns'] = float(re.search(r'^wns (\S+)', txt, re.M).group(1))
     c['power'] = float(re.search(r'^Total\s+\S+\s+\S+\s+\S+\s+(\S+)', txt, re.M).group(1))
@@ -250,6 +255,15 @@ def sta_slack(d, name, c, work, idx):
     c['slack_unmatched'] = missing
     save(c)
     return out
+
+
+def slack_counts(txt):
+    """Part 215: timing_slack.tcl's SKIPPEDPATHS / BADPOINTS (paths without a slack or points; points without a
+    net name, skipped one by one). An older script printed only SKIPPEDPATHS: BADPOINTS is then None."""
+    m = re.search(r'^SKIPPEDPATHS (\d+)(?: BADPOINTS (\d+))?', txt, re.M)
+    if not m:
+        raise SystemExit('timing_loop.py: OpenROAD (slack) printed no SKIPPEDPATHS line')
+    return int(m.group(1)), (int(m.group(2)) if m.group(2) is not None else None)
 
 
 def delta(c, b, w, n):
@@ -403,6 +417,9 @@ def selftest():
     ok &= DONE == keep_done and N_SAVED == 1443997 and 'route' not in DONE['k20r']
     ok &= DONE['k20r']['power'] == 23.466699 + 1e-12 and DONE['k20r']['of'] == 178597927.0813
     DONE.clear(); CKPT, N_SAVED = None, None
+    # Part 215: the slack session's skip counts, from the fixed script's line and from the older one's
+    ok &= slack_counts('x\nSKIPPEDPATHS 0 BADPOINTS 6278\nSLACKNETS 9263\n') == (0, 6278)
+    ok &= slack_counts('SKIPPEDPATHS 6278\n') == (6278, None)
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got}')
     shutil.rmtree(t)
     return ok
@@ -436,8 +453,10 @@ def main():
         os.replace(CKPT, CKPT + '.prev')
     if '--router' in sys.argv:
         ROUTER = os.path.abspath(sys.argv[sys.argv.index('--router') + 1])
-    # Part 188 (the user, 2026-11-06): two rounds of sticky re-classification by default; --refine 0 turns it off
-    rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else 2
+    # Part 188 (the user, 2026-11-06): sticky re-classification by default; --refine 0 turns it off. Part 215 (the
+    # user, 2026-11-20): up to 12 rounds (was 2) -- it stops by itself once a round gains nothing or the classes stop
+    # changing; blind mempool_tile_wrap gained in every round to 8 (0.9238 at 2 -> 0.4879, contest score)
+    rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else 12
     global K3_LADDER
     if '--k3' in sys.argv:  # Part 215: the timing strengths to try, e.g. --k3 2,5,10,20 (default 20,180,540)
         K3_LADDER = [int(v) for v in sys.argv[sys.argv.index('--k3') + 1].split(',')]

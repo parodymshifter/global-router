@@ -78,18 +78,21 @@ report_power
 set worst [dict create]
 set skipped 0
 proc take_path {p} {
-  # a path or point without an object (mempool_tile_wrap has some) is skipped and counted
-  upvar #0 worst worst skipped skipped
-  if {[catch {
-    set s [get_property $p slack]
-    foreach pt [get_property $p points] {
-      if {[catch {set pin [get_property $pt pin]}] || $pin eq "" || $pin eq "NULL"} { continue }
-      if {[catch {set n [get_nets -quiet -of_objects $pin]}] || $n eq ""} { continue }
+  # Part 215: one point without an object (mempool_tile_wrap has some) is skipped and counted (BADPOINTS), not the
+  # whole path -- the whole-path catch before dropped 6278 of blind mempool_tile_wrap's ~7783 failing paths, its
+  # worst among them (665 nets with slack instead of 9263). SKIPPEDPATHS: paths without a slack or points.
+  upvar #0 worst worst skipped skipped badpts badpts
+  if {[catch {set s [get_property $p slack]; set pts [get_property $p points]}]} { incr skipped; return }
+  foreach pt $pts {
+    if {[catch {
+      set pin [get_property $pt pin]
+      set n [get_nets -quiet -of_objects $pin]
       set nm [get_full_name $n]
-      if {![dict exists $worst $nm] || $s < [dict get $worst $nm]} { dict set worst $nm $s }
-    }
-  }]} { incr skipped }
+    }] || $nm eq ""} { incr badpts; continue }
+    if {![dict exists $worst $nm] || $s < [dict get $worst $nm]} { dict set worst $nm $s }
+  }
 }
+set badpts 0
 # Part 189: SLACK_BANDS=K walks the failing paths in K slack bands, worst first (edges wns/2, wns/4, ...,
 # wns/2^(K-1), 0), so OpenSTA holds one band's path ends at a time instead of all of them (mempool_cluster:
 # ~35-40 GB on a 24 GB Mac). OpenSTA keeps, per endpoint and path group, the worst end *inside* the band,
@@ -121,7 +124,7 @@ if {[info exists ::env(SLACK_BANDS)] && $::env(SLACK_BANDS) > 1 && $wns_ui < 0.0
     take_path $p
   }
 }
-puts "SKIPPEDPATHS $skipped"
+puts "SKIPPEDPATHS $skipped BADPOINTS $badpts"
 set f [open $::env(SLACK_OUT) w]
 dict for {nm s} $worst { puts $f "$nm $s" }
 close $f
