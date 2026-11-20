@@ -15716,3 +15716,28 @@ default flow, `gr/pd39route` ae3d102; 0 skipped paths / points on ariane and bsg
 (delta of our contest score against each design's unbiased route, our endpoint count.) With blind mempool_tile_wrap
 (-1.1491 -> -2.0457 in the same units), **the twelve-design sum goes -27.17 -> -28.39**. Visible mempool_group (m2
 -7.5202, +0.003 over m1) and mempool_cluster were not rerun. bsg_chip's loop is 5.4x longer for -0.10.
+
+**#1, the mempool designs' congestion: narrower critical sets** (the user, 2026-11-20 12:16, "yes"). Check first: the
+blind mempool_tile loop on the committed flow (`gr/timing_loop.py`, defaults, `~/Code/GlobalRouterTemp/p215/tile_std`,
+log `p215/narrow/tile_std.log`, 894 s) reproduces every refine round of the fixed-script copy exactly (m1 -1.4091 ...
+m8 -2.0457, round 9 stopped): the adopted change is the tested one. Its final classes (`merged9.slack`, 10460 nets, 9834
+classed): 1479 / 1571 / 6784 in classes 1 / 2 / 3; the slack is bunched near the worst (slack / worst >= 0.8: 6597
+nets, >= 0.9: 3936, >= 0.95: 1198). Variants at those classes, k3 180, kp 1 (`p215/narrow/narrow.py`, routed like the
+loop, contest evaluator, one OpenROAD session; contest score by the contest's formula and endpoint count;
+`p215/narrow/narrow_tile.log`):
+
+| variant | k1 / k2 / k3 | WNS | TNS | congestion | contest score |
+|---|---|---|---|---|---|
+| ref (= loop's m8, byte-for-byte numbers) | 45 / 90 / 180 | -0.3233 | -1252 | 2.757M | **0.4879** |
+| classes 2-3 only | 0 / 90 / 180 | -0.3230 | -1301 | 2.651M | 0.5003 |
+| class 3 only | 0 / 0 / 180 | -0.4081 | -1692 | 2.455M | 1.4580 |
+| class 3 only | 0 / 0 / 360 | -0.4045 | -1678 | 2.617M | 1.5721 |
+| class 3 only | 0 / 0 / 720 | -0.3990 | -1664 | 2.848M | 1.7479 |
+| room gate | 45 / 90 / 180, `TIMING_GATE=1` | -0.4971 | -2018 | 2.141M | 2.3221 |
+
+(1st place 0.3576: WNS -0.342, TNS -1356, congestion 2.23M.) **Narrowing loses**: leaving class 2 (slack 40-70% of the
+worst, 1571 nets) unbiased costs 0.085 ns of WNS that no top-class strength wins back -- the paths are many and near
+one another, so an unbiased near-critical net joins the new worst path (an inference from these numbers, not traced).
+The room gate gets congestion under 1st place's but loses most of the timing (as on ariane, Part 133). GAP-LA's narrow
+selection (0.001-0.6% of nets) does not carry over to this design in this mechanism. Next: strength at the refined
+classes (k3 60 / 90 / 120 / 240) and one filtered set (slack / worst >= 0.9), `p215/narrow/narrow_tile2.log`.
