@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Router Recap 8</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+a { color: var(--trace); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+figure.shot { margin: 10px 0 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+figure.shot figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 5px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.shots > * { min-width: 0; }
+img.px { image-rendering: pixelated; }
+/* Recap 7 additions: an options ledger. */
+.opt { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 18px; }
+.opt h3 { margin: 0 0 6px; }
+.opt p { margin: 0 0 8px; }
+.opt .why { font-size: 14px; color: var(--ink-soft); }
+.opts { display: grid; gap: 12px; }
+.src { font-size: 13px; color: var(--ink-soft); }
+.callout { background: var(--trace-soft); border-left: 3px solid var(--trace); padding: 12px 16px; margin: 10px 0 14px; }
+.callout p:last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap 8 · 20 November 2026 · Parts 190–215</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">Eleven days, three turns. A two-ended search made the ISPD 2008 suite three times faster. A rule audit
+  found that this router had been routing nets the contest exempts, and leaving them out moved more overflow than any
+  late-stage mechanism ever had: newblue1 reached zero, bigblue4 fell to 90 against a published 160. On ISPD 2025 a
+  bug in our own slack measurement had hidden the worst timing paths of one design; fixed, that design's contest
+  score fell by 70%, and our blind six now sum below first place's.</p>
+  <div class="meta">
+    <span><b>2008:</b> <code>pd39route @standard.env @fast08.env @speed08.env</code>; residues through <code>gr/reorder_portfolio.py</code>, then <code>gr/hotspot_flow.py</code></span>
+    <span><b>2025:</b> <code>gr/timing_loop.py</code> (refine up to 12 rounds since Part 215)</span>
+    <span><b>Checks:</b> every 2008 result legal, <code>gr_verify</code> equal to <code>eval2008.pl</code>; 2024 by <code>g24_verify</code> and the contest evaluator; 2025 by the contest's evaluator and OpenROAD</span>
+  </div>
+</header>
+<nav class="toc" aria-label="Sections">
+  <a href="#glance">At a glance</a><a href="#ispd08">ISPD 2008</a><a href="#exempt">The exempt nets</a>
+  <a href="#bounds">How much is forced</a><a href="#speed">Runtime</a><a href="#ispd25">ISPD 2025</a>
+  <a href="#wl">Wirelength and vias</a><a href="#aside">Set aside</a><a href="#process">Process</a>
+  <a href="#next">Next</a><a href="#disk">Disk</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">2.96×</div><div class="lab">faster over all sixteen ISPD 2008 designs with the two-ended search: 11.9 h → 4.0 h (Part 198)</div></div>
+    <div class="tile"><div class="fig">0 · 90</div><div class="lab">newblue1 and bigblue4 overflow (Recap 7: 26 and 318); bigblue4's published best is 160</div></div>
+    <div class="tile"><div class="fig">6.71</div><div class="lab">our ISPD 2025 blind six, scored as the contest scored them; 1st place 8.06 (lower is better)</div></div>
+    <div class="tile"><div class="fig">−28.39</div><div class="lab">ISPD 2025 change against our own unbiased routes, all twelve designs (Recap 7: −27.17)</div></div>
+  </div>
+</section>
+
+<section id="ispd08">
+  <h2>ISPD 2008: where the residues stand</h2>
+  <p>Eleven of sixteen stay at zero overflow. The other five, best result from our own pipeline:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>design</th><th class="num">Recap 7</th><th class="num">now</th><th>how</th><th class="num">NTHU-Route 2.0, own page</th><th>certified forced</th></tr></thead>
+    <tbody>
+      <tr><td>newblue1</td><td class="num">26</td><td class="num"><b>0</b></td><td>exempt nets left out (Part 212)</td><td class="num">0</td><td>—</td></tr>
+      <tr><td>bigblue4</td><td class="num">318</td><td class="num"><b>90</b></td><td>exempt nets out, reorderings portfolio 130, hotspot flow 90 (max 8)</td><td class="num">160</td><td>none</td></tr>
+      <tr><td>newblue4</td><td class="num">136</td><td class="num"><b>112</b></td><td>hotspot flow, nets routed (Part 209); 114 with them left out</td><td class="num">138</td><td>pin-bound</td></tr>
+      <tr><td>newblue7</td><td class="num">92</td><td class="num">56</td><td>exempt nets left out</td><td class="num">54</td><td>≥ 54</td></tr>
+      <tr><td>newblue3</td><td class="num">33492</td><td class="num">31402</td><td>refinement keeps its reroutes above 1000 units (Part 213), best of six reorderings</td><td class="num">31810*</td><td>≥ 26264</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">*NTHU-Route 2.0 as rerun here from its posted phase output (Part 213, a diagnostic only); best published
+  newblue3 is 31024 (NTUgr). Results count only from our own pipeline; other routers' routes are diagnostics (the user's rule
+  since 18 November). Wire length on the eleven zero designs: −0.4% to +1.8% against NTHU-Route 2.0, like for like.</p>
+</section>
+
+<section id="exempt">
+  <h2>The exempt nets</h2>
+  <p>ISPD 2008 does not require nets with more than 1000 pins to be routed; both scorers skip a missing route for them, and
+  NTHU-Route 2.0 leaves them out. This router had routed them since its first generation; Part 36 even found them the
+  worst overflow offenders and made them negotiate. Comparing NTHU-Route's bigblue4 routes with ours net by net found it
+  (Part 212). With <code>PD39ROUTE_SKIP_GIANT=1</code>, now in <code>fast08.env</code>:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>design</th><th class="num">one run, before</th><th class="num">one run, exempt nets out</th></tr></thead>
+    <tbody>
+      <tr><td>newblue1</td><td class="num">36</td><td class="num"><b>0</b></td></tr>
+      <tr><td>bigblue4</td><td class="num">332</td><td class="num"><b>132</b></td></tr>
+      <tr><td>newblue7</td><td class="num">100</td><td class="num">56</td></tr>
+      <tr><td>newblue3</td><td class="num">34056</td><td class="num">33328</td></tr>
+      <tr><td>newblue4</td><td class="num">138</td><td class="num">142 (inside its spread)</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout"><p><b>The lesson, bigger than any algorithm this project has tuned:</b> audit the model against the
+  contest's rules before tuning. The 2024 and 2025 rules were audited the same way afterwards (Part 214): no
+  optimization mismatch there, but our stage report counted the idle-GCell floor twice; fixed, it agrees with the
+  evaluators within 0.3%, routes byte-identical.</p></div>
+  <p>A second comparison with NTHU-Route 2.0's last phase, from the same routes, found that its refinement keeps every
+  reroute while ours reverted half of them (NTHU −7550, ours −308). Keeping them above 1000 units of overflow
+  (<code>PD39ROUTE_REFINE_KEEP_ABOVE=1000</code>, Part 213) took newblue3 from 33318 to 31434; below 1000 it hurt the small
+  residues, so the rule switches on there.</p>
+</section>
+
+<section id="bounds">
+  <h2>How much is forced</h2>
+  <p>Two new exact tools (Parts 208, 213) solve the routing problem around a hotspot as a linear program over generated
+  candidate routes (column generation, HiGHS). <code>gr/hotspot_flow.py</code> turns that into a repair: solve, round, and
+  run the late stages from the rounded routes.</p>
+  <ul>
+    <li><b>newblue7</b>: its main hotspot's fractional optimum is exactly 54, which our 54 there already meets; the other 2
+    units sit on one edge whose fractional optimum is 0 but every rounding, and a 5000-net exact re-solve, ends at 2.
+    Closed at 56.</li>
+    <li><b>newblue3</b>: the fractional optimum lies between 26264 and 32141; the three isolated hotspots already sit
+    exactly at their cut bounds.</li>
+    <li><b>bigblue4</b>: purpose-made candidates showed a fractional optimum near 196 with the exempt nets routed
+    (Part 208, from 318); with them out, the flow reached 90.</li>
+  </ul>
+</section>
+
+<section id="speed">
+  <h2>Runtime</h2>
+  <p>Late searches flooded their boxes from the source end: the sink pin sits in a small, expensive pocket, so 99.7% of a
+  median box is cheaper to reach from the sources than the route found (Part 196). A search from both ends at once,
+  exact in cost (<code>PD39ROUTE_SEARCH_BIDIR=2</code>, in <code>speed08.env</code>):</p>
+  <div class="tablebox"><table>
+    <thead><tr><th></th><th class="num">one-ended</th><th class="num">two-ended</th></tr></thead>
+    <tbody>
+      <tr><td>sixteen designs, one setting each</td><td class="num">42855 s (11.9 h)</td><td class="num"><b>14496 s (4.0 h)</b></td></tr>
+      <tr><td>eleven zero-overflow designs</td><td class="num">0 on all</td><td class="num">0 on all; wire within ±0.13%</td></tr>
+      <tr><td>residues, one run</td><td colspan="2">a little worse on average (newblue1 27.7 vs 24.0 over six orderings): which equal-cost route a search returns is not neutral</td></tr>
+    </tbody>
+  </table></div>
+  <p>So residues run as a portfolio over six slow-tier orderings (<code>gr/reorder_portfolio.py</code>, Part 202), keeping
+  the best by overflow, max overflow and wire length: 1.45× the one-ended time, and a small gain. A search quota for
+  slow-tier batches (Parts 193–195) helped some designs and hurt newblue3; not adopted. Neither change pays on 2024 or
+  2025, whose slow tier does more work two-ended (Part 200).</p>
+</section>
+
+<section id="ispd25">
+  <h2>ISPD 2025: a measurement bug, and the winners' scores</h2>
+  <p><b>Scored as the contest scored them</b> (Part 215, from the contest's published weights, endpoint counts and the
+  blind round's reference medians). Our endpoint counts differ from the contest's on the mempool designs; no pick changes.</p>
+  <p><b>The bug.</b> The loop classes critical nets from the slack OpenROAD measures on failing paths. On blind
+  mempool_tile_wrap the script dropped every path containing one point it could not name: 6278 of about 7783 failing
+  paths, the worst among them, leaving 665 nets instead of 9263. The narrow, measured classes therefore never moved
+  timing there, and the broad input-slack classes won, at a large congestion cost. Fixed per point and with refinement
+  allowed up to 12 rounds (it stops by itself):</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>blind mempool_tile_wrap</th><th class="num">contest score</th><th class="num">WNS (ns)</th><th class="num">TNS (ns)</th><th class="num">congestion</th></tr></thead>
+    <tbody>
+      <tr><td>before</td><td class="num">1.6415</td><td class="num">−0.410</td><td class="num">−1637</td><td class="num">2.73M</td></tr>
+      <tr><td>fixed, 2 refine rounds</td><td class="num">0.9238</td><td class="num">−0.372</td><td class="num">−1383</td><td class="num">2.75M</td></tr>
+      <tr><td>fixed, refined to convergence (8)</td><td class="num"><b>0.4879</b></td><td class="num"><b>−0.323</b></td><td class="num"><b>−1252</b></td><td class="num">2.76M</td></tr>
+      <tr><td>1st place</td><td class="num">0.3576</td><td class="num">−0.342</td><td class="num">−1356</td><td class="num">2.23M</td></tr>
+    </tbody>
+  </table></div>
+  <div class="tablebox"><table>
+    <thead><tr><th>blind design</th><th class="num">ours</th><th class="num">1st</th><th class="num">2nd</th></tr></thead>
+    <tbody>
+      <tr><td>ariane</td><td class="num">1.4605</td><td class="num">1.7802</td><td class="num">1.6464</td></tr>
+      <tr><td>bsg_chip</td><td class="num">0.4389</td><td class="num">0.8604</td><td class="num">0.4258</td></tr>
+      <tr><td>NV_NVDLA_partition_c</td><td class="num">1.3206</td><td class="num">1.4024</td><td class="num">1.6326</td></tr>
+      <tr><td>mempool_tile_wrap</td><td class="num">0.4879</td><td class="num">0.3576</td><td class="num">2.0881</td></tr>
+      <tr><td>mempool_group</td><td class="num">1.3519</td><td class="num">1.3327</td><td class="num">1.2335</td></tr>
+      <tr><td>mempool_cluster</td><td class="num">1.6533</td><td class="num">2.3273</td><td class="num">2.3707</td></tr>
+      <tr><td><b>sum</b></td><td class="num"><b>6.7132</b></td><td class="num">8.0604</td><td class="num">9.3971</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Runtime scaling is left out (the published median wall times are unreadable for most designs). Which
+  designs the bug touched: blind ariane, bsg_chip and NVDLA and visible mempool_group not at all; visible mempool_tile
+  slightly (+0.2% nets). mempool_cluster is <b>unverified</b>: one OpenROAD session there needs 80–113 GB. Refining to
+  convergence also gained on visible ariane (−0.004), bsg_chip (−0.10) and mempool_tile (−0.22).</p>
+  <p><b>Where the bias costs.</b> 95.4% of the overflow cost the timing bias adds lands on metal7–10 (Part 190). Our
+  unbiased routes have lower congestion than both winners on every blind design, but our timing picks add +56% to +83%
+  on the mempool designs. Three ways to aim the bias better were built and scored, and none helped:</p>
+  <ul>
+    <li>weighting nets by their benefit (Part 205);</li>
+    <li>weighting nets by their driver's strength (Part 207);</li>
+    <li>delay-aware trees, whose ceiling lay across nets, not along a tree (Part 204).</li>
+  </ul>
+</section>
+
+<section id="wl">
+  <h2>Wirelength and vias, scoped (Part 214)</h2>
+  <p>Every lever measured on the 2008 wire length is small:</p>
+  <ul>
+    <li>a 2D post-pass, about 1% of a window's wire;</li>
+    <li>layer assignment, at most 2.8% of the score: on bigblue1 a certified via lower bound (<code>gr/labound.cpp</code>)
+    is 1807213 against 1965453 used, with capacity respected;</li>
+    <li>excess bends in the 2D shapes, at most about 0.8%.</li>
+  </ul>
+</section>
+
+<section id="aside">
+  <h2>Measured and set aside</h2>
+  <ul>
+    <li><b>Blocker eviction chains on bigblue4</b> (Part 191): blockers move, but the room never adds up; the neighbourhood is saturated out to 60 tiles.</li>
+    <li><b>Joint selection over the portfolio's six routings</b> (Part 206): fractional room on two designs, no whole-route mix below the base.</li>
+    <li><b>Random-walk rounding</b> (<code>gr/dwalk.cpp</code>, Part 213): no gain over the rounding already used.</li>
+    <li><b>Solved prices fed back into the router</b> (Part 210): seeded newblue1 runs end at 28–30, inside its 22–36 spread; no gain.</li>
+    <li><b>Turning the region stage off</b> (Part 215): each pricing variant settles at its own level whatever the start; without the stage newblue3 ends at 32278–32404 against 31434.</li>
+  </ul>
+</section>
+
+<section id="process">
+  <h2>Process</h2>
+  <ul>
+    <li><b>Claims and evidence</b> (18 November): every possible / impossible / absent / tried / forced claim names the check
+    behind it, with its scope, or is labelled unverified. Two claims made without checks prompted it ("the linear-algebra
+    libraries aren't installed": Eigen, OpenBLAS and Accelerate were; "the model audit found no other mismatch": no audit
+    had been run; it then was).</li>
+    <li><b>Network failures</b> are scoped with the network-triage skill before any report, which names the specific failure.</li>
+    <li><b>Own-pipeline results only</b>: NTHU-Route's port (GPL v3) and its routes are diagnostics.</li>
+    <li>Measure a diagnosis before building on it (Part 150's "near-tie" was wrong); give a quality-neutral-looking change several reorderings before believing its overflow.</li>
+  </ul>
+</section>
+
+<section id="next">
+  <h2>Next</h2>
+  <div class="opts">
+    <div class="opt"><h3>1. Carry the mempool designs' critical nets for less congestion</h3>
+    <p>On blind mempool_tile our timing now beats 1st place; the gap (0.49 vs 0.36) is congestion, 2.76M vs 2.23M. Same on
+    mempool_group (1.35 vs 1.33). GAP-LA (the 2024 and 2025 winners' group) biases only 0.001–0.6% of nets, by pin slack,
+    with an Elmore look-ahead in layer assignment.</p>
+    <p class="why">The only 2025 lever left with a measured gap. Small designs, minutes per loop.</p></div>
+    <div class="opt"><h3>2. mempool_cluster under the fixed slack script</h3>
+    <p>Check the skip count, then rerun its loop with up to 12 refine rounds.</p>
+    <p class="why">20–30 h per loop and about 80–100 GB of swap: needs free disk first.</p></div>
+    <div class="opt"><h3>3. ISPD 2008: newblue3</h3>
+    <p>31402 against the best published 31024, with a fractional optimum between 26264 and 32141.</p>
+    <p class="why">The only 2008 residue with room the bounds cannot rule out; hours per attempt.</p></div>
+  </div>
+</section>
+
+<section id="disk">
+  <h2>Disk: what pending work needs</h2>
+  <p>Free space: 17 GB of 926 GB, 20 November, 11:25. <code>~/Code/GlobalRouterTemp</code> holds 88 GB. Every record route
+  is in <code>~/Code/GlobalRouterRuns</code>, which is backed up.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>item</th><th class="num">size</th><th>needed by</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Temp <code>p215/vis_r12</code>, <code>p215/tile_fix*</code>, <code>p215/skipchk</code></td><td class="num">17 GB</td><td>nothing: best routes, scores and logs copied to Runs</td><td><span class="pill good">delete</span></td></tr>
+      <tr><td>Temp <code>p208</code>, <code>p210</code> (bigblue4 / newblue1 hotspot solver files)</td><td class="num">11.6 GB</td><td>nothing: closed; results and best routes in Runs</td><td><span class="pill good">delete</span></td></tr>
+      <tr><td>Temp <code>p191</code>, <code>p209</code>, <code>p211</code>–<code>p214</code>, <code>p189/rt1-3</code></td><td class="num">7.1 GB</td><td>nothing: scratch and diagnostic routes; records in Runs</td><td><span class="pill good">delete</span></td></tr>
+      <tr><td>Temp <code>p189/loop.*</code>, all but base and best</td><td class="num">≈ 12 GB</td><td>nothing: the loops are finished, and a rerun under the fixed script starts fresh</td><td><span class="pill good">delete</span></td></tr>
+      <tr><td>Temp <code>p189/loop.*</code>, base and best routes (4)</td><td class="num">3 GB</td><td>the only copies of our best mempool_cluster routes</td><td><span class="pill warn">keep</span></td></tr>
+      <tr><td>Unpacked mempool_cluster designs, visible and blind</td><td class="num">34 GB</td><td>only option 2, which needs ~80–100 GB free for swap anyway</td><td><span class="pill info">optional: unzip again when scheduled</span></td></tr>
+      <tr><td>Unpacked visible mempool_group</td><td class="num">3.9 GB</td><td>option 1</td><td><span class="pill warn">keep</span></td></tr>
+      <tr><td><code>gr/bench</code>: 2008 <code>.gr</code>, ISPD 2024, the 2025 zip and small designs</td><td class="num">15 GB</td><td>every rerun, self-test and regression</td><td><span class="pill warn">keep</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">The four delete rows free about 48 GB with no pending experiment slowed. The optional row adds 34 GB; unzipping
+  it again takes an unmeasured few minutes. Time Machine's local snapshots keep deleted files until they expire, so
+  space returns fully only after them.</p>
+</section>
+</div>
+</body>
+</html>
