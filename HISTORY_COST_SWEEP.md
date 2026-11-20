@@ -15690,3 +15690,14 @@ counts as the loop's files, so unaffected. mempool_group / mempool_cluster: bein
 "the classes did not change, stopped". Blind mempool_tile **1.6415 -> 0.4879 (-70%)**; WNS and TNS now better than 1st
 place's, congestion still 24% above its 2.23M (1st 0.3576). Blind six-design sum with this alone: 7.8668 -> 6.7132
 (1st place 8.0604). Route `p215/tile_fix/k180rp1m8.route.xz`.
+**Which designs the slack bug touched** (03:27-03:56, the fixed script on a route of each, `~/Code/GlobalRouterTemp/p215/
+skipchk/`): blind ariane, bsg_chip, NV_NVDLA_partition_c -- 0 bad points; visible mempool_group (k180ip4, 16 slack bands,
+29.6 GB peak) -- 1 bad point, the same 225125 nets; visible mempool_tile_wrap (k180rp1) -- 792 paths skipped, 12930 nets
+vs the loop's 12902 (+0.2%, small). Blind mempool_tile_wrap (6278 of ~7783 paths, 665 vs 9263 nets) is the one design
+the bug badly hurt. mempool_cluster (visible / blind): **unverified** -- not checked (an OpenROAD session there peaks at
+80-113 GB); the bad points look tied to the tile wrapper's own top-level ports, which group and cluster do not have as
+ports (an inference from visible mempool_group's single bad point, unverified for cluster).
+**Refinement's round cap** (from the p188 loops' refine.tsv): the default `--refine 2` stopped while still gaining on
+visible ariane (m1 -3.9413 -> m2 -4.0542), visible bsg_chip (-1.8945 -> -1.9862), visible mempool_tile_wrap (-0.8798 ->
+-0.9260), visible mempool_group (-7.5169 -> -7.5202); every blind design except mempool_tile stopped at m1 (no gain), so
+running refinement to convergence would change no other blind score (from those records; not rerun).
