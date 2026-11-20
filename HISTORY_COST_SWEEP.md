@@ -15601,3 +15601,12 @@ reroutes) took the slow tier's 41870 -> 32404 in 16 iterations, 31 s, stopped by
 (last gain at iteration 14). So the region stage helps our pipeline: its ~33500 is a better start for refinement than
 the slow tier's 41870. The plateau rule also stopped refinement in K1 (12 iterations). N2 (region off) and N3 (region
 on), both with `PD12ROUTE_REFINE_PLATEAU=0 PD4ROUTE_REFINE_ITERS=60`, started 01:38.
+Results (legal, both scorers agree): **N2** (region off, refinement 60 iterations, no plateau stop) **32278** (refinement
+41870 -> 32280, last gain at iteration 35; 1315 s); **N3** (region on, same refinement) **31434** -- identical to the
+standard (refinement's last gain at iteration 9: the plateau rule was cutting nothing there).
+**Conclusion of the first open question.** The region stage settles at its pricing's own level whatever its start (plain
+~38900, +7.5% cap ~33500 on newblue3), so it degrades a start better than that level -- but on our own pipeline it is
+still worth running: its ~33500 is a better start for the 1-if-full refinement than the slow tier's 41870 (refinement
+from the region stage 31434; from the slow tier 32278-32404). Neither a longer refinement nor skipping the region stage
+beats the standard. The lever left in this direction would be a region-stage price whose settling level is lower
+(i.e. closer to the scored overflow) -- not tested.
