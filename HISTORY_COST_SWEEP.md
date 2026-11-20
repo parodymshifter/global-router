@@ -15610,3 +15610,33 @@ still worth running: its ~33500 is a better start for the 1-if-full refinement t
 from the region stage 31434; from the slow tier 32278-32404). Neither a longer refinement nor skipping the region stage
 beats the standard. The lever left in this direction would be a region-stage price whose settling level is lower
 (i.e. closer to the scored overflow) -- not tested.
+
+**#1, the 2024 / 2025 scores -- where we stand.** 2024 (Part 120's table): ahead of contest #1 on every hidden design,
+-0.44% to -0.92%. 2025: the record compared only ariane with the winners; the contest's published final round
+(github.com/liangrj2014/ISPD25_contest `index.md`, read 2026-11-20: per-design WNS / TNS / power / congestion of 1st-3rd,
+weights, N_endpoint, and the blind round's reference medians; the ranking is on the blind designs) lets the blind
+designs be scored exactly. `p215/contest25.py` (original score, lower is better; the runtime scaling is left out --
+the published median wall times are unreadable for most designs) on the loops' saved candidates
+(`p188/rf.blind.*/refine.tsv`, `p189/results.blind/scores.jsonl`):
+
+| blind design | ours | 1st | 2nd | 3rd |
+|---|---|---|---|---|
+| ariane | **1.4605** | 1.7802 | 1.6464 | 1.5186 |
+| bsg_chip | 0.4389 | 0.8604 | **0.4258** | 0.6998 |
+| NVDLA | **1.3206** | 1.4024 | 1.6326 | 1.3636 |
+| mempool_tile | 1.6415 | **0.3576** | 2.0881 | 1.8173 |
+| mempool_group | 1.3519 | 1.3327 | **1.2335** | 3.1167 |
+| mempool_cluster | **1.6533** | 2.3273 | 2.3707 | 2.6780 |
+| sum | **7.8668** | 8.0604 | | |
+
+Checks: the formula reproduces the page's published 1st-place blind ariane score (1.780161). **Found: our endpoint
+counts differ from the contest's N_endpoint on the mempool designs** (mempool_tile 19000 vs 13350, mempool_group 438269
+vs 347869, mempool_cluster 1443997 vs 1082397; bsg_chip 214955 vs 214915; ariane and NVDLA equal) -- our loop divided
+TNS by too much there. It changes no pick: the same candidate wins under either count. **The lever: the congestion
+cost of our timing bias.** Our unbiased routes have lower congestion than both 1st and 2nd place on every blind design
+(0.78-0.985 of the better of the two); our picks raise it by 1-3% on ariane / bsg_chip / NVDLA but by **+64%
+(mempool_tile, 1.66M -> 2.73M), +83% (mempool_group, 41.95M -> 76.88M), +56% (mempool_cluster, 193.9M -> 302.1M)** --
+above both winners. On mempool_tile the congestion the bias adds (~1.06 of score) exceeds 1st place's whole score
+(0.36), and 1st place also has better WNS / TNS there (-0.342 / -1356 vs our -0.410 / -1637). The winners buy timing
+for far less congestion; a cheaper way to carry the critical nets on the mempool designs is the 2025 lever (Part 189's
+reading, now measured against the winners).
