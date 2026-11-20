@@ -15528,3 +15528,12 @@ scores? -- the kind of mismatch that gave Parts 212 and 213 their gains). Checke
   (`cmp`). Self-test `testRouterScoreOnePlane` (both planes given capacity, no demand: the score is the own-direction
   floor; the old loop gives about twice it). Binary `pd39route.p214`.
 **Audit result: no mismatch in what the 2024 / 2025 flows optimize; one misleading report, fixed.**
+
+**Via scoping, first measurement** (00:2x, `p214/via_floor.py`: per net, the route's 2D wire merged into straight legs
+between pins / branches / bends, and an exact tree DP choosing one layer per leg to minimize the via stack spans,
+pin layers included, capacity ignored -- the uncapacitated layer-assignment floor for the same 2D wire). bigblue1's
+standard route (`p212/z_bigblue1_skip.route.gz`, all 196885 nets with wire, none with a 2D cycle; 20 s): **vias used
+1965453, floor 820812** -- 1144641 above it (139%; ~20% of the scored 5672146). That floor is not reachable: bigblue1's
+layers 1 / 2 (pins on layer 1) hold 10 units each, layers 3-6 hold 50 (header), and the uncapacitated optimum keeps
+nearly every wire on layers 1-2. The gap is mostly capacity forcing wires up (2-4 vias per pin to reach layers 3-6);
+how much of it any capacitated layer assignment can recover is the open question.
