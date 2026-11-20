@@ -15662,3 +15662,19 @@ route (WNS -0.586, 1.66M) first place gains -0.244 of WNS for +0.57M of congesti
 mechanism (critical nets pay resistance-weighted wirelength, steering them to low-R upper metal) buys less timing per
 unit of congestion than the winners' -- the strength is not the limit. Next for #1: how the winners carry critical
 nets (their papers: e.g. InstantGR 2.0, Cypress at ISPD 2025 -- to be read), then a mechanism to test.
+
+**Reading the winners, and a measurement bug** (2026-11-20, 03:00-03:25). GAP-LA (arXiv 2507.13375; its first author
+lists 1st place at ISPD 2024 and 2025) treats only 0.001-0.6% of nets as critical, weights them per pin, and places
+their layers with an Elmore look-ahead in the layer-assignment dynamic program. Our input-slack classes bias ~31000 of
+mempool_tile's 135814 nets (k20i's trace: 19066 / 1364 / 10620), which suggested trying a narrower set. But a narrower set
+was already in the loop: the routed-slack classes (`r`, 416 nets classed on mempool_tile) -- and they left WNS exactly at
+the unbiased route's -0.5864 at every strength. Why: the slack file they come from (`gr/timing_slack.tcl`, unbiased route,
+`p215/wns_probe/`) had its worst net at -0.316 ns while the design's WNS is -0.586 ns; **none of the worst path's 48 nets
+were in it.** `take_path` wraps a whole path in one `catch`, and on mempool_tile every path starting at a point
+`get_full_name` cannot name (STA-0323 "get_property NULL is not an object") was dropped whole: **SKIPPEDPATHS 6278 of the
+~7783 failing paths** (81%), exactly one bad point each. With the catch per point (`p215/fixloop/timing_slack.tcl`) the
+same route gives SKIPPEDPATHS 0, BADPOINTS 6278, **9263 nets with slack instead of 665**, worst -0.586429, all 48 of the
+worst path's nets present. So every routed-slack classification and every refine merge on mempool_tile used a fifth of
+the failing paths, the worst ones missing; other designs are not yet checked (the loop never logged SKIPPEDPATHS).
+Test running: blind mempool_tile through the loop with the fixed script (a copy in `p215/fixloop/`, `gr/` unchanged),
+`~/Code/GlobalRouterTemp/p215/tile_fix`, log `p215/tile_fix.log`.
