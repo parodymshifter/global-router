@@ -15585,3 +15585,13 @@ below its start in 20 rounds and stopped. Runs (diagnostic -- NTHU's routes as t
 Two hypotheses ruled out: (a) cong^5 pushing nets off forced-overflow edges onto just-full ones -- capping the price
 does not stop the jump; (b) the wire-length weight decayed to ~0 -- checked in the code, `configureCostModel` starts
 the region stage at iteration 1 (factor ~0.99). Running to the end to see whether, and how far, the stage recovers.
+Result (`p214/R*_*.stderr`; all three stopped by the plateau rule after 50 rounds, `PD12ROUTE_REGION_PLATEAU=50`, and
+returned the start, 31524): lowest 2D overflow reached in the region rounds -- R1 (cap at capacity) 39302 at round 24,
+R2 (cap +7.5%) **33698** at round 18, R3 (plain) 38916 at round 16; flat after. The same variants from our own slow
+tier's 41870 (K1, Part 213): plain 38912, cap at capacity 38172, cap +7.5% **33514**. **Answer: the region stage is
+start-independent on newblue3 -- each pricing variant has its own settling level (plain ~38900, +7.5% cap ~33500),
+reached from a 41870 start and from a 31524 one alike; a start below that level is pulled up to it.** The soft
+present-demand price with history negotiates toward its own equilibrium, which is not the scored overflow; the
+1-if-full refinement with every reroute kept (Part 213) is what goes below it. Test of the consequence, our own
+pipeline: newblue3 with the region stage off (`PD5ROUTE_REGION=0`, refinement straight from the slow tier, keeping
+its reroutes above 1000 per fast08) -- `p214/N.jobs`, queued 01:09.
