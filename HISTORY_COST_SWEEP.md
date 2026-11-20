@@ -15701,3 +15701,18 @@ ports (an inference from visible mempool_group's single bad point, unverified fo
 visible ariane (m1 -3.9413 -> m2 -4.0542), visible bsg_chip (-1.8945 -> -1.9862), visible mempool_tile_wrap (-0.8798 ->
 -0.9260), visible mempool_group (-7.5169 -> -7.5202); every blind design except mempool_tile stopped at m1 (no gain), so
 running refinement to convergence would change no other blind score (from those records; not rerun).
+**Both adopted** (the user, 2026-11-20 09:16; commit 779c7d3): `gr/timing_slack.tcl` skips an unnamed point instead of its
+path and prints `SKIPPEDPATHS n BADPOINTS m`; `timing_loop.py` logs both per slack session (scores.jsonl fields
+`slack_skipped`, `slack_badpoints`; self-test covers the parse) and refines up to 12 rounds by default. **Rerun of the
+visible designs whose refinement was still gaining at 2** (`p215/vis_r12/` -- logs, loop.tsv, scores.jsonl, best routes;
+default flow, `gr/pd39route` ae3d102; 0 skipped paths / points on ariane and bsg_chip):
+
+| visible design | before (`--refine 2`) | now | rounds | loop time |
+|---|---|---|---|---|
+| ariane | k540rm2 -4.0542 | k540rm3 -4.0584 | 4 (m4 -4.0548, stopped) | 524 s |
+| bsg_chip | k540rm2 -1.9862 | k540rm6 -2.0877 | 7 (m7 -2.0869, stopped) | 4399 s (was 817 s) |
+| mempool_tile_wrap | k180rp1m2 -0.9260 | k180rp1m7 -1.1423 | 8 (m8 -1.0150, stopped) | 907 s |
+
+(delta of our contest score against each design's unbiased route, our endpoint count.) With blind mempool_tile_wrap
+(-1.1491 -> -2.0457 in the same units), **the twelve-design sum goes -27.17 -> -28.39**. Visible mempool_group (m2
+-7.5202, +0.003 over m1) and mempool_cluster were not rerun. bsg_chip's loop is 5.4x longer for -0.10.

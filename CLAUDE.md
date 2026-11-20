@@ -359,7 +359,8 @@ Since 2026-11-20 (Part 215) `gr/timing_slack.tcl` skips an unnamed point, not it
 6278 of blind mempool_tile_wrap's ~7783 failing paths, its worst among them; ariane, bsg_chip, NVDLA and visible
 mempool_group were unaffected, mempool_cluster unchecked), every slack session logs its skip counts, and refinement
 runs up to 12 rounds (`--refine 12`, the new default; it stops by itself): blind mempool_tile_wrap 1.6415 -> 0.4879
-(contest score), better WNS and TNS than 1st place, congestion still 24% above it.
+(contest score), better WNS and TNS than 1st place, congestion still 24% above it; visible ariane / bsg_chip /
+mempool_tile_wrap gain -0.004 / -0.10 / -0.22 more -- twelve designs -27.17 -> -28.39.
 Since 2026-11-09 (Part 189) all twelve 2025 designs are scored: mempool_cluster visible -0.6993, blind -1.3643,
 **twelve designs -27.17**. On a 24 GB Mac its OpenROAD sessions peak at 80-113 GB of footprint on swap, so it runs
 with `--lean` (compress every route that can no longer win), `SLACK_BANDS=16` (walk the failing paths in slack
