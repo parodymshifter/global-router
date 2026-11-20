@@ -15653,3 +15653,12 @@ wire tie-break) -- no solution below the base's 2. Not a certificate: the dual b
 whose size was not recorded (at ~1e-5 x ~100000 edges it would be ~1, leaving ~2 -- an estimate, unverified), and it
 holds only over the generated candidates. **Closed without a gain:** newblue7 stays at 56 (forced >= 54); further
 attempts would cost hours for at most 2 units (3.6%), below this project's progress threshold.
+Result (`p215/tile_k3/`, 445 s, 12 candidates; contest score by `contest25.py`): **the same pick as before, k20ip1, 1.6415**.
+The weaker strengths with routed-slack classes (k2r / k5r / k10r / k20r) leave timing exactly at the unbiased route's
+(WNS -0.5864) and only add congestion (1.670M-1.706M vs 1.663M); with input-slack classes timing moves but costs
+congestion (k10i WNS -0.499 at 2.09M, 2.600; k20i -0.445 at 2.41M, 2.078; k20ip1 -0.410 at 2.73M, 1.6415; k20ip4 -0.382
+at 4.27M, 2.461). **First place dominates every candidate: WNS -0.342, TNS -1356 at congestion 2.23M.** From our unbiased
+route (WNS -0.586, 1.66M) first place gains -0.244 of WNS for +0.57M of congestion, ours -0.176 for +1.06M: the
+mechanism (critical nets pay resistance-weighted wirelength, steering them to low-R upper metal) buys less timing per
+unit of congestion than the winners' -- the strength is not the limit. Next for #1: how the winners carry critical
+nets (their papers: e.g. InstantGR 2.0, Cypress at ISPD 2025 -- to be read), then a mechanism to test.
