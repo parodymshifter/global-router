@@ -8,6 +8,8 @@
                            [--prices-out FILE [--prices-only]] [--force-out] [--alt-out ROUTE] [--kpe] [--stats]
                            [--only x0,y0,x1,y1]   (only the over-capacity edges in that box; the rest stay)
                            [--dwalk K]   (K seeds of gr/dwalk's random-walk rounding of the split nets, Part 213)
+                           [--wl x0,y0,x1,y1]   (wirelength mode, Part 214: the box is the window; overflow may not
+                                                 rise, inside wire falls -- for designs at zero overflow)
   python3 gr/hotspot_cg.py --rebalance DESIGN.gr IN.route OUT.route
 
 Part 206 chose among each net's routes in six complete routings and found fractional room only (bigblue4 326 ->
@@ -155,9 +157,14 @@ def main():
         args.remove(sys.argv[sys.argv.index('--lns-size') + 1])
     if '--prices-out' in sys.argv:
         args.remove(sys.argv[sys.argv.index('--prices-out') + 1])
-    for k in ('--out', '--alt-out', '--only', '--dwalk'):
+    for k in ('--out', '--alt-out', '--only', '--dwalk', '--wl'):
         if k in sys.argv:
             args.remove(sys.argv[sys.argv.index(k) + 1])
+    wl = None  # --wl x0,y0,x1,y1 (Part 214): wirelength mode -- this box is the window, overflow may not rise, wire falls
+    if '--wl' in sys.argv:
+        wl = [int(v) for v in sys.argv[sys.argv.index('--wl') + 1].split(',')]
+        if len(wl) != 4:
+            sys.exit('--wl takes x0,y0,x1,y1')
     only = None  # --only x0,y0,x1,y1 (Part 213): work on the over-capacity edges inside this box only
     if '--only' in sys.argv:
         only = [int(v) for v in sys.argv[sys.argv.index('--only') + 1].split(',')]
@@ -204,14 +211,18 @@ def main():
     of2 = sum(over.values())
     if only is not None:  # the other hotspots stay as they are (their overflow counts as outside the window)
         over = {e: v for e, v in over.items() if only[0] <= e[1] <= only[2] and only[1] <= e[2] <= only[3]}
-    if not over:
-        print('the base has no 2D overflow')
-        return
-    m = opt['--margin']
-    x0 = max(0, min(e[1] for e in over) - m)
-    x1 = min(g['nx'] - 1, max(e[1] + (e[0] == 0) for e in over) + m)
-    y0 = max(0, min(e[2] for e in over) - m)
-    y1 = min(g['ny'] - 1, max(e[2] + (e[0] == 1) for e in over) + m)
+    if wl is not None:
+        x0, y0, x1, y1 = max(0, wl[0]), max(0, wl[1]), min(g['nx'] - 1, wl[2]), min(g['ny'] - 1, wl[3])
+        m = opt['--margin']
+    else:
+        if not over:
+            print('the base has no 2D overflow')
+            return
+        m = opt['--margin']
+        x0 = max(0, min(e[1] for e in over) - m)
+        x1 = min(g['nx'] - 1, max(e[1] + (e[0] == 0) for e in over) + m)
+        y0 = max(0, min(e[2] for e in over) - m)
+        y1 = min(g['ny'] - 1, max(e[2] + (e[0] == 1) for e in over) + m)
 
     # --union: the window is the tiles within the margin of an over-capacity edge (several hotspots: one box around
     # newblue7's holds most of the design), not their bounding box
@@ -761,7 +772,7 @@ def main():
             cs = cols[n]
             ks = free[n] if free is not None else range(len(cs))
             pay = [col_cost(cs[k], ph, pv) for k in ks]
-            if min(pay) <= 1e-9:
+            if wl is None and min(pay) <= 1e-9:
                 continue  # it already has a route that pays nothing
             sigma = min(v + EPS * cs[k][1] for v, k in zip(pay, ks))
             tried += 1
@@ -804,6 +815,10 @@ def main():
         if cost_e(e, u) > 0:
             pi[e] = 1.0
     model0 = of_out + sum(edge_info(e)[2] for e in fix_edges) + sum(cost_e(e, u) for e, u in load0.items())
+    if wl is not None:  # Part 214: the base's objective in wirelength mode (overflow + EPS x inside wire)
+        wire0 = sum(cols[n][0][1] for n in nets)
+        model0 = model0 + EPS * wire0
+        print(f'wirelength mode: window x {x0}-{x1} y {y0}-{y1}, base inside wire {wire0} (movable nets)', flush=True)
     print(f'the exact 2D model on the base: {model0} (3D {of3}; the layers\' capacities summed: {of2})', flush=True)
     weights = {}
     history = []
@@ -866,6 +881,8 @@ def main():
             for e, a in cols[n][choice.get(n, 0)][0].items():
                 load[e] += a
         obj = start = static + sum(cost_e(e, u) for e, u in load.items())
+        if wl is not None:  # Part 214: overflow first, wire second -- one number, wire weighted EPS per edge
+            obj = start = obj + EPS * sum(cols[n][choice.get(n, 0)][1] for n in nets)
         t1, sweeps, idle, moves = time.time(), 0, 0, 0
         while idle < 60 and time.time() - t1 < opt['--time']:
             rng.shuffle(free_nets)
@@ -885,9 +902,11 @@ def main():
                     for e, b in new.items():
                         if e not in cur:
                             d += cost_e(e, load[e] + b) - cost_e(e, load[e])
+                    if wl is not None:
+                        d += EPS * (c[1] - cols[n][k0][1])
                     if d < best_d:
                         best_d, best_k = d, k
-                if best_k >= 0 and (best_d < 0 or (best_d == 0 and rng.random() < 0.3)):
+                if best_k >= 0 and (best_d < -1e-12 or (abs(best_d) <= 1e-12 and rng.random() < 0.3)):
                     for e, a in cur.items():
                         load[e] -= a
                     for e, b in cols[n][best_k][0].items():

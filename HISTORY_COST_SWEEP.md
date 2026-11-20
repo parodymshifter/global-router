@@ -15481,3 +15481,17 @@ whole gap to NTHU-Route 2.0 is ~102000 units (LMgr's table, three significant fi
 alone is of its size -- if it can be removed, which the saturated reclaim pass (Parts 137, 187) says needs other nets
 to move too. Where it sits: at 16 x 16-tile cells, 141 of 225 cells hold any; the top 20 hold 55% -- clustered enough
 for windows.
+
+**`hotspot_cg.py --wl x0,y0,x1,y1`** (new, wirelength mode): the box is the window, the objective is overflow first
+then inside wire (the existing EPS-per-edge term), pricing no longer skips nets that pay no congestion, and the
+rounding search and the final decision compare (overflow, wire). **Ceiling on bigblue1's worst-detour window** (x
+152-183 y 72-103, 1024 tiles, 8498 movable nets, inside wire 105415; `p214/bb1_wl1.txt`, `bb1_wl2.txt`): 5 rounds --
+the mix moves 965 nets, their inside wire 103449 -> 102761 (-688); the best whole-route rounding saves 68 edges at zero
+overflow (413 nets changed). 25 rounds -- **pricing converges at round 17** (no net finds a cheaper route under this
+growth rule): the mix moves 1975 nets, their wire 103512 -> 102447, **-1065 edges, ~1.0% of the window's inside
+wire**, in the window with the most small-net detour (6127 units in its worst 16x16 cell). Most of that detour is
+capacity-forced, not a choice the relaxation can undo. Extrapolated to the design (unverified -- other windows have
+less detour): at most ~37000 units, ~0.65% of the score, inside the 1.6-3.6% wirelength noise Part 78 measured.
+**Reading: a 2D wirelength post-pass is not worth building out on these designs.** The larger lever on the scored
+wirelength is vias -- 34.7% of bigblue1's score -- i.e. layer assignment, not 2D routing (not yet measured how far
+its via count sits above any bound).
