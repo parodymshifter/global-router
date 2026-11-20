@@ -15499,3 +15499,7 @@ its via count sits above any bound).
 **Queue (the user, 2026-11-19 22:38):** after item 1 (newblue3's reorderings, ~23:25) and item 2 (the 2024 / 2025 rule
 audit), **scope the wirelength step on vias**: how far our via count sits from what is achievable (vias are 34.7% of
 bigblue1's scored wirelength, Part 214).
+
+**1. Result** (21:29-23:41, `p214/run1.log`, `p214/newblue3/`; all legal, gr_verify and eval2008.pl agree): overflow by
+spread 56: 31504, **60: 31402** (max 420, wirelength 10701357), 68: 31422, 80: 31450, 72: 31416 (Part 213's spread 64:
+31434). Kept spread 60: **newblue3 31402** -- 1.2% above the best published 31024; the six orderings span 31402-31504.
