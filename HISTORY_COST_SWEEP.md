@@ -15741,3 +15741,17 @@ one another, so an unbiased near-critical net joins the new worst path (an infer
 The room gate gets congestion under 1st place's but loses most of the timing (as on ariane, Part 133). GAP-LA's narrow
 selection (0.001-0.6% of nets) does not carry over to this design in this mechanism. Next: strength at the refined
 classes (k3 60 / 90 / 120 / 240) and one filtered set (slack / worst >= 0.9), `p215/narrow/narrow_tile2.log`.
+**Strength at the refined classes** (12:35-12:38, `p215/narrow/narrow_tile2.log`; same classes, k1 / k2 = k3 / 4, k3 / 2,
+kp 1): k3 60 -> 0.7834 (WNS -0.3678, TNS -1439, 2.463M), 90 -> 0.6620 (-0.3528, -1375, 2.544M), 120 -> 0.5864 (-0.3404,
+-1326, 2.623M), 180 -> 0.4879 (above), 240 -> 0.5249 (-0.3203, -1234, 2.852M); class 3 filtered to slack / worst >= 0.9
+(3936 nets) at 180 -> 1.3178 (-0.4078, -1711, 2.246M). The best stays at 180 (the strength the classes were refined at,
+so the comparison favours it). **Our frontier sits ~0.4M of congestion above 1st place's point**: k3 120 matches 1st
+place's timing (-0.340 / -1326 vs -0.342 / -1356) at 2.62M against 2.23M. Neither narrowing nor strength closes it.
+**Where the added congestion lands** (the contest evaluator's per-layer lines, unbiased base -> ref, 1.094M added):
+metal2 +111k (10%), metal7 +273k, metal8 +98k, metal9 +364k, metal10 +254k (90% on metal7-10, as Part 190 found); vias
+3.28M -> 4.13M. By NanGate45's R per layer (`standard25.env`), the bias's step from metal4-6 to metal7-8 is 8x in R and
+from metal7-8 to metal9-10 another 5x, so at k3 180 a step's pull is ~43 units into metal7-8 and only ~5 more into
+metal9-10: the bias is a resistance-only, per-step pull, and the overflow it buys is critical nets competing for the
+same upper tracks. 1st place (Hippo; GAP-LA's group) places layers with an Elmore model that includes the driver's
+resistance and the capacitance below each segment -- Part 205 found our benefit estimate wrong for leaving the driver
+out. That is the remaining candidate mechanism (large: a delay term in the layer-assignment DP).
