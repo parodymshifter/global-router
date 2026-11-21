@@ -15895,3 +15895,8 @@ Step 1 (from 16:37, `p215/cluster/step1.sh`, guard `p215/cluster/guard.sh`, Open
 fixed `timing_slack.tcl` on Part 189's unbiased route of each set, blind then visible, compared with the slack Part
 189's script measured from the same route. If the net sets and values agree, the old loops' classes stand and only the
 Elmore stage needs running (path A); otherwise full loops (path B).
+**Step 1, blind (16:37-18:27):** identical. The fixed script skipped 0 failing paths and 0 unnamed points on blind
+mempool_cluster's unbiased route; 996166 nets in both slack files, none only in one, all 996166 values the same
+(worst -1.527 ns, classes 0/1/2/3 396832 / 498589 / 61273 / 22001 both). So Part 189's blind loop classes stand: the
+script fix does not touch this design. OpenROAD 6603 s, resident 11.2 GB, peak footprint 112.4 GB; swap peaked at
+38.0 GB, free disk never below 49 GB (`guard.log`). Visible started 18:27 at 85 GB free.
