@@ -15879,3 +15879,19 @@ gain is congestion, not timing: K 35 has worse WNS / TNS (-0.4967 / -2246 vs -0.
 visible ariane, whose best strength is 540 (blind ariane's 180), the deltas fall with K and K 140 comes closest;
 a higher K may pay there (unverified, not run). Twelve designs -28.39 -> **-28.65**. Best route kept as
 `p215/std_check/mempool_tile_wrap.best.route.xz`.
+
+**mempool_cluster disk plan (the user, 2026-11-21 16:34: "yes").** Need, from Part 189's sessions: >= 85 GB free at each
+session start (swap peaks 40-52 GB, routes 12.4 GB uncompressed, guard floor 20 GB; starts at 83-118 GB never fell
+below 45 GB, the start at 51 GB hit the guard). The user rebooted (swap 17 GB -> 0), deleted both Time Machine local
+snapshots and turned automatic backups off. Deleted with approval: `GlobalRouterTemp/p215` (31 GB; its logs, score
+tables and slack files, 445 MB in 4009 files, first copied to `GlobalRouterRuns/p215/temp_records`) and the unpacked
+blind / visible mempool_group designs (7.8 GB; `gr/bench`'s links to them now dangle -- unzip again if needed). Free
+29 -> 99 GB.
+Step 0 (16:35-16:36, `p215/cluster/step0_rows.log`): Elmore rows for blind mempool_cluster at the loop best's classes
+(k20ip1m1: merged1.slack, min mode, kp 1) -- 93 s, resident 8.1 GB, peak footprint 23.9 GB; classes 1/2/3 1774642 /
+218873 / 76724 against the router's 1774634 / 218873 / 76724 for the same file (k20ip1m1.err): 8 more class-1 nets in
+the rows (cause unverified; likely rounding at the 0.1 boundary).
+Step 1 (from 16:37, `p215/cluster/step1.sh`, guard `p215/cluster/guard.sh`, OpenROAD memory in `openroad.time`): the
+fixed `timing_slack.tcl` on Part 189's unbiased route of each set, blind then visible, compared with the slack Part
+189's script measured from the same route. If the net sets and values agree, the old loops' classes stand and only the
+Elmore stage needs running (path A); otherwise full loops (path B).
