@@ -15807,3 +15807,8 @@ elmore_bsg.log`): ref 0.4389, Elmore K 35 / 70 / 140 / 280: 0.4388 / 0.4389 / 0.
 under every row (-0.1475, -15.80): this design's failing paths do not respond to the classed nets' layers. No gain.
 Blind mempool_group's standard loop started 04:14 (`p215/elmore/mempool_group.loop.log`; its .def / .net unpacked from
 the benchmark zip into GlobalRouterTemp, seconds).
+**Correction: the slack bug also hit blind mempool_group.** Its loop's first slack session with the fixed script
+(`p215/elmore/mempool_group.loop.log`): "0 failing paths skipped, 48889 unnamed points skipped" -- under the old script
+each of those points dropped its whole path. Earlier today only *visible* mempool_group was checked (1 bad point), and
+the record above read that as covering the group designs; it does not cover the blind one. Its Part 188 score (1.3519)
+came from the old script; this loop measures what the fix changes there.
