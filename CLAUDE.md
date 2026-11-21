@@ -361,6 +361,13 @@ mempool_group were unaffected, mempool_cluster unchecked), every slack session l
 runs up to 12 rounds (`--refine 12`, the new default; it stops by itself): blind mempool_tile_wrap 1.6415 -> 0.4879
 (contest score), better WNS and TNS than 1st place, congestion still 24% above it; visible ariane / bsg_chip /
 mempool_tile_wrap gain -0.004 / -0.10 / -0.22 more -- twelve designs -27.17 -> -28.39.
+Since 2026-11-21 (Part 215) the loop ends with the Elmore stage (`--elmore 35,70,140`, the new default; `--elmore 0`
+turns it off): the best rerouted with per-net rows from an Elmore delay model (`gr/elmore_rows.py`, the router's
+`PD39ROUTE_TIMING_ROWS`), which prices the driver's resistance times each layer's capacitance -- metal4-8 are the slow
+layers for delay, not metal2 -- and ranks blind designs by the contest's published endpoint count (`CONTEST_ENDPOINTS`;
+OpenROAD's registers + outputs is 42% high on blind mempool_tile_wrap; `--endpoints measured` gives it back). Blind
+six, contest score: **6.1210** (1st place 8.0604, 2nd 9.3971) -- mempool_tile_wrap 0.1768, mempool_group 1.0946, ariane
+1.4368; mempool_cluster (1.6533) not yet rerun with it.
 Since 2026-11-09 (Part 189) all twelve 2025 designs are scored: mempool_cluster visible -0.6993, blind -1.3643,
 **twelve designs -27.17**. On a 24 GB Mac its OpenROAD sessions peak at 80-113 GB of footprint on swap, so it runs
 with `--lean` (compress every route that can no longer win), `SLACK_BANDS=16` (walk the failing paths in slack

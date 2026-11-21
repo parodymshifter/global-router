@@ -8,8 +8,8 @@ candidate with the contest's own OpenROAD (timing, power -- one session for all 
 evaluator, and keep the best by the contest score's change against the unbiased route.
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
-      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...]
-      [--endpoints N] | --selftest
+      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...|0]
+      [--endpoints N|measured] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -33,11 +33,16 @@ into a session lost a whole day's scores, which lived only in memory). `--resume
 the same WORK_DIR: a route that was compressed or evaluated before is not routed again, a candidate already
 scored is not scored again, and a slack file already written is not measured again -- the rest runs as
 before, so the result is the same as an uninterrupted run's.
-`--elmore K1,K2,...` (Part 215, off unless given): after refinement, the best rerouted with per-net Elmore-delay
-rows (`gr/elmore_rows.py`, `PD39ROUTE_TIMING_ROWS`) at each strength K, from the classes it was routed with, all scored
-in one session; the best kept as before (blind mempool_tile_wrap 0.4879 -> 0.1768 at K 70, ariane 1.4605 -> 1.4368).
-`--endpoints N` (Part 215): rank candidates with N endpoints (the contest's published count) instead of the count
-OpenROAD reports; they differ on the mempool designs (tile 13350 vs 19000), and twice that changed the pick.
+Stage 4, the Elmore stage (Part 215; default since 2026-11-21, `--elmore K1,K2,...` to change the strengths, `--elmore
+0` = off): after refinement, the best rerouted with per-net Elmore-delay rows (`gr/elmore_rows.py`,
+`PD39ROUTE_TIMING_ROWS`) at each strength K in ELMORE_LADDER (35, 70, 140: the best of blind ariane, mempool_tile_wrap
+and mempool_group), from the classes it was routed with, all scored in one session (`--lean`: one at a time); the best
+kept as before (blind mempool_tile_wrap 0.4879 -> 0.1768 at K 70, ariane 1.4605 -> 1.4368, mempool_group 1.2959 ->
+1.0946 at K 140, contest score).
+Endpoint count (Part 215; default since 2026-11-21): candidates are ranked with the contest's published N_endpoint
+for the blind designs (CONTEST_ENDPOINTS, a DESIGN_DIR inside a folder named `blind`) and with the count OpenROAD
+reports (registers + outputs) otherwise; they differ on the mempool designs (tile 13350 vs 19000), and twice that
+changed the pick. `--endpoints N` gives the count; `--endpoints measured` uses OpenROAD's everywhere.
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
@@ -56,6 +61,15 @@ SLACK_TCL = os.path.join(GR, 'timing_slack.tcl')
 # 2026-10-16 (Part 134, the user: fewer steps): 20 / 180 / 540 -- dropping 60 and 1600 loses nothing on the
 # ten scored designs (each was best only on blind bsg_chip, by 0.0006); 8 routes per design -> 6
 K3_LADDER = [20, 180, 540]
+# Part 215 (the user, 2026-11-21: standard): the Elmore stage's strengths -- the best K was 35 on blind ariane, 70 on
+# blind mempool_tile_wrap, 140 on blind mempool_group (bsg_chip and NVDLA indifferent)
+ELMORE_LADDER = [35, 70, 140]
+# Part 215 (the user, 2026-11-21: standard): the contest's N_endpoint for its blind designs (github.com/liangrj2014/
+# ISPD25_contest index.md, read 2026-11-20). OpenROAD's registers + outputs agree on ariane and NVDLA and not on the
+# mempool designs (19000 / 438269 / 1443997) or bsg_chip (214955). The visible designs' contest counts are not
+# published there; for them the measured count is used (unverified whether it is the contest's on the mempool ones).
+CONTEST_ENDPOINTS = {'ariane': 20218, 'bsg_chip': 214915, 'NV_NVDLA_partition_c': 45925, 'mempool_tile_wrap': 13350,
+                     'mempool_group': 347869, 'mempool_cluster': 1082397}
 KP_LADDER = [1, 4]
 ROUTER = os.path.join(GR, 'pd39route')  # --router PATH to use another build
 LEAN = False  # --lean (Part 189)
@@ -274,7 +288,17 @@ def slack_counts(txt):
     return int(m.group(1)), (int(m.group(2)) if m.group(2) is not None else None)
 
 
-N_ENDPOINTS = None  # Part 215: --endpoints N -- the contest's endpoint count, in place of the one OpenROAD reports
+N_ENDPOINTS = None  # Part 215: the contest's endpoint count, in place of the one OpenROAD reports (None: OpenROAD's)
+
+
+def contest_endpoints(d):
+    """Part 215: the contest's published N_endpoint for a blind design's folder (by its path as given or resolved), else
+    None."""
+    for p in (d, os.path.realpath(d)):
+        p = p.rstrip('/')
+        if os.path.basename(os.path.dirname(p)) == 'blind':
+            return CONTEST_ENDPOINTS.get(os.path.basename(p))
+    return None
 
 
 def delta(c, b, w, n):
@@ -354,18 +378,33 @@ def elmore(d, name, work, b, best, w, n, ks):
         return []
     import elmore_rows
     sf, smode = best.get('sf'), best.get('smode') or 'replace'
-    out = []
-    for K in ks:
+    out, keep = [], best
+
+    def one(K):
         rows = os.path.join(work, f"{best['tag']}e{K:g}.rows")
         if not (RESUME and os.path.exists(rows)):
             info = elmore_rows.build(d, sf or 'none', 'min' if not sf else smode, rows, K, best['kp'])
             print(f"{name}: elmore K {K:g}: {info}", flush=True)
-        out.append(dict(route(d, name, work, f"{best['tag']}e{K:g}", best['k3'], best['kp'], sf, smode,
-                              {'PD39ROUTE_TIMING_ROWS': rows}), src=best['src']))
-    sta(d, name, out)
-    for c in out:
-        c['delta'] = delta(c, b, w, n)
-        print(f"{name}: elmore {c['tag']} delta {c['delta']:+.4f} (from {best['tag']} {best['delta']:+.4f})", flush=True)
+        return dict(route(d, name, work, f"{best['tag']}e{K:g}", best['k3'], best['kp'], sf, smode,
+                          {'PD39ROUTE_TIMING_ROWS': rows}), src=best['src'])
+
+    def scored(g):
+        for c in g:
+            c['delta'] = delta(c, b, w, n)
+            print(f"{name}: elmore {c['tag']} delta {c['delta']:+.4f} (from {best['tag']} {best['delta']:+.4f})",
+                  flush=True)
+    if LEAN:  # 2026-11-21: one route at a time, so at most the best and one candidate sit uncompressed (mempool_cluster)
+        for K in ks:
+            c = one(K)
+            sta(d, name, [c])
+            scored([c])
+            out.append(c)
+            keep = min([keep, c], key=lambda x: x['delta'])
+            prune([best] + out, keep)
+    else:
+        out = [one(K) for K in ks]
+        sta(d, name, out)
+        scored(out)
     return out
 
 
@@ -375,7 +414,8 @@ def write_tsv(path, allc, best, w, n, t0):
         for c in allc:
             f.write(f"{c['tag']}\t{c['k3']}\t{c['kp']}\t{c['wns']}\t{c['tns']}\t{c['power']}\t{c['of']}\t{c['opens']}"
                     f"\t{c['delta']:+.4f}\t{c.get('slack_nets', '')}\t{c.get('slack_unmatched', '')}\t{c.get('classed', '')}\n")
-        f.write(f"# best {best['tag']} delta {best['delta']:+.4f}; weights {w}; endpoints {n}; "
+        f.write(f"# best {best['tag']} delta {best['delta']:+.4f}; weights {w}; endpoints {N_ENDPOINTS or n}"
+                f"{' (contest)' if N_ENDPOINTS else ''}; "
                 f"{time.time() - t0:.0f} s for {len(allc)} candidates\n")
 
 
@@ -462,6 +502,12 @@ def selftest():
     N_ENDPOINTS = 25
     ok &= abs(delta(c0, b0, [0, -1, 0, 0], 10) - -2.0) < 1e-12
     N_ENDPOINTS = None
+    # the contest's counts: a blind design's folder, by path or through a symlink; a visible one gets none
+    ok &= contest_endpoints('/x/blind/mempool_tile_wrap') == 13350 and contest_endpoints('/x/blind/mempool_group/') == 347869
+    ok &= contest_endpoints('/x/visible/mempool_tile_wrap') is None and contest_endpoints('/x/blind/unknown') is None
+    os.makedirs(os.path.join(t, 'blind', 'ariane'))
+    os.symlink(os.path.join(t, 'blind', 'ariane'), os.path.join(t, 'ariane_link'))
+    ok &= contest_endpoints(os.path.join(t, 'ariane_link')) == 20218
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got}')
     shutil.rmtree(t)
     return ok
@@ -504,16 +550,24 @@ def main():
         K3_LADDER = [int(v) for v in sys.argv[sys.argv.index('--k3') + 1].split(',')]
         if not K3_LADDER or min(K3_LADDER) <= 0:
             raise SystemExit('timing_loop.py: --k3 takes positive integers, e.g. 2,5,10,20')
-    # Part 215: --elmore K1,K2,... -- after refinement, the best rerouted with Elmore-delay rows at each K (off unless
-    # given; blind mempool_tile_wrap 0.4879 -> 0.1768 at K 70, blind ariane 1.4605 -> 1.4368 at K 35)
-    ks = [float(v) for v in sys.argv[sys.argv.index('--elmore') + 1].split(',')] if '--elmore' in sys.argv else []
+    # Part 215: the Elmore stage -- after refinement, the best rerouted with Elmore-delay rows at each K (the user,
+    # 2026-11-21: on by default at ELMORE_LADDER; --elmore 0 turns it off; blind mempool_tile_wrap 0.4879 -> 0.1768 at
+    # K 70, blind ariane 1.4605 -> 1.4368 at K 35, blind mempool_group 1.2959 -> 1.0946 at K 140)
+    ks = ([float(v) for v in sys.argv[sys.argv.index('--elmore') + 1].split(',')] if '--elmore' in sys.argv
+          else list(ELMORE_LADDER))
+    if ks == [0.0]:
+        ks = []
     if any(k <= 0 for k in ks):
-        raise SystemExit('timing_loop.py: --elmore takes positive strengths, e.g. 35,70,140')
-    global N_ENDPOINTS
-    if '--endpoints' in sys.argv:  # Part 215: rank by the contest's published endpoint count (mempool designs: ours differs)
-        N_ENDPOINTS = int(sys.argv[sys.argv.index('--endpoints') + 1])
-        if N_ENDPOINTS <= 0:
-            raise SystemExit('timing_loop.py: --endpoints takes a positive count')
+        raise SystemExit('timing_loop.py: --elmore takes positive strengths, e.g. 35,70,140 (or 0: off)')
+    global N_ENDPOINTS  # Part 215 (the user, 2026-11-21: standard): the contest's endpoint count for a blind design
+    N_ENDPOINTS = contest_endpoints(d)
+    if '--endpoints' in sys.argv:
+        v = sys.argv[sys.argv.index('--endpoints') + 1]
+        N_ENDPOINTS = None if v == 'measured' else int(v)
+        if N_ENDPOINTS is not None and N_ENDPOINTS <= 0:
+            raise SystemExit('timing_loop.py: --endpoints takes a positive count or "measured"')
+    print(f"{name}: endpoints for ranking: " + (f"{N_ENDPOINTS} (contest)" if N_ENDPOINTS else "OpenROAD's count")
+          + f"; Elmore stage: {'K ' + ','.join(f'{k:g}' for k in ks) if ks else 'off'}", flush=True)
     if '--reuse' in sys.argv:
         top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), max(rounds, 1), t0)
         if out:

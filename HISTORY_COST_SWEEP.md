@@ -15854,3 +15854,16 @@ there needs 80-113 GB of footprint; free disk is 22 GB).
 Limitation found: a second `--elmore` pass under `--resume` does not know the first pass's candidates (they are not
 replayed), so it ranks only its own -- mempool_group's second pass printed "best k180rm1e280" and wrote that route to
 `--out`; the best is K 140's (1.0946), kept as `p215/elmore/mempool_group.k180rm1e140.route.xz`. Run every K in one pass.
+
+**Adopted (the user, 2026-11-21 11:10: "make 1 and 2 standard, skip option 2").** `gr/timing_loop.py` defaults:
+(1) the Elmore stage runs after refinement at K 35 / 70 / 140 (`ELMORE_LADDER`, the three blind designs' best K;
+`--elmore K1,...` changes them, `--elmore 0` turns it off); under `--lean` its candidates are routed and scored one at a
+time and pruned between them, so mempool_cluster never holds three uncompressed routes. (2) A design folder inside a
+folder named `blind` is ranked with the contest's published N_endpoint (`CONTEST_ENDPOINTS`, from the contest's
+`index.md` as read 2026-11-20); visible designs keep OpenROAD's registers + outputs (the contest's visible counts are not
+on that page: whether ours match them on the visible mempool designs is unverified). `--endpoints N` gives a count,
+`--endpoints measured` OpenROAD's. The loop prints which count and which strengths it uses at start; `loop.tsv`'s last
+line names the count ranked with. Self-test: the lookup by path, with a trailing slash, through a symlink, and None
+for a visible or unknown design -- pass. Option 2 (the metal2 share of the added congestion) is skipped.
+End-to-end check (11:12): fresh loops on visible ariane and visible mempool_tile_wrap with the new defaults
+(`~/Code/GlobalRouterRuns/p215/std_check/`), the first measurement of the Elmore stage on visible designs.
