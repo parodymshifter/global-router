@@ -15792,3 +15792,10 @@ inference above was wrong**: the uniform part of the row did not cause the conge
 better than 1st place's, congestion 2.46M against its 2.23M; a broad bottom from K 50 to 100. At the loop's classes
 (refined under the class rows) and its k3 / kp; nothing re-refined under the Elmore rows yet. Next: the other blind
 designs, each from its own standard loop's final classes (`p215/elmore/`).
+**Blind ariane** (its standard loop on the committed flow, `~/Code/GlobalRouterTemp/p215/elmore/ariane`, 904 s: best
+k180im1 -0.2551, input-slack classes, the same as Part 188's; Elmore rows from its `merged1.slack` with the input pin
+slack lowered by it -- `elmore_rows.py --input-min`, classes 865 / 124 / 973 as the router's; `p215/narrow/
+elmore_ariane.log`): ref 1.4605 (= the loop's); Elmore K 35 **1.4368**, 70 1.4418 (WNS -0.3678, TNS -29.9), 140 1.4537
+(-0.3400, -23.6), 280 1.4693 (-0.3357, -22.6). Timing improves strongly with K (WNS -0.402 -> -0.336) but ariane's
+weights (-0.2, -2, 100, 4e-7) value its congestion (4.4M, ~1.77 of score) far above its timing, so the gain is small:
+-0.024 at K 35 (1st place 1.7802).
