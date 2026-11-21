@@ -10373,6 +10373,12 @@ struct TimingLayerModel {
   // byte-identical.
   std::vector<float> hpwl, sinks; // per net, from the reader (pins' bounding box half-perimeter; pins - 1)
   std::vector<float> mult;        // per net: the timing term's multiplier (empty: off)
+  // Part 215: PD39ROUTE_TIMING_ROWS=<file> -- a listed net's whole bias row (one value per layer, timing and power
+  // together) given outright, in place of its class's row and any multiplier: a delay model computed outside the
+  // router (first use: Elmore with the driver's resistance) is scored without a rebuild. Empty: off.
+  std::vector<int32_t> rowOf;     // per net: index of its row in rowVals / rowL, or -1
+  std::vector<double> rowVals;    // rows, rowL values each
+  size_t rowL = 0;
   // benefitQ (the fourth field): the reference W. In [0, 1]: that quantile of the classed nets' W (0.5: the first
   // form, which only raised the pull -- the low tail of W is tight, no net fell below 0.78 -- and bought overflow:
   // ariane -4.054 -> -4.073, mempool_tile_wrap -0.926 -> -0.625, Part 205). -1 (default): the W_ref at which the
@@ -10521,6 +10527,49 @@ bool loadSlackOverride(const std::string &path, size_t nNets, std::vector<float>
   }
   return true;
 }
+// pd39route (Part 215): PD39ROUTE_TIMING_ROWS=<file> -- one line per listed net: "<net index> <v_1> ... <v_L>",
+// one value per layer, each finite and in [0, 1e6]; '#' lines are comments. Fails on a malformed line, a wrong
+// number of values, an index out of range or listed twice.
+bool loadTimingRows(const std::string &path, size_t nNets, size_t L, std::vector<int32_t> &rowOf,
+                    std::vector<double> &vals, std::string &err) {
+  std::ifstream in(path);
+  if (!in) {
+    err = "cannot open " + path;
+    return false;
+  }
+  rowOf.assign(nNets, -1);
+  vals.clear();
+  std::string line;
+  size_t lineNo = 0;
+  int32_t rows = 0;
+  while (std::getline(in, line)) {
+    ++lineNo;
+    if (line.empty() || line[0] == '#')
+      continue;
+    std::istringstream ls(line);
+    long long idx = -1;
+    std::vector<double> v;
+    std::string tok;
+    bool ok = static_cast<bool>(ls >> idx) && idx >= 0 && static_cast<size_t>(idx) < nNets;
+    while (ok && ls >> tok) {
+      char *end = nullptr;
+      const double x = std::strtod(tok.c_str(), &end);
+      if (!end || *end || !std::isfinite(x) || x < 0 || x > 1e6)
+        ok = false;
+      else
+        v.push_back(x);
+    }
+    if (!ok || v.size() != L || rowOf[static_cast<size_t>(idx)] >= 0) {
+      err = path + ":" + std::to_string(lineNo) + ": expected '<net index 0.." + std::to_string(nNets - 1) + "> " +
+            "followed by " + std::to_string(L) + " values in [0, 1e6]', each net once, got '" + line + "'";
+      return false;
+    }
+    rowOf[static_cast<size_t>(idx)] = rows++;
+    vals.insert(vals.end(), v.begin(), v.end());
+  }
+  return true;
+}
+
 // pd39route (Part 207): PD39ROUTE_TIMING_MULT=<file> -- a multiplier per net for the timing term of its bias
 // (the power term is not scaled), in place of PD39ROUTE_TIMING_BENEFIT's own formula: any per-net weighting can
 // then be scored without a rebuild (first use: the driver's resistance, from the DEF and the Liberty library).
@@ -10579,6 +10628,12 @@ struct LayerBiasScope {
         tLayerBias = row;
         tLayerBiasMax = mx;
       }
+    }
+    if (n && !gTiming.rowOf.empty() && n->id >= 0 && static_cast<size_t>(n->id) < gTiming.rowOf.size() &&
+        gTiming.rowOf[static_cast<size_t>(n->id)] >= 0) { // Part 215: the net's own row, outright
+      const double *r = gTiming.rowVals.data() + static_cast<size_t>(gTiming.rowOf[static_cast<size_t>(n->id)]) * gTiming.rowL;
+      tLayerBias = r;
+      tLayerBiasMax = *std::max_element(r, r + gTiming.rowL);
     }
   }
   ~LayerBiasScope() {
@@ -23059,6 +23114,56 @@ void testTimingMultFile() {
   check(!loadTimingMult("pd39route_selftest_no_such_file.txt", 4, v, listed, err), "timing multiplier file: a missing file refused");
 }
 
+// Part 215: PD39ROUTE_TIMING_ROWS -- the file's rows reach the nets listed, the rest keep their class rows.
+void testTimingRowsFile() {
+  const std::string path = "pd39route_selftest_rows.txt";
+  auto write = [&](const char *text) {
+    std::ofstream f(path);
+    f << text;
+  };
+  std::vector<int32_t> rowOf;
+  std::vector<double> vals;
+  std::string err;
+  write("# elmore\n2 1 0.5 0\n0 0 0 3\n");
+  bool ok = loadTimingRows(path, 4, 3, rowOf, vals, err) && rowOf == std::vector<int32_t>({1, -1, 0, -1}) &&
+            vals == std::vector<double>({1, 0.5, 0, 0, 0, 3});
+  bool bad = true;
+  for (const char *text : {"4 1 1 1\n", "1 1 1\n", "1 1 1 1 1\n", "1 1 x 1\n", "1 1 -1 1\n", "1 1 2e6 1\n",
+                           "1 1 nan 1\n", "1 1 1 1\n1 2 2 2\n"}) {
+    write(text);
+    bad = bad && !loadTimingRows(path, 4, 3, rowOf, vals, err);
+  }
+  std::remove(path.c_str());
+  check(ok, "timing rows file: listed nets get their row, the rest none");
+  check(bad, "timing rows file: index out of range, too few / many values, a non-number, a negative, above 1e6, NaN, "
+             "a net listed twice refused");
+  check(!loadTimingRows("pd39route_selftest_no_such_file.txt", 4, 3, rowOf, vals, err), "timing rows file: a missing file refused");
+  TimingLayerModel keep = gTiming;
+  gTiming = TimingLayerModel{};
+  gTiming.on = true;
+  gTiming.slack = {-1.0f, -1.0f};
+  gTiming.relR = {1.0, 0.5, 0.01};
+  gTiming.k[3] = 10;
+  gTiming.classify();
+  gTiming.rowOf = {-1, 0};
+  gTiming.rowVals = {2.0, 7.0, 1.0};
+  gTiming.rowL = 3;
+  Net a, b;
+  a.id = 0;
+  b.id = 1;
+  {
+    LayerBiasScope sa(&a);
+    check(tLayerBias == gTiming.bias[3].data() && tLayerBiasMax == 10.0, "timing rows: an unlisted net keeps its class row");
+  }
+  {
+    LayerBiasScope sb(&b);
+    check(tLayerBias && tLayerBias[0] == 2.0 && tLayerBias[1] == 7.0 && tLayerBias[2] == 1.0 && tLayerBiasMax == 7.0,
+          "timing rows: a listed net gets its own row and its row's maximum");
+  }
+  check(tLayerBias == nullptr, "timing rows: the scope restores the previous row");
+  gTiming = keep;
+}
+
 // pd39route (Part 133): buildNetTree equals buildNetTreeReference -- nodes
 // (order included), edges, adjacency and the return value -- on 3000 random
 // nets: rectilinear walks with repeated and overlapping legs (cycles), a few
@@ -23658,6 +23763,7 @@ int run() {
   testBuildNetTreeMatchesReference();
   testSlackOverrideFile();
   testTimingMultFile();
+  testTimingRowsFile();
   testPriceSeed();
   testSkipGiant();
   testSplitInteriorCrossings();
@@ -24248,6 +24354,21 @@ int main(int argc, char **argv) {
         gTiming.mult.swap(m);
         std::cerr << "ISPD 2025 timing layers: per-net multipliers from " << mf << ": " << listed << " nets listed, "
                   << acting << " classed nets with a multiplier other than 1 (" << lo << " to " << hi << ")\n";
+      }
+      if (const char *rf = std::getenv("PD39ROUTE_TIMING_ROWS"); rf && *rf) { // Part 215: a whole row per net
+        std::string err;
+        const size_t L = static_cast<size_t>(g24In.res.nLayers);
+        if (!loadTimingRows(rf, gTiming.cls.size(), L, gTiming.rowOf, gTiming.rowVals, err))
+          fail("PD39ROUTE_TIMING_ROWS: " + err);
+        gTiming.rowL = L;
+        const size_t listed = gTiming.rowVals.size() / L;
+        double lo = 0, hi = 0;
+        if (listed) {
+          lo = *std::min_element(gTiming.rowVals.begin(), gTiming.rowVals.end());
+          hi = *std::max_element(gTiming.rowVals.begin(), gTiming.rowVals.end());
+        }
+        std::cerr << "ISPD 2025 timing layers: per-net rows from " << rf << ": " << listed << " nets, values " << lo
+                  << " to " << hi << " (their class rows and multipliers replaced)\n";
       }
     }
     if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {

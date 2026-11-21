@@ -421,6 +421,51 @@ def main():
     check('PD39ROUTE_REGION_BOX_CAP_B changes only the reclaim path', bool(wa and wb) and wa.group(1, 2) == wb.group(1, 2)
           and wa.group(3, 4) != wb.group(3, 4), f'A {wb.group(1, 2) if wb else None} = {wa.group(1, 2) if wa else None}; '
           f'B {wb.group(3, 4) if wb else None} vs {wa.group(3, 4) if wa else None}')
+    # Part 215: PD39ROUTE_TIMING_ROWS -- an ISPD 2025 design (6 layers, 20 x 20 GCells, written here): one listed net's
+    # own row forbids one horizontal wiring layer (metal3 / metal5; metal1 holds the pins), then the other, and the net's wire in the solution moves between them;
+    # the run without the file is the reference. Run on the 2025 flow's settings (@standard.env @standard24.env
+    # @fast24.env), with the timing bias on.
+    cap, net = os.path.join(work, 'rows25.cap'), os.path.join(work, 'rows25.net')
+    with open(cap, 'w') as f:
+        f.write('6 20 20\n0.5 4 5 5 5 5 5 5 -1 -10 100 0.000001\n' + ' '.join(['4200'] * 19) + '\n' +
+                ' '.join(['4200'] * 19) + '\n')
+        for z, (nm, d) in enumerate([('metal1', 0), ('metal2', 1), ('metal3', 0), ('metal4', 1), ('metal5', 0), ('metal6', 1)]):
+            f.write(f'{nm} {d} 0\n')
+            for _ in range(20):
+                f.write(' '.join(['8'] * 20) + '\n')
+    with open(net, 'w') as f:
+        f.write('crit\n(\nd0/Z, -1e-10, [(0, 1, 10)]\ns0/A, -1e-10, [(0, 18, 10)]\n)\n')
+        for i in range(12):
+            y = 2 + i
+            f.write(f'n{i}\n(\nd{i+1}/Z, 2e-10, [(0, 2, {y})]\ns{i+1}/A, 2e-10, [(0, 16, {y})]\n)\n')
+    b25 = dict(os.environ)
+    for fn in ('standard.env', 'standard24.env', 'fast24.env'):
+        b25.update(env_file(os.path.join(HERE, fn)))
+    b25.update({'PD39ROUTE_TIMING_LAYERS': '0,0,1', 'PD39ROUTE_LAYER_R': '4,2,1,1,1,1'})
+
+    def run25(extra, tag):
+        out = os.path.join(work, f'rows25.{tag}.route')
+        p = subprocess.run([router, cap, net, out], env={**b25, **extra}, capture_output=True, text=True)
+        if p.returncode != 0:
+            raise RuntimeError(f'rows25 {tag}: router exited {p.returncode}\n' + p.stderr[-2000:])
+        wire, cur = {}, None
+        for line in open(out):
+            t = line.split()
+            if len(t) == 1 and t[0] not in '()':
+                cur = t[0]
+            elif len(t) == 6 and cur == 'crit' and t[2] == t[5] and t[1] == t[4] and t[0] != t[3]:
+                wire[t[2]] = wire.get(t[2], 0) + abs(int(t[3]) - int(t[0])) // 4200
+        return wire
+    rows = {}
+    for tag, row in (('no3', '0 0 1000 0 0 0'), ('no5', '0 0 0 0 1000 0')):
+        rows[tag] = os.path.join(work, f'rows25.{tag}.rows')
+        with open(rows[tag], 'w') as f:
+            f.write(f'# crit is net 0\n0 {row}\n')
+    w_no3 = run25({'PD39ROUTE_TIMING_ROWS': rows['no3']}, 'no3')
+    w_no5 = run25({'PD39ROUTE_TIMING_ROWS': rows['no5']}, 'no5')
+    check('PD39ROUTE_TIMING_ROWS sets a listed net\'s layers', w_no3.get('metal3', 0) == 0 and w_no3.get('metal5', 0) > 0
+          and w_no5.get('metal5', 0) == 0 and w_no5.get('metal3', 0) > 0,
+          f'crit horizontal wire by layer: metal3 forbidden {w_no3}, metal5 forbidden {w_no5}')
     failed = [n for n, ok, _ in checks if not ok]
     print(f'\n{len(checks) - len(failed)} of {len(checks)} passed' + (': FAILED ' + ', '.join(failed) if failed else ''))
     sys.exit(1 if failed else 0)
