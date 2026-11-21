@@ -15867,3 +15867,15 @@ line names the count ranked with. Self-test: the lookup by path, with a trailing
 for a visible or unknown design -- pass. Option 2 (the metal2 share of the added congestion) is skipped.
 End-to-end check (11:12): fresh loops on visible ariane and visible mempool_tile_wrap with the new defaults
 (`~/Code/GlobalRouterRuns/p215/std_check/`), the first measurement of the Elmore stage on visible designs.
+Results (11:12-11:29; `p215/std_check/*.log`, `*.loop.tsv`, `*.scores.jsonl`; score change against each design's
+unbiased route, OpenROAD's endpoint count, lower is better):
+| visible design | before Elmore (loop best) | K 35 | K 70 | K 140 | kept | time (Part 215 vis_r12 -> now) |
+|---|---|---|---|---|---|---|
+| ariane | k540rm3 -4.0584 | -2.9539 | -3.6305 | -4.0411 | k540rm3 -4.0584 (no gain) | 524 -> 632 s |
+| mempool_tile_wrap | k180rp1m7 -1.1423 | **-1.4049** | -1.3659 | -1.2595 | k180rp1m7e35 **-1.4049** | 907 -> 1068 s |
+The stages before the Elmore stage reproduced the vis_r12 loops exactly (same best tags and deltas). mempool_tile_wrap's
+gain is congestion, not timing: K 35 has worse WNS / TNS (-0.4967 / -2246 vs -0.4563 / -2039) and less overflow cost
+(2.72M vs 3.39M) -- the Elmore rows move its critical nets off metal4-8 at lower total pull than the R-only rows. On
+visible ariane, whose best strength is 540 (blind ariane's 180), the deltas fall with K and K 140 comes closest;
+a higher K may pay there (unverified, not run). Twelve designs -28.39 -> **-28.65**. Best route kept as
+`p215/std_check/mempool_tile_wrap.best.route.xz`.

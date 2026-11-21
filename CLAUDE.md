@@ -367,7 +367,8 @@ turns it off): the best rerouted with per-net rows from an Elmore delay model (`
 layers for delay, not metal2 -- and ranks blind designs by the contest's published endpoint count (`CONTEST_ENDPOINTS`;
 OpenROAD's registers + outputs is 42% high on blind mempool_tile_wrap; `--endpoints measured` gives it back). Blind
 six, contest score: **6.1210** (1st place 8.0604, 2nd 9.3971) -- mempool_tile_wrap 0.1768, mempool_group 1.0946, ariane
-1.4368; mempool_cluster (1.6533) not yet rerun with it.
+1.4368; mempool_cluster (1.6533) not yet rerun with it. Visible: mempool_tile_wrap -1.1423 -> -1.4049 (K 35), ariane
+unchanged -- twelve designs -28.39 -> -28.65.
 Since 2026-11-09 (Part 189) all twelve 2025 designs are scored: mempool_cluster visible -0.6993, blind -1.3643,
 **twelve designs -27.17**. On a 24 GB Mac its OpenROAD sessions peak at 80-113 GB of footprint on swap, so it runs
 with `--lean` (compress every route that can no longer win), `SLACK_BANDS=16` (walk the failing paths in slack
