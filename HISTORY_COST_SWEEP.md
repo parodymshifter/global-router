@@ -15781,3 +15781,8 @@ Timing beats 1st place's (-0.342 / -1356) at every K and saturates by K 600; con
 puts cost on every layer (delay of wire anywhere), so a critical net pays for every detour, where the class row is
 near zero on its best layer (an inference about the congestion's cause, tested next: lower K, and rows less their
 least wiring-layer value -- the layer preference only).
+**Lower K, and relative rows** (02:44-02:46, `p215/narrow/elmore_tile2.log`): **Elmore K 100: WNS -0.3169, TNS -1221,
+congestion 2.589M, contest score 0.2163 -- below 1st place's 0.3576** (and below our 0.4879: better timing *and* less
+congestion than the class rows); K 150: -0.3149, -1199, 2.777M, 0.3385. Relative rows (least wiring-layer value
+subtracted) K 300 / 600 / 1200: 0.5956 / 0.9305 / 1.4374, the same as the absolute rows within 0.0003 -- **the
+inference above was wrong**: the uniform part of the row did not cause the congestion; the strength did. Next: K 30-120.
