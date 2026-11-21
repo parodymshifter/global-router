@@ -15799,3 +15799,6 @@ elmore_ariane.log`): ref 1.4605 (= the loop's); Elmore K 35 **1.4368**, 70 1.441
 (-0.3400, -23.6), 280 1.4693 (-0.3357, -22.6). Timing improves strongly with K (WNS -0.402 -> -0.336) but ariane's
 weights (-0.2, -2, 100, 4e-7) value its congestion (4.4M, ~1.77 of score) far above its timing, so the gain is small:
 -0.024 at K 35 (1st place 1.7802).
+**Blind NV_NVDLA_partition_c** (standard loop, 1562 s, best k20r -1.4391 as Part 188): the unbiased route fails timing
+on 2 nets only (WNS -79.5 ns, TNS -279252); the weakest bias fixes both (WNS 0, TNS 0) -- nothing left for a delay
+model to gain; not tested.
