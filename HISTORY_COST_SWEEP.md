@@ -15786,3 +15786,9 @@ congestion 2.589M, contest score 0.2163 -- below 1st place's 0.3576** (and below
 congestion than the class rows); K 150: -0.3149, -1199, 2.777M, 0.3385. Relative rows (least wiring-layer value
 subtracted) K 300 / 600 / 1200: 0.5956 / 0.9305 / 1.4374, the same as the absolute rows within 0.0003 -- **the
 inference above was wrong**: the uniform part of the row did not cause the congestion; the strength did. Next: K 30-120.
+**K 30-120** (02:47-02:49, `p215/narrow/elmore_tile3.log`): K 30 0.3164 (WNS -0.3568, TNS -1368, 2.207M), 50 0.1868
+(-0.3324, -1285, 2.357M), **70 0.1768 (-0.3229, -1251, 2.459M)**, 85 0.1797 (-0.3195, -1230, 2.524M), 100 0.2163, 120
+0.2744 (-0.3162, -1211, 2.676M). **Blind mempool_tile 0.4879 -> 0.1768 (-64%), half of 1st place's 0.3576**: timing
+better than 1st place's, congestion 2.46M against its 2.23M; a broad bottom from K 50 to 100. At the loop's classes
+(refined under the class rows) and its k3 / kp; nothing re-refined under the Elmore rows yet. Next: the other blind
+designs, each from its own standard loop's final classes (`p215/elmore/`).
