@@ -15821,3 +15821,14 @@ loop resumed with `--elmore 50,70,100` (`p215/elmore/tile_elm.log`, 88 s) reprod
 0.1868 / 0.1768 / 0.2163). **The loop's endpoint count changes the pick here**: by our count (19000) it keeps K 50
 (delta -2.3687 vs -2.3561 at K 70), by the contest's (13350) K 70 is best (0.1768 vs 0.1868) -- the first pick the count
 mismatch has changed (earlier today: none had).
+**Blind mempool_group with the fixed slack script** (standard loop, 04:14-07:40, `~/Code/GlobalRouterTemp/p215/elmore/
+mempool_group`; stopped after stage 1 at 05:49 and resumed with `--lean` for disk -- free space had fallen to 17 GB with
+seven 2.5-3 GB routes and 28 GB of swap; the resume re-ran nothing; logs `p215/elmore/mempool_group.loop*.log`, table
+`p215/elmore/mempool_group.loop.tsv`; contest score by `contest25.py`): stage 1 k180r 1.3633 (the routed classes now
+win here: before the fix the loop's pick was k20ip1m1, 1.3519); refine 1 **k180rm1 1.2959** (WNS -0.5646, TNS -40770,
+congestion 63.0M), refine 2 k180rm2 1.2898 (-0.5887, -38267, 64.2M) -- better by the contest's count, worse by ours
+(delta -1.3426 vs -1.3439), so the loop stopped at round 2 and kept m1. **The endpoint count changed the pick a
+second time** (mempool_tile's Elmore K above was the first). Blind mempool_group: 1.3519 -> 1.2959 (loop's pick; 1st
+place 1.3327, 2nd 1.2335).
+Watcher note: `pgrep -f PATTERN` inside a Monitor matches the Monitor's own shell (its command line holds the pattern),
+so an "until no match" watcher never ends and a `pgrep || launch` guard never launches; match on a file or a PID instead.
