@@ -9,7 +9,7 @@ evaluator, and keep the best by the contest score's change against the unbiased 
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
       [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...]
-      | --selftest
+      [--endpoints N] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -36,6 +36,8 @@ before, so the result is the same as an uninterrupted run's.
 `--elmore K1,K2,...` (Part 215, off unless given): after refinement, the best rerouted with per-net Elmore-delay
 rows (`gr/elmore_rows.py`, `PD39ROUTE_TIMING_ROWS`) at each strength K, from the classes it was routed with, all scored
 in one session; the best kept as before (blind mempool_tile_wrap 0.4879 -> 0.1768 at K 70, ariane 1.4605 -> 1.4368).
+`--endpoints N` (Part 215): rank candidates with N endpoints (the contest's published count) instead of the count
+OpenROAD reports; they differ on the mempool designs (tile 13350 vs 19000), and twice that changed the pick.
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
@@ -272,8 +274,12 @@ def slack_counts(txt):
     return int(m.group(1)), (int(m.group(2)) if m.group(2) is not None else None)
 
 
+N_ENDPOINTS = None  # Part 215: --endpoints N -- the contest's endpoint count, in place of the one OpenROAD reports
+
+
 def delta(c, b, w, n):
     """The contest score's change from the unbiased candidate (lower is better)."""
+    n = N_ENDPOINTS or n
     return (w[0] * (c['wns'] - b['wns']) + w[1] * (c['tns'] - b['tns']) / n + w[2] * (c['power'] - b['power'])
             + w[3] * (c['of'] - b['of']))
 
@@ -448,6 +454,13 @@ def selftest():
     # Part 215: the slack session's skip counts, from the fixed script's line and from the older one's
     ok &= slack_counts('x\nSKIPPEDPATHS 0 BADPOINTS 6278\nSLACKNETS 9263\n') == (0, 6278)
     ok &= slack_counts('SKIPPEDPATHS 6278\n') == (6278, None)
+    global N_ENDPOINTS  # Part 215: --endpoints replaces the measured count in the score change
+    b0 = {'wns': -1.0, 'tns': -100.0, 'power': 1.0, 'of': 0.0}
+    c0 = {'wns': -1.0, 'tns': -50.0, 'power': 1.0, 'of': 0.0}
+    ok &= abs(delta(c0, b0, [0, -1, 0, 0], 10) - -5.0) < 1e-12
+    N_ENDPOINTS = 25
+    ok &= abs(delta(c0, b0, [0, -1, 0, 0], 10) - -2.0) < 1e-12
+    N_ENDPOINTS = None
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got}')
     shutil.rmtree(t)
     return ok
@@ -495,6 +508,11 @@ def main():
     ks = [float(v) for v in sys.argv[sys.argv.index('--elmore') + 1].split(',')] if '--elmore' in sys.argv else []
     if any(k <= 0 for k in ks):
         raise SystemExit('timing_loop.py: --elmore takes positive strengths, e.g. 35,70,140')
+    global N_ENDPOINTS
+    if '--endpoints' in sys.argv:  # Part 215: rank by the contest's published endpoint count (mempool designs: ours differs)
+        N_ENDPOINTS = int(sys.argv[sys.argv.index('--endpoints') + 1])
+        if N_ENDPOINTS <= 0:
+            raise SystemExit('timing_loop.py: --endpoints takes a positive count')
     if '--reuse' in sys.argv:
         top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), max(rounds, 1), t0)
         if out:
