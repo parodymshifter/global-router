@@ -15851,3 +15851,6 @@ NVDLA 1.3206, mempool_tile 0.1768, mempool_group 1.0946, mempool_cluster 1.6533 
 (`--elmore`, off) and, on mempool_tile, the contest's endpoint count (`--endpoints`, off; by our count the loop keeps
 K 50, 0.1868). mempool_cluster is not yet rerun with the fixed slack script or the Elmore stage (an OpenROAD session
 there needs 80-113 GB of footprint; free disk is 22 GB).
+Limitation found: a second `--elmore` pass under `--resume` does not know the first pass's candidates (they are not
+replayed), so it ranks only its own -- mempool_group's second pass printed "best k180rm1e280" and wrote that route to
+`--out`; the best is K 140's (1.0946), kept as `p215/elmore/mempool_group.k180rm1e140.route.xz`. Run every K in one pass.
