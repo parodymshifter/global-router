@@ -15755,3 +15755,29 @@ metal9-10: the bias is a resistance-only, per-step pull, and the overflow it buy
 same upper tracks. 1st place (Hippo; GAP-LA's group) places layers with an Elmore model that includes the driver's
 resistance and the capacitance below each segment -- Part 205 found our benefit estimate wrong for leaving the driver
 out. That is the remaining candidate mechanism (large: a delay term in the layer-assignment DP).
+**Option 1: an Elmore delay term, per net** (the user, 2026-11-20 13:59: "1 and 2 after that if the improvement is
+still needed"). Built (commit c93b16b): `PD39ROUTE_TIMING_ROWS=<file>` -- each listed net's whole per-layer bias row,
+given outright (in place of its class row and any multiplier), so a delay model computed outside the router is scored
+without a rebuild; off by default, self-test (loader with 8 broken cases; scope), `e2e_settings.py` check on a
+synthetic 6-layer ISPD 2025 design (the listed net's row moves its wire between metal3 and metal5; fails on the
+previous binary), 53 of 53 pass. Rows (`p215/narrow/elmore_rows.py`): for each classed net, the delay a micron of wire
+adds on layer l, `d_l = R_drv x C_l + R_l x C_down` (ps / um), R_drv the driver pin's resistance from the Liberty
+library (Part 207's `drive.py`; median 2.93 kOhm on mempool_tile's classed nets, 14 of 9834 without), C_down the
+sink pins' capacitance (Liberty input pins) plus half the wire's (half-perimeter x mean C), row = K x class weight
+(1/4, 1/2, 1) x d_l + the loop's power term. **The model's view of the layers** (a median net, ps / um): metal2 0.203,
+metal3 0.266, metal4-8 0.285-0.324, metal9 0.108, metal10 0.082 -- the driver term dominates, so metal4-8 are the
+*worst* layers for delay and metal2 beats them, while the resistance-only bias ranks metal7-8 next to metal9-10.
+Blind mempool_tile, the loop's final classes (`p215/narrow/elmore_tile.log`; contest score, lower is better):
+
+| rows | WNS | TNS | congestion | contest score |
+|---|---|---|---|---|
+| ref (class rows 45 / 90 / 180, new binary: same numbers as before) | -0.3233 | -1252 | 2.757M | 0.4879 |
+| Elmore K 300 | -0.3103 | -1178 | 3.101M | 0.5944 |
+| Elmore K 600 | -0.3069 | -1172 | 3.464M | 0.9303 |
+| Elmore K 1200 | -0.3061 | -1168 | 3.986M | 1.4371 |
+| Elmore K 2400 | -0.3048 | -1166 | 4.704M | 2.1431 |
+
+Timing beats 1st place's (-0.342 / -1356) at every K and saturates by K 600; congestion climbs with K. The Elmore row
+puts cost on every layer (delay of wire anywhere), so a critical net pays for every detour, where the class row is
+near zero on its best layer (an inference about the congestion's cause, tested next: lower K, and rows less their
+least wiring-layer value -- the layer preference only).
