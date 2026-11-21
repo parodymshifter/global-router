@@ -15837,3 +15837,7 @@ so an "until no match" watcher never ends and a `pgrep || launch` guard never la
 (WNS -0.5798, TNS -42658, 45.5M), K 70 1.1788 (-0.5740, -40955, 48.7M), **K 140 1.0946 (-0.5584, -39896, 53.4M)** --
 against k180rm1's 1.2959 (63.0M): less congestion *and* better timing; below 1st place (1.3327) and 2nd (1.2335).
 Still falling at the ladder's top: K 280 and 560 next.
+Blind ariane below K 35 (`p215/narrow/elmore_ariane2.log`): K 10 1.4940 (WNS -0.7051), K 20 1.4506 (-0.5153) -- K 35
+(1.4368) stays its best. The best K differs by design: ariane 35, mempool_tile 70, mempool_group >= 140.
+`--resume --lean` bug found and fixed (08:22): a refine round replayed after a later prune compared its route file
+(packed) with the previous one -- FileNotFoundError; the replayed candidate's route is now unpacked first.

@@ -338,6 +338,7 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
         print(f"{name}: refine {it}: {c['tag']} delta {c['delta']:+.4f} (from {cur['tag']} {cur['delta']:+.4f}, "
               f"{c['classed']} nets classed)", flush=True)
         unpack(cur)  # --resume: cur's slack may have been measured before and its route left packed
+        unpack(c)  # --resume with --lean (Part 215): a replayed round's route may have been packed by a later prune
         if c['delta'] >= cur['delta'] or filecmp.cmp(c['route'], cur['route'], shallow=False):
             pack(c)
             break
