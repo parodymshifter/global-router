@@ -8,7 +8,8 @@ candidate with the contest's own OpenROAD (timing, power -- one session for all 
 evaluator, and keep the best by the contest score's change against the unbiased route.
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
-      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] | --selftest
+      [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...]
+      | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -32,6 +33,9 @@ into a session lost a whole day's scores, which lived only in memory). `--resume
 the same WORK_DIR: a route that was compressed or evaluated before is not routed again, a candidate already
 scored is not scored again, and a slack file already written is not measured again -- the rest runs as
 before, so the result is the same as an uninterrupted run's.
+`--elmore K1,K2,...` (Part 215, off unless given): after refinement, the best rerouted with per-net Elmore-delay
+rows (`gr/elmore_rows.py`, `PD39ROUTE_TIMING_ROWS`) at each strength K, from the classes it was routed with, all scored
+in one session; the best kept as before (blind mempool_tile_wrap 0.4879 -> 0.1768 at K 70, ariane 1.4605 -> 1.4368).
 Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md) and run under
 /usr/bin/time -l. Standard library only.
 """
@@ -107,7 +111,7 @@ def wait_slot():
         time.sleep(5)
 
 
-def route(d, name, work, tag, k3, kp, slack_file=None, slack_mode='replace'):
+def route(d, name, work, tag, k3, kp, slack_file=None, slack_mode='replace', extra=None):
     """One candidate: the 2024 standard plus the timing bias at top-class strength k3 and the power
     term kp; slack_file (the routed-slack file) replaces the input slack as the classes' source
     (slack_mode 'min': lowers the input slack where the file's is worse)."""
@@ -124,11 +128,13 @@ def route(d, name, work, tag, k3, kp, slack_file=None, slack_mode='replace'):
     if slack_file and (k3 > 0 or kp > 0):
         base['PD39ROUTE_TIMING_SLACK'] = slack_file
         base['PD39ROUTE_TIMING_SLACK_MODE'] = slack_mode
+    base.update(extra or {})  # Part 215: e.g. PD39ROUTE_TIMING_ROWS (the Elmore stage)
+    cls_src = {'sf': slack_file, 'smode': slack_mode}  # the classes this candidate was routed with (the Elmore stage)
     sol = os.path.join(work, f'{tag}.route')
     got = DONE.get(tag, {}) if RESUME else {}
     if 'of' in got and (os.path.exists(sol) or os.path.exists(sol + '.xz')):  # --resume: routed and evaluated
         print(f'{name}: resume: {tag} routed and evaluated before', flush=True)
-        return {'tag': tag, 'k3': k3, 'kp': kp, 'route': sol, 'of': got['of'], 'opens': got['opens']}
+        return {'tag': tag, 'k3': k3, 'kp': kp, 'route': sol, 'of': got['of'], 'opens': got['opens'], **cls_src}
     if RESUME and os.path.exists(sol + '.xz'):  # --resume: a route packed by --lean is complete; evaluate it
         print(f'{name}: resume: {tag} routed before, evaluating it', flush=True)
         with open(sol + '.tmp', 'wb') as g:
@@ -145,7 +151,7 @@ def route(d, name, work, tag, k3, kp, slack_file=None, slack_mode='replace'):
     m = re.search(r'^overflow cost ([\d.eE+-]+)', ev, re.M)
     opens = re.search(r'open nets : (\d+)', ev)
     c = {'tag': tag, 'k3': k3, 'kp': kp, 'route': sol, 'of': float(m.group(1)) if m else float('nan'),
-         'opens': int(opens.group(1)) if opens else -1}
+         'opens': int(opens.group(1)) if opens else -1, **cls_src}
     save(c)
     return c
 
@@ -334,6 +340,28 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
     return out
 
 
+def elmore(d, name, work, b, best, w, n, ks):
+    """Part 215: the best candidate rerouted with Elmore-delay rows (gr/elmore_rows.py, PD39ROUTE_TIMING_ROWS) at each
+    strength in ks, from the classes it was routed with; returns the new candidates (all scored in one session)."""
+    if best is b or not ks:
+        return []
+    import elmore_rows
+    sf, smode = best.get('sf'), best.get('smode') or 'replace'
+    out = []
+    for K in ks:
+        rows = os.path.join(work, f"{best['tag']}e{K:g}.rows")
+        if not (RESUME and os.path.exists(rows)):
+            info = elmore_rows.build(d, sf or 'none', 'min' if not sf else smode, rows, K, best['kp'])
+            print(f"{name}: elmore K {K:g}: {info}", flush=True)
+        out.append(dict(route(d, name, work, f"{best['tag']}e{K:g}", best['k3'], best['kp'], sf, smode,
+                              {'PD39ROUTE_TIMING_ROWS': rows}), src=best['src']))
+    sta(d, name, out)
+    for c in out:
+        c['delta'] = delta(c, b, w, n)
+        print(f"{name}: elmore {c['tag']} delta {c['delta']:+.4f} (from {best['tag']} {best['delta']:+.4f})", flush=True)
+    return out
+
+
 def write_tsv(path, allc, best, w, n, t0):
     with open(path, 'w') as f:
         f.write('tag\tk3\tkp\twns\ttns\tpower\tof\topens\tdelta\tslack_nets\tunmatched\tclassed\n')
@@ -462,6 +490,11 @@ def main():
         K3_LADDER = [int(v) for v in sys.argv[sys.argv.index('--k3') + 1].split(',')]
         if not K3_LADDER or min(K3_LADDER) <= 0:
             raise SystemExit('timing_loop.py: --k3 takes positive integers, e.g. 2,5,10,20')
+    # Part 215: --elmore K1,K2,... -- after refinement, the best rerouted with Elmore-delay rows at each K (off unless
+    # given; blind mempool_tile_wrap 0.4879 -> 0.1768 at K 70, blind ariane 1.4605 -> 1.4368 at K 35)
+    ks = [float(v) for v in sys.argv[sys.argv.index('--elmore') + 1].split(',')] if '--elmore' in sys.argv else []
+    if any(k <= 0 for k in ks):
+        raise SystemExit('timing_loop.py: --elmore takes positive strengths, e.g. 35,70,140')
     if '--reuse' in sys.argv:
         top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), max(rounds, 1), t0)
         if out:
@@ -508,6 +541,10 @@ def main():
     if rounds > 0:  # Part 188: sticky re-classification from the best route's own slack
         allc += refine(d, name, work, b, best, [srcs['r']] if srcs.get('r') else [], w, n, rounds)
         best = min(allc, key=lambda c: c['delta'])
+    if ks:  # Part 215: the Elmore stage (--elmore K1,K2,...), at the best so far
+        allc += elmore(d, name, work, b, best, w, n, ks)
+        best = min(allc, key=lambda c: c['delta'])
+        prune(allc, best)
     write_tsv(os.path.join(work, 'loop.tsv'), allc, best, w, n, t0)
     if out:
         unpack(best)

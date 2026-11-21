@@ -15812,3 +15812,12 @@ the benchmark zip into GlobalRouterTemp, seconds).
 each of those points dropped its whole path. Earlier today only *visible* mempool_group was checked (1 bad point), and
 the record above read that as covering the group designs; it does not cover the blind one. Its Part 188 score (1.3519)
 came from the old script; this loop measures what the fix changes there.
+**Into the loop, off by default** (06:20-06:54): `gr/elmore_rows.py` (standard library; Liberty drive resistance and
+input pin capacitance, DEF components, the router's own classes for `replace`, `min` and no slack file; self-test on a
+hand-made 3-layer design checks a row against the formula by hand) -- its rows are identical to the experiments' on
+mempool_tile (replace) and ariane (min). `timing_loop.py --elmore K1,K2,...`: after refinement, the best rerouted with
+those rows at each K from the classes it was routed with, scored in one session. Check: blind mempool_tile's finished
+loop resumed with `--elmore 50,70,100` (`p215/elmore/tile_elm.log`, 88 s) reproduces the experiment exactly (contest
+0.1868 / 0.1768 / 0.2163). **The loop's endpoint count changes the pick here**: by our count (19000) it keeps K 50
+(delta -2.3687 vs -2.3561 at K 70), by the contest's (13350) K 70 is best (0.1768 vs 0.1868) -- the first pick the count
+mismatch has changed (earlier today: none had).
