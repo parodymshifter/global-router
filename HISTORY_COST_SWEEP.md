@@ -15802,3 +15802,8 @@ weights (-0.2, -2, 100, 4e-7) value its congestion (4.4M, ~1.77 of score) far ab
 **Blind NV_NVDLA_partition_c** (standard loop, 1562 s, best k20r -1.4391 as Part 188): the unbiased route fails timing
 on 2 nets only (WNS -79.5 ns, TNS -279252); the weakest bias fixes both (WNS 0, TNS 0) -- nothing left for a delay
 model to gain; not tested.
+**Blind bsg_chip** (standard loop, 1809 s, best k180i -0.2351, stage-1 input-slack classes 31 / 104 / 384; `p215/narrow/
+elmore_bsg.log`): ref 0.4389, Elmore K 35 / 70 / 140 / 280: 0.4388 / 0.4389 / 0.4390 / 0.4391 -- WNS and TNS identical
+under every row (-0.1475, -15.80): this design's failing paths do not respond to the classed nets' layers. No gain.
+Blind mempool_group's standard loop started 04:14 (`p215/elmore/mempool_group.loop.log`; its .def / .net unpacked from
+the benchmark zip into GlobalRouterTemp, seconds).
