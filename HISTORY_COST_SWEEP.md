@@ -15841,3 +15841,13 @@ Blind ariane below K 35 (`p215/narrow/elmore_ariane2.log`): K 10 1.4940 (WNS -0.
 (1.4368) stays its best. The best K differs by design: ariane 35, mempool_tile 70, mempool_group >= 140.
 `--resume --lean` bug found and fixed (08:22): a refine round replayed after a later prune compared its route file
 (packed) with the previous one -- FileNotFoundError; the replayed candidate's route is now unpacked first.
+mempool_group K 280 / 560 (`p215/elmore/mempool_group.elmore2.log`, 08:22-08:53): 1.2214 (WNS -0.5879, 61.0M) / 1.4354
+(-0.5518, 70.6M) -- **K 140 (1.0946) stays its best**. The best K by design: ariane 35, mempool_tile 70, mempool_group
+140; bsg_chip and NVDLA indifferent.
+**Blind six, scored as the contest scored them (each design's best of our own runs):** ariane 1.4368, bsg_chip 0.4389,
+NVDLA 1.3206, mempool_tile 0.1768, mempool_group 1.0946, mempool_cluster 1.6533 (Part 189, not rerun) -- **sum 6.1210**
+(this morning 6.7132, Part 215's start 7.8668; 1st place 8.0604, 2nd 9.3971). Five of six below both winners; bsg_chip
+0.4389 vs 2nd place's 0.4258. Two of these picks need what the loop does not yet do by default: the Elmore stage
+(`--elmore`, off) and, on mempool_tile, the contest's endpoint count (`--endpoints`, off; by our count the loop keeps
+K 50, 0.1868). mempool_cluster is not yet rerun with the fixed slack script or the Elmore stage (an OpenROAD session
+there needs 80-113 GB of footprint; free disk is 22 GB).
