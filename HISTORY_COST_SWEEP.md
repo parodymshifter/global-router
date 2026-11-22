@@ -15908,3 +15908,7 @@ byte-identical to the in-process build). Dry run (Elmore stubbed): blind's best 
 endpoint count (-1.3643 -> -1.4346 as ranked with 1082397 endpoints instead of 1443997), visible's k20im2 -0.6993.
 `p215/cluster/pathA.sh` (nohup, from 19:27) waits for step 1's visible line, starts only if visible matches as blind
 did, then runs blind and visible in turn (each at >= 85 GB free), records in `pathA.txt`, copies tables to `pathA.<set>`.
+**Step 1, visible (18:27-20:12):** identical too -- 0 skipped paths, 0 unnamed points, 934394 nets in both files, all
+values the same (worst -0.929 ns, classes 0/1/2/3 341648 / 570678 / 1086 / 3415 both). OpenROAD 6251 s, resident 11.8
+GB, peak footprint 109.8 GB; swap peaked at 38.5 GB over both sessions. Neither mempool_cluster loop was touched by the
+script fix, so path A started by itself at 20:12 (blind first, 94 GB free).
