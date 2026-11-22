@@ -38,7 +38,10 @@ Stage 4, the Elmore stage (Part 215; default since 2026-11-21, `--elmore K1,K2,.
 `PD39ROUTE_TIMING_ROWS`) at each strength K in ELMORE_LADDER (35, 70, 140: the best of blind ariane, mempool_tile_wrap
 and mempool_group), from the classes it was routed with, all scored in one session (`--lean`: one at a time); the best
 kept as before (blind mempool_tile_wrap 0.4879 -> 0.1768 at K 70, ariane 1.4605 -> 1.4368, mempool_group 1.2959 ->
-1.0946 at K 140, contest score).
+1.0946 at K 140, contest score). `--lean`: every other route stays compressed while a candidate is scored.
+`--reuse EARLIER_WORK_DIR` (Part 188) refines an earlier loop's best instead of rerunning stages 0-2, then runs the
+Elmore stage from the class file that best was routed with; `--reuse ... --refine 0` (Part 215) runs only the Elmore
+stage (before 2026-11-21 it still ran one refinement round).
 Endpoint count (Part 215; default since 2026-11-21): candidates are ranked with the contest's published N_endpoint
 for the blind designs (CONTEST_ENDPOINTS, a DESIGN_DIR inside a folder named `blind`) and with the count OpenROAD
 reports (registers + outputs) otherwise; they differ on the mempool designs (tile 13350 vs 19000), and twice that
@@ -179,9 +182,14 @@ def pack(c):
 
 
 def unpack(c):
-    if not os.path.exists(c['route']) and os.path.exists(c['route'] + '.xz'):
-        with open(c['route'], 'wb') as g:
-            subprocess.run(['xz', '-dc', c['route'] + '.xz'], stdout=g, check=True)
+    """Restore a packed route: from its own .xz, else (--reuse, Part 215) from the earlier loop's copy."""
+    if not os.path.exists(c['route']):
+        for xz in (c['route'] + '.xz', c.get('packed')):
+            if xz and os.path.exists(xz):
+                with open(c['route'] + '.tmp', 'wb') as g:
+                    subprocess.run(['xz', '-dc', xz], stdout=g, check=True)
+                os.replace(c['route'] + '.tmp', c['route'])
+                break
 
 
 def prune(cands, keep):
@@ -376,14 +384,18 @@ def elmore(d, name, work, b, best, w, n, ks):
     strength in ks, from the classes it was routed with; returns the new candidates (all scored in one session)."""
     if best is b or not ks:
         return []
-    import elmore_rows
     sf, smode = best.get('sf'), best.get('smode') or 'replace'
     out, keep = [], best
 
     def one(K):
         rows = os.path.join(work, f"{best['tag']}e{K:g}.rows")
-        if not (RESUME and os.path.exists(rows)):
-            info = elmore_rows.build(d, sf or 'none', 'min' if not sf else smode, rows, K, best['kp'])
+        if not (RESUME and os.path.exists(rows)):  # in its own process (2026-11-21): mempool_cluster's build peaks at
+            # 24 GB of footprint, which this process would otherwise keep through the route and the OpenROAD session;
+            # written to .tmp first, so a stopped build is not taken as done by --resume
+            info = subprocess.run([sys.executable, os.path.join(GR, 'elmore_rows.py'), d, sf or 'none',
+                                   'min' if not sf else smode, rows + '.tmp', repr(float(K)), repr(float(best['kp']))],
+                                  capture_output=True, text=True, check=True).stdout.strip()
+            os.replace(rows + '.tmp', rows)
             print(f"{name}: elmore K {K:g}: {info}", flush=True)
         return dict(route(d, name, work, f"{best['tag']}e{K:g}", best['k3'], best['kp'], sf, smode,
                           {'PD39ROUTE_TIMING_ROWS': rows}), src=best['src'])
@@ -393,9 +405,10 @@ def elmore(d, name, work, b, best, w, n, ks):
             c['delta'] = delta(c, b, w, n)
             print(f"{name}: elmore {c['tag']} delta {c['delta']:+.4f} (from {best['tag']} {best['delta']:+.4f})",
                   flush=True)
-    if LEAN:  # 2026-11-21: one route at a time, so at most the best and one candidate sit uncompressed (mempool_cluster)
-        for K in ks:
+    if LEAN:  # 2026-11-21: one route at a time; every other route packed while it is scored, so only the candidate
+        for K in ks:  # sits uncompressed during an OpenROAD session (mempool_cluster: 12.4 GB per route)
             c = one(K)
+            prune([best] + out, c)
             sta(d, name, [c])
             scored([c])
             out.append(c)
@@ -419,10 +432,21 @@ def write_tsv(path, allc, best, w, n, t0):
                 f"{time.time() - t0:.0f} s for {len(allc)} candidates\n")
 
 
-def reuse(d, name, work, src, rounds, t0):
+def reused_classes(c, src):
+    """The class source an earlier loop routed candidate c with (--reuse, Part 215): a refined candidate (tag ...mK)
+    used mergedK.slack, a stage 1-2 one with routed classes base.slack, with input classes the input slack (None)."""
+    m = re.search(r'm(\d+)$', c['tag'])
+    if m:
+        return os.path.join(src, f'merged{m.group(1)}.slack'), 'replace' if c['src'] == 'r' else 'min'
+    return (os.path.join(src, 'base.slack') if c['src'] == 'r' else None), 'replace'
+
+
+def reuse(d, name, work, src, rounds, t0, ks=()):
     """--reuse SRC: refine an earlier loop's result (SRC/loop.tsv, its route files and base.slack) instead
     of re-running stages 0-2. Writes WORK/refine.tsv. SRC may itself be a refined loop (its refine.tsv and
-    its latest mergedK.slack, which holds every slack measured there): rounds then continue from K + 1."""
+    its latest mergedK.slack, which holds every slack measured there): rounds then continue from K + 1.
+    Part 215: then the Elmore stage at ks from the best; with --refine 0 only the Elmore stage runs (the best's
+    route is not unpacked unless it is the answer)."""
     rows, n = [], None
     tsv = os.path.join(src, 'refine.tsv')
     for line in open(tsv if os.path.exists(tsv) else os.path.join(src, 'loop.tsv')):
@@ -433,16 +457,18 @@ def reuse(d, name, work, src, rounds, t0):
             m = re.match(r'k\d+([ri])', f[0])
             c = {'tag': f[0], 'k3': int(f[1]), 'kp': int(f[2]), 'wns': float(f[3]), 'tns': float(f[4]),
                  'power': float(f[5]), 'of': float(f[6]), 'opens': int(f[7]), 'delta': float(f[8]),
-                 'src': m.group(1) if m else '', 'route': os.path.join(work, f[0] + '.route')}
+                 'src': m.group(1) if m else '', 'route': os.path.join(work, f[0] + '.route'),
+                 'packed': os.path.join(src, f[0] + '.route.xz')}
+            c['sf'], c['smode'] = reused_classes(c, src)
             rows.append(c)
     w = weights(os.path.join(d, name + '.cap'))
     for c in rows:  # loop.tsv prints the change to 4 decimals; recompute it from the full-precision terms
         c['delta'] = delta(c, rows[0], w, n)
     b, best = rows[0], min(rows, key=lambda c: c['delta'])
-    for c in (best,):
-        if not os.path.exists(c['route']):
-            with open(c['route'], 'wb') as g:
-                subprocess.run(['xz', '-dc', os.path.join(src, c['tag'] + '.route.xz')], stdout=g, check=True)
+    if ks and best is not b and best['sf'] and not os.path.exists(best['sf']):  # the Elmore stage reads its classes
+        raise SystemExit(f"timing_loop.py: --reuse: no class file {best['sf']} for {best['tag']}")
+    if rounds > 0:
+        unpack(best)
     base_slack = os.path.join(src, 'base.slack')
     ks = [int(m.group(1)) for f in os.listdir(src) for m in [re.match(r'merged(\d+)\.slack$', f)] if m]
     measured = ([os.path.join(src, f'merged{max(ks)}.slack')] if ks else
@@ -450,9 +476,14 @@ def reuse(d, name, work, src, rounds, t0):
     if best['src'] == 'r' and not measured:
         raise SystemExit('timing_loop.py: --reuse: routed classes but no base.slack in ' + src)
     m = re.search(r'm(\d+)$', best['tag'])
-    new = refine(d, name, work, b, best, measured, w, n, rounds, int(m.group(1)) + 1 if m else 1)
+    new = refine(d, name, work, b, best, measured, w, n, rounds, int(m.group(1)) + 1 if m else 1) if rounds > 0 else []
     allc = rows + new
     top = min(allc, key=lambda c: c['delta'])
+    if ks:  # Part 215: the Elmore stage at the best so far
+        new += elmore(d, name, work, b, top, w, n, ks)
+        allc = rows + new
+        top = min(allc, key=lambda c: c['delta'])
+        prune(new, top)
     write_tsv(os.path.join(work, 'refine.tsv'), allc, top, w, n, t0)
     print(f"{name}: reused {best['tag']} {best['delta']:+.4f} -> best {top['tag']} {top['delta']:+.4f}, "
           f"{len(new)} new, {time.time() - t0:.0f} s", flush=True)
@@ -508,6 +539,16 @@ def selftest():
     os.makedirs(os.path.join(t, 'blind', 'ariane'))
     os.symlink(os.path.join(t, 'blind', 'ariane'), os.path.join(t, 'ariane_link'))
     ok &= contest_endpoints(os.path.join(t, 'ariane_link')) == 20218
+    # Part 215, --reuse: the class source of an earlier loop's candidate, and a route restored from the loop's copy
+    ok &= reused_classes({'tag': 'k20ip1m1', 'src': 'i'}, '/s') == ('/s/merged1.slack', 'min')
+    ok &= reused_classes({'tag': 'k540rm3', 'src': 'r'}, '/s') == ('/s/merged3.slack', 'replace')
+    ok &= reused_classes({'tag': 'k180r', 'src': 'r'}, '/s') == ('/s/base.slack', 'replace')
+    ok &= reused_classes({'tag': 'k20ip1', 'src': 'i'}, '/s') == (None, 'replace')
+    os.makedirs(os.path.join(t, 'src'))
+    subprocess.run(['xz', '-k', '-c', r2], stdout=open(os.path.join(t, 'src', 'z.route.xz'), 'wb'), check=True)
+    c3 = {'route': os.path.join(t, 'z.route'), 'packed': os.path.join(t, 'src', 'z.route.xz')}
+    unpack(c3)
+    ok &= filecmp.cmp(c3['route'], r2, shallow=False) and not os.path.exists(c3['route'] + '.tmp')
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got}')
     shutil.rmtree(t)
     return ok
@@ -569,7 +610,8 @@ def main():
     print(f"{name}: endpoints for ranking: " + (f"{N_ENDPOINTS} (contest)" if N_ENDPOINTS else "OpenROAD's count")
           + f"; Elmore stage: {'K ' + ','.join(f'{k:g}' for k in ks) if ks else 'off'}", flush=True)
     if '--reuse' in sys.argv:
-        top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), max(rounds, 1), t0)
+        # Part 215: --refine 0 with --reuse skips refinement (it ran one round before), so only the Elmore stage runs
+        top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), rounds, t0, ks)
         if out:
             unpack(top)
             shutil.copyfile(top['route'], out)
