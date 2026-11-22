@@ -470,8 +470,8 @@ def reuse(d, name, work, src, rounds, t0, ks=()):
     if rounds > 0:
         unpack(best)
     base_slack = os.path.join(src, 'base.slack')
-    ks = [int(m.group(1)) for f in os.listdir(src) for m in [re.match(r'merged(\d+)\.slack$', f)] if m]
-    measured = ([os.path.join(src, f'merged{max(ks)}.slack')] if ks else
+    its = [int(m.group(1)) for f in os.listdir(src) for m in [re.match(r'merged(\d+)\.slack$', f)] if m]
+    measured = ([os.path.join(src, f'merged{max(its)}.slack')] if its else
                 [base_slack] if os.path.exists(base_slack) else [])
     if best['src'] == 'r' and not measured:
         raise SystemExit('timing_loop.py: --reuse: routed classes but no base.slack in ' + src)
@@ -549,7 +549,26 @@ def selftest():
     c3 = {'route': os.path.join(t, 'z.route'), 'packed': os.path.join(t, 'src', 'z.route.xz')}
     unpack(c3)
     ok &= filecmp.cmp(c3['route'], r2, shallow=False) and not os.path.exists(c3['route'] + '.tmp')
-    print('timing_loop selftest:', 'pass' if ok else f'FAIL {got}')
+    # --reuse --refine 0 hands the Elmore stage the strengths it was given and the best's classes (2026-11-21: a
+    # local list of merged-file numbers once shadowed the strengths, and blind mempool_cluster was routed at K 1)
+    global elmore
+    src, wk, dd = os.path.join(t, 'loopsrc'), os.path.join(t, 'wk'), os.path.join(t, 'des')
+    for f in (src, wk, dd):
+        os.makedirs(f, exist_ok=True)
+    open(os.path.join(dd, 'des.cap'), 'w').write('x\n1 1 -1 -10 2 1e-8\n')
+    for f in ('merged1.slack', 'merged2.slack'):
+        open(os.path.join(src, f), 'w').write('# m\n1 -1e-10\n')
+    open(os.path.join(src, 'loop.tsv'), 'w').write(
+        'tag\tk3\tkp\twns\ttns\tpower\tof\topens\tdelta\n'
+        'base\t0\t0\t-1\t-100\t2\t10\t0\t+0\n'
+        'k20ip1m1\t20\t1\t-0.5\t-50\t2\t10\t0\t-1\n# best k20ip1m1 delta -1; weights x; endpoints 100; 1 s\n')
+    seen, real = {}, elmore
+    elmore = lambda d_, nm, wk_, b_, best_, w_, n_, ks_: seen.update(ks=list(ks_), sf=best_['sf'], tag=best_['tag']) or []
+    reuse(dd, 'des', wk, src, 0, time.time(), [35.0, 70.0])
+    elmore = real
+    ok &= seen == {'ks': [35.0, 70.0], 'sf': os.path.join(src, 'merged1.slack'), 'tag': 'k20ip1m1'}
+    ok &= not os.path.exists(os.path.join(wk, 'k20ip1m1.route'))  # the best's route is not unpacked for the stage
+    print('timing_loop selftest:', 'pass' if ok else f'FAIL {got} {seen}')
     shutil.rmtree(t)
     return ok
 
