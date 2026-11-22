@@ -15968,3 +15968,18 @@ session refused when fewer than 85 GB are free (`MIN_FREE_GB`, checked with the 
 Disk: the unzipped visible mempool_cluster `.def` / `.net` (17 GB, the user: "A"; sizes matched the zip's) deleted at 10:33
 -- and free disk stayed at 88 GB (`df -g`, 10:33:48). `tmutil listlocalsnapshots` shows one snapshot, 2026-11-22-094532,
 newer than those files: presumably it still holds their blocks (inference; not checked further).
+**Item 2, results (10:31-11:52; `p215/vis_elm/`, score change against each design's unbiased route, OpenROAD's endpoint
+count, lower is better; all routes 0 open nets by the evaluator):**
+| visible design | before Elmore (loop best) | K 35 | K 70 | K 140 | kept |
+|---|---|---|---|---|---|
+| NV_NVDLA_partition_c | k540r -6.2887 | -6.2886 | -6.2886 | -6.2887 | k540r -6.2887 (no gain; 2 nets classed) |
+| bsg_chip | k540rm6 -2.0877 | -1.0131 | -1.5129 | -1.9509 | k540rm6 -2.0877 (no gain) |
+| mempool_group | k180ip4m2 -7.5202 | -9.0670 | **-9.1049** | -8.8945 | k180ip4m2e70 **-9.1049** |
+mempool_group is the largest Elmore gain so far (-1.585; the score went from -7.520 to -9.105): K 70's WNS -0.2651 (was
+-0.2618), TNS -18283 (-17916), power 7.306 (7.306), congestion 136.9M (190.7M, -28%) -- the Elmore rows give up a little
+timing and shed a quarter of the congestion, as on the other mempool designs. bsg_chip's refinement replayed rounds 4-7
+of `p215/vis_r12` exactly (same deltas and class counts) and stopped at round 7; its deltas fall as K rises, like
+visible ariane's (both at strength 540), so K above 140 is untested there. NVDLA's base.slack holds 16520 nets, of which
+2 reach class 3 (worst -122 ns, the rest at most -0.41 ns): nothing for the rows to change (known from Part 133).
+Twelve designs -28.95 -> **-30.53** (-28.95 + (-9.1049 + 7.5202)). mempool_group: route + Elmore + one OpenROAD session
+2766 s; OpenROAD 2128 s, resident 11.4 GB, peak footprint 26.9 GB.
