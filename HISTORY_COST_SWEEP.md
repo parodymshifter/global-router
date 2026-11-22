@@ -15983,3 +15983,9 @@ visible ariane's (both at strength 540), so K above 140 is untested there. NVDLA
 2 reach class 3 (worst -122 ns, the rest at most -0.41 ns): nothing for the rows to change (known from Part 133).
 Twelve designs -28.95 -> **-30.53** (-28.95 + (-9.1049 + 7.5202)). mempool_group: route + Elmore + one OpenROAD session
 2766 s; OpenROAD 2128 s, resident 11.4 GB, peak footprint 26.9 GB.
+**Item 1, blocked on disk (12:01).** The unzipped visible mempool_group files were deleted at 11:53:25 (free 79 -> 83 GB;
+these were unzipped after the 09:45 snapshot, so that deletion freed space where the 10:33 one did not). Blind
+mempool_cluster started at 11:53:25: K 10's rows (2070239 classed nets, 1774642 / 218873 / 76724 -- the same classes as
+K 35's) and its route (11.9 GB, done 11:59) are on disk, and the scoring session was refused at 12:01:37 with 72 GB free
+(`MIN_FREE_GB=85`). Nothing was scored. `p215/lowk/resume.sh` now waits (from 12:01:53) until 85 GB is free and then runs the
+same loop with `--resume`, starting from the K 10 route; no action other than freeing disk is needed.
