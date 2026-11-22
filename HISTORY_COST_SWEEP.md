@@ -15919,3 +15919,8 @@ its scoring session; the K 1 route (route 4 min, 20:14-20:18) is kept compressed
 blind.A.k1`. Fixed (commit 3b31745); the selftest now runs `reuse --refine 0` with the stage stubbed and checks the
 strengths, the class file and that the best's route stays packed -- it fails on the old code (`ks [1, 2]`). Restarted
 20:20 at 93 GB free.
+**Path A, blind K 35 (rows 20:20-20:21, route 245 s, OpenROAD 20:27-21:50):** the rows' classes now match step 0
+(1774642 / 218873 / 76724). k20ip1m1e35: WNS -0.2678 (-0.2682), TNS -51066 (-50334), power 23.5649 (23.5867),
+congestion 285.95M (302.10M) -- the Elmore rows lower congestion by 5.3% at a small TNS cost. Change from the unbiased
+route -1.4346 -> **-1.6370**; contest score (`p215/contest25.py`'s formula and references) **1.6533 -> 1.4509** (1st
+place 2.3273). OpenROAD 4945 s, resident 12.8 GB, peak footprint 80.3 GB; swap peaked at 24.4 GB.
