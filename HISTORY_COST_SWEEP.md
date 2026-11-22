@@ -16007,3 +16007,26 @@ the standard's, gives 5.9186 and -30.53). Adding 20 to the ladder is the user's 
 route and session (1.4 h on mempool_cluster) for 0.007 here. Sessions 4926 / 4911 s, resident 9.4 / 12.3 GB, peak footprint
 80.3 / 80.4 GB, swap peak 24.2 GB, free disk 94-95 GB at the starts and never below 70 GB in the guard's 30 s samples.
 Best route (K 20) kept as `p215/lowk/mempool_cluster.best.route.xz`.
+Cleanup (2026-11-22 18:00, the user: "Yes to 1 and 2"): `GlobalRouterTemp/p215v` (13 GB) deleted, free disk 96 -> 109 GB. Checked
+first: mempool_group's best byte-identical to its copy in `p215/vis_elm`, bsg_chip's best identical (decompressed) to
+`p215/vis_r12`'s, mempool_cluster's K 20 identical (15:52); 46 logs, score tables, class and small rows files copied to
+`p215/p215v_records` and compared. Not kept (listed in its `not_kept.txt`): the other candidates' routes, the large rows.
+**K 280 and 560 on visible ariane and bsg_chip (18:00-18:06; `p215/highk/`).** `--reuse --refine 0 --elmore 280,560` from the
+class files of the K 35-140 runs (the same 13100 / 64870 classed nets), OpenROAD's endpoint count, 0 open nets by the evaluator:
+| visible design | K | WNS | TNS | power | congestion | change vs unbiased |
+|---|---|---|---|---|---|---|
+| ariane | none (k540rm3) | -0.36277 | -855.8 | 0.646081 | 7.081M | -4.0584 |
+| ariane | 140 | -0.36557 | -896.2 | 0.646080 | 6.379M | -4.0411 |
+| ariane | 280 | -0.36282 | -839.6 | 0.646080 | 6.700M | -4.2525 |
+| ariane | 560 | -0.36153 | -818.2 | 0.646078 | 7.041M | **-4.2695** |
+| bsg_chip | none (k540rm6) | -0.38160 | -6971.4 | 3.05313 | 27.334M | -2.0877 |
+| bsg_chip | 140 | -0.38849 | -7365.9 | 3.05313 | 24.441M | -1.9509 |
+| bsg_chip | 280 | -0.38134 | -6888.4 | 3.05313 | 26.082M | -2.1790 |
+| bsg_chip | 560 | -0.37897 | -6687.3 | 3.05314 | 27.941M | **-2.2218** |
+Both designs gain (ariane -0.211, bsg_chip -0.134) and the curve flattens (280 -> 560: -0.017, -0.043), but 560 is the largest
+K tried, so neither optimum is bracketed. K 280 beats both designs' loop best on timing and congestion except ariane's WNS
+(0.00005 worse); K 560 beats ariane's on all four terms and bsg_chip's on timing at +2.2% congestion. No run-to-run spread is
+measured on either. So the standard ladder (35 / 70 / 140) is too low for these two, whose best timing strength is 540; off
+the ladder, best on record: twelve designs -30.53 -> **-30.88** (-30.89 with mempool_cluster's K 20). The standard's stays -30.53.
+Cost: routes 2.4-2.9 s (ariane) and 12 s (bsg_chip), one OpenROAD session 51 s / 290 s (resident 1.6 / 6.5 GB). Best routes
+kept as `p215/highk/{ariane,bsg_chip}.best.route.xz` (decompressed and compared).

@@ -374,7 +374,9 @@ min and 4 h 26 min): blind 1.6533 -> **1.4509** (K 35), visible -0.6993 -> **-0.
 in it). No script fix changed its classes (Part 215 step 1).
 Visible bsg_chip, NV_NVDLA_partition_c and mempool_group were also run with the Elmore stage (2026-11-22): mempool_group
 -7.5202 -> **-9.1049** (K 70; congestion -28%), the other two unchanged -- twelve designs -28.95 -> **-30.53**. Off the
-standard ladder, K 20 gives blind mempool_cluster 1.4443 (K 35 1.4509, K 10 1.4680): flat from 10 to 35.
+standard ladder, K 20 gives blind mempool_cluster 1.4443 (K 35 1.4509, K 10 1.4680): flat from 10 to 35. K above it helps the two visible designs whose timing strength is
+540 (2026-11-22): K 560 gives ariane -4.0584 -> -4.2695 and bsg_chip -2.0877 -> -2.2218, not bracketed above (off the
+ladder: twelve designs -30.88 on record; the standard's -30.53).
 Since 2026-11-09 (Part 189) all twelve 2025 designs are scored: mempool_cluster visible -0.6993, blind -1.3643,
 **twelve designs -27.17**. On a 24 GB Mac its OpenROAD sessions peak at 80-113 GB of footprint on swap, so it runs
 with `--lean` (compress every route that can no longer win), `SLACK_BANDS=16` (walk the failing paths in slack
