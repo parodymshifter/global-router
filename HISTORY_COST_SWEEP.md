@@ -15959,3 +15959,12 @@ byte-identical to their copies in `pathA.blind` / `pathA.visible` (and `xz -t` c
 `base.slack_names` byte-identical to `p189/results.{blind,visible}`; logs, score tables and scripts (20 files) copied
 to `p215/cluster/temp_records`. Not kept: the four other candidates' routes and the K 1 route (re-routable, ~4 min
 each, from `p189/loop.*`'s class files).
+**The Elmore stage on the other visible designs, and lower K on blind mempool_cluster (the user, 2026-11-22 10:29, "yes
+go for it").** Item 2 (`p215/vis_elm/`, from 10:31): visible NV_NVDLA_partition_c (from `p134/bt.visible...`, best k540r,
+Elmore only), bsg_chip (from `p188c/rf3.visible...`, refined on from round 4, then Elmore) and mempool_group (from
+`p188/rf.visible...`, best k180ip4m2, Elmore only; its `.def` / `.net` unzipped again), `timing_loop.py --reuse`, K 35 / 70
+/ 140. Item 1 (`p215/lowk/`, queued behind it): blind mempool_cluster at K 10 and 20 from Part 189's best, each OpenROAD
+session refused when fewer than 85 GB are free (`MIN_FREE_GB`, checked with the route already on disk), guard running.
+Disk: the unzipped visible mempool_cluster `.def` / `.net` (17 GB, the user: "A"; sizes matched the zip's) deleted at 10:33
+-- and free disk stayed at 88 GB (`df -g`, 10:33:48). `tmutil listlocalsnapshots` shows one snapshot, 2026-11-22-094532,
+newer than those files: presumably it still holds their blocks (inference; not checked further).
