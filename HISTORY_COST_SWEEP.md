@@ -15928,3 +15928,12 @@ place 2.3273). OpenROAD 4945 s, resident 12.8 GB, peak footprint 80.3 GB; swap p
 -- better timing and power than K 35, but most of the congestion gain gone. Change -1.5550 (K 35: -1.6370); contest
 score 1.5329 (K 35 1.4509 stays best). OpenROAD 5026 s, resident 12.9 GB, peak footprint 80.6 GB; swap peak 23.9 GB.
 Both routes compressed while the next is scored (as designed). K 140 started 23:23.
+**Path A, blind K 140 (OpenROAD 23:30-00:54) and the blind result.** k20ip1m1e140: WNS -0.2671, TNS -47922, power
+23.5200 (the best timing and power of the three), congestion 321.44M (above Part 189's 302.10M); change -1.3840,
+contest score 1.7040. The strength trades timing for congestion monotonically (K 35 / 70 / 140: TNS -51066 / -49088 /
+-47922, congestion 285.95M / 298.73M / 321.44M), and on this design congestion wins: **blind mempool_cluster's best is
+K 35, contest score 1.6533 -> 1.4509** (1st place 2.3273), legal (0 open nets). Blind six **6.1210 -> 5.9186** (1st
+place 8.0604). Blind took 16474 s (4 h 35 min) for three routes and three sessions; each session 4945-5056 s, peak
+footprint 80.3-80.9 GB, swap below 25 GB, free disk never below 61 GB. Tables in `p215/cluster/pathA.blind/`, the
+best route `pathA.blind/mempool_cluster.best.route.xz`. K 35 being the smallest strength tried, a lower K may pay here
+(unverified, not run). Visible started 00:54 at 90 GB free.
