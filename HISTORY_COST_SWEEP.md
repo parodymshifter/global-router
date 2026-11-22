@@ -15923,7 +15923,7 @@ strengths, the class file and that the best's route stays packed -- it fails on 
 (1774642 / 218873 / 76724). k20ip1m1e35: WNS -0.2678 (-0.2682), TNS -51066 (-50334), power 23.5649 (23.5867),
 congestion 285.95M (302.10M) -- the Elmore rows lower congestion by 5.3% at a small TNS cost. Change from the unbiased
 route -1.4346 -> **-1.6370**; contest score (`p215/contest25.py`'s formula and references) **1.6533 -> 1.4509** (1st
-place 2.3273). OpenROAD 4945 s, resident 12.8 GB, peak footprint 80.3 GB; swap peaked at 24.4 GB.
+place 2.3273). OpenROAD 4945 s, resident 12.8 GB, peak footprint 80.3 GB; swap peaked at 22.4 GB.
 **Path A, blind K 70 (OpenROAD 21:58-23:21):** k20ip1m1e70: WNS -0.2674, TNS -49088, power 23.5458, congestion 298.73M
 -- better timing and power than K 35, but most of the congestion gain gone. Change -1.5550 (K 35: -1.6370); contest
 score 1.5329 (K 35 1.4509 stays best). OpenROAD 5026 s, resident 12.9 GB, peak footprint 80.6 GB; swap peak 23.9 GB.
@@ -15934,7 +15934,7 @@ contest score 1.7040. The strength trades timing for congestion monotonically (K
 -47922, congestion 285.95M / 298.73M / 321.44M), and on this design congestion wins: **blind mempool_cluster's best is
 K 35, contest score 1.6533 -> 1.4509** (1st place 2.3273), legal (0 open nets). Blind six **6.1210 -> 5.9186** (1st
 place 8.0604). Blind took 16474 s (4 h 35 min) for three routes and three sessions; each session 4945-5056 s, peak
-footprint 80.3-80.9 GB, swap below 25 GB, free disk never below 61 GB. Tables in `p215/cluster/pathA.blind/`, the
+footprint 80.3-80.9 GB, swap peak 23.9 GB, free disk never below 60 GB. Tables in `p215/cluster/pathA.blind/`, the
 best route `pathA.blind/mempool_cluster.best.route.xz`. K 35 being the smallest strength tried, a lower K may pay here
 (unverified, not run). Visible started 00:54 at 90 GB free.
 **Path A, visible (00:54-05:20) and the close of Part 215's mempool_cluster work.** Strength again trades congestion for
@@ -15942,10 +15942,14 @@ timing: K 35 / 70 / 140 -- TNS -62416 / -59160 / -56985 (unbiased -82910, Part 1
 200.3M / 223.0M (Part 189 best 208.1M), power 23.505 / 23.389 / 23.302 (23.469), all legal (0 open nets). Changes
 against the unbiased route: -0.7899 / **-0.7967** / -0.7353 (Part 189 best -0.6993): **K 70 is kept, -0.0974** --
 better than Part 189's best on all four measures (WNS -0.2715 vs -0.2802, TNS -59160 vs -62923, power 23.389 vs 23.469,
-congestion 200.3M vs 208.1M). Sessions 4718-4853 s, peak footprint 76.3-76.9 GB, swap <= 23.3 GB, free disk >= 82 GB.
+congestion 200.3M vs 208.1M). Sessions 4718-4853 s, peak footprint 76.3-76.9 GB, swap peak 23.3 GB, free disk never below 57 GB.
 Best route `p215/cluster/pathA.visible/mempool_cluster.best.route.xz` (blind's in `pathA.blind/`).
 Sum of the twelve designs (OpenROAD's count as ranked before, so blind Elmore gains of ariane / mempool_tile_wrap /
 mempool_group are not in it): visible mempool_cluster -0.0974 and blind -0.2031 (its measured-count change, -1.3643 ->
 -1.5674) -> **-28.65 -> -28.95**. Blind six by the contest's formula 6.1210 -> **5.9186** (1st place 8.0604).
 Best K over the four mempool designs: blind tile 70, group 140, cluster 35; visible tile 35, cluster 70 -- no K suits
 them all, and the loop tries three: the standard ladder 35 / 70 / 140 stays (the user's, adopted).
+Correction (05:22, from all of `guard.log`): the swap and free-disk figures above were first taken from spot readings
+(K 35 swap 24.4 GB, blind free 61 GB, visible free ">= 82 GB") and are now the minima / maxima over every 30 s sample
+(K 35 / 70 / 140 swap peak 22.4 / 23.9 / 23.0 GB, free min 62 / 60 / 60 GB). The K 35 session also began at 82 GB
+free, below the plan's 85 GB rule: `pathA.sh` checked it only at each design's start, before the 12 GB route was written.
