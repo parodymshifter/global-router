@@ -15937,3 +15937,15 @@ place 8.0604). Blind took 16474 s (4 h 35 min) for three routes and three sessio
 footprint 80.3-80.9 GB, swap below 25 GB, free disk never below 61 GB. Tables in `p215/cluster/pathA.blind/`, the
 best route `pathA.blind/mempool_cluster.best.route.xz`. K 35 being the smallest strength tried, a lower K may pay here
 (unverified, not run). Visible started 00:54 at 90 GB free.
+**Path A, visible (00:54-05:20) and the close of Part 215's mempool_cluster work.** Strength again trades congestion for
+timing: K 35 / 70 / 140 -- TNS -62416 / -59160 / -56985 (unbiased -82910, Part 189 best -62923), congestion 188.5M /
+200.3M / 223.0M (Part 189 best 208.1M), power 23.505 / 23.389 / 23.302 (23.469), all legal (0 open nets). Changes
+against the unbiased route: -0.7899 / **-0.7967** / -0.7353 (Part 189 best -0.6993): **K 70 is kept, -0.0974** --
+better than Part 189's best on all four measures (WNS -0.2715 vs -0.2802, TNS -59160 vs -62923, power 23.389 vs 23.469,
+congestion 200.3M vs 208.1M). Sessions 4718-4853 s, peak footprint 76.3-76.9 GB, swap <= 23.3 GB, free disk >= 82 GB.
+Best route `p215/cluster/pathA.visible/mempool_cluster.best.route.xz` (blind's in `pathA.blind/`).
+Sum of the twelve designs (OpenROAD's count as ranked before, so blind Elmore gains of ariane / mempool_tile_wrap /
+mempool_group are not in it): visible mempool_cluster -0.0974 and blind -0.2031 (its measured-count change, -1.3643 ->
+-1.5674) -> **-28.65 -> -28.95**. Blind six by the contest's formula 6.1210 -> **5.9186** (1st place 8.0604).
+Best K over the four mempool designs: blind tile 70, group 140, cluster 35; visible tile 35, cluster 70 -- no K suits
+them all, and the loop tries three: the standard ladder 35 / 70 / 140 stays (the user's, adopted).
