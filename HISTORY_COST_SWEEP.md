@@ -15989,3 +15989,21 @@ mempool_cluster started at 11:53:25: K 10's rows (2070239 classed nets, 1774642 
 K 35's) and its route (11.9 GB, done 11:59) are on disk, and the scoring session was refused at 12:01:37 with 72 GB free
 (`MIN_FREE_GB=85`). Nothing was scored. `p215/lowk/resume.sh` now waits (from 12:01:53) until 85 GB is free and then runs the
 same loop with `--resume`, starting from the K 10 route; no action other than freeing disk is needed.
+**Item 1, result (12:46-15:39; `p215/lowk/`).** The 09:45 snapshot left the list between 12:33 and 12:47 and free disk
+went 76 -> 97 GB; the waiter resumed at 12:46:55 (94 GB free). Blind mempool_cluster, Elmore stage from Part 189's best
+(k20ip1m1), contest endpoint count 1082397, all 0 open nets by the evaluator:
+| K | WNS | TNS | power | congestion | change vs unbiased | contest score |
+|---|---|---|---|---|---|---|
+| 10 | -0.3067 | -60450 | 23.5925 | 277.11M | -1.6200 | 1.4680 |
+| 20 | -0.2792 | -54659 | 23.5793 | 280.62M | **-1.6437** | **1.4443** |
+| 35 (path A) | -0.2678 | -51066 | 23.5649 | 285.95M | -1.6370 | 1.4509 |
+| 70 | -0.2674 | -49088 | 23.5458 | 298.73M | -1.5550 | 1.5329 |
+| 140 | -0.2671 | -47922 | 23.5200 | 321.44M | -1.3840 | 1.7040 |
+The score is flat from K 10 to 35 (1.4680 / 1.4443 / 1.4509) and rises above 70: K 20 is the best of five, 0.0066 better
+than K 35 -- under the noise level any progress claim here needs (a best of three or of five is not the same
+selection). With OpenROAD's count K 20's change is -1.5774 (K 35 -1.5674). Best on record (not the standard ladder, which
+has no K 20): blind mempool_cluster 1.4443; blind six 5.9186 -> **5.9120**, twelve designs -30.53 -> **-30.54** (K 35,
+the standard's, gives 5.9186 and -30.53). Adding 20 to the ladder is the user's to decide; the loop would cost one more
+route and session (1.4 h on mempool_cluster) for 0.007 here. Sessions 4926 / 4911 s, resident 9.4 / 12.3 GB, peak footprint
+80.3 / 80.4 GB, swap peak 24.2 GB, free disk 94-95 GB at the starts and never below 70 GB in the guard's 30 s samples.
+Best route (K 20) kept as `p215/lowk/mempool_cluster.best.route.xz`.
