@@ -16000,8 +16000,8 @@ went 76 -> 97 GB; the waiter resumed at 12:46:55 (94 GB free). Blind mempool_clu
 | 70 | -0.2674 | -49088 | 23.5458 | 298.73M | -1.5550 | 1.5329 |
 | 140 | -0.2671 | -47922 | 23.5200 | 321.44M | -1.3840 | 1.7040 |
 The score is flat from K 10 to 35 (1.4680 / 1.4443 / 1.4509) and rises above 70: K 20 is the best of five, 0.0066 better
-than K 35 -- under the noise level any progress claim here needs (a best of three or of five is not the same
-selection). With OpenROAD's count K 20's change is -1.5774 (K 35 -1.5674). Best on record (not the standard ladder, which
+than K 35. No run-to-run spread has been measured for this design, so whether 0.0066 is more than chance is unverified,
+and picking the best of five flatters it a little. With OpenROAD's count K 20's change is -1.5774 (K 35 -1.5674). Best on record (not the standard ladder, which
 has no K 20): blind mempool_cluster 1.4443; blind six 5.9186 -> **5.9120**, twelve designs -30.53 -> **-30.54** (K 35,
 the standard's, gives 5.9186 and -30.53). Adding 20 to the ladder is the user's to decide; the loop would cost one more
 route and session (1.4 h on mempool_cluster) for 0.007 here. Sessions 4926 / 4911 s, resident 9.4 / 12.3 GB, peak footprint
