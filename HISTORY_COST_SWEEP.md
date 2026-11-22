@@ -15953,3 +15953,9 @@ Correction (05:22, from all of `guard.log`): the swap and free-disk figures abov
 (K 35 swap 24.4 GB, blind free 61 GB, visible free ">= 82 GB") and are now the minima / maxima over every 30 s sample
 (K 35 / 70 / 140 swap peak 22.4 / 23.9 / 23.0 GB, free min 62 / 60 / 60 GB). The K 35 session also began at 82 GB
 free, below the plan's 85 GB rule: `pathA.sh` checked it only at each design's start, before the 12 GB route was written.
+Cleanup (2026-11-22 09:25, the user: "yes, delete it"): `GlobalRouterTemp/p215c` (6.4 GB) deleted -- the Elmore
+routes, rows files, step 1's slack files and the K 1 route of the aborted start. Checked first: both best routes
+byte-identical to their copies in `pathA.blind` / `pathA.visible` (and `xz -t` clean), step 1's `base.slack` and
+`base.slack_names` byte-identical to `p189/results.{blind,visible}`; logs, score tables and scripts (20 files) copied
+to `p215/cluster/temp_records`. Not kept: the four other candidates' routes and the K 1 route (re-routable, ~4 min
+each, from `p189/loop.*`'s class files).
