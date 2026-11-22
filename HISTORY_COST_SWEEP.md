@@ -15924,3 +15924,7 @@ strengths, the class file and that the best's route stays packed -- it fails on 
 congestion 285.95M (302.10M) -- the Elmore rows lower congestion by 5.3% at a small TNS cost. Change from the unbiased
 route -1.4346 -> **-1.6370**; contest score (`p215/contest25.py`'s formula and references) **1.6533 -> 1.4509** (1st
 place 2.3273). OpenROAD 4945 s, resident 12.8 GB, peak footprint 80.3 GB; swap peaked at 24.4 GB.
+**Path A, blind K 70 (OpenROAD 21:58-23:21):** k20ip1m1e70: WNS -0.2674, TNS -49088, power 23.5458, congestion 298.73M
+-- better timing and power than K 35, but most of the congestion gain gone. Change -1.5550 (K 35: -1.6370); contest
+score 1.5329 (K 35 1.4509 stays best). OpenROAD 5026 s, resident 12.9 GB, peak footprint 80.6 GB; swap peak 23.9 GB.
+Both routes compressed while the next is scored (as designed). K 140 started 23:23.
