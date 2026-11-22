@@ -15906,5 +15906,5 @@ merged1.slack, min mode; k20im2 -> merged2.slack, min mode), its route restored 
 answer, every other route compressed while a candidate is scored, the rows built in their own process (bodies
 byte-identical to the in-process build). Dry run (Elmore stubbed): blind's best stays k20ip1m1 under the contest's
 endpoint count (-1.3643 -> -1.4346 as ranked with 1082397 endpoints instead of 1443997), visible's k20im2 -0.6993.
-`p215/cluster/pathA.sh` (nohup, from 19:5x) waits for step 1's visible line, starts only if visible matches as blind
+`p215/cluster/pathA.sh` (nohup, from 19:27) waits for step 1's visible line, starts only if visible matches as blind
 did, then runs blind and visible in turn (each at >= 85 GB free), records in `pathA.txt`, copies tables to `pathA.<set>`.
