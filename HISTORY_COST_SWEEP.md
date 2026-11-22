@@ -15912,3 +15912,10 @@ did, then runs blind and visible in turn (each at >= 85 GB free), records in `pa
 values the same (worst -0.929 ns, classes 0/1/2/3 341648 / 570678 / 1086 / 3415 both). OpenROAD 6251 s, resident 11.8
 GB, peak footprint 109.8 GB; swap peaked at 38.5 GB over both sessions. Neither mempool_cluster loop was touched by the
 script fix, so path A started by itself at 20:12 (blind first, 94 GB free).
+**Path A, first start (20:12-20:19): wrong strength, stopped.** `reuse()` named its list of merged-file numbers `ks`,
+the name of the Elmore strengths it hands on, so the stage ran K 1 (then would have run 2) instead of 35 / 70 / 140 --
+the stubbed dry run had not printed the strengths. Seen at the first route's log line ("elmore K 1"), stopped before
+its scoring session; the K 1 route (route 4 min, 20:14-20:18) is kept compressed in `GlobalRouterTemp/p215c/
+blind.A.k1`. Fixed (commit 3b31745); the selftest now runs `reuse --refine 0` with the stage stubbed and checks the
+strengths, the class file and that the best's route stays packed -- it fails on the old code (`ks [1, 2]`). Restarted
+20:20 at 93 GB free.
