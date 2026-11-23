@@ -16113,3 +16113,20 @@ kept as `p215/grp/blind.mempool_group.best.route.xz` (decompressed and compared)
 **What the five refinements say together**: the two designs whose classic refinement had been cut short by one bad round
 (visible mempool_tile_wrap, blind mempool_group) gain 0.15-0.24; the others gain 0-0.012. The candidate change is refinement's
 stop rule (patience past a loss, keep the best), before the Elmore stage -- not a second refinement after it.
+
+**2026-11-23: temporaries deleted, and a patience stop for refinement tested as a flow change (the user: yes to both,
+mempool_group's unzipped files kept).** `GlobalRouterTemp/p215g` (7.7 GB) and `p215t` (2.3 GB) deleted after their
+non-route files were copied to `p215/p215g_records` and `p215/p215t_records` and compared byte for byte (the larger `.rows`
+and `.slack_names` then compressed with xz and checked by round trip; 250 MB and 34 MB; routes listed in each
+`not_kept.txt`), and after `p215/grp/blind.mempool_group.best.route.xz` was decompressed and compared with its source
+`n9K140.route` (identical).
+`timing_loop.py --patience P` (default 0, the standard): a refinement round that does not beat the best does not stop
+refinement; the next round goes on from that round's route, its slack merged in, until P + 1 rounds in a row have not
+beaten the best. The best is still the lowest change, and the Elmore stage runs from it as before. With P = 0 the loop is
+the old one (self-test: scripted round scores, routing and OpenROAD stubbed -- P 0 / 2 / 3 and a binding round cap stop
+where they should; it fails when the patience rule is removed). Run (`p215/patience/`, `run.sh`): full loops from scratch,
+`--lean --patience 3 --refine 24`, the eight small designs (visible and blind ariane, bsg_chip, NV_NVDLA_partition_c,
+mempool_tile_wrap), three at a time, from 06:59. Patience 3 because visible mempool_tile_wrap's classic refinement needed
+three rounds past its stop for a new best (m8-m10 no gain, m11 -1.1897; `classic_more.tsv`); the cap 24 because it was
+still gaining at m20. To beat (standard flow, change vs unbiased): visible ariane -4.2695, bsg_chip -2.2218, NVDLA -6.2887,
+mempool_tile_wrap -1.4049; blind ariane -0.2788, mempool_tile_wrap -3.2048, bsg_chip -0.2351, NVDLA -1.4391.

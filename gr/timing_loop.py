@@ -9,7 +9,7 @@ evaluator, and keep the best by the contest score's change against the unbiased 
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
       [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...|0]
-      [--endpoints N|measured] | --selftest
+      [--endpoints N|measured] [--patience P] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -72,6 +72,10 @@ ELMORE_LADDER = [35, 70, 140]
 # designs at 180 or below do not (blind mempool_group: K 140 1.0946, K 280 1.2214; blind bsg_chip indifferent)
 ELMORE_HIGH, ELMORE_HIGH_K3 = [280, 560], 540
 ELMORE_GIVEN = False  # --elmore K1,K2,... given: exactly those
+# Part 215 (the user, 2026-11-23: test, not standard): refinement's rounds without a new best before it stops (0: the first
+# such round stops it, the standard). Visible mempool_tile_wrap's classic refinement stopped at m8 after m7 -1.1423; three
+# more rounds were needed for a new best (m11 -1.1897), and it was still gaining at m20 (-1.2697)
+PATIENCE = 0
 # Part 215 (the user, 2026-11-21: standard): the contest's N_endpoint for its blind designs (github.com/liangrj2014/
 # ISPD25_contest index.md, read 2026-11-20). OpenROAD's registers + outputs agree on ariane and NVDLA and not on the
 # mempool designs (19000 / 438269 / 1443997) or bsg_chip (214955). The visible designs' contest counts are not
@@ -348,9 +352,12 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
     with every slack measured so far (per net, the worst), and re-route at the best's strength and power
     term with those classes (routed source: replace; input source: the input slack lowered by them).
     Repeat while the new route beats the best, up to `rounds` times (numbered from `start`). Returns the
-    new candidates."""
+    new candidates. With PATIENCE > 0 (--patience, Part 215) a round that does not beat the best does not stop it:
+    the next round goes on from that round's route (its slack merged in), until PATIENCE rounds in a row have not
+    beaten the best; the best is still the candidate with the lowest change."""
     idx = net_index(os.path.join(d, name + '.net'))
     measured, out, cur = list(measured), [], best
+    top, misses = best, 0  # the best so far, and rounds since it (--patience)
     for it in range(start, start + rounds):
         if cur is b:
             break
@@ -376,11 +383,25 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
               f"{c['classed']} nets classed)", flush=True)
         unpack(cur)  # --resume: cur's slack may have been measured before and its route left packed
         unpack(c)  # --resume with --lean (Part 215): a replayed round's route may have been packed by a later prune
-        if c['delta'] >= cur['delta'] or filecmp.cmp(c['route'], cur['route'], shallow=False):
+        if filecmp.cmp(c['route'], cur['route'], shallow=False):
             pack(c)
             break
-        pack(cur)
+        if c['delta'] < top['delta']:
+            if top is not cur:
+                pack(top)
+            top, misses = c, 0
+        else:  # --patience (Part 215): go on from this round's route up to PATIENCE rounds without a new best
+            misses += 1
+            if misses > PATIENCE:
+                pack(c)
+                break
+            print(f"{name}: refine {it}: no gain on {top['tag']} {top['delta']:+.4f} ({misses} of {PATIENCE}), "
+                  f"going on", flush=True)
+        if cur is not top:
+            pack(cur)
         cur = c
+    if cur is not top:
+        pack(cur)
     return out
 
 
@@ -505,6 +526,50 @@ def reuse(d, name, work, src, rounds, t0, ks=()):
     return top
 
 
+def selftest_patience(t):
+    """Part 215, --patience: refinement on scripted round scores (routing and OpenROAD stubbed)."""
+    # Part 215, --patience: scripted round scores; refinement stops after PATIENCE rounds in a row without a new best
+    global sta_slack, route, sta, delta, net_index, PATIENCE
+    ok = True
+    saved = (sta_slack, route, sta, delta, net_index, PATIENCE)
+    pw = os.path.join(t, 'pat')
+    os.makedirs(pw)
+
+    def run(scores, pat, rounds=12):
+        global PATIENCE
+        PATIENCE, cnt = pat, [0]
+
+        def fake_slack(d_, nm, c, wk_, idx_):
+            cnt[0] += 1
+            f = os.path.join(pw, f"s{cnt[0]}.slack")
+            open(f, 'w').write(f'# s\n{cnt[0]} -1e-10\n')  # a new net each round, so the classes keep changing
+            return f
+
+        def fake_route(d_, nm, wk_, tag, *a, **k):
+            r = os.path.join(pw, tag + '.route')
+            open(r, 'w').write(tag)
+            return {'tag': tag, 'route': r, 'k3': 180, 'kp': 0, 'tns': 0.0, 'wns': 0.0, 'power': 0.0}
+        global sta_slack, route, sta, delta, net_index
+        sta_slack, route, net_index = fake_slack, fake_route, (lambda f: {})
+        sta, delta = (lambda *a: None), (lambda c, *a: scores[int(re.search(r'm(\d+)$', c['tag']).group(1)) - 1])
+        b_ = {'tag': 'base', 'route': os.path.join(pw, 'base.route')}
+        best_ = {'tag': 'k180r', 'k3': 180, 'kp': 0, 'src': 'r', 'delta': -1.0, 'route': os.path.join(pw, 'k180r.route'),
+                 'tns': 0.0, 'wns': 0.0, 'power': 0.0}
+        open(best_['route'], 'w').write('k180r')
+        for f in os.listdir(pw):
+            if f.startswith('merged'):
+                os.remove(os.path.join(pw, f))
+        new = refine('/d', 'des', pw, b_, best_, [], None, 1, rounds)
+        return [c['tag'] for c in new], min([best_] + new, key=lambda c: c['delta'])['tag']
+    sc = [-1.1, -1.05, -1.08, -1.09, -1.2, -1.15, -1.1, -1.0, -0.9]  # m1 gains, m2-m4 do not, m5 gains, then none
+    ok &= run(sc, 0) == (['k180rm1', 'k180rm2'], 'k180rm1')  # the standard: the first round without gain stops it
+    ok &= run(sc, 2) == (['k180rm1', 'k180rm2', 'k180rm3', 'k180rm4'], 'k180rm1')
+    ok &= run(sc, 3) == ([f'k180rm{i}' for i in range(1, 10)], 'k180rm5')  # m6-m8 go on, m9 stops it
+    ok &= run(sc, 3, rounds=6) == ([f'k180rm{i}' for i in range(1, 7)], 'k180rm5')  # the round cap still binds
+    sta_slack, route, sta, delta, net_index, PATIENCE = saved
+    return ok
+
+
 def selftest():
     """The Part 188 helpers on hand-made files: the merge keeps every net and its worst slack, ignores
     comments, and the refined candidate's tag names its strength, source, power term and round."""
@@ -592,6 +657,7 @@ def selftest():
     ELMORE_GIVEN = True
     ok &= elmore_ks({'k3': 540}, [35.0]) == [35.0]
     ELMORE_GIVEN = was
+    ok &= selftest_patience(t)
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got} {seen}')
     shutil.rmtree(t)
     return ok
@@ -629,6 +695,11 @@ def main():
     # user, 2026-11-20): up to 12 rounds (was 2) -- it stops by itself once a round gains nothing or the classes stop
     # changing; blind mempool_tile_wrap gained in every round to 8 (0.9238 at 2 -> 0.4879, contest score)
     rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else 12
+    global PATIENCE
+    if '--patience' in sys.argv:  # Part 215 (test): rounds without a new best before refinement stops
+        PATIENCE = int(sys.argv[sys.argv.index('--patience') + 1])
+        if PATIENCE < 0:
+            raise SystemExit('timing_loop.py: --patience takes a count >= 0')
     global K3_LADDER
     if '--k3' in sys.argv:  # Part 215: the timing strengths to try, e.g. --k3 2,5,10,20 (default 20,180,540)
         K3_LADDER = [int(v) for v in sys.argv[sys.argv.index('--k3') + 1].split(',')]
