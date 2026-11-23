@@ -16090,3 +16090,26 @@ Mostly refinement resumed: at like class counts the Elmore routes from classic c
 (0.053). The classic loop itself gained 0.13 past its stop (-1.1423 -> -1.2697), still creeping at round 20. So the standard's
 stop at the first round without gain is what cut this design short; a stop with patience (continue a few rounds past a loss,
 keep the best) is the candidate change, untested on the other designs. Not adopted.
+**Refining from the Elmore routes, mempool_group (2026-11-22 20:52 - 11-23 02:20, the user: "then 1"; `p215/grp/`, the same
+driver with losing routes packed; OpenROAD sessions 1183-1240 s, peak footprint 30.4 GB, free disk >= 83 GB, one design at
+a time).** Round 0 reproduced both recorded routes (visible -9.1049; blind WNS -0.5584, TNS -39896, 53.4M = contest 1.0946).
+- Visible (K 70, input-slack classes, `min`): round 1's Elmore rows were byte-identical to round 0's below the header -- the
+  newly measured slack changed no net's class (995684 classed) -- so its route was the same (-9.1049). Stopped by hand at
+  21:40 before K 35 / 140, which at those classes are the recorded -9.0670 / -8.8945. No gain.
+- Blind (K 140, routed classes): nine rounds kept, classed nets 318131 -> 354230 (`blind.mempool_group.tsv`):
+| round | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| contest score | 1.0946 | 1.0575 | 1.0257 | 1.0091 | 0.9900 | 0.9815 | 0.9702 | 0.9682 | 0.9540 | **0.9442** | 0.9463 |
+  Round 9: WNS -0.5584 -> -0.4793, TNS -39896 -> -31445, power 8.222 -> 8.212, congestion 53.42M -> 54.44M (+1.9%). K 70 / 280
+  on round 9's classes: change -1.6744 / -1.6314 against K 140's -1.7487 (contest count) -- K 140 stays. **Blind
+  mempool_group 1.0946 -> 0.9442** (1st place 1.3327, 2nd 1.2335; contest score computed directly from the contest's weights,
+  N_endpoint and references: 0.9442). One-sided over nine rounds, steps 0.002-0.037; no spread measured.
+  Its classic refinement had stopped at m1 (m2 -1.3426 vs m1 -1.3439 by our count; by the contest's count m2 was the better,
+  Part 215 above), so as on visible mempool_tile_wrap this may be refinement resumed more than the Elmore-measured slack
+  (untested here).
+Best on record, off the standard flow: **blind six 5.9186 -> 5.7682** (5.7616 with mempool_cluster's K 20); twelve designs
+-31.13 -> **-31.26** (blind mempool_group -1.5426 -> -1.6680 by OpenROAD's count). The standard flow is unchanged. Best route
+kept as `p215/grp/blind.mempool_group.best.route.xz` (decompressed and compared).
+**What the five refinements say together**: the two designs whose classic refinement had been cut short by one bad round
+(visible mempool_tile_wrap, blind mempool_group) gain 0.15-0.24; the others gain 0-0.012. The candidate change is refinement's
+stop rule (patience past a loss, keep the best), before the Elmore stage -- not a second refinement after it.

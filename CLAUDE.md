@@ -378,6 +378,10 @@ standard ladder, K 20 gives blind mempool_cluster 1.4443 (K 35 1.4509, K 10 1.46
 Elmore stage also tries K 280 and 560 when the best's timing strength is 540 (the k3 ladder's top; not when `--elmore` is
 given): visible ariane -4.0584 -> -4.2695 and bsg_chip -2.0877 -> -2.2218, both at K 560 (1120 and 2240 worse; no design below
 540 measured above K 140 gains there -- blind mempool_group 1.0946 at 140, 1.2214 at 280) -- twelve designs -30.53 -> **-30.88**.
+Refining after the Elmore stage (2026-11-22, off the standard flow, Part 215): blind mempool_group 1.0946 -> **0.9442**
+(nine rounds), visible mempool_tile_wrap -1.4049 -> -1.6478, five others 0 to -0.012 -- blind six **5.7682** on record, twelve
+designs -31.26. Both gains come where classic refinement had stopped at its first worse round; continuing classic refinement
+instead gave mempool_tile_wrap the same (-1.6236), so the lever is refinement's stop rule (untested as a flow change).
 Since 2026-11-09 (Part 189) all twelve 2025 designs are scored: mempool_cluster visible -0.6993, blind -1.3643,
 **twelve designs -27.17**. On a 24 GB Mac its OpenROAD sessions peak at 80-113 GB of footprint on swap, so it runs
 with `--lean` (compress every route that can no longer win), `SLACK_BANDS=16` (walk the failing paths in slack
