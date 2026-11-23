@@ -16173,3 +16173,29 @@ mempool_tile_wrap -1.4049; blind ariane -0.2788, mempool_tile_wrap -3.2048, bsg_
   change (stopped). Elmore from k180i: K 35 -0.2352, K 70 -0.2351, K 140 -0.2350. Best k180ie35 -0.2352 against the record's
   -0.2351 (`temp_records/elmore/bsg_chip`, no Elmore candidate in its table): 0.0001, from the Elmore stage at the same
   classes, not from patience, and inside the noise. **Unchanged by patience.**
+- visible bsg_chip (07:54-10:07, 7943 s): m1-m6 as in the standard (m6 -2.0877), m7 -2.0869 no gain -- the standard's stop
+  -- then m8 -2.0878, m9 -2.0881, m10 -2.0884 (steps 0.0001-0.0003, below the 0.0018 power noise sized on mempool_tile_wrap),
+  m11 / m12 no gain, m13's route identical to m12's (stopped). Elmore from m10's classes: K 35 -1.0129, K 70 -1.5088, K 140
+  -1.9574, K 280 -2.1840 (standard -2.1790), K 560 **-2.2297** (standard -2.2218; WNS -0.3785, TNS -6678.9, power 3.0531,
+  congestion 27.96M, 0 opens). Best route kept as `p215/patience/visible.bsg_chip.best.route.xz` (decompressed and compared).
+
+**Patience 3, cap 24, the eight small designs (06:59-10:07; full loops from scratch, `p215/patience/*.loop.tsv`; change vs
+unbiased, lower is better):**
+| design | standard flow | patience 3, cap 24 | change | where patience acted | loop time |
+|---|---|---|---|---|---|
+| visible ariane | -4.2695 | -4.2695 | 0 | m4-m7, no gain | 931 s |
+| visible bsg_chip | -2.2218 | **-2.2297** | -0.0079 | m7 no gain, m8-m10 new bests by 0.0001-0.0003 | 7943 s |
+| visible NVDLA | -6.2887 | -6.2887 | 0 | never (m1's route identical) | 2407 s |
+| visible mempool_tile_wrap | -1.4049 | **-1.6469** | **-0.2420** | m8-m10 no gain, then new bests to m23 (the cap bound) | 12 + 31 min |
+| blind ariane | -0.2788 | -0.2788 | 0 | never (m2's route identical) | 1186 s |
+| blind bsg_chip | -0.2351 | -0.2352 | -0.0001 (Elmore K 35, not patience) | m1 no gain, m2's classes unchanged | 2746 s |
+| blind NVDLA | -1.4391 | -1.4391 | 0 | never (m1's route identical) | 2069 s |
+| blind mempool_tile_wrap | -3.2048 | -3.2048 | 0 | never (classes unchanged at m9) | 21 + 11 min |
+Reading: patience never made a design worse (it cannot: the best is still the minimum, and the rounds it adds come after
+the standard's stop). It paid where refinement had been cut short by one bad round and then kept gaining:
+visible mempool_tile_wrap (-0.24, matching the -1.6478 refinement after the Elmore stage had found off the flow) and,
+by an amount inside the noise, visible bsg_chip (-0.0079; refinement after the Elmore stage had found -2.2334). On four
+designs refinement stops on an identical route or unchanged classes, where patience cannot act. Cost: rounds past the
+standard's stop -- visible bsg_chip ran 7 more rounds (about 5 min each) for its 0.0079, visible ariane 3. The cap of 24
+bound only on visible mempool_tile_wrap. Peak OpenROAD session 7.3 GB (bsg_chip). As a flow change for the eight designs:
+sum -0.25 (twelve designs -30.88 -> -31.13 standard, if adopted; blind mempool_group not yet measured under it).
