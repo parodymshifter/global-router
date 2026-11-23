@@ -16141,3 +16141,14 @@ mempool_tile_wrap -1.4049; blind ariane -0.2788, mempool_tile_wrap -3.2048, bsg_
   keeps the scoring session's value (commit aaee8a8; self-test with a 4e-5 slack-session wobble kept, 1e-3 still stops;
   fails with the old tolerance or without restoring the value). Resumed with `--resume` from `scores.jsonl` (`resume.sh`)
   once a lane is free; the first log kept as `visible.mempool_tile_wrap.failed1.log`.
+- blind ariane (07:00-07:19, 1186 s): m2's route identical to m1's (that stop is not patience's), Elmore K 35 ->
+  **-0.2788, the standard's number exactly**. No change.
+- blind mempool_tile_wrap stopped at 07:20 on the same check (k180rp1m2 power 0.141998842 re-measured as 0.142004564, 4e-5
+  relative, TNS / WNS exact) -- both stops so far on mempool_tile_wrap, both the slack session high; queued to resume
+  (`resume_blind.sh`; first log `blind.mempool_tile_wrap.failed1.log`).
+- visible mempool_tile_wrap's resume showed that the scored value was not written back: `sta_slack` saves its own reading
+  to `scores.jsonl`, so the resumed m4 was rescored from the slack session's power, -1.0167 against the scoring session's
+  -1.0185 (path unchanged: m5 beats both). That also sizes the noise: 4e-5 relative in power is 0.0018 of score change on
+  this design. Fixed (the kept value is saved again; self-test reloads `scores.jsonl` and fails without the save) for runs
+  started after it; the two resumed loops carry the slack-session power on the stopped round only. Its patience rounds
+  reproduce `classic_more.tsv` exactly: m8 -1.0150, m9 -1.1414, m10 -1.1025.

@@ -374,6 +374,7 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
                 print(f"{name}: {cur['tag']} {k} {v} re-measured as {cur[k]} (within {tol:.1e}; scored value kept)",
                       flush=True)
                 cur[k] = v
+                save(cur)  # sta_slack saved the re-measured value; --resume must read the scored one
         merged = merge_slack(measured, os.path.join(work, f'merged{it}.slack'))
         prev = os.path.join(work, f'merged{it - 1}.slack')
         if os.path.exists(prev) and open(merged).read().split('\n', 1)[1] == \
@@ -548,7 +549,8 @@ def selftest_patience(t):
         PATIENCE, cnt = pat, [0]
 
         def fake_slack(d_, nm, c, wk_, idx_):
-            c['power'] *= 1 + (wobble or 0.0)  # the slack session's own reading
+            c['power'] *= 1 + (wobble or 0.0)  # the slack session's own reading, saved as sta_slack saves it
+            save(c)
             cnt[0] += 1
             f = os.path.join(pw, f"s{cnt[0]}.slack")
             open(f, 'w').write(f'# s\n{cnt[0]} -1e-10\n')  # a new net each round, so the classes keep changing
@@ -572,7 +574,14 @@ def selftest_patience(t):
         got = [c['tag'] for c in new], min([best_] + new, key=lambda c: c['delta'])['tag']
         return got + ([c['power'] for c in [best_] + new],) if wobble is not None else got
     # 2026-11-23: a slack session whose power moves 4e-5 relative keeps the scored value; 1e-3 is a different route
+    global CKPT
+    CKPT = os.path.join(pw, 'scores.jsonl')  # and --resume reads the scored value back, not the slack session's
     ok &= run([-1.1, -1.05], 0, power=0.14, wobble=4e-5) == (['k180rm1', 'k180rm2'], 'k180rm1', [0.14, 0.14, 0.14])
+    DONE.clear()
+    load(CKPT)
+    ok &= DONE['k180r']['power'] == 0.14 and DONE['k180rm1']['power'] == 0.14
+    DONE.clear()
+    CKPT = None
     try:
         run([-1.1, -1.05], 0, power=0.14, wobble=1e-3)
         ok = False
