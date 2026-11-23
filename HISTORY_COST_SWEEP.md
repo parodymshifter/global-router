@@ -16160,3 +16160,6 @@ mempool_tile_wrap -1.4049; blind ariane -0.2788, mempool_tile_wrap -3.2048, bsg_
   On record before (refinement after the Elmore stage, off the flow): -1.6478 -- the same within the measured noise
   (0.0018). Loop time 12 + 31 min against the standard's 18 min. Best route kept as
   `p215/patience/visible.mempool_tile_wrap.best.route.xz` (decompressed and compared).
+- blind NV_NVDLA_partition_c (07:19-07:53, 2069 s) and visible NV_NVDLA_partition_c (07:14-07:54, 2407 s): m1's route
+  identical to its start (2 / 16568 nets classed; not patience's stop), Elmore no gain -> **-1.4391 and -6.2887, the
+  standard's numbers exactly**. No change.
