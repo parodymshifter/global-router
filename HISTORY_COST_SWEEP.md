@@ -16152,3 +16152,11 @@ mempool_tile_wrap -1.4049; blind ariane -0.2788, mempool_tile_wrap -3.2048, bsg_
   this design. Fixed (the kept value is saved again; self-test reloads `scores.jsonl` and fails without the save) for runs
   started after it; the two resumed loops carry the slack-session power on the stopped round only. Its patience rounds
   reproduce `classic_more.tsv` exactly: m8 -1.0150, m9 -1.1414, m10 -1.1025.
+- **visible mempool_tile_wrap (06:59-07:11, then resumed 07:20-07:51): -1.4049 -> -1.6469** (k180rp1m23e35; WNS -0.4245,
+  TNS -1829.5, power 0.141984, congestion 2.788M, 0 opens). Refinement m11 -1.1897 (patience carried it past m8-m10, as in
+  `classic_more`), then new bests at m13-m15, m17, m19-m23; m24 (the cap) -1.2795, no gain. Elmore from m23's classes: K 35
+  -1.6469, K 70 -1.6017, K 140 -1.3891. The cap of 24 bound (best at m23), and the cap mattered as much as the patience:
+  with the standard cap of 12 the best would have been m11 (-1.1897), whose Elmore K 35 is -1.5419 (`classic_more.tsv`).
+  On record before (refinement after the Elmore stage, off the flow): -1.6478 -- the same within the measured noise
+  (0.0018). Loop time 12 + 31 min against the standard's 18 min. Best route kept as
+  `p215/patience/visible.mempool_tile_wrap.best.route.xz` (decompressed and compared).
