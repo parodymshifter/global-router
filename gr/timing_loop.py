@@ -364,8 +364,16 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
         keep = {k: cur[k] for k in ('tns', 'wns', 'power')}
         measured.append(sta_slack(d, name, cur, work, idx))
         for k, v in keep.items():  # the same route: OpenROAD's numbers must agree with the scoring session
-            if abs(cur[k] - v) > 1e-6 * max(1.0, abs(v)):
+            # Part 215 (2026-11-23): power to 1e-4 relative -- visible mempool_tile_wrap's k180rp1m4 read 0.141794011 in
+            # its slack session against 0.141788095 when scored, with TNS and WNS exact; the same route re-measured alone
+            # gave 0.141788095 in two slack sessions and a scoring one. The scoring session's numbers are kept
+            tol = 1e-4 * abs(v) if k == 'power' else 1e-6 * max(1.0, abs(v))
+            if abs(cur[k] - v) > tol:
                 raise SystemExit(f"timing_loop.py: {cur['tag']} {k} {v} re-measured as {cur[k]}")
+            if cur[k] != v:
+                print(f"{name}: {cur['tag']} {k} {v} re-measured as {cur[k]} (within {tol:.1e}; scored value kept)",
+                      flush=True)
+                cur[k] = v
         merged = merge_slack(measured, os.path.join(work, f'merged{it}.slack'))
         prev = os.path.join(work, f'merged{it - 1}.slack')
         if os.path.exists(prev) and open(merged).read().split('\n', 1)[1] == \
@@ -535,11 +543,12 @@ def selftest_patience(t):
     pw = os.path.join(t, 'pat')
     os.makedirs(pw)
 
-    def run(scores, pat, rounds=12):
+    def run(scores, pat, rounds=12, power=0.0, wobble=None):
         global PATIENCE
         PATIENCE, cnt = pat, [0]
 
         def fake_slack(d_, nm, c, wk_, idx_):
+            c['power'] *= 1 + (wobble or 0.0)  # the slack session's own reading
             cnt[0] += 1
             f = os.path.join(pw, f"s{cnt[0]}.slack")
             open(f, 'w').write(f'# s\n{cnt[0]} -1e-10\n')  # a new net each round, so the classes keep changing
@@ -548,19 +557,27 @@ def selftest_patience(t):
         def fake_route(d_, nm, wk_, tag, *a, **k):
             r = os.path.join(pw, tag + '.route')
             open(r, 'w').write(tag)
-            return {'tag': tag, 'route': r, 'k3': 180, 'kp': 0, 'tns': 0.0, 'wns': 0.0, 'power': 0.0}
+            return {'tag': tag, 'route': r, 'k3': 180, 'kp': 0, 'tns': 0.0, 'wns': 0.0, 'power': power}
         global sta_slack, route, sta, delta, net_index
         sta_slack, route, net_index = fake_slack, fake_route, (lambda f: {})
         sta, delta = (lambda *a: None), (lambda c, *a: scores[int(re.search(r'm(\d+)$', c['tag']).group(1)) - 1])
         b_ = {'tag': 'base', 'route': os.path.join(pw, 'base.route')}
         best_ = {'tag': 'k180r', 'k3': 180, 'kp': 0, 'src': 'r', 'delta': -1.0, 'route': os.path.join(pw, 'k180r.route'),
-                 'tns': 0.0, 'wns': 0.0, 'power': 0.0}
+                 'tns': 0.0, 'wns': 0.0, 'power': power}
         open(best_['route'], 'w').write('k180r')
         for f in os.listdir(pw):
             if f.startswith('merged'):
                 os.remove(os.path.join(pw, f))
         new = refine('/d', 'des', pw, b_, best_, [], None, 1, rounds)
-        return [c['tag'] for c in new], min([best_] + new, key=lambda c: c['delta'])['tag']
+        got = [c['tag'] for c in new], min([best_] + new, key=lambda c: c['delta'])['tag']
+        return got + ([c['power'] for c in [best_] + new],) if wobble is not None else got
+    # 2026-11-23: a slack session whose power moves 4e-5 relative keeps the scored value; 1e-3 is a different route
+    ok &= run([-1.1, -1.05], 0, power=0.14, wobble=4e-5) == (['k180rm1', 'k180rm2'], 'k180rm1', [0.14, 0.14, 0.14])
+    try:
+        run([-1.1, -1.05], 0, power=0.14, wobble=1e-3)
+        ok = False
+    except SystemExit:
+        pass
     sc = [-1.1, -1.05, -1.08, -1.09, -1.2, -1.15, -1.1, -1.0, -0.9]  # m1 gains, m2-m4 do not, m5 gains, then none
     ok &= run(sc, 0) == (['k180rm1', 'k180rm2'], 'k180rm1')  # the standard: the first round without gain stops it
     ok &= run(sc, 2) == (['k180rm1', 'k180rm2', 'k180rm3', 'k180rm4'], 'k180rm1')
