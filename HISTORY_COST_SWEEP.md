@@ -16199,3 +16199,12 @@ designs refinement stops on an identical route or unchanged classes, where patie
 standard's stop -- visible bsg_chip ran 7 more rounds (about 5 min each) for its 0.0079, visible ariane 3. The cap of 24
 bound only on visible mempool_tile_wrap. Peak OpenROAD session 7.3 GB (bsg_chip). As a flow change for the eight designs:
 sum -0.25 (twelve designs -30.88 -> -31.13 standard, if adopted; blind mempool_group not yet measured under it).
+
+**Blind mempool_group under patience (from 10:09; `p215/patience/grp.sh`).** Its record (`temp_records/elmore/mempool_group`)
+was ranked by OpenROAD's endpoint count when refinement ran: m1 -1.3439, m2 -1.3426, stopped at m1. By the contest's count,
+which the loop uses for blind designs since 2026-11-21, the same rows give m1 -1.3970 and **m2 -1.4031**, so today's
+standard flow would not stop at m1 either -- the recorded 1.0946 (Elmore K 140 from m1) mixes the two counts. The run reuses
+the record's stages 0-2 and m1-m2 (`--reuse`, Elmore rows left out), m2 rebuilt from `merged2.slack` (checked against the
+recorded overflow cost 64168240.0334 and 0 opens before the loop starts; the re-measure check then compares TNS / WNS /
+power), and continues from m3 with `--patience 3 --refine 22` (cap 24 counted from m1). The trace shows where the patience-0
+standard would have stopped; if that is not the final best, the standard's own Elmore result is measured separately.
