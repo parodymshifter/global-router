@@ -16169,3 +16169,7 @@ mempool_tile_wrap -1.4049; blind ariane -0.2788, mempool_tile_wrap -3.2048, bsg_
   mempool_tile_wrap the difference is not rare: 5 of 35 slack sessions over both designs' logs (visible 1 of 6, then 0 of 19
   resumed; blind 1 of 4, then 3 of 6 resumed -- counted from the `slack of` and `re-measured` lines; a first count of "5 of
   17" written here was wrong); always the slack session high. Which session's reading is the steady one is unverified beyond visible m4 (scoring value reproduced 3 times).
+- blind bsg_chip (07:53-08:39, 2747 s): m1 -0.2350, no gain on k180i -0.2351; patience went on, and m2's classes did not
+  change (stopped). Elmore from k180i: K 35 -0.2352, K 70 -0.2351, K 140 -0.2350. Best k180ie35 -0.2352 against the record's
+  -0.2351 (`temp_records/elmore/bsg_chip`, no Elmore candidate in its table): 0.0001, from the Elmore stage at the same
+  classes, not from patience, and inside the noise. **Unchanged by patience.**
