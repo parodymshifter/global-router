@@ -16076,3 +16076,17 @@ gain 0 or 0.012. Not run: blind bsg_chip (flat in K) and both NVDLA designs (bli
 Best on record off the standard flow: twelve designs -30.88 -> **-31.13** (-0.2428 - 0.0116). The standard is unchanged; the stage
 would cost one slack session per design even where it gains nothing. Best routes kept as `elm_refine/visible.*.best.route.xz`
 (decompressed and compared); the first start (19:53:00, a relative design path) is in `elm_refine/failed1`.
+**Is visible mempool_tile_wrap's gain the Elmore routes, or classic refinement resumed? (20:35-20:53, the user: yes; `p215/
+classic_more/`).** Its classic refinement had stopped at m8 (-1.0150 after m7 -1.1423). Continued here without the stop:
+rounds 8-20 at k3 180, kp 1, each merging the latest route's slack (round 8 replayed m8 exactly), and from each round's classes
+one Elmore route at K 35 (`classic_more.tsv`):
+| round | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| classed | 16132 | 16208 | 16343 | 16420 | 16515 | 16613 | 16683 | 16730 | 16837 | 16926 | 16978 | 17057 | 17105 |
+| classic | -1.0150 | -1.1414 | -1.1025 | -1.1897 | -1.1637 | -1.2112 | -1.2377 | -1.2585 | -1.2569 | -1.2642 | -1.2549 | -1.2653 | -1.2697 |
+| Elmore K 35 | -1.4228 | -1.4215 | -1.4247 | -1.5419 | -1.5046 | -1.5383 | -1.5583 | -1.5787 | -1.5982 | -1.6038 | -1.6044 | -1.6043 | **-1.6236** |
+Mostly refinement resumed: at like class counts the Elmore routes from classic classes track the Elmore-measured ones (16837
+-1.5982 vs 16817 -1.5993; 17105 -1.6236 vs 17082 -1.6478), and the last difference (0.024) is below one round's scatter
+(0.053). The classic loop itself gained 0.13 past its stop (-1.1423 -> -1.2697), still creeping at round 20. So the standard's
+stop at the first round without gain is what cut this design short; a stop with patience (continue a few rounds past a loss,
+keep the best) is the candidate change, untested on the other designs. Not adopted.
