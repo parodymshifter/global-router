@@ -16166,5 +16166,6 @@ mempool_tile_wrap -1.4049; blind ariane -0.2788, mempool_tile_wrap -3.2048, bsg_
 - blind mempool_tile_wrap (06:59-07:20, resumed 07:51-08:02): every round gained to m8 (-2.8937), m9's classes unchanged
   (not patience's stop), Elmore K 70 -> **-3.2048, the standard's number exactly**. No change. Its slack sessions read
   power above the scoring session's on m2, m3, m4 (4.0e-5 relative each) and m7 (4e-7), TNS / WNS exact every time -- on
-  mempool_tile_wrap the difference is common, not rare (both designs: 5 of 17 slack sessions); always the slack session
-  high. Which session's reading is the steady one is unverified beyond visible m4 (scoring value reproduced 3 times).
+  mempool_tile_wrap the difference is not rare: 5 of 35 slack sessions over both designs' logs (visible 1 of 6, then 0 of 19
+  resumed; blind 1 of 4, then 3 of 6 resumed -- counted from the `slack of` and `re-measured` lines; a first count of "5 of
+  17" written here was wrong); always the slack session high. Which session's reading is the steady one is unverified beyond visible m4 (scoring value reproduced 3 times).
