@@ -16130,3 +16130,14 @@ mempool_tile_wrap), three at a time, from 06:59. Patience 3 because visible memp
 three rounds past its stop for a new best (m8-m10 no gain, m11 -1.1897; `classic_more.tsv`); the cap 24 because it was
 still gaining at m20. To beat (standard flow, change vs unbiased): visible ariane -4.2695, bsg_chip -2.2218, NVDLA -6.2887,
 mempool_tile_wrap -1.4049; blind ariane -0.2788, mempool_tile_wrap -3.2048, bsg_chip -0.2351, NVDLA -1.4391.
+- visible ariane (06:59-07:14, 931 s): refinement best k540rm3 -4.0584 as in the standard; m4-m7 no gain (patience used up),
+  Elmore K 560 -> **-4.2695, the standard's number exactly**. No change.
+- visible mempool_tile_wrap stopped at 07:11 (before any patience round; m1-m4 all gained, the same deltas as
+  `std_check`): `timing_loop.py: k180rp1m4 power 0.141788095 re-measured as 0.141794011`. TNS and WNS re-measured exactly;
+  the same route, re-measured alone afterwards, gave 0.141788095 in two slack sessions and one scoring session. OpenROAD
+  runs single-threaded here (`ord::thread_count` 1), neither script writes into `ispd25eval` (unchanged since 2026-10-12),
+  so the 4e-5 relative difference is session-to-session variation in OpenROAD's power report (unverified: cause not found).
+  The re-measure check (there to catch a different route) now allows 1e-4 relative on power only, logs any difference, and
+  keeps the scoring session's value (commit aaee8a8; self-test with a 4e-5 slack-session wobble kept, 1e-3 still stops;
+  fails with the old tolerance or without restoring the value). Resumed with `--resume` from `scores.jsonl` (`resume.sh`)
+  once a lane is free; the first log kept as `visible.mempool_tile_wrap.failed1.log`.
