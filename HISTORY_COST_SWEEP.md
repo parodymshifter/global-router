@@ -16051,3 +16051,6 @@ one session). Both best routes byte-identical to `p215/highk`'s. **Twelve design
 and -0.1341 of it; record -30.89 with mempool_cluster's K 20).
 Cleanup: `GlobalRouterTemp/p215h` deleted 19:30 (the user: yes to 3); its 14 small files compared and kept in
 `p215/p215h_records`, both best routes rechecked identical to `p215/highk`'s. Not kept: the K 280 routes (re-routable).
+Cleanup (2026-11-22 19:47, the user: "yes, delete both"): `GlobalRouterTemp/p215h2` and `p215l` deleted; their small files (logs,
+tables, class and rows files under 40 MB) compared and kept in `p215/p215h2_records` and `p215/p215l_records`, both best routes
+rechecked identical to `p215/highk`'s. Not kept: every other candidate's route (each folder's `not_kept.txt`; re-routable).
