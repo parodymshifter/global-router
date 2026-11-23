@@ -16030,3 +16030,24 @@ measured on either. So the standard ladder (35 / 70 / 140) is too low for these 
 the ladder, best on record: twelve designs -30.53 -> **-30.88** (-30.89 with mempool_cluster's K 20). The standard's stays -30.53.
 Cost: routes 2.4-2.9 s (ariane) and 12 s (bsg_chip), one OpenROAD session 51 s / 290 s (resident 1.6 / 6.5 GB). Best routes
 kept as `p215/highk/{ariane,bsg_chip}.best.route.xz` (decompressed and compared).
+**K 1120 and 2240 (19:23-19:29, the user: yes; `p215/highk2/`), and the ladder's extension.** Same class files, 0 open nets:
+| visible design | K 280 | K 560 | K 1120 | K 2240 |
+|---|---|---|---|---|
+| ariane | -4.2525 | **-4.2695** | -4.2055 (WNS -0.36065, TNS -811.3, 7.395M) | -4.1122 (-0.36043, -810.0, 7.735M) |
+| bsg_chip | -2.1790 | **-2.2218** | -2.1847 (-0.37912, -6613.5, 29.688M) | -2.1335 (-0.37866, -6570.0, 31.592M) |
+Both are bracketed: above 560 timing gains little more and congestion keeps rising. **Adopted (the user, 2026-11-22 19:23,
+"yes to 2 and 3"): `timing_loop.py`'s Elmore stage also tries K 280 and 560 when the best's timing strength is 540** (the k3
+ladder's top) and `--elmore` is not given; `--elmore` still runs exactly what it names. Self-test: five cases, and breaking
+the rule makes it fail. Designs the rule skips (strength below 540), from the records: four measured above K 140, all worse
+there -- blind mempool_group K 140 1.0946, 280 1.2214, 560 1.4354 (2026-11-21, already run -- I first proposed running it
+again, having missed this record); blind ariane 35 1.4368, 280 1.4693; blind mempool_tile 70 0.1768, 300 0.5944; blind
+bsg_chip 35-280 0.4388-0.4391 (flat) -- and four whose score already worsens inside the ladder (visible mempool_tile, visible
+mempool_group, both mempool_cluster; best at 35 / 70 / 35 / 70); blind NVDLA has nothing left to gain (WNS and TNS 0).
+Visible NVDLA (540, 2 classed nets) pays two more routes for nothing. The threshold is set by the two designs it
+gains on and has not been tested on another design at 540 (none exists among the twelve but NVDLA).
+End-to-end check (19:29-19:43, `p215/ladder_check/`): visible ariane, a fresh loop: every stage as recorded, K 35-140 as
+before, best K 560 -4.2695, 654 s (632 s before); bsg_chip (`--reuse --refine 0`): best K 560 -2.2218, 786 s (five routes,
+one session). Both best routes byte-identical to `p215/highk`'s. **Twelve designs, standard: -30.53 -> -30.88** (-0.2111
+and -0.1341 of it; record -30.89 with mempool_cluster's K 20).
+Cleanup: `GlobalRouterTemp/p215h` deleted 19:30 (the user: yes to 3); its 14 small files compared and kept in
+`p215/p215h_records`, both best routes rechecked identical to `p215/highk`'s. Not kept: the K 280 routes (re-routable).

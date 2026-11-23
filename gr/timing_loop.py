@@ -36,7 +36,7 @@ before, so the result is the same as an uninterrupted run's.
 Stage 4, the Elmore stage (Part 215; default since 2026-11-21, `--elmore K1,K2,...` to change the strengths, `--elmore
 0` = off): after refinement, the best rerouted with per-net Elmore-delay rows (`gr/elmore_rows.py`,
 `PD39ROUTE_TIMING_ROWS`) at each strength K in ELMORE_LADDER (35, 70, 140: the best of blind ariane, mempool_tile_wrap
-and mempool_group), from the classes it was routed with, all scored in one session (`--lean`: one at a time); the best
+and mempool_group; since 2026-11-22 also 280 and 560 when the best's timing strength is 540, unless --elmore is given), from the classes it was routed with, all scored in one session (`--lean`: one at a time); the best
 kept as before (blind mempool_tile_wrap 0.4879 -> 0.1768 at K 70, ariane 1.4605 -> 1.4368, mempool_group 1.2959 ->
 1.0946 at K 140, contest score). `--lean`: every other route stays compressed while a candidate is scored.
 `--reuse EARLIER_WORK_DIR` (Part 188) refines an earlier loop's best instead of rerunning stages 0-2, then runs the
@@ -67,6 +67,11 @@ K3_LADDER = [20, 180, 540]
 # Part 215 (the user, 2026-11-21: standard): the Elmore stage's strengths -- the best K was 35 on blind ariane, 70 on
 # blind mempool_tile_wrap, 140 on blind mempool_group (bsg_chip and NVDLA indifferent)
 ELMORE_LADDER = [35, 70, 140]
+# Part 215 (the user, 2026-11-22: standard): a design whose best timing strength is the k3 ladder's top, 540, also tries
+# these -- visible ariane -4.0584 -> -4.2695 and bsg_chip -2.0877 -> -2.2218, both at K 560 (1120 and 2240 worse on both);
+# designs at 180 or below do not (blind mempool_group: K 140 1.0946, K 280 1.2214; blind bsg_chip indifferent)
+ELMORE_HIGH, ELMORE_HIGH_K3 = [280, 560], 540
+ELMORE_GIVEN = False  # --elmore K1,K2,... given: exactly those
 # Part 215 (the user, 2026-11-21: standard): the contest's N_endpoint for its blind designs (github.com/liangrj2014/
 # ISPD25_contest index.md, read 2026-11-20). OpenROAD's registers + outputs agree on ariane and NVDLA and not on the
 # mempool designs (19000 / 438269 / 1443997) or bsg_chip (214955). The visible designs' contest counts are not
@@ -379,11 +384,21 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
     return out
 
 
+def elmore_ks(best, ks):
+    """The Elmore stage's strengths for this best: the ladder, plus ELMORE_HIGH when the best's timing strength is at
+    least ELMORE_HIGH_K3 and the ladder was not given by --elmore."""
+    if ks and not ELMORE_GIVEN and best['k3'] >= ELMORE_HIGH_K3:
+        return list(ks) + [k for k in ELMORE_HIGH if k not in ks]
+    return list(ks)
+
+
 def elmore(d, name, work, b, best, w, n, ks):
     """Part 215: the best candidate rerouted with Elmore-delay rows (gr/elmore_rows.py, PD39ROUTE_TIMING_ROWS) at each
     strength in ks, from the classes it was routed with; returns the new candidates (all scored in one session)."""
     if best is b or not ks:
         return []
+    ks = elmore_ks(best, ks)
+    print(f"{name}: Elmore strengths for {best['tag']}: {','.join(f'{k:g}' for k in ks)}", flush=True)
     sf, smode = best.get('sf'), best.get('smode') or 'replace'
     out, keep = [], best
 
@@ -568,6 +583,15 @@ def selftest():
     elmore = real
     ok &= seen == {'ks': [35.0, 70.0], 'sf': os.path.join(src, 'merged1.slack'), 'tag': 'k20ip1m1'}
     ok &= not os.path.exists(os.path.join(wk, 'k20ip1m1.route'))  # the best's route is not unpacked for the stage
+    # 2026-11-22: the higher strengths are tried at timing strength 540 only, never when --elmore was given
+    global ELMORE_GIVEN
+    was, ELMORE_GIVEN = ELMORE_GIVEN, False
+    ok &= elmore_ks({'k3': 540}, ELMORE_LADDER) == [35, 70, 140, 280, 560]
+    ok &= elmore_ks({'k3': 180}, ELMORE_LADDER) == [35, 70, 140] and elmore_ks({'k3': 540}, []) == []
+    ok &= elmore_ks({'k3': 540}, [280, 1000]) == [280, 1000, 560]
+    ELMORE_GIVEN = True
+    ok &= elmore_ks({'k3': 540}, [35.0]) == [35.0]
+    ELMORE_GIVEN = was
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got} {seen}')
     shutil.rmtree(t)
     return ok
@@ -613,7 +637,9 @@ def main():
     # Part 215: the Elmore stage -- after refinement, the best rerouted with Elmore-delay rows at each K (the user,
     # 2026-11-21: on by default at ELMORE_LADDER; --elmore 0 turns it off; blind mempool_tile_wrap 0.4879 -> 0.1768 at
     # K 70, blind ariane 1.4605 -> 1.4368 at K 35, blind mempool_group 1.2959 -> 1.0946 at K 140)
-    ks = ([float(v) for v in sys.argv[sys.argv.index('--elmore') + 1].split(',')] if '--elmore' in sys.argv
+    global ELMORE_GIVEN
+    ELMORE_GIVEN = '--elmore' in sys.argv
+    ks = ([float(v) for v in sys.argv[sys.argv.index('--elmore') + 1].split(',')] if ELMORE_GIVEN
           else list(ELMORE_LADDER))
     if ks == [0.0]:
         ks = []
@@ -627,7 +653,9 @@ def main():
         if N_ENDPOINTS is not None and N_ENDPOINTS <= 0:
             raise SystemExit('timing_loop.py: --endpoints takes a positive count or "measured"')
     print(f"{name}: endpoints for ranking: " + (f"{N_ENDPOINTS} (contest)" if N_ENDPOINTS else "OpenROAD's count")
-          + f"; Elmore stage: {'K ' + ','.join(f'{k:g}' for k in ks) if ks else 'off'}", flush=True)
+          + f"; Elmore stage: {'K ' + ','.join(f'{k:g}' for k in ks) if ks else 'off'}"
+          + (f" (+ {','.join(f'{k:g}' for k in ELMORE_HIGH)} at timing strength {ELMORE_HIGH_K3})"
+             if ks and not ELMORE_GIVEN else ''), flush=True)
     if '--reuse' in sys.argv:
         # Part 215: --refine 0 with --reuse skips refinement (it ran one round before), so only the Elmore stage runs
         top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), rounds, t0, ks)
