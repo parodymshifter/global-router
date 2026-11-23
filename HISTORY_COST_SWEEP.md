@@ -16054,3 +16054,25 @@ Cleanup: `GlobalRouterTemp/p215h` deleted 19:30 (the user: yes to 3); its 14 sma
 Cleanup (2026-11-22 19:47, the user: "yes, delete both"): `GlobalRouterTemp/p215h2` and `p215l` deleted; their small files (logs,
 tables, class and rows files under 40 MB) compared and kept in `p215/p215h2_records` and `p215/p215l_records`, both best routes
 rechecked identical to `p215/highk`'s. Not kept: every other candidate's route (each folder's `not_kept.txt`; re-routable).
+**Refining from the Elmore routes, the small designs (2026-11-22 19:53-20:32, the user: "go ahead with 2, the small designs first";
+`p215/elm_refine/`, driver `er.py`, no flow change).** Until now nothing was refined after the Elmore stage (refinement runs
+before it). Each design: the recorded Elmore best rebuilt from its class file (round 0 reproduced every recorded score: visible
+ariane -4.2695, bsg_chip -2.2218, mempool_tile_wrap -1.4049; the two blind ones' congestion, WNS and TNS), then each round that
+route's own failing-path slack merged into its classes (worst per net), Elmore rows at the same K, re-route, kept while it
+gains; last K/2 and 2K on the final classes. Score change against the unbiased route (OpenROAD's endpoints on the visible
+designs, the contest's on the blind ones); all 0 open nets by the evaluator:
+| design | K | Elmore best | refined | rounds kept | K/2, 2K on the final classes | time |
+|---|---|---|---|---|---|---|
+| visible ariane | 560 | -4.2695 | -4.2695 (round 1 -4.2678) | 0 | -4.2525, -4.2055 (as on record) | 138 s |
+| blind ariane | 35 | -0.2788 (contest 1.4368) | -0.2788 (round 1 the same score) | 0 | -0.2610, -0.2738 | 285 s |
+| visible mempool_tile_wrap | 35 | -1.4049 | **-1.6478** (round 12 -1.5946) | 11 | -1.5814, -1.5325 | 686 s |
+| blind mempool_tile_wrap | 70 | -3.2048 (contest 0.1768) | -3.2048 (round 1 -3.2031) | 0 | -3.1097, -3.0604 | 160 s |
+| visible bsg_chip | 560 | -2.2218 | -2.2334 (round 7 no gain) | 6 | -2.1858, -2.1960 | 2309 s |
+Visible mempool_tile_wrap gains 0.243 (17%): WNS -0.4967 -> -0.4237, TNS -2246 -> -1829, congestion 2.720M -> 2.777M. Its
+last round fell back 0.053, so single rounds move the score that much there: the 11 gains (0.005-0.088) are not all
+separable from scatter, though the trend over them is one-sided. Its classic refinement had also stopped on one bad round
+(m8 -1.0150 after m7 -1.1423), so some of this may be refinement resumed rather than the Elmore rows (untested). The other four
+gain 0 or 0.012. Not run: blind bsg_chip (flat in K) and both NVDLA designs (blind has no failures; visible 2 classed nets).
+Best on record off the standard flow: twelve designs -30.88 -> **-31.13** (-0.2428 - 0.0116). The standard is unchanged; the stage
+would cost one slack session per design even where it gains nothing. Best routes kept as `elm_refine/visible.*.best.route.xz`
+(decompressed and compared); the first start (19:53:00, a relative design path) is in `elm_refine/failed1`.
