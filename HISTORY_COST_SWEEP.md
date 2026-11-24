@@ -16224,3 +16224,20 @@ mempool_tile_wrap. Best route kept as `p215/patience/blind.mempool_group.best.ro
 The standard's own result (Elmore from m7) runs next (02:42-, `std_elm.sh`; a first start at 23:13 was stopped at 23:19
 because its wait matched no process -- `pgrep -f patience/grp.sh` against a process started as `./grp.sh` -- and it ran
 beside the patience run's round 21 route for 6 min; routes are deterministic, so only that round's time was affected).
+**The standard's own result on blind mempool_group (02:42-03:38, `std_elm.blind.mempool_group.tsv`):** Elmore from m7's
+classes (where patience 0 stops; m7 rebuilt from the patience run's `scores.jsonl`, -1.4922 reproduced): K 35 -1.4306,
+K 70 -1.6332, **K 140 -1.7240** (WNS -0.4928, TNS -33228.9, power 8.2102, congestion 54.40M, 0 opens) -- contest score
+**0.9689**. So on this design today's standard is itself better than the recorded 1.0946 (that run's refinement was ranked
+by OpenROAD's count and stopped at m1), and patience 3 / cap 24 adds **0.9689 -> 0.8855** on top (score change -1.7240 ->
+-1.8074; by OpenROAD's count -1.6486 -> -1.7185).
+
+**Patience 3 / cap 24, all nine measured designs:** never worse; it acts where refinement stops on a round without gain
+and later rounds gain again -- visible mempool_tile_wrap -0.242, blind mempool_group -0.083 (contest score), visible
+bsg_chip -0.008, six designs unchanged. The cap of 24 bound on both designs that gained most (best at m23 / m24), so a
+higher cap may pay more there (unverified). Cost: blind mempool_group 16.5 h of refinement from m3 against about 4 h to
+m8 for the standard (rounds about 40 min). Twelve-design sum by OpenROAD's count, standard -30.88 (with blind mempool_group
+at its recorded -1.5426): today's standard measured -30.99 (blind mempool_group -1.6486); with patience 3 / cap 24 on the
+nine measured designs **-31.31** (visible mempool_group and both mempool_cluster designs not run under it). Blind six
+(contest score): 5.9186 recorded standard, 5.7929 with today's standard measured on mempool_group, **5.7095** with
+patience on the five blind designs measured (blind mempool_cluster not run under it). Not adopted: the standard flow is
+unchanged until the user decides.
