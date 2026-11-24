@@ -16351,3 +16351,64 @@ Also passing: the self-test; the address + undefined-behaviour sanitizer self-te
 `g24_verify` self-tests; `g24_bridge`, `g24_gap` and `pd38route` compile warning-free with the changed `g24_io.h`. Wall
 times are not compared: the runs shared the machine.
 
+## Part 216 -- every setting and input checked before any work; the 2025 methods on the small designs (in progress)
+
+**The user, 2026-11-24 08:40:** "yes to the 2025 methods, small designs first. make it so all settings and input data are
+verified as valid before starting any work beyond validating. In the case of invalid command line option or invalid
+input of any kind make the code report all the problems in detail and terminate the execution. proceed with R3 and R4
+if that will improve the performance or quality of the code."
+
+### Checking before any work (R4 included)
+
+`pd39route`'s `main()` (1,507 lines) read about 60 settings only after the main routing had run: the late stages, the
+portfolio, the fallback, the forced-overflow report. So a bad `PD39ROUTE_PORTFOLIO` stopped a run after its slow tier.
+It also stopped at the first problem. The run is now `RouterRun` in four steps:
+- `commandLine()`: an unknown option; the wrong argument count; an input that is missing, a folder or unreadable; an
+  output whose folder is missing or unwritable, or that is a folder; an output that is an input.
+- `readSettings()`: every setting parse `main()` had, verbatim, each top-level statement in its own `step()`, so a
+  problem is recorded and the next setting is still read. Together with `settings::problems()`:
+  - unknown names and unparsable Int / Real values;
+  - new: flags must be 0 or 1, on-if-set switches must be 1, and the nine worded settings read with a silent default
+    must use their words (`VROUTE_HIST_MODE` add/mult/ratio, the `*_HIST_SCALE` off/overflow, three traces 0/1).
+  Every recorded value of these was checked first: all are 0/1 or 1, and the worded ones were never set.
+- `readInputs()`:
+  - the design: `gr_io::readGrText` now notes every problem that leaves the structure intact (a repeated name or id; a
+    pin off the grid or on a missing layer; a capacity adjustment out of the grid, joining layers or non-neighbours,
+    raising a capacity, or contradicting another) and reads on. A structural problem still stops reading there, and is
+    reported after the noted ones. The 2024 reader notes every net whose access points break the rules. Both list the
+    first 1000 in detail and count the rest.
+  - the design-size checks (`checkSegRange`, `checkIndexWidth`), the price seed, the `PD3ROUTE_LA_FROM` route;
+  - the timing files (slack, multipliers, rows), checked only when every setting is valid, because they read the
+    timing settings.
+- `work()`: the routing, unchanged.
+
+While the first three steps run, `gr_io::fail()` throws (`failThrows()`), so every existing check reports instead of
+exiting. Messages the settings print about themselves are held and shown as before if the run goes on. If not, one
+numbered report lists every problem (duplicates once) and the run exits 1, or 2 with the usage for a bad command line.
+The cross-checks now run after the portfolio is parsed: the `PD39ROUTE_SEARCH_BIDIR` check had read `gPortfolio`
+before it was filled, so it never covered the portfolio's variants. Output paths the settings name (`PD39ROUTE_SLOW_TASKS`,
+`_NET_TIMES`, `_FORCED_REPORT`, `_REGION_DUMP`, `_SEARCH_DUMP`, the `PD38ROUTE_FRAMES` folder) are checked up front.
+
+Tests:
+- self-test: 9 command-line cases, and flag, switch and word checks in the registry test;
+- `input_check --selftest`: three problems in one file all reported in file order; a structural one after a noted one;
+- `gr/e2e_settings.py`: 59 of 59, including four new cases (an unknown option; a missing design plus a bad setting,
+  both reported; a design with two problems, both with their lines; an output folder that does not exist, stopped
+  before routing).
+
+**Routes byte-identical** to the binary before Part 215's changes (4b19e10's source), restructured binary against
+`~/Code/GlobalRouterTemp/p216/*.base.route`: synthetic design, newblue1, adaptec1 (standard + fast08 + speed08) and
+visible ariane (standard + standard24 + fast24 + standard25).
+
+The flow scripts get the same rule through `gr/flowcheck.py` (`Problems`, `parse_options`):
+- `timing_loop.py`: unknown options, with the nearest one offered (`--patiense` -> `--patience`); every value; the design
+  folder's .cap/.net/.def/.sdc; WORK_DIR (writable or makeable, no space, which before was found only at the first
+  OpenROAD session); `--resume`'s scores, `--reuse`'s folder; OpenROAD, the evaluator, the scripts and the settings
+  files; and the router's own `--settings` check under the flow's settings files.
+- `elmore_rows.py`: all seven arguments.
+- `reorder_portfolio.py`: argparse's first-error exit and its silent abbreviations replaced (`--sett` is refused);
+  paths, values, `--jobs` 1-3, the settings items, and the router's check.
+
+**Sleep:** the laptop slept 09:20:38 -> 14:07:52, with brief maintenance wakes. Every job paused and resumed by itself;
+wall times of runs spanning it are not comparable.
+

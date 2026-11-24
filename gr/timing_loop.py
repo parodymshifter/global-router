@@ -9,7 +9,7 @@ evaluator, and keep the best by the contest score's change against the unbiased 
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
       [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...|0]
-      [--endpoints N|measured] [--patience P] [--two-sessions] | --selftest
+      [--endpoints N|measured] [--patience P] [--two-sessions] [--decay G] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -53,6 +53,8 @@ Router runs wait for a free slot (at most 3 tracked runs machine-wide, CLAUDE.md
 """
 import filecmp, json, os, re, shutil, subprocess, sys, time
 
+import flowcheck  # Part 216: every problem reported before any work
+
 GR = os.path.dirname(os.path.abspath(__file__))
 EVAL_DIR = os.path.expanduser('~/Code/GlobalRouterRuns/ispd25eval')       # NanGate45 libraries, setRC.tcl
 OPENROAD = os.path.expanduser('~/Code/OpenROAD_ISPD25/build/src/openroad')  # the contest's fork
@@ -85,6 +87,14 @@ REFINE_ROUNDS = 24  # --refine N (Part 188: 2; 2026-11-20: 12; 2026-11-24, with 
 # round -- the same measurements, one session per round instead of two (blind mempool_group: ~17 of every ~40 min).
 # --two-sessions gives the old way back
 ONE_SESSION = True
+# Part 216 (the user, 2026-11-24: test the review's method 3, "timing multipliers that fall as well as rise"): refinement's
+# class memory fades. Per net, with the slack files measured so far s_0, s_1, ... (oldest first), the merged slack is
+# m_0 = s_0, m_k = min(s_k, DECAY x m_{k-1}) -- a net not measured in round k (its failing path fixed) has s_k = +inf, so
+# its merged slack moves toward 0 by the factor DECAY each round and the net leaves the classes once it is under 10% of the
+# worst (the router's class thresholds are 0.7 / 0.4 / 0.1 of the worst slack). DECAY 1 is the sticky merge (the
+# standard: the worst slack ever measured, Part 188); DECAY 0 re-classifies from the latest route alone (Part 134: worse).
+# --decay G sets it; test only, not standard
+DECAY = 1.0
 # Part 215 (the user, 2026-11-21: standard): the contest's N_endpoint for its blind designs (github.com/liangrj2014/
 # ISPD25_contest index.md, read 2026-11-20). OpenROAD's registers + outputs agree on ariane and NVDLA and not on the
 # mempool designs (19000 / 438269 / 1443997) or bsg_chip (214955). The visible designs' contest counts are not
@@ -352,6 +362,28 @@ def merge_slack(files, out):
     return out
 
 
+def merge_decay(files, out, g):
+    """Part 216: merge_slack with a fading memory (DECAY above); g == 1 is merge_slack exactly."""
+    if g >= 1.0:
+        return merge_slack(files, out)
+    m = {}
+    for fn in files:
+        cur = {}
+        for line in open(fn):
+            if line.startswith('#') or not line.strip():
+                continue
+            i, v = line.split()
+            cur[int(i)] = min(float(v), cur.get(int(i), float('inf')))
+        m = {i: min(cur.get(i, float('inf')), g * m[i] if i in m else float('inf')) for i in set(m) | set(cur)}
+    with open(out, 'w') as f:
+        f.write(f'# merged routed slack (seconds), memory fading by {g:g} per file, over '
+                + ' '.join(os.path.basename(x) for x in files) + '\n')
+        for i in sorted(m):
+            if m[i] < 0:  # a net whose memory has faded to 0 (or that never failed) is unclassed
+                f.write(f'{i} {m[i]:.6e}\n')
+    return out
+
+
 def tag_of(best, it):
     return f"k{best['k3']}{best['src']}" + (f"p{best['kp']}" if best['kp'] else '') + f'm{it}'
 
@@ -394,7 +426,7 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
             break
         measured.append(slack if slack is not None else remeasured(d, name, cur, work, idx))
         slack = None
-        merged = merge_slack(measured, os.path.join(work, f'merged{it}.slack'))
+        merged = merge_decay(measured, os.path.join(work, f'merged{it}.slack'), DECAY)  # DECAY 1: merge_slack
         prev = os.path.join(work, f'merged{it - 1}.slack')
         if os.path.exists(prev) and open(merged).read().split('\n', 1)[1] == \
                 open(prev).read().split('\n', 1)[1]:
@@ -657,6 +689,12 @@ def selftest():
     got = {int(l.split()[0]): float(l.split()[1]) for l in open(merge_slack([a, b], os.path.join(t, 'm')))
            if not l.startswith('#')}
     ok = got == {3: -1.0e-10, 7: -5.0e-10, 9: -3.0e-10}
+    # Part 216: the fading merge -- g 1 is the sticky merge byte for byte; g 0.5 halves what a later file does not
+    # renew (3: -1e-10 -> -5e-11; 7: min(-2e-10, -2.5e-10) = -2.5e-10; 9 new: -3e-10); g 0 keeps only the last file
+    ok &= open(merge_decay([a, b], os.path.join(t, 'd1'), 1.0)).read() == open(os.path.join(t, 'm')).read()
+    dec = lambda g: {int(l.split()[0]): float(l.split()[1]) for l in open(merge_decay([a, b], os.path.join(t, 'd'), g))
+                     if not l.startswith('#')}
+    ok &= dec(0.5) == {3: -5.0e-11, 7: -2.5e-10, 9: -3.0e-10} and dec(0.0) == {7: -2.0e-10, 9: -3.0e-10}
     ok &= tag_of({'k3': 540, 'src': 'r', 'kp': 0}, 1) == 'k540rm1'
     ok &= tag_of({'k3': 180, 'src': 'i', 'kp': 4}, 2) == 'k180ip4m2'
     global LEAN  # --lean: a pruned route is compressed, the kept one is not, and unpack restores it exactly
@@ -739,74 +777,133 @@ def selftest():
     return ok
 
 
+# Part 216 (the user, 2026-11-24: every option and input checked before any work, every problem reported): the options
+# this script takes (None: a switch); check_run() checks them, their values, the design's files, the tools and the
+# router's own settings check under the flow's settings files, and stops with every problem before anything runs.
+OPTIONS = {'--out': 'value', '--classes': 'value', '--refine': 'value', '--reuse': 'value', '--router': 'value',
+           '--lean': None, '--resume': None, '--k3': 'value', '--elmore': 'value', '--endpoints': 'value',
+           '--patience': 'value', '--two-sessions': None, '--decay': 'value'}
+
+
+def check_run(argv):
+    """Part 216: the command line and everything it names, before any work. Returns (design dir, work dir, options) or
+    exits with every problem listed."""
+    opts, args, p = flowcheck.parse_options(argv, OPTIONS, 2, 'timing_loop.py')
+
+    def val(opt, conv, ok, what):
+        if opt not in opts:
+            return None
+        try:
+            v = conv(opts[opt])
+            if ok(v):
+                return v
+        except ValueError:
+            pass
+        p.add(f"{opt} takes {what} (got '{opts[opt]}')")
+        return None
+    val('--classes', str, lambda v: v in ('both', 'routed', 'input'), 'both, routed or input')
+    val('--refine', int, lambda v: v >= 0, 'a round count >= 0')
+    val('--patience', int, lambda v: v >= 0, 'a round count >= 0')
+    val('--decay', float, lambda v: 0.0 <= v <= 1.0, 'a factor in [0, 1]')
+    val('--k3', lambda v: [int(x) for x in v.split(',')], lambda v: v and min(v) > 0, 'positive integers, e.g. 20,180,540')
+    val('--elmore', lambda v: [float(x) for x in v.split(',')], lambda v: v == [0.0] or (v and min(v) > 0),
+        'positive strengths, e.g. 35,70,140, or 0 (off)')
+    val('--endpoints', lambda v: v if v == 'measured' else int(v), lambda v: v == 'measured' or v > 0,
+        'a positive count or measured')
+    d = work = None
+    if len(args) == 2:
+        d, work = os.path.abspath(args[0]), os.path.abspath(args[1])
+        name = os.path.basename(d.rstrip('/'))
+        if p.need_dir(d, 'DESIGN_DIR'):
+            for ext in ('.cap', '.net', '.def', '.sdc'):
+                p.need_file(os.path.join(d, name + ext), f'the design\'s {ext} file')
+        p.need_workdir(work, 'WORK_DIR')
+        if ' ' in work:
+            p.add(f'WORK_DIR {work} contains a space (OpenROAD sources its scripts unquoted)')
+        if '--resume' in opts:
+            p.need_file(os.path.join(work, 'scores.jsonl'), '--resume: the earlier run\'s scores')
+    if '--out' in opts:
+        p.need_output(opts['--out'], '--out')
+    if '--reuse' in opts and p.need_dir(opts['--reuse'], '--reuse'):
+        if not any(os.path.exists(os.path.join(opts['--reuse'], f)) for f in ('loop.tsv', 'refine.tsv')):
+            p.add(f"--reuse {opts['--reuse']} holds no loop.tsv or refine.tsv")
+    router = os.path.abspath(opts['--router']) if '--router' in opts else ROUTER
+    p.need_exe(OPENROAD, 'OpenROAD')
+    p.need_exe(EVALUATOR, "the contest's evaluator")
+    p.need_dir(EVAL_DIR, 'the evaluation folder (NanGate45 libraries, setRC.tcl)')
+    for f, what in ((MULTI_TCL, 'the scoring script'), (SLACK_TCL, 'the slack script'),
+                    (os.path.join(GR, 'elmore_rows.py'), 'the Elmore rows script')):
+        p.need_file(f, what)
+    envs = [os.path.join(GR, f) for f in ('standard.env', 'standard24.env', 'fast24.env', 'standard25.env')]
+    if all(p.need_file(f, 'the settings file') for f in envs) and p.need_exe(router, 'the router'):
+        base = {}  # the settings every candidate gets (route()); the router lists what it would refuse
+        for f in envs[:3]:
+            base.update(env_file(f))
+        base['PD37ROUTE_THREADS'] = '8'
+        r = subprocess.run([router, '--settings'], env={**os.environ, **base}, capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            if line.startswith('problem: '):
+                p.add('the router refuses its settings: ' + line[len('problem: '):])
+        if r.returncode != 0:
+            p.add(f'{router} --settings exited {r.returncode}: ' + (r.stderr.strip().splitlines() or [''])[-1])
+    p.stop_if_any('usage:\n' + next(b for b in __doc__.split('\n\n') if 'python3 gr/timing_loop.py DESIGN_DIR' in b))
+    return d, work, opts
+
+
 def main():
     if '--selftest' in sys.argv:
         sys.exit(0 if selftest() else 1)
-    if len(sys.argv) < 3:
-        print(__doc__)
-        sys.exit(2)
-    d, work = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
-    out = sys.argv[sys.argv.index('--out') + 1] if '--out' in sys.argv else None
+    d, work, opts = check_run(sys.argv[1:])
+    out = opts.get('--out')
     name = os.path.basename(d.rstrip('/'))
     os.makedirs(work, exist_ok=True)
     w = weights(os.path.join(d, name + '.cap'))
     t0 = time.time()
-    mode = sys.argv[sys.argv.index('--classes') + 1] if '--classes' in sys.argv else 'both'
-    if mode not in ('both', 'routed', 'input'):
-        raise SystemExit('timing_loop.py: --classes must be both, routed or input')
+    mode = opts.get('--classes', 'both')
     global ROUTER, LEAN, CKPT, RESUME
-    LEAN = '--lean' in sys.argv
-    RESUME = '--resume' in sys.argv
+    LEAN = '--lean' in opts
+    RESUME = '--resume' in opts
     CKPT = os.path.join(work, 'scores.jsonl')
     if RESUME:
-        if not os.path.exists(CKPT):
-            raise SystemExit('timing_loop.py: --resume: no scores.jsonl in ' + work)
         load(CKPT)
         print(f"{name}: resume: {len(DONE)} candidates in scores.jsonl", flush=True)
     elif os.path.exists(CKPT):  # a fresh run starts its own record
         os.replace(CKPT, CKPT + '.prev')
-    if '--router' in sys.argv:
-        ROUTER = os.path.abspath(sys.argv[sys.argv.index('--router') + 1])
+    if '--router' in opts:
+        ROUTER = os.path.abspath(opts['--router'])
     # Part 188 (the user, 2026-11-06): sticky re-classification by default; --refine 0 turns it off. Part 215 (the
     # user, 2026-11-20): up to 12 rounds (was 2) -- it stops by itself once a round gains nothing or the classes stop
     # changing; blind mempool_tile_wrap gained in every round to 8 (0.9238 at 2 -> 0.4879, contest score); 2026-11-24: 24
-    rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else REFINE_ROUNDS
-    global PATIENCE, ONE_SESSION
-    ONE_SESSION = '--two-sessions' not in sys.argv
-    if '--patience' in sys.argv:  # Part 215: rounds without a new best before refinement stops (default PATIENCE)
-        PATIENCE = int(sys.argv[sys.argv.index('--patience') + 1])
-        if PATIENCE < 0:
-            raise SystemExit('timing_loop.py: --patience takes a count >= 0')
+    rounds = int(opts['--refine']) if '--refine' in opts else REFINE_ROUNDS
+    global PATIENCE, ONE_SESSION, DECAY
+    ONE_SESSION = '--two-sessions' not in opts
+    if '--decay' in opts:  # Part 216 (test): the class memory's fade per round (1: sticky, the standard)
+        DECAY = float(opts['--decay'])
+    if '--patience' in opts:  # Part 215: rounds without a new best before refinement stops (default PATIENCE)
+        PATIENCE = int(opts['--patience'])
     global K3_LADDER
-    if '--k3' in sys.argv:  # Part 215: the timing strengths to try, e.g. --k3 2,5,10,20 (default 20,180,540)
-        K3_LADDER = [int(v) for v in sys.argv[sys.argv.index('--k3') + 1].split(',')]
-        if not K3_LADDER or min(K3_LADDER) <= 0:
-            raise SystemExit('timing_loop.py: --k3 takes positive integers, e.g. 2,5,10,20')
+    if '--k3' in opts:  # Part 215: the timing strengths to try, e.g. --k3 2,5,10,20 (default 20,180,540)
+        K3_LADDER = [int(v) for v in opts['--k3'].split(',')]
     # Part 215: the Elmore stage -- after refinement, the best rerouted with Elmore-delay rows at each K (the user,
     # 2026-11-21: on by default at ELMORE_LADDER; --elmore 0 turns it off; blind mempool_tile_wrap 0.4879 -> 0.1768 at
     # K 70, blind ariane 1.4605 -> 1.4368 at K 35, blind mempool_group 1.2959 -> 1.0946 at K 140)
     global ELMORE_GIVEN
-    ELMORE_GIVEN = '--elmore' in sys.argv
-    ks = ([float(v) for v in sys.argv[sys.argv.index('--elmore') + 1].split(',')] if ELMORE_GIVEN
-          else list(ELMORE_LADDER))
+    ELMORE_GIVEN = '--elmore' in opts
+    ks = [float(v) for v in opts['--elmore'].split(',')] if ELMORE_GIVEN else list(ELMORE_LADDER)
     if ks == [0.0]:
         ks = []
-    if any(k <= 0 for k in ks):
-        raise SystemExit('timing_loop.py: --elmore takes positive strengths, e.g. 35,70,140 (or 0: off)')
     global N_ENDPOINTS  # Part 215 (the user, 2026-11-21: standard): the contest's endpoint count for a blind design
     N_ENDPOINTS = contest_endpoints(d)
-    if '--endpoints' in sys.argv:
-        v = sys.argv[sys.argv.index('--endpoints') + 1]
+    if '--endpoints' in opts:
+        v = opts['--endpoints']
         N_ENDPOINTS = None if v == 'measured' else int(v)
-        if N_ENDPOINTS is not None and N_ENDPOINTS <= 0:
-            raise SystemExit('timing_loop.py: --endpoints takes a positive count or "measured"')
     print(f"{name}: endpoints for ranking: " + (f"{N_ENDPOINTS} (contest)" if N_ENDPOINTS else "OpenROAD's count")
           + f"; Elmore stage: {'K ' + ','.join(f'{k:g}' for k in ks) if ks else 'off'}"
           + (f" (+ {','.join(f'{k:g}' for k in ELMORE_HIGH)} at timing strength {ELMORE_HIGH_K3})"
              if ks and not ELMORE_GIVEN else ''), flush=True)
-    if '--reuse' in sys.argv:
+    if '--reuse' in opts:
         # Part 215: --refine 0 with --reuse skips refinement (it ran one round before), so only the Elmore stage runs
-        top = reuse(d, name, work, os.path.abspath(sys.argv[sys.argv.index('--reuse') + 1]), rounds, t0, ks)
+        top = reuse(d, name, work, os.path.abspath(opts['--reuse']), rounds, t0, ks)
         if out:
             unpack(top)
             shutil.copyfile(top['route'], out)

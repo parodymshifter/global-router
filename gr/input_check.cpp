@@ -14,6 +14,7 @@
 #include "g24_io.h"
 #include "gr_io.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <sstream>
 #include <iostream>
@@ -123,6 +124,20 @@ void selftest2008() {
   expectGrError("a net width of zero", with(good(), "n1 1 2 1", "n1 1 2 0"), "net n1: minimum width 0 is out of range");
   expectGrError("a repeated net name", with(good(), "n1 1 2 1", "n0 1 2 1"), "net name n0 appears twice");
   expectGrError("a repeated net id", with(good(), "n1 1 2 1", "n1 0 2 1"), "net n1: id 0 is used by another net");
+  { // Part 216 (2026-11-24): problems that leave the structure intact are all reported, each with its line; a
+    // structural one after them stops reading there and is reported last
+    std::string t = with(with(with(good(), "n1 1 2 1", "n0 1 2 1"), "35 25 2", "45 25 2"), "1 1 2 1 2 2 0", "1 1 2 1 2 2 50");
+    std::string m = readGrMsg(t);
+    const size_t a = m.find("t.gr:11: net n0: pin (45, 25) is outside"), b = m.find("t.gr:12: net name n0 appears twice"),
+                 c = m.find("t.gr:17: capacity adjustment raises a vertical edge on layer 2 to 50");
+    check(a != std::string::npos && b != std::string::npos && c != std::string::npos && a < b && b < c &&
+              std::count(m.begin(), m.end(), '\n') == 2,
+          "2008: three problems in one file are all reported, in file order, each with its line -- " + m);
+    m = readGrMsg(with(with(good(), "n1 1 2 1", "n0 1 2 1"), "15 25 2\n", "15 25\n"));
+    check(m.find("net name n0 appears twice") < m.find("(reading stopped here") &&
+              m.find("expected net n0: pin 2 of 2") != std::string::npos,
+          "2008: a structural problem after a noted one stops reading, both reported -- " + m);
+  }
   expectGrError("a pin past the grid's right edge", with(good(), "35 25 2", "45 25 2"),
                 "net n0: pin (45, 25) is outside the grid");
   // floor, not truncation: x = -5 is tile -1 (it used to land in tile 0)

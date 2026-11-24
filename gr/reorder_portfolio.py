@@ -208,7 +208,12 @@ def main():
         good = selftest()
         print('SELF TEST PASS' if good else 'SELF TEST FAIL')
         raise SystemExit(0 if good else 1)
-    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    import flowcheck  # Part 216 (the user, 2026-11-24): every option and input checked first, every problem reported
+
+    class Parser(argparse.ArgumentParser):
+        def error(self, message):  # collected below, with every other problem, instead of ending at the first
+            raise ValueError(message)
+    ap = Parser(description=__doc__.split('\n\n')[0], allow_abbrev=False)  # an abbreviation is not an option
     ap.add_argument('design')
     ap.add_argument('work')
     ap.add_argument('--out')
@@ -217,7 +222,47 @@ def main():
     ap.add_argument('--router', default='./pd39route')
     ap.add_argument('--settings', nargs='+', default=DEFAULT_SETTINGS)
     ap.add_argument('--set', nargs='+', default=[], dest='sets')
-    a = ap.parse_args()
+    p = flowcheck.Problems('reorder_portfolio.py')
+    try:
+        a, unknown = ap.parse_known_args()
+    except ValueError as e:
+        p.add(str(e))
+        p.stop_if_any(ap.format_usage())
+    for u in unknown:
+        p.add(f'unknown option {u}' if u.startswith('-') else f'unexpected argument {u}')
+    p.need_file(a.design, 'DESIGN.gr')
+    p.need_workdir(a.work, 'WORK_DIR')
+    if a.out:
+        p.need_output(a.out, '--out')
+    try:
+        if not all(int(x) >= 0 for x in a.spreads.split(',')) or not a.spreads.split(','):
+            raise ValueError
+    except ValueError:
+        p.add(f"--spreads takes tile sides >= 0, e.g. {DEFAULT_SPREADS} (got '{a.spreads}')")
+    if not 1 <= a.jobs <= 3:
+        p.add(f'--jobs takes 1 to 3 (the machine-wide cap; got {a.jobs})')
+    router = a.router if os.path.isabs(a.router) else os.path.join(GR, a.router)
+    env = {}
+    for item in a.settings + a.sets:
+        if item.startswith('@'):
+            f = os.path.join(GR, item[1:])
+            if p.need_file(f, 'the settings file'):
+                for line in open(f):
+                    line = line.rstrip('\n')
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        env[k] = v
+        elif '=' in item and item.split('=', 1)[0]:
+            k, v = item.split('=', 1)
+            env[k] = v
+        else:
+            p.add(f"a setting must be @file or NAME=value (got '{item}')")
+    if p.need_exe(router, 'the router'):  # the router lists what it would refuse under these settings
+        r = subprocess.run([router, '--settings'], env={**os.environ, **env}, capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            if line.startswith('problem: '):
+                p.add('the router refuses its settings: ' + line[len('problem: '):])
+    p.stop_if_any(ap.format_usage())
 
     def log(s):
         print(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {s}', flush=True)

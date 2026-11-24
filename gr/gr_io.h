@@ -25,7 +25,20 @@
 
 namespace gr_io {
 
+// A problem found while a program checks its settings and inputs (2026-11-24, HISTORY_COST_SWEEP.md Part 216): while
+// failThrows() is set, fail() throws one of these instead of ending the program, so the checker can collect every
+// problem and report them all before stopping (pd39route sets it while it validates, never while it routes).
+struct Failure : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+inline bool &failThrows() {
+  static bool on = false;
+  return on;
+}
+
 [[noreturn]] inline void fail(const std::string &msg) {
+  if (failThrows())
+    throw Failure(msg);
   std::cerr << "error: " << msg << "\n";
   std::exit(1);
 }
@@ -67,6 +80,8 @@ public:
   }
 
   bool done() const { return pos_ >= toks_.size(); }
+  // "<file>:<line>: " -- the prefix of a problem reported on that line (Part 216)
+  std::string where(int line) const { return name_ + ":" + std::to_string(line) + ": "; }
   // The line of the next token (the file's last line at the end).
   int line() const { return done() ? lastLine_ : lines_[pos_]; }
 
@@ -309,9 +324,51 @@ struct Design {
 // A warning (printed, the run continues) for what the format allows but suggests a mistake: an identical
 // adjustment repeated. `warnings`, if given, collects warnings instead of printing them. (A layer with capacity
 // in both directions is allowed and not reported: the benchmarks have none, but many self-test grids do.)
+// Part 216 (2026-11-24): a problem that leaves the file's structure intact (a name or id used twice, a pin off the
+// grid or on a missing layer, a capacity adjustment that is out of the grid, joins layers or non-neighbours, raises a
+// capacity or contradicts another) is noted and reading goes on, so one run reports every such problem; one that breaks
+// the structure (a missing or extra field, a non-number, the end of the file) stops reading there. Either way
+// readGrText then throws one InputError listing them all, the first kMaxNoted in detail.
+inline constexpr size_t kMaxNoted = 1000;
+
+inline Design readGrTextChecked(Tokens &tk, const std::string &name,
+                                std::vector<std::string> *warnings, std::vector<std::string> &noted, size_t &nNoted);
+
 inline Design readGrText(const std::string &text, const std::string &name,
                          std::vector<std::string> *warnings = nullptr) {
   Tokens tk(text, name);
+  std::vector<std::string> noted;
+  size_t nNoted = 0;
+  auto all = [&](const std::string &last) {
+    std::string msg;
+    for (const std::string &n : noted)
+      msg += (msg.empty() ? "" : "\n") + n;
+    if (nNoted > noted.size())
+      msg += "\n... and " + std::to_string(nNoted - noted.size()) + " more problems of these kinds (not listed)";
+    if (!last.empty())
+      msg += (msg.empty() ? "" : "\n") + last;
+    return msg;
+  };
+  Design d;
+  try {
+    d = readGrTextChecked(tk, name, warnings, noted, nNoted);
+  } catch (const InputError &e) {
+    if (noted.empty())
+      throw;
+    throw InputError(all(std::string(e.what()) + " (reading stopped here: the rest of the file was not checked)"));
+  }
+  if (nNoted > 0)
+    throw InputError(all(""));
+  return d;
+}
+
+inline Design readGrTextChecked(Tokens &tk, const std::string &name,
+                                std::vector<std::string> *warnings, std::vector<std::string> &noted, size_t &nNoted) {
+  auto note = [&](int line, const std::string &msg) {
+    if (noted.size() < kMaxNoted)
+      noted.push_back(tk.where(line) + msg);
+    ++nNoted;
+  };
   Design d;
   RoutingGrid &g = d.grid;
   auto warn = [&](int line, const std::string &msg) {
@@ -369,9 +426,9 @@ inline Design readGrText(const std::string &text, const std::string &name,
     const int numPins = tk.nextIntIn(1, kIntMax, "net " + n.name + ": pin count");
     n.minWidth = tk.nextIntIn(1, kIntMax, "net " + n.name + ": minimum width");
     if (!names.insert(n.name).second)
-      tk.error(hl, "net name " + n.name + " appears twice");
+      note(hl, "net name " + n.name + " appears twice");
     if (!ids.insert(n.id).second)
-      tk.error(hl, "net " + n.name + ": id " + std::to_string(n.id) + " is used by another net");
+      note(hl, "net " + n.name + ": id " + std::to_string(n.id) + " is used by another net");
     n.pins.reserve(static_cast<size_t>(numPins));
     for (int p = 0; p < numPins; ++p) {
       const int pl = tk.expectRecord(3, "net " + n.name + ": pin " + std::to_string(p + 1) + " of " +
@@ -382,14 +439,16 @@ inline Design readGrText(const std::string &text, const std::string &name,
       Pin pin;
       pin.x = g.colOf(px);
       pin.y = g.rowOf(py);
-      if (layer < 1 || layer > g.nLayers)
-        tk.error(pl, "net " + n.name + ": pin layer " + std::to_string(layer) + " is not in 1.." +
-                         std::to_string(g.nLayers));
+      if (layer < 1 || layer > g.nLayers) {
+        note(pl, "net " + n.name + ": pin layer " + std::to_string(layer) + " is not in 1.." +
+                     std::to_string(g.nLayers));
+        layer = 1; // noted; read on (the design is not used)
+      }
       pin.layer = static_cast<int>(layer) - 1; // file layers are one based
       if (!g.inBounds(pin.x, pin.y, pin.layer))
-        tk.error(pl, "net " + n.name + ": pin (" + std::to_string(px) + ", " + std::to_string(py) +
-                         ") is outside the grid (tile " + std::to_string(pin.x) + ", " + std::to_string(pin.y) +
-                         " of " + std::to_string(g.nx) + " x " + std::to_string(g.ny) + ")");
+        note(pl, "net " + n.name + ": pin (" + std::to_string(px) + ", " + std::to_string(py) +
+                     ") is outside the grid (tile " + std::to_string(pin.x) + ", " + std::to_string(pin.y) +
+                     " of " + std::to_string(g.nx) + " x " + std::to_string(g.ny) + ")");
       n.pins.push_back(pin);
     }
     d.nets.push_back(std::move(n));
@@ -410,27 +469,33 @@ inline Design readGrText(const std::string &text, const std::string &name,
       int r2 = tk.nextIntIn(0, kIntMax, "adjustment row");
       int l2 = tk.nextIntIn(1, kIntMax, "adjustment layer") - 1;
       int cap = tk.nextIntIn(0, kIntMax, "adjusted capacity");
-      if (!g.inBounds(c1, r1, l1) || !g.inBounds(c2, r2, l2))
-        tk.error(al, "capacity adjustment refers to a tile outside the grid (tile indices, not real coordinates, "
-                     "are expected here)");
-      if (l1 != l2)
-        tk.error(al, "capacity adjustment joins layers " + std::to_string(l1 + 1) + " and " +
-                         std::to_string(l2 + 1) + " (vias have no capacity in this format)");
+      if (!g.inBounds(c1, r1, l1) || !g.inBounds(c2, r2, l2)) {
+        note(al, "capacity adjustment refers to a tile outside the grid (tile indices, not real coordinates, "
+                 "are expected here)");
+        continue; // no edge to adjust
+      }
+      if (l1 != l2) {
+        note(al, "capacity adjustment joins layers " + std::to_string(l1 + 1) + " and " + std::to_string(l2 + 1) +
+                     " (vias have no capacity in this format)");
+        continue;
+      }
       const bool h = r1 == r2 && std::abs(c1 - c2) == 1, v = c1 == c2 && std::abs(r1 - r2) == 1;
-      if (!h && !v)
-        tk.error(al, "capacity adjustment joins tiles that are not neighbours");
+      if (!h && !v) {
+        note(al, "capacity adjustment joins tiles that are not neighbours");
+        continue;
+      }
       const int def = h ? g.hCapLayer[l1] : g.vCapLayer[l1];
       if (cap > def)
-        tk.error(al, "capacity adjustment raises a " + std::string(h ? "horizontal" : "vertical") + " edge on layer " +
-                         std::to_string(l1 + 1) + " to " + std::to_string(cap) + ", above the layer's default " +
-                         std::to_string(def) + " (the format reduces capacity)");
+        note(al, "capacity adjustment raises a " + std::string(h ? "horizontal" : "vertical") + " edge on layer " +
+                     std::to_string(l1 + 1) + " to " + std::to_string(cap) + ", above the layer's default " +
+                     std::to_string(def) + " (the format reduces capacity)");
       const size_t e = h ? g.hIndex(std::min(c1, c2), r1, l1) : g.vIndex(c1, std::min(r1, r2), l1);
       auto &seen = h ? seenH : seenV;
       auto [it, fresh] = seen.emplace(static_cast<long long>(e), cap);
       if (!fresh) {
         if (it->second != cap)
-          tk.error(al, "capacity adjustment sets an edge already adjusted to " + std::to_string(it->second) +
-                           " to " + std::to_string(cap));
+          note(al, "capacity adjustment sets an edge already adjusted to " + std::to_string(it->second) + " to " +
+                       std::to_string(cap));
         warn(al, "the same capacity adjustment appears twice");
       }
       (h ? g.hcap : g.vcap)[e] = cap;

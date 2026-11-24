@@ -35,13 +35,13 @@ extern char **environ;
 namespace settings {
 
 enum class Kind {
-  Flag,    // 0 or 1 (or, where its meaning says so, 0 = off and anything else on)
-  OnIfSet, // on when set, to any value (even 0)
+  Flag,    // 0 or 1, checked at start-up (Part 216; before it several took anything but 0 as on)
+  OnIfSet, // on when set; its value must be 1, checked at start-up (Part 216; before it any value, even 0, was on)
   Int,     // a whole number, checked here
   Real,    // a number, checked here
   Number,  // a number checked by its own parser at its read
   List,    // several values, checked by its own parser
-  Text,    // a word from a set, checked by its read (or, where its meaning says so, anything else = the default)
+  Text,    // a word from a set: its `allowed` words checked at start-up, or its own parser at its read
   File     // a path
 };
 
@@ -49,6 +49,7 @@ struct Info {
   const char *name;
   Kind kind;
   const char *meaning;
+  const char *allowed = nullptr; // Part 216: a Text setting's words, '|'-separated, checked at start-up
 };
 
 // Sorted by name in byte order (strcmp), for find(); the self-test checks the order.
@@ -66,24 +67,24 @@ inline constexpr Info kTable[] = {
     {"NV11ROUTE_BOX_MODE", Kind::Text, "slow-tier search box growth mode (e.g. round)"},
     {"NV2ROUTE_HIST_EXPONENT_ESCALATION", Kind::Real, "via history: exponent added per round in ratio mode"},
     {"NV2ROUTE_HIST_FACTOR", Kind::Real, "via history: factor in mult mode"},
-    {"NV2ROUTE_HIST_MODE", Kind::Text, "via history: mult or ratio (anything else: additive)"},
+    {"NV2ROUTE_HIST_MODE", Kind::Text, "via history: mult or ratio (add: additive, the default)", "add|mult|ratio"},
     {"NV2ROUTE_HIST_RATIO_EXPONENT", Kind::Real, "via history: exponent in ratio mode"},
-    {"NV2ROUTE_HIST_RELAX", Kind::Flag, "via history: 0 = permanent, no LIFO relaxation (0 = off, else on)"},
-    {"NV2ROUTE_HIST_SCALE", Kind::Text, "via history: overflow = scale each step by the overflow"},
+    {"NV2ROUTE_HIST_RELAX", Kind::Flag, "via history: 0 = permanent, no LIFO relaxation (0 or 1)"},
+    {"NV2ROUTE_HIST_SCALE", Kind::Text, "via history: overflow: scale each step by the overflow (off: the default)", "off|overflow"},
     {"NV2ROUTE_HIST_STEP", Kind::Real, "via history: additive step"},
     {"NV2ROUTE_HIST_STREAK", Kind::Int, "via history: over-capacity rounds in a row before it grows"},
     {"NV2ROUTE_TRACE", Kind::OnIfSet, "per-round trace of via and wire pricing (nv2route)"},
-    {"NV2ROUTE_VIA_AWARE", Kind::Flag, "0: via pricing off, nv1route's exact output (0 = off, else on)"},
+    {"NV2ROUTE_VIA_AWARE", Kind::Flag, "0: via pricing off, nv1route's exact output (0 or 1)"},
     {"NV2ROUTE_VIA_PATIENCE", Kind::Int, "via negotiation: rounds without gain before it stops"},
     {"NV2ROUTE_VIA_ROUNDS", Kind::Int, "via negotiation: most rounds"},
     {"NV2ROUTE_VIA_WEIGHT", Kind::Real, "via cost weight"},
-    {"NV2ROUTE_WIRE_AWARE", Kind::Flag, "0: wire-history pricing off (0 = off, else on)"},
+    {"NV2ROUTE_WIRE_AWARE", Kind::Flag, "0: wire-history pricing off (0 or 1)"},
     {"NV2ROUTE_WIRE_HIST_EXPONENT_ESCALATION", Kind::Real, "wire history: exponent added per round in ratio mode"},
     {"NV2ROUTE_WIRE_HIST_FACTOR", Kind::Real, "wire history: factor in mult mode"},
-    {"NV2ROUTE_WIRE_HIST_MODE", Kind::Text, "wire history: mult or ratio (anything else: additive)"},
+    {"NV2ROUTE_WIRE_HIST_MODE", Kind::Text, "wire history: mult or ratio (add: additive, the default)", "add|mult|ratio"},
     {"NV2ROUTE_WIRE_HIST_RATIO_EXPONENT", Kind::Real, "wire history: exponent in ratio mode"},
-    {"NV2ROUTE_WIRE_HIST_RELAX", Kind::Flag, "wire history: 0 = permanent, no LIFO relaxation (0 = off, else on)"},
-    {"NV2ROUTE_WIRE_HIST_SCALE", Kind::Text, "wire history: overflow = scale each step by the overflow"},
+    {"NV2ROUTE_WIRE_HIST_RELAX", Kind::Flag, "wire history: 0 = permanent, no LIFO relaxation (0 or 1)"},
+    {"NV2ROUTE_WIRE_HIST_SCALE", Kind::Text, "wire history: overflow: scale each step by the overflow (off: the default)", "off|overflow"},
     {"NV2ROUTE_WIRE_HIST_STEP", Kind::Real, "wire history: additive step"},
     {"NV2ROUTE_WIRE_HIST_STREAK", Kind::Int, "wire history: over-capacity rounds in a row before it grows"},
     {"NV3ROUTE_GIANT_FAST_TIER", Kind::Flag, "0: giant nets go through the slow tier too (nv3route; 0 = off, else on)"},
@@ -99,7 +100,7 @@ inline constexpr Info kTable[] = {
     {"PD13ROUTE_REGION_BOX_CAP", Kind::Number, "region stage: largest search margin (Part 76)"},
     {"PD14ROUTE_REGION_COST_POPS", Kind::Number, "region stage's work-gated stop: search expansions (Part 80)"},
     {"PD14ROUTE_REGION_COST_WINDOW", Kind::Number, "region stage's work-gated stop: window in rounds (Part 80)"},
-    {"PD15ROUTE_DETOUR_TRACE", Kind::Text, "1: per-stage detour trace (Part 82, trace only)"},
+    {"PD15ROUTE_DETOUR_TRACE", Kind::Text, "1: per-stage detour trace (Part 82, trace only)", "0|1"},
     {"PD16ROUTE_RECLAIM", Kind::Flag, "the detour reclaim pass (Parts 82-88)"},
     {"PD16ROUTE_RECLAIM_MARGIN", Kind::Number, "reclaim: search margin"},
     {"PD16ROUTE_RECLAIM_MIN_EXCESS", Kind::Number, "reclaim: least detour excess for a net to qualify"},
@@ -122,10 +123,10 @@ inline constexpr Info kTable[] = {
     {"PD33ROUTE_AP", Kind::Text, "ISPD 2024 access points: first (default) or InstantGR's rule"},
     {"PD33ROUTE_LA_COST", Kind::Text, "ISPD 2024 layer assignment's cost (score: the 2024 score)"},
     {"PD33ROUTE_VIA_DEMAND", Kind::Flag, "ISPD 2024: via demand on wire capacity"},
-    {"PD34ROUTE_2D_COST", Kind::Flag, "ISPD 2024: the score's cost in every 2D search"},
+    {"PD34ROUTE_2D_COST", Kind::Text, "ISPD 2024: the 2D searches' cost, pd (default) or score"},
     {"PD34ROUTE_2D_HIST", Kind::Number, "ISPD 2024: 0 = history stays 1 under the score cost"},
     {"PD35ROUTE_LOWMEM", Kind::Text, "low-memory mode: auto (default), 0 or 1"},
-    {"PD35ROUTE_MEMTRACE", Kind::Text, "memory trace (diagnostic only)"},
+    {"PD35ROUTE_MEMTRACE", Kind::Text, "memory trace (diagnostic only)", "0|1"},
     {"PD35ROUTE_PATTERN3D", Kind::Number, "3D pattern passes after layer assignment (needs PD33ROUTE_LA_COST=score)"},
     {"PD37ROUTE_BATCH_TRACE", Kind::OnIfSet, "pattern batches' dependency trace (diagnostic)"},
     {"PD37ROUTE_CELL", Kind::Number, "pattern stage: tile side of its dependency cells"},
@@ -181,7 +182,7 @@ inline constexpr Info kTable[] = {
     {"PD39ROUTE_REGION_WL_FLOOR", Kind::Number, "region stage: wirelength floor (Part 138)"},
     {"PD39ROUTE_SEARCH_BIDIR", Kind::Number, "two-ended search (Parts 196-202; 0 = one-ended)"},
     {"PD39ROUTE_SEARCH_DUMP", Kind::List, "search dump: prefix,every,minpops[,all] (Parts 153, 197; trace only)"},
-    {"PD39ROUTE_SEARCH_TRACE", Kind::Text, "1: search trace (Part 138, trace only)"},
+    {"PD39ROUTE_SEARCH_TRACE", Kind::Text, "1: search trace (Part 138, trace only)", "0|1"},
     {"PD39ROUTE_SKIP_GIANT", Kind::Flag, "leave nets over 1000 pins unrouted (ISPD 2008 only, Part 212)"},
     {"PD39ROUTE_SLOW_CUT", Kind::List, "slow tier cut: tracks,radius,below,every,full (Part 173)"},
     {"PD39ROUTE_SLOW_OVER", Kind::List, "slow tier over-capacity cost: slack[,below] (Part 186)"},
@@ -229,14 +230,14 @@ inline constexpr Info kTable[] = {
     {"VROUTE_FAST_ROUNDS", Kind::Int, "cheap tier: most rounds"},
     {"VROUTE_HIST_EXPONENT_ESCALATION", Kind::Real, "history: exponent added per round in ratio mode"},
     {"VROUTE_HIST_FACTOR", Kind::Real, "history: factor in mult mode"},
-    {"VROUTE_HIST_MODE", Kind::Text, "history: mult or ratio (anything else: additive)"},
+    {"VROUTE_HIST_MODE", Kind::Text, "history: mult or ratio (add: additive, the default)", "add|mult|ratio"},
     {"VROUTE_HIST_RATIO_EXPONENT", Kind::Real, "history: exponent in ratio mode"},
-    {"VROUTE_HIST_RELAX", Kind::Flag, "history: 0 = permanent, no LIFO relaxation (0 = off, else on)"},
-    {"VROUTE_HIST_SCALE", Kind::Text, "history: overflow = scale each step by the overflow"},
+    {"VROUTE_HIST_RELAX", Kind::Flag, "history: 0 = permanent, no LIFO relaxation (0 or 1)"},
+    {"VROUTE_HIST_SCALE", Kind::Text, "history: overflow: scale each step by the overflow (off: the default)", "off|overflow"},
     {"VROUTE_HIST_STEP", Kind::Real, "history: additive step"},
     {"VROUTE_HIST_STREAK", Kind::Int, "history: over-capacity rounds in a row before it grows"},
     {"VROUTE_MAX_MARGIN", Kind::Int, "largest search margin (-1: nv4route's rule)"},
-    {"VROUTE_MSMV", Kind::Flag, "0: fixed-topology slow tier instead of MSMV maze growth (0 = off, else on)"},
+    {"VROUTE_MSMV", Kind::Flag, "0: fixed-topology slow tier instead of MSMV maze growth (0 or 1)"},
     {"VROUTE_POWER", Kind::Real, "price curve exponent"},
     {"VROUTE_SLOW_ROUNDS", Kind::Int, "slow tier: most rounds"},
     {"VROUTE_THRESHOLD", Kind::Real, "per-round pricing threshold"},
@@ -414,6 +415,27 @@ inline std::vector<std::string> problems(char *const *envp) {
         out.push_back("unknown setting " + name + (near.empty() ? std::string() : " (did you mean " + near + "?)"));
       }
       continue;
+    }
+    const std::string val(eq + 1);
+    if (i->kind == Kind::Flag && val != "0" && val != "1")
+      out.push_back(std::string(i->name) + " must be 0 or 1 (got '" + val + "')");
+    if (i->kind == Kind::OnIfSet && val != "1")
+      out.push_back(std::string(i->name) + " is on when set: set it to 1, or leave it unset for off (got '" + val + "')");
+    if (i->allowed) {
+      bool ok = false;
+      std::string words = i->allowed, w;
+      for (size_t a = 0, b; a <= words.size(); a = b + 1) {
+        b = words.find('|', a);
+        b = b == std::string::npos ? words.size() : b;
+        ok |= words.compare(a, b - a, val) == 0 && val.size() == b - a;
+      }
+      if (!ok) {
+        std::string list = words;
+        for (char &c : list)
+          if (c == '|')
+            c = '/';
+        out.push_back(std::string(i->name) + " must be one of " + list + " (got '" + val + "')");
+      }
     }
     long long x = 0;
     double r = 0;

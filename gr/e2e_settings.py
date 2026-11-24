@@ -481,6 +481,38 @@ def main():
     ok, err = refused({'VROUTE_EPS': '0,1'}, 'badnumber')
     check('a setting whose value is not a number stops the run', ok and "VROUTE_EPS must be a number (got '0,1')" in err,
           err[:90])
+    # Part 216 (2026-11-24): the command line, the settings and the input are all checked before any work, and every
+    # problem is reported -- numbered, in one report -- with no route written.
+    def stopped(args, extra, tag):
+        out = os.path.join(work, f'{tag}.route')
+        if os.path.exists(out):
+            os.remove(out)
+        p = subprocess.run([router] + args, env={**base, **extra}, capture_output=True, text=True)
+        return p.returncode, p.stderr, not os.path.exists(out)
+    rc, err, none = stopped(['--sharp', os.path.join(work, 'hard.gr'), os.path.join(work, 'opt.route')], {}, 'opt')
+    check('an unknown option stops the run with its usage', rc == 2 and none and 'unknown option --sharp' in err and
+          'usage:' in err, err.strip().splitlines()[1][:90] if err.strip() else 'no message')
+    rc, err, none = stopped([os.path.join(work, 'nothere.gr'), os.path.join(work, 'two.route')], {'VROUTE_EPS': 'x'}, 'two')
+    check('a missing design and a bad setting are both reported',
+          rc != 0 and none and 'error: 2 problems' in err and 'cannot read the .gr file' in err and
+          "VROUTE_EPS must be a number (got 'x')" in err, err.strip().splitlines()[0][:90] if err.strip() else '')
+    bad = os.path.join(work, 'bad.gr')
+    with open(os.path.join(work, 'hard.gr')) as f:
+        text = f.read().split('\n')
+    # the first net's name repeated on the second net, and the first pin moved off the grid
+    first = next(i for i, l in enumerate(text) if l.startswith('num net')) + 1
+    second = first + 1 + int(text[first].split()[2])  # after the first net's pin lines
+    text[second] = text[first].split()[0] + ' ' + ' '.join(text[second].split()[1:])
+    text[first + 1] = '99999999 ' + ' '.join(text[first + 1].split()[1:])
+    with open(bad, 'w') as f:
+        f.write('\n'.join(text))
+    rc, err, none = stopped([bad, os.path.join(work, 'bad.route')], {}, 'bad')
+    check('every problem in the design is reported, with its line',
+          rc != 0 and none and 'error: 1 problem' in err and f'bad.gr:{first + 2}:' in err and 'outside the grid' in err
+          and f'bad.gr:{second + 1}:' in err and 'appears twice' in err, ' | '.join(err.strip().splitlines()[1:3])[:110])
+    rc, err, none = stopped([os.path.join(work, 'hard.gr'), os.path.join(work, 'no', 'such', 'folder.route')], {}, 'nofolder')
+    check('an output folder that does not exist stops the run before routing', rc != 0 and 'does not exist' in err and
+          'slow round' not in err, err.strip().splitlines()[1][:90] if err.strip() else '')
     failed = [n for n, ok, _ in checks if not ok]
     print(f'\n{len(checks) - len(failed)} of {len(checks)} passed' + (': FAILED ' + ', '.join(failed) if failed else ''))
     sys.exit(1 if failed else 0)

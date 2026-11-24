@@ -228,8 +228,29 @@ def selftest():
 if __name__ == '__main__':
     if '--selftest' in sys.argv:
         sys.exit(0 if selftest() else 1)
-    if len(sys.argv) < 7:
-        print(__doc__)
-        sys.exit(2)
-    a = sys.argv
-    print(build(a[1], a[2], a[3], a[4], float(a[5]), float(a[6]), a[7] if len(a) > 7 else LIBERTY))
+    # Part 216 (the user, 2026-11-24): every argument and input checked first, every problem reported
+    import flowcheck
+    _, a, p = flowcheck.parse_options(sys.argv[1:], {}, None, 'elmore_rows.py')
+    if len(a) not in (6, 7):
+        p.add(f'{len(a)} arguments given; 6 or 7 expected')
+    else:
+        d = a[0].rstrip('/')
+        if p.need_dir(d, 'DESIGN_DIR'):
+            for ext in ('.def', '.net', '.cap'):
+                p.need_file(os.path.join(d, os.path.basename(d) + ext), f"the design's {ext} file")
+        if a[1] != 'none':
+            p.need_file(a[1], 'SLACK_FILE')
+        if a[2] not in ('replace', 'min'):
+            p.add(f"MODE must be replace or min (got '{a[2]}')")
+        p.need_output(a[3], 'OUT.rows')
+        for v, what, lo in ((a[4], 'K', 0.0), (a[5], 'KP', None)):
+            try:
+                x = float(v)
+                if not (x == x and abs(x) != float('inf')) or (lo is not None and not x > lo) or x < 0:
+                    raise ValueError
+            except ValueError:
+                p.add(f"{what} must be a number {'> 0' if lo is not None else '>= 0'} (got '{v}')")
+        p.need_file(a[6] if len(a) > 6 else LIBERTY, 'LIBERTY')
+        p.need_file(os.path.join(HERE, 'standard25.env'), 'standard25.env (the layer R and C)')
+    p.stop_if_any('usage:\n  python3 gr/elmore_rows.py DESIGN_DIR SLACK_FILE|none MODE OUT.rows K KP [LIBERTY]  |  --selftest')
+    print(build(a[0], a[1], a[2], a[3], float(a[4]), float(a[5]), a[6] if len(a) > 6 else LIBERTY))
