@@ -16478,3 +16478,16 @@ consecutive round routes compared net by net):
 So a warm start could save at most ~10% of a round, and has no churn to remove. It was not built (the review costed it
 at days).
 
+### Method 4 (a higher round cap): visible mempool_tile_wrap at cap 48 -- a gain, and the one-session check
+
+`timing_loop.py --refine 48` with today's standard otherwise (patience 3, one session a round), frozen flow, finished
+15:06; its wall time 21150 s includes the 4.8 h sleep. Refinement gained to m32 (-1.3109) and stopped by itself at m36
+(four rounds without a new best). The Elmore stage at m32: K 35 -1.6738, K 70 -1.6544, K 140 -1.4353.
+**Final -1.6738 against -1.6469 at cap 24 (-0.027)**.
+- Rounds 1-23 reproduce the cap-24 run (two sessions a round, Part 215) to four decimals (m7 -1.1423, m11 -1.1897,
+  m20 -1.2697, m23 -1.2802). m24 reads -1.2777 against -1.2795: the 0.0018 power-reading wobble Part 215 found.
+  So one session a round gives the same results as two, measured on 23 rounds.
+- A higher cap costs nothing where refinement stops by itself before it. Of the nine designs in the patience test, only
+  visible mempool_tile_wrap and blind mempool_group reached round 24. Raising the standard's cap (48, or none) would
+  change only designs like those; not adopted, the user to decide.
+
