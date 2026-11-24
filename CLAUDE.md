@@ -885,6 +885,16 @@ agent knew from scratch just to keep going. Two rules follow from that:
   runs the default silently) and on an Int / Real setting whose value is not a number, and `gr/settings_check.py`
   (CI) checks the table against the source and every `gr/*.env`. `./pd39route --settings` lists them all, with what
   the environment sets.
+- **Nothing runs until everything is checked** (2026-11-24, the user; Part 216). `pd39route` is `RouterRun`
+  (`gr/pd39_run.h`): `commandLine()`, `readSettings()`, `readInputs()`, then `work()`. A new setting's parse goes in
+  `readSettings()` (in its own `step()`, never between stages), its name in `gr/pd39_settings.h`. A new input check
+  goes in `readInputs()`. Both report through `fail()`, which throws while validating, so every problem is listed in
+  one report and no work starts. The flow scripts do the same through `gr/flowcheck.py`: an unknown option, a bad value
+  or a missing input is reported with all the others before anything runs.
+- **pd39route's source is three files plus the settings table** (R3, Part 216): `gr/pd39route.cpp` (the routing,
+  ~14,900 lines), `gr/pd39_run.h` (the run) and `gr/pd39_selftest.h` (the self-test), included once into the same
+  translation unit, so the one-line g++ build is unchanged. Change them in place, checked byte-identical (or measured
+  as a flow change), rather than copying a whole generation to a new file.
 - Load settings files line by line (as `gr/run_batch.sh` does), never by sourcing them with `.`:
   `fast08.env`'s `PD39ROUTE_PORTFOLIO` value contains `;`, which a shell treats as a command separator.
 - Write a new router binary to a fresh file (`rm` it first, or build to a new name): copying over an

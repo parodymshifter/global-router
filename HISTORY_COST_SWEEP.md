@@ -16412,3 +16412,19 @@ The flow scripts get the same rule through `gr/flowcheck.py` (`Problems`, `parse
 **Sleep:** the laptop slept 09:20:38 -> 14:07:52, with brief maintenance wakes. Every job paused and resumed by itself;
 wall times of runs spanning it are not comparable.
 
+### R3: the source split, in place
+
+`pd39route.cpp` (26,054 lines) became:
+- `gr/pd39route.cpp` (14,867 lines, the routing);
+- `gr/pd39_run.h` (2,069, `RouterRun`);
+- `gr/pd39_selftest.h` (9,132, the self-test).
+
+Both headers are included once at their old place, so it is one translation unit and the same one-line build.
+Runtime cannot change: the same code is compiled in the same order. It improves the code: the routing code is
+separate from the run and the tests. A full split into separately compiled modules was not done: it would not be
+faster without link-time optimization, it would end the one-line build, and it would cost days. The other half of R3
+(stop copying files) is the practice since Part 123 (pd39route edited in place); CLAUDE.md now says so.
+`gr/settings_check.py` reads the three files.
+Checks of the split build: warning-free; self-test passes; `e2e_settings.py` 59 of 59; routes byte-identical on the
+synthetic design and visible ariane (newblue1 and adaptec1 queued behind the pd38route comparison).
+

@@ -22,7 +22,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def main():
     stem = sys.argv[1] if len(sys.argv) > 1 else 'pd39route'
-    src = open(os.path.join(HERE, stem + '.cpp')).read()
+    # the router's source: its .cpp and the parts split out of it (Part 216, R3: <stem without 'route'>_run.h, _selftest.h)
+    parts = [stem + '.cpp'] + [f for f in (stem.replace('route', '') + '_run.h', stem.replace('route', '') + '_selftest.h')
+                               if os.path.exists(os.path.join(HERE, f))]
+    src = '\n'.join(open(os.path.join(HERE, f)).read() for f in parts)
     head = open(os.path.join(HERE, 'pd39_settings.h')).read()
     # the registry's own self-test feeds made-up names (misspellings, other prefixes) on purpose
     i = src.find('void testSettingsRegistry() {')
@@ -42,9 +45,10 @@ def main():
         bad.append(f'{n} is read by {stem} but not in the table')
     for n in sorted(set(names) - used):
         bad.append(f'{n} is in the table but {stem} does not read it')
-    direct = [i + 1 for i, line in enumerate(src.split('\n')) if 'std::getenv(' in line]
-    if direct:
-        bad.append(f'{stem}.cpp reads std::getenv directly at lines {direct[:10]} (use settings::get)')
+    for f in parts:
+        direct = [i + 1 for i, line in enumerate(open(os.path.join(HERE, f))) if 'std::getenv(' in line]
+        if direct:
+            bad.append(f'{f} reads std::getenv directly at lines {direct[:10]} (use settings::get)')
     for f in sorted(glob.glob(os.path.join(HERE, '*.env'))):
         for i, line in enumerate(open(f), 1):
             line = line.strip()
