@@ -382,6 +382,11 @@ Refining after the Elmore stage (2026-11-22, off the standard flow, Part 215): b
 (nine rounds), visible mempool_tile_wrap -1.4049 -> -1.6478, five others 0 to -0.012 -- blind six **5.7682** on record, twelve
 designs -31.26. Both gains come where classic refinement had stopped at its first worse round; continuing classic refinement
 instead gave mempool_tile_wrap the same (-1.6236), so the lever is refinement's stop rule (untested as a flow change).
+Tested as a flow change on 2026-11-23 (Part 215, not adopted; `timing_loop.py --patience 3 --refine 24`: a round without
+gain no longer stops refinement until four in a row): never worse on nine designs, visible mempool_tile_wrap -1.4049 ->
+-1.6469, blind mempool_group **0.8855** (contest score; today's standard measured on it 0.9689 -- its recorded 1.0946 was
+refined under OpenROAD's count), visible bsg_chip -0.008, six unchanged; the cap of 24 bound on both big gainers. Blind six
+**5.7095** on record, twelve designs -31.31 (OpenROAD's count). Cost: blind mempool_group 16.5 h of refinement.
 Since 2026-11-09 (Part 189) all twelve 2025 designs are scored: mempool_cluster visible -0.6993, blind -1.3643,
 **twelve designs -27.17**. On a 24 GB Mac its OpenROAD sessions peak at 80-113 GB of footprint on swap, so it runs
 with `--lean` (compress every route that can no longer win), `SLACK_BANDS=16` (walk the failing paths in slack
