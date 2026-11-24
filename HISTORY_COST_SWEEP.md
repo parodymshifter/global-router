@@ -16491,3 +16491,23 @@ at days).
   visible mempool_tile_wrap and blind mempool_group reached round 24. Raising the standard's cap (48, or none) would
   change only designs like those; not adopted, the user to decide.
 
+**2026-11-24 15:33, the user: "try the gentler fade on the ones where it might help. also raise the cap to 48, drop
+warm start and after the test if the fade fails to help drop the decay."**
+- The cap is 48 (`REFINE_ROUNDS`).
+- Warm-started rounds are dropped (measured above: no churn to remove, at most ~10% of a round).
+- Decay 0.8 so far:
+
+| design | standard | decay 0.8 |
+|---|---|---|
+| visible ariane | -4.0584 | best round -4.0152 (its Elmore stage resumes later) |
+| visible mempool_tile_wrap | -1.6469 | -1.4391 (refinement stopped improving at m11) |
+| blind ariane | -0.2788 | -0.2790 |
+| visible NV_NVDLA_partition_c | -6.2887 | -6.2887 (the best comes before refinement) |
+| blind NV_NVDLA_partition_c | -1.4391 | -1.4391 (the best comes before refinement) |
+
+  Blind bsg_chip's decay 0.8 loop was stopped at 15:33, at its Elmore stage. Refinement never acted on that design
+  (its best is the input-class ladder's), so the run could not show anything.
+- **Decay 0.95** (a net out of the classes after ~45 rounds instead of ~11), with cap 48: visible ariane, visible and
+  blind mempool_tile_wrap, visible bsg_chip, the four small designs where refinement acts (`p216/run95.sh`). If it
+  does not help, `--decay` is removed.
+

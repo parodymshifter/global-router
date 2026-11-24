@@ -22,7 +22,7 @@ everywhere (routed: visible ariane -3.31 vs -2.27; input: blind mempool_tile_wra
 unbiased route seemed to fail on only 665 nets -- Part 215: a slack-script bug dropped 81% of its failing paths;
 fixed, 9263 nets, and routed classes win there too). `--classes routed|input` runs one. Stage 2: at the best, the power
 term at KP_LADDER with the same classes. Stage 3 (Part 188, default since 2026-11-06; `--refine N`, 0 = off,
-default 2, 12 since 2026-11-20, 24 since 2026-11-24, Part 215): sticky re-classification -- the best route's own failing-path
+default 2, 12 since 2026-11-20, 24 then 48 since 2026-11-24, Parts 215-216): sticky re-classification -- the best route's own failing-path
 slack merged with every slack measured before (per net, the worst), and a re-route at the best's setting, while it gains (ten
 designs -23.97 -> -25.11, none worse). Since 2026-11-24 (`--patience P`, default 3; 0 = the old rule) a round without gain
 does not stop it until P + 1 rounds in a row have none, and each round's route is scored by the session that measures its
@@ -81,7 +81,9 @@ ELMORE_GIVEN = False  # --elmore K1,K2,... given: exactly those
 # refinement stopped at m8 after m7 -1.1423; three more rounds were needed for a new best (m11 -1.1897). Nine designs at
 # patience 3, cap 24: never worse; visible mempool_tile_wrap -1.4049 -> -1.6469, blind mempool_group 0.9689 -> 0.8855
 PATIENCE = 3
-REFINE_ROUNDS = 24  # --refine N (Part 188: 2; 2026-11-20: 12; 2026-11-24, with patience 3: 24 -- it bound on both gainers)
+REFINE_ROUNDS = 48  # --refine N (Part 188: 2; 2026-11-20: 12; 2026-11-24, with patience 3: 24 -- it bound on both gainers;
+# 2026-11-24 15:33, the user: 48 -- visible mempool_tile_wrap gained to m32, -1.6469 -> -1.6738; patience stops it earlier
+# wherever rounds stop gaining, so only designs still gaining at 24 run longer, Part 216)
 # Part 215 (the user, 2026-11-24: standard): a refinement round's route is scored by the OpenROAD session that measures
 # its slack (that session reads timing and power too), not by a scoring session first and a slack session in the next
 # round -- the same measurements, one session per round instead of two (blind mempool_group: ~17 of every ~40 min).

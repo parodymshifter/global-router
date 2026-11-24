@@ -390,7 +390,8 @@ gain no longer stops refinement until four in a row): never worse on nine design
 -1.6469, blind mempool_group **0.8855** (contest score; today's standard measured on it 0.9689 -- its recorded 1.0946 was
 refined under OpenROAD's count), visible bsg_chip -0.008, six unchanged; the cap of 24 bound on both big gainers. Blind six
 **5.7095** on record, twelve designs -31.31 (OpenROAD's count). Cost: blind mempool_group 16.5 h of refinement.
-**Since 2026-11-24 (the user) both are the standard**: `timing_loop.py` defaults to `--patience 3` and `--refine 24`
+**Since 2026-11-24 (the user) both are the standard**: `timing_loop.py` defaults to `--patience 3` and `--refine 48` (24
+until 15:33 that day; Part 216: visible mempool_tile_wrap kept gaining to round 32, -1.6469 -> -1.6738)
 (`--patience 0 --refine 12` gives the old rule), and each refinement round's route is scored by the OpenROAD session that
 measures its slack -- one session per round instead of two, the same measurements (blind mempool_group: ~17 of every ~40
 min; `--two-sessions` gives the old way back). The power reading moves ~4e-5 relative between sessions on the same route
