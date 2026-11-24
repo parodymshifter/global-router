@@ -73,6 +73,7 @@ def read_dump(path):
     totals = {}
     reroutes = []  # (round, margin, limited, pops, halo)
     head = ''
+    cur = None  # the round of the last R line (2026-11-24: was unset before the first one, ruff F821)
     with open(path) as f:
         for line in f:
             t = line.split()
@@ -81,6 +82,8 @@ def read_dump(path):
             if t[0] == 'N':
                 reroutes.append((int(t[1]), int(t[3]), int(t[4]), int(t[5]), int(t[6])))
             elif t[0] == 'O':
+                if cur is None:
+                    raise SystemExit(f'{path}: an O line before the first R line')
                 over[t[1] + t[2]][cur] = int(t[3])
             elif t[0] == 'R':
                 cur = int(t[1])

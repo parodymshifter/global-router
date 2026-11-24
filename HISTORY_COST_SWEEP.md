@@ -16290,3 +16290,64 @@ can fall, randomized rounding of the hotspot program, a stabilized lower bound f
    `log(0)` and `log(-1)` are intentional tests of detmath; its two empty-container hits cannot be empty by their callers
    -- by reading, not by a test). Added to `recaps/review-2026-11-24.html` as an update section.
 
+**2026-11-24 07:55-08:34: R2 and R5 of the review (the user: "yes to R2 and R5").**
+*R2, the settings table.* `gr/pd39_settings.h`: all 188 settings, each with a kind and a one-line meaning -- the 185
+quoted names `pd39route.cpp` reads (no name is built at run time; checked by grep) plus `GR_GPU`, `GR_METALLIB`,
+`GR_SIGNPOSTS`. All 223 reads go through `settings::get`, which stops the run on a name the table lacks. At the start of
+every routing run, `settings::checkEnvironment()` stops it on:
+- any variable with one of the table's prefixes that is not in the table, naming the nearest setting (edit distance);
+- any Int / Real setting whose value is not a whole number / finite number. These are the 31 settings that used `atoi` /
+  `atof` (clang-tidy's unchecked conversions), several read lazily inside functions; they are parsed strictly at start-up,
+  and their read sites use `settings::intValue` / `realValue`.
+
+`./pd39route --settings` lists the table and what the environment sets. Defaults stay at their read sites (R2 as first
+written put them in one struct: not done).
+
+Checks:
+- a self-test of 9 checks on the table, lookup, strict parsing (valid values equal to `atof` / `atoi`'s), the problems of
+  a made-up environment and the nearest-name offer;
+- two end-to-end cases in `gr/e2e_settings.py` (a misspelled name, `VROUTE_EPS=0,1`: each stops the run, no route
+  written; 55 of 55 pass);
+- `gr/settings_check.py`, now in CI's settings job: the table equals the source's names, is sorted, no read bypasses it,
+  and every `gr/*.env` name is in it. A removed entry and a direct `getenv` were each tried and caught.
+
+Compatibility, checked by grep:
+- every name in the 8 `gr/*.env` files, the flow scripts, the workflows and the 59 names in recorded `pd39route` job
+  lines (`~/Code/GlobalRouterRuns/**/*.jobs`) is in the table;
+- all 12 recorded values of the 31 numeric settings (job files, scripts, workflows, documents) are numbers.
+
+*R5.*
+- F2: `testFixedTopologySlowTierStillWorksAfterTheCollapse` also routes a congested design (250 nets, 40 x 40, capacity 2,
+  two fast rounds): 240 nets escalate and 1430 fixed-topology searches run (a new counter, `gFixedTopologySlowRoutes`).
+  Every net must be connected and on all its pin tiles, with overflow no worse than the fast tier's (1666 vs 1734).
+  - Connectivity alone did not catch a `routeNetSlow` that routes nothing (an empty route counts as connected), which was
+    also true of the old test.
+  - With the pin-tile check, that broken build fails.
+  - The design has 248 routable nets, not 250: two have all their pins in one tile.
+- F5:
+  - `NV3ROUTE_GIANT_FAST_TIER` is read once.
+  - `rewind` became a checked `fseek`.
+  - `FastText::open` closes an old handle and resets its buffer.
+  - Two self-tests return after a failed sanity check instead of indexing -1.
+  - `RealViaUsage` stops on more than 2^32 via sites, and the four 32-bit via-index stores are explicit casts.
+  - The 8 shadowed names are renamed (three by reading each history mode once).
+  - clang `-Wall -Wextra -Wshadow` and `-Wshorten-64-to-32` now report 0 warnings.
+- Python:
+  - `region_dump_analysis.py` sets `cur` before use and stops on an `O` line before the first `R` line (ruff F821).
+  - Removed: `gzip` in `cg_merge.py`, `sys` in `search_bound_sim.py` and `search_parallel_sim.py`, `head_end` in
+    `tighten_gr.py`; ruff's error checks (`F`) pass on `gr/` and `perf/`.
+  - The 19 loop-variable closures (ruff B023) were each read: every one is called within the iteration that defines it.
+    Left as they are.
+
+*Routes unchanged, byte for byte*, the final source against the binary before any of this (built from 4aabed6's
+`pd39route.cpp` with the documented `-O2` line). Four designs, settings files loaded line by line, in
+`~/Code/GlobalRouterTemp/p216/`:
+- the synthetic design (`perf/gen_synth.py`), standard + fast08 + speed08: md5 cf0e0a84;
+- adaptec1, same settings: f8f00bd2, 0 overflow;
+- newblue1, same settings: ba27e2f7, 0 overflow;
+- visible ariane, standard + standard24 + fast24 + standard25: b899d56b.
+
+Also passing: the self-test; the address + undefined-behaviour sanitizer self-test (0 reports); `input_check` and
+`g24_verify` self-tests; `g24_bridge`, `g24_gap` and `pd38route` compile warning-free with the changed `g24_io.h`. Wall
+times are not compared: the runs shared the machine.
+

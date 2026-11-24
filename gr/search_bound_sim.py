@@ -41,7 +41,6 @@ import argparse
 import glob
 import heapq
 import struct
-import sys
 
 INF = float('inf')
 EPS = (1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 1e-1)

@@ -519,6 +519,9 @@ public:
       std::fclose(f_);
   }
   bool open(const std::string &path) {
+    if (f_) // a second open starts afresh (2026-11-24, code review F5: the old handle leaked)
+      std::fclose(f_);
+    pos_ = len_ = 0;
     f_ = std::fopen(path.c_str(), "rb");
     return f_ != nullptr;
   }

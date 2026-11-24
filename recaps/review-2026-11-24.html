@@ -243,6 +243,46 @@ img.px { image-rendering: pixelated; }
   settings already check (<code>PD39ROUTE_LA_CRIT</code> must be 0 or 1); the registry would make that the rule.</p></div>
 </section>
 
+<section id="update2">
+  <h2>Update, 24 November 07:55&ndash;08:40 EST: R2 and R5 done</h2>
+  <p><strong>R2, the settings table.</strong> <code>gr/pd39_settings.h</code> lists all 188 settings: the 185 the router reads
+  under 35 prefixes, plus <code>GR_GPU</code>, <code>GR_METALLIB</code> and <code>GR_SIGNPOSTS</code>. Each entry has a kind and a
+  one-line meaning. All 223 reads in <code>pd39route.cpp</code> go through <code>settings::get</code>, which stops the run if a name
+  is not in the table. At the start of every routing run, the router now stops on:</p>
+  <ul>
+    <li>a variable named like a setting but not one of them, naming the nearest real one (F4);</li>
+    <li>any of the 31 settings that used to go through <code>atoi</code> / <code>atof</code> whose value is not a number. These are
+    checked once at start-up, because several were read only when their function first ran, hours into a route (F9).</li>
+  </ul>
+  <p><code>./pd39route --settings</code> prints the table and what the environment sets. <code>gr/settings_check.py</code>
+  (now in CI) checks the table against the source and every <code>gr/*.env</code>. It caught both deliberate breaks tried: a
+  missing entry and a direct <code>getenv</code>. Nothing on record breaks:</p>
+  <ul>
+    <li>every name is known in the 8 settings files, the flow scripts, the workflows and the 59 names in recorded
+    <code>pd39route</code> job lines;</li>
+    <li>all 12 recorded values of the 31 numeric settings are numbers.</li>
+  </ul>
+  <p>Two parts of R2 as first written were left out. Defaults stay at their read sites rather than in one settings struct.
+  Per-setting end-to-end coverage stays as it was (recent settings only).</p>
+  <p><strong>R5.</strong></p>
+  <ul>
+    <li>F2: the fixed-topology test now also routes a congested design. 240 nets escalate, 1430 fixed-topology searches run,
+    and every net must lie on all its pin tiles. A version whose fixed-topology search routes nothing fails it. Connectivity
+    alone did not catch that, since an empty route counts as connected: the old test had the same gap.</li>
+    <li>F5: the history setting is read once; <code>rewind</code> became a checked <code>fseek</code>; <code>FastText::open</code>
+    closes an old handle; two self-tests return after a failed sanity check instead of indexing -1; a grid with more than
+    2<sup>32</sup> via sites stops with a message, and the four 32-bit stores are explicit; the 8 shadowed names are renamed.
+    <code>-Wshadow</code> and <code>-Wshorten-64-to-32</code> now report 0 warnings.</li>
+    <li>Python: the <code>region_dump_analysis.py</code> bug is fixed, and 3 unused imports and 1 unused value are removed.
+    The 19 loop closures were read: each is used within its own iteration, so all are left as they are.</li>
+  </ul>
+  <p><strong>Routes are unchanged:</strong> byte for byte against the old binary on four designs, each with its standard settings:
+  the synthetic design and ISPD 2008 adaptec1 and newblue1 (standard + fast08 + speed08), and ISPD 2025 visible ariane
+  (standard + standard24 + fast24 + standard25). The self-test passes, as do the address and undefined-behaviour
+  sanitizer self-test (0 reports), the 55 end-to-end settings checks and the self-tests of the other programs that share
+  <code>g24_io.h</code>.</p>
+</section>
+
 <section id="findings">
   <h2>Findings, most important first</h2>
   <div class="findings">

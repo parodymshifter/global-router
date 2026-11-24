@@ -466,6 +466,21 @@ def main():
     check('PD39ROUTE_TIMING_ROWS sets a listed net\'s layers', w_no3.get('metal3', 0) == 0 and w_no3.get('metal5', 0) > 0
           and w_no5.get('metal5', 0) == 0 and w_no5.get('metal3', 0) > 0,
           f'crit horizontal wire by layer: metal3 forbidden {w_no3}, metal5 forbidden {w_no5}')
+    # Part 215 (2026-11-24): the settings table (pd39_settings.h). A misspelled name, or an Int / Real setting whose value
+    # is not a number, stops the run before it reads the design, naming the setting; no route is written.
+    def refused(extra, tag):
+        out = os.path.join(work, f'hard.{tag}.route')
+        if os.path.exists(out):
+            os.remove(out)
+        p = subprocess.run([router, os.path.join(work, 'hard.gr'), out], env={**base, **extra}, capture_output=True,
+                           text=True)
+        return p.returncode != 0 and not os.path.exists(out), p.stderr.strip()
+    ok, err = refused({'PD39ROUTE_SKIP_GAINT': '1'}, 'misspelled')
+    check('a misspelled setting stops the run, naming the nearest one',
+          ok and 'unknown setting PD39ROUTE_SKIP_GAINT (did you mean PD39ROUTE_SKIP_GIANT?)' in err, err[:90])
+    ok, err = refused({'VROUTE_EPS': '0,1'}, 'badnumber')
+    check('a setting whose value is not a number stops the run', ok and "VROUTE_EPS must be a number (got '0,1')" in err,
+          err[:90])
     failed = [n for n, ok, _ in checks if not ok]
     print(f'\n{len(checks) - len(failed)} of {len(checks)} passed' + (': FAILED ' + ', '.join(failed) if failed else ''))
     sys.exit(1 if failed else 0)

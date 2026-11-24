@@ -47,7 +47,6 @@ def main():
     vias = nxt()
     org = nxt().split()
     llx, lly, tw, th = float(org[0]), float(org[1]), float(org[2]), float(org[3])
-    head_end = i
     numnet = nxt()
     n = int(numnet.split()[2])
     net_start = i

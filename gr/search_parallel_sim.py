@@ -23,7 +23,6 @@ import glob
 import heapq
 import math
 import struct
-import sys
 
 
 def load(path):

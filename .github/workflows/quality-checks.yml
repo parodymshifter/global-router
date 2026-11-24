@@ -205,7 +205,7 @@ jobs:
           path: fp/
 
   settings-e2e:
-    name: New settings take effect (end to end)
+    name: Settings take effect (end to end) and match the table
     # gr/e2e_settings.py (HISTORY_COST_SWEEP.md Part 149): runs the router itself on small synthetic designs,
     # each recent setting given through the environment as a real run gives it, and checks for evidence the
     # mechanism acted (a self-test that sets the variable directly cannot catch a setting main() reads too late).
@@ -213,6 +213,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: The settings table matches the source
+        # gr/settings_check.py (Part 215, 2026-11-24): every setting the router reads is in gr/pd39_settings.h and
+        # nothing else is, the table is sorted, no read bypasses it, and every gr/*.env name is in it.
+        run: python3 gr/settings_check.py "$PORTABLE_ROUTER"
       - name: Build and check
         shell: bash
         run: |

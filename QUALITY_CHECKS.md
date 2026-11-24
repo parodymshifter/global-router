@@ -13,7 +13,7 @@ setting at its top; since 2026-11-24 -- from 2026-10-14 to then it still checked
 | Static analysis | clang-tidy and cppcheck read the code and list likely mistakes | every push, every pull request, nightly |
 | Sanitizers | Builds the router so it stops on memory errors and bad math, then runs the self-tests and a routed test design | every push, every pull request, nightly |
 | Same routes on every platform | Builds `PORTABLE_ROUTER` on Linux and macOS, routes a test design on each, and compares the routes | every push, every pull request, nightly |
-| New settings take effect | `gr/e2e_settings.py`: runs the router with each recent setting given through the environment and looks for evidence the mechanism acted | every push, every pull request, nightly |
+| Settings take effect and match the table | `gr/settings_check.py`: the settings table `gr/pd39_settings.h` lists exactly the settings the router reads, sorted, and covers every `gr/*.env` name; then `gr/e2e_settings.py`: runs the router with each recent setting given through the environment and looks for evidence the mechanism acted, and checks that a misspelled name or a non-numeric value stops the run | every push, every pull request, nightly |
 | Valgrind | A slower and deeper memory check | nightly and on request |
 | Timing | Routes a fixed test design three times and compares time, memory, overflow and wirelength with the last good run on main | every push, every pull request, nightly |
 

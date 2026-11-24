@@ -1418,6 +1418,7 @@
 #include "cut_bound.h" // Part 162: the forced-overflow report
 #include "gpu/pattern_kernel.h"
 #include "signpost.h"
+#include "pd39_settings.h" // Part 215 (2026-11-24): every setting, and the checks on them
 
 using gr_io::Design;
 using gr_io::fail;
@@ -1689,8 +1690,8 @@ struct Prices {
 // reproduces nv3route's own exact curve.
 double priceExponentTerm(double usage, double cap, double threshold) {
   static const double power = [] {
-    const char *p = std::getenv("VROUTE_POWER");
-    return p ? std::atof(p) : 1.5;
+    const char *p = settings::get("VROUTE_POWER");
+    return p ? settings::realValue("VROUTE_POWER", p) : 1.5;
   }();
   if (threshold >= 1.0)
     return std::max(0.0, usage / cap - 1.0);
@@ -1701,8 +1702,8 @@ double priceExponentTerm(double usage, double cap, double threshold) {
 
 double defaultThreshold() {
   static const double threshold = [] {
-    const char *t = std::getenv("VROUTE_THRESHOLD");
-    return t ? std::atof(t) : 0.05;
+    const char *t = settings::get("VROUTE_THRESHOLD");
+    return t ? settings::realValue("VROUTE_THRESHOLD", t) : 0.05;
   }();
   return threshold;
 }
@@ -3401,8 +3402,8 @@ DijkstraResult routeSegment(const RoutingGrid &g, const Prices &prices, const La
                              SearchRegion &region, Point p1, int p1Layer, Point p2, int width,
                              int marginOverride = -1) {
   static const int maxMargin = [] {
-    const char *m = std::getenv("VROUTE_MAX_MARGIN");
-    return m ? std::atoi(m) : 6;
+    const char *m = settings::get("VROUTE_MAX_MARGIN");
+    return m ? settings::intValue("VROUTE_MAX_MARGIN", m) : 6;
   }();
   int cap = marginOverride >= 1 ? marginOverride : maxMargin;
   int span = std::abs(p1.x - p2.x) + std::abs(p1.y - p2.y);
@@ -4144,8 +4145,8 @@ MSMVResult routeStepMSMV(const RoutingGrid &g, const Prices &prices, const Layer
                           const std::vector<Point> &sinks, int width, int marginOverride = -1,
                           bool boxHeuristic = false) {
   static const int maxMargin = [] {
-    const char *m = std::getenv("VROUTE_MAX_MARGIN");
-    return m ? std::atoi(m) : 6;
+    const char *m = settings::get("VROUTE_MAX_MARGIN");
+    return m ? settings::intValue("VROUTE_MAX_MARGIN", m) : 6;
   }();
   int margin = marginOverride >= 1 ? marginOverride : maxMargin;
   for (int attempt = 0; attempt < 6; ++attempt) {
@@ -4246,9 +4247,14 @@ void routeNetSlowMSMV(const RoutingGrid &g, Prices &prices, Usage &usage, const 
   }
 }
 
+// Part 215 (2026-11-24): fixed-topology slow-tier searches run (VROUTE_MSMV=0) -- the self-test's evidence that its
+// congested design reaches this path (review F2: the old test's design never escalated a net, so it passed at 0%).
+std::atomic<long long> gFixedTopologySlowRoutes{0};
+
 // Routes one net with the slow tier: same shape as mroute's routeNet.
 void routeNetSlow(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPlan &lp,
                    SearchRegion &region, double epsilon, RoutedNet &rn) {
+  gFixedTopologySlowRoutes.fetch_add(1, std::memory_order_relaxed);
   for (const ChargeRecord &c : rn.charges)
     undoCharge(g, usage, c);
   rn.segs.clear();
@@ -6050,8 +6056,8 @@ RegionReport regionNegotiateOnce(const Design &d, std::vector<RoutedNet> &nets, 
                   << pct(t.popsR[3]) << " >=1e3 " << pct(t.popsR[4]) << " h=0 " << pct(t.popsR[5])
                   << "; by box fill <0.1 " << pct(t.popsF[0]) << " 0.1-0.5 " << pct(t.popsF[1]) << " 0.5-0.9 "
                   << pct(t.popsF[2]) << " >=0.9 " << pct(t.popsF[3]) << "; searches by ratio";
-        for (int r = 0; r < SearchTraceStats::kR; ++r)
-          std::cerr << " " << t.nR[r];
+        for (int ri = 0; ri < SearchTraceStats::kR; ++ri)
+          std::cerr << " " << t.nR[ri];
         std::cerr << std::defaultfloat << std::setprecision(6);
       }
       std::cerr << "\n";
@@ -6381,14 +6387,14 @@ struct RunReport {
 void relaxedCleanup(const RoutingGrid &g, Prices &prices, Usage &usage, const LayerPlan &lp,
                      double epsilon, RunReport &rep) {
   double relaxedThreshold = [] {
-    const char *t = std::getenv("VROUTE_CLEANUP_THRESHOLD");
-    return t ? std::atof(t) : 0.5;
+    const char *t = settings::get("VROUTE_CLEANUP_THRESHOLD");
+    return t ? settings::realValue("VROUTE_CLEANUP_THRESHOLD", t) : 0.5;
   }();
   int passes = [] {
-    const char *p = std::getenv("VROUTE_CLEANUP_PASSES");
-    return p ? std::atoi(p) : 30;
+    const char *p = settings::get("VROUTE_CLEANUP_PASSES");
+    return p ? settings::intValue("VROUTE_CLEANUP_PASSES", p) : 30;
   }();
-  bool trace = std::getenv("VROUTE_TRACE") != nullptr;
+  bool trace = settings::get("VROUTE_TRACE") != nullptr;
   long long before = rep.bestOverflow;
 
   for (int pass = 0; pass < passes; ++pass) {
@@ -6503,7 +6509,7 @@ DetourStats detourStats(const std::vector<RoutedNet> &nets) {
 }
 
 bool detourTraceOn() {
-  const char *v = std::getenv("PD15ROUTE_DETOUR_TRACE");
+  const char *v = settings::get("PD15ROUTE_DETOUR_TRACE");
   return v && std::string(v) == "1";
 }
 
@@ -6513,7 +6519,7 @@ bool detourTraceOn() {
 // boundary. Diagnostic only; no routing decision reads it.
 bool memTraceOn() {
   static const bool on = [] {
-    const char *v = std::getenv("PD35ROUTE_MEMTRACE");
+    const char *v = settings::get("PD35ROUTE_MEMTRACE");
     return v && std::string(v) == "1";
   }();
   return on;
@@ -7258,7 +7264,8 @@ struct NetSpill {
       fail("net spill: write failed (disk full?)");
   }
   void read(std::vector<RoutedNet> &nets, const Net *base) {
-    std::rewind(f);
+    if (std::fseek(f, 0, SEEK_SET) != 0) // Part 215 (review F5): rewind cannot report a failure
+      fail("net spill: seek failed");
     uint64_t n = 0;
     if (std::fread(&n, sizeof n, 1, f) != 1)
       fail("net spill: short read");
@@ -8369,7 +8376,7 @@ CommutingDagPlan buildCommutingDag(size_t n, size_t nCells, const CellsOfFn &cel
   std::vector<int64_t>().swap(last);
   // PD37ROUTE_BATCH_TRACE=1: the longest dependency chain (positions) --
   // the speedup's ceiling is n / chain at equal work. Diagnostics only.
-  if (std::getenv("PD37ROUTE_BATCH_TRACE")) {
+  if (settings::get("PD37ROUTE_BATCH_TRACE")) {
     std::vector<uint32_t> depth(n, 1);
     uint32_t longest = n ? 1 : 0;
     for (size_t k = 0; k < n; ++k) {
@@ -8400,7 +8407,7 @@ CommutingDagPlan buildCommutingDag(size_t n, size_t nCells, const CellsOfFn &cel
     plan.indeg[k] = predStart[k + 1] - predStart[k];
   plan.succStart = std::move(succStart);
   plan.succ = std::move(succ);
-  if (std::getenv("PD37ROUTE_BATCH_TRACE"))
+  if (settings::get("PD37ROUTE_BATCH_TRACE"))
     std::cerr << "dependency graph: build "
               << std::chrono::duration<double>(std::chrono::steady_clock::now() - tBuild0).count() << " s\n";
   return plan;
@@ -8438,7 +8445,7 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
   // pd39route (Part 129), PD37ROUTE_BATCH_TRACE only: where each worker's
   // time goes -- running tasks, or waiting for one (spinning or asleep) --
   // and how tasks reached it (from the shared queue, or handed on directly).
-  const bool dagTrace = std::getenv("PD37ROUTE_BATCH_TRACE") != nullptr;
+  const bool dagTrace = settings::get("PD37ROUTE_BATCH_TRACE") != nullptr;
   std::mutex statM;
   std::vector<float> taskTime(dagTrace ? n : 0); // per position, for the critical path
   double sWork = 0, sWait = 0;
@@ -8636,7 +8643,7 @@ void runCommutingDagPlan(const CommutingDagPlan &plan, int threads, const std::f
       }
     }
   }
-  if (std::getenv("PD37ROUTE_BATCH_TRACE"))
+  if (settings::get("PD37ROUTE_BATCH_TRACE"))
     std::cerr << "dependency graph: run " << std::chrono::duration<double>(std::chrono::steady_clock::now() - tRun0).count()
               << " s\n";
 }
@@ -8998,7 +9005,7 @@ PatternStageReport patternStage2D(const RoutingGrid &g, std::vector<RoutedNet> &
   std::vector<std::vector<int>> bestEdges;
   std::vector<char> changedSinceBest(pieces.size(), 1); // pd37route
   // pd37route: PD37ROUTE_BATCH_TRACE=1 -- where the stage's time goes.
-  const bool ptrace = std::getenv("PD37ROUTE_BATCH_TRACE") != nullptr;
+  const bool ptrace = settings::get("PD37ROUTE_BATCH_TRACE") != nullptr;
   if (ptrace)
     std::cerr << "pattern stage trace: setup "
               << std::chrono::duration<double>(std::chrono::steady_clock::now() - tPre0).count() << " s\n";
@@ -9341,7 +9348,7 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   configureCostModel(prices, usage, cost);
   LayerPlan lp(g);
   SearchRegion region;
-  bool trace = std::getenv("VROUTE_TRACE") != nullptr;
+  bool trace = settings::get("VROUTE_TRACE") != nullptr;
 
   std::vector<RoutedNet> nets;
   for (const Net &n : d.nets) {
@@ -9390,11 +9397,11 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
     }
     rn.giant = n.pins.size() > kGiantNetPins;
   });
-  if (std::getenv("PD37ROUTE_BATCH_TRACE"))
+  if (settings::get("PD37ROUTE_BATCH_TRACE"))
     std::cerr << "route trace: net setup + trees "
               << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0trees).count() << " s\n";
 
-  const bool rtrace = std::getenv("PD37ROUTE_BATCH_TRACE") != nullptr; // pd37route
+  const bool rtrace = settings::get("PD37ROUTE_BATCH_TRACE") != nullptr; // pd37route
   auto g0 = std::chrono::steady_clock::now();
   for (RoutedNet &rn : nets)
     if (rn.giant)
@@ -9411,8 +9418,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
   // MSMV escalation or the cleanup pass -- this widens fast-tier
   // eligibility only. NV3ROUTE_GIANT_FAST_TIER=0 excludes them again,
   // reproducing nv2route's exact prior behavior.
-  bool giantFastTier = std::getenv("NV3ROUTE_GIANT_FAST_TIER") == nullptr ||
-                        std::string(std::getenv("NV3ROUTE_GIANT_FAST_TIER")) != "0";
+  const char *giantFastTierV = settings::get("NV3ROUTE_GIANT_FAST_TIER"); // read once (Part 215, review F5)
+  bool giantFastTier = giantFastTierV == nullptr || std::string(giantFastTierV) != "0";
 
   // pd11route: the batched pattern stage replaces phase A and the cleanup
   // pass (maxFastRounds -> 0 skips phase A's loop below).
@@ -9797,8 +9804,8 @@ RunReport route(const Design &d, int maxFastRounds, int maxSlowRounds, double ep
       // each candidate's region: its route's box (pins included, +1) widened
       // by the margin its searches start from
       static const int envMaxMargin = [] {
-        const char *m = std::getenv("VROUTE_MAX_MARGIN");
-        return m ? std::atoi(m) : 6;
+        const char *m = settings::get("VROUTE_MAX_MARGIN");
+        return m ? settings::intValue("VROUTE_MAX_MARGIN", m) : 6;
       }();
       std::vector<NetBox> regionOf(cand.size());
       for (size_t k = 0; k < cand.size(); ++k) {
@@ -10149,7 +10156,11 @@ std::vector<int> viaCapacityPerLayerPair(const RoutingGrid &g) {
 // count, not net width, unlike wire capacity).
 struct RealViaUsage {
   std::vector<int32_t> usage; // pd35route: 4-byte (was 8)
-  explicit RealViaUsage(const RoutingGrid &g) : usage(viaCount(g), 0) {}
+  explicit RealViaUsage(const RoutingGrid &g) : usage(viaCount(g), 0) {
+    // Part 215 (review F5): charge logs keep via indices in 32 bits (rvuIdx); a grid with more via sites stops here
+    if (usage.size() > std::numeric_limits<uint32_t>::max())
+      fail("design too large: more than 2^32 via sites (charge logs keep via indices in 32 bits)");
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -11730,7 +11741,7 @@ void commitNetTree(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, int w
       size_t idx = viaIndex(g, x, y, l);
       rvu.usage[idx] += 1;
       if (charge)
-        charge->rvuIdx.push_back(idx);
+        charge->rvuIdx.push_back(static_cast<uint32_t>(idx)); // < 2^32: RealViaUsage checks
       segs.push_back({x, y, l, x, y, l + 1});
     }
   }
@@ -11953,7 +11964,7 @@ void stitchPinAccessForNetChargingVias(const RoutingGrid &g, RealViaUsage &rvu, 
       size_t idx = viaIndex(g, p.x, p.y, l);
       rvu.usage[idx] += 1;
       if (charge)
-        charge->rvuIdx.push_back(idx);
+        charge->rvuIdx.push_back(static_cast<uint32_t>(idx)); // < 2^32: RealViaUsage checks
     }
     if (p.layer > have)
       for (int l = have; l < p.layer; ++l)
@@ -13598,7 +13609,7 @@ bool pattern3DNet(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, const 
         for (int l = std::min(s.l1, s.l2); l < std::max(s.l1, s.l2); ++l) {
           size_t idx = viaIndex(g, s.x1, s.y1, l);
           rvu.usage[idx] += 1;
-          c.rvuIdx.push_back(idx);
+          c.rvuIdx.push_back(static_cast<uint32_t>(idx)); // < 2^32: RealViaUsage checks
         }
       }
     }
@@ -13841,7 +13852,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
                                              HistKnobs wireKnobs = HistKnobs(),
                                              LaMode laMode = LaMode::kInherited, bool laPins = false) {
   // pd39route (Part 129), PD37ROUTE_BATCH_TRACE only: where round 0's wall time goes.
-  const bool laTrace = std::getenv("PD37ROUTE_BATCH_TRACE") != nullptr;
+  const bool laTrace = settings::get("PD37ROUTE_BATCH_TRACE") != nullptr;
   auto laT = std::chrono::steady_clock::now();
   auto laLap = [&](const char *what) {
     if (!laTrace)
@@ -13865,17 +13876,17 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
   // pd35route (memory): NTHU's cost never reads via-site history (spanCost
   // counts vias only), so in that mode it is neither allocated nor updated.
   ViaPrices vp(g, !nthu);
-  bool trace = std::getenv("NV2ROUTE_TRACE") != nullptr;
+  bool trace = settings::get("NV2ROUTE_TRACE") != nullptr;
 
   bool viaAware = true;
-  if (const char *r = std::getenv("NV2ROUTE_VIA_AWARE"); r)
+  if (const char *r = settings::get("NV2ROUTE_VIA_AWARE"); r)
     viaAware = std::string(r) != "0";
   // This file's own new mechanism: independent of viaAware -- a run can be
   // via-aware, wire-aware, both, or neither, for clean ablation testing.
   // 0 passes nullptr for both historyWire pointers below, reproducing
   // nv1route's exact output for direct comparison.
   bool wireAware = true;
-  if (const char *r = std::getenv("NV2ROUTE_WIRE_AWARE"); r)
+  if (const char *r = settings::get("NV2ROUTE_WIRE_AWARE"); r)
     wireAware = std::string(r) != "0";
   // pd37route (memory): with no negotiation rounds the wire history is
   // never read after round 0, where every value is 1.0 -- the factor the
@@ -14251,7 +14262,7 @@ ViaNegotiationReport negotiateViaAssignment(const RoutingGrid &g, std::vector<Ro
     Pattern3DMemo memo; // pd38route: PD38ROUTE_P3D_SKIP
     for (int pass = 0; pass < gPattern3D.passes; ++pass) {
       Pattern3DStats st = pattern3DPass(g, ru, rvu, nets, charges, usesTreeDP, order, &memo);
-      if (gP3dSkip && std::getenv("PD37ROUTE_BATCH_TRACE"))
+      if (gP3dSkip && settings::get("PD37ROUTE_BATCH_TRACE"))
         std::cerr << "pattern 3D pass " << pass << " trace: " << st.skipped << " nets skipped (nothing changed nearby)\n";
       memTrace("a pattern 3D pass", &nets);
       if (gStages.on)
@@ -15496,6 +15507,48 @@ void testFixedTopologySlowTierStillWorksAfterTheCollapse() {
   check(rep.bestOverflow == 0, "no overflow on an uncongested design via the fixed-topology path either");
   for (const RoutedNet &rn : rep.nets)
     check(segsConnected(rn.segs), "each net routed via the fixed-topology 2D path is one component");
+  // Part 215 (2026-11-24, review F2): the basic design never congests, so no net escalates and the lines above passed
+  // with routeNetSlow, routeSegment and boundedDijkstra never run. A congested design (testSlowTierBestStateIsKept's
+  // kind: 250 small nets on a 40 x 40 grid of capacity 2, with two fast rounds) escalates nets to the fixed-topology
+  // tier; the counter shows its searches ran, and the routes must still be whole and no worse than the start.
+  std::string gr = "grid 40 40 2\nvertical capacity 0 2\nhorizontal capacity 2 0\n"
+                   "minimum width 1 1\nminimum spacing 1 1\nvia spacing 0 0\n0 0 10 10\nnum net 250\n";
+  unsigned st = 777;
+  auto rnd = [&](int n) {
+    st = st * 1103515245u + 12345u;
+    return static_cast<int>((st >> 8) % static_cast<unsigned>(n));
+  };
+  for (int i = 0; i < 250; ++i) {
+    int np = 2 + rnd(3), cx = rnd(40), cy = rnd(40);
+    gr += "n" + std::to_string(i) + " " + std::to_string(i) + " " + std::to_string(np) + " 1\n";
+    for (int k = 0; k < np; ++k) {
+      int x = std::min(39, std::max(0, cx + rnd(15) - 7)), y = std::min(39, std::max(0, cy + rnd(15) - 7));
+      gr += std::to_string(x * 10 + 5) + " " + std::to_string(y * 10 + 5) + " 1\n";
+    }
+  }
+  gr += "0\n";
+  Design dc = parse("pd39route_selftest_fixedslow.gr", gr.c_str());
+  RunReport fast = route(dc, 2, 0, 0.02, 1.0, HistMode::kAdditive, 1.0, 1, false, true, 1.0, 0.0, false);
+  const long long before = gFixedTopologySlowRoutes.load();
+  RunReport slow = route(dc, 2, 6, 0.02, 1.0, HistMode::kAdditive, 1.0, 1, false, true, 1.0, 0.0, false);
+  const long long searches = gFixedTopologySlowRoutes.load() - before;
+  bool whole = slow.nets.size() == fast.nets.size() && slow.nets.size() >= 240; // 248: two nets sit in one tile
+  for (const RoutedNet &rn : slow.nets) { // connected, and on every pin tile (an empty route is "connected" too)
+    std::set<std::pair<int, int>> on;
+    for (const Seg &sg : rn.segs)
+      for (int x = std::min(sg.x1, sg.x2); x <= std::max(sg.x1, sg.x2); ++x)
+        for (int y = std::min(sg.y1, sg.y2); y <= std::max(sg.y1, sg.y2); ++y)
+          on.insert({x, y});
+    whole &= segsConnected(rn.segs) && rn.pts.size() >= 2;
+    for (const Point &pt : rn.pts)
+      whole &= on.count({pt.x, pt.y}) == 1;
+  }
+  check(fast.bestOverflow > 0 && slow.escalatedCount > 0 && searches > 0,
+        "congested design, VROUTE_MSMV=0: nets escalate and the fixed-topology slow tier searches (" +
+            std::to_string(slow.escalatedCount) + " escalated, " + std::to_string(searches) + " searches)");
+  check(whole && slow.bestOverflow <= fast.bestOverflow,
+        "congested design, VROUTE_MSMV=0: every net whole, overflow " + std::to_string(slow.bestOverflow) +
+            " no worse than the fast tier's " + std::to_string(fast.bestOverflow));
 }
 
 // FR1ROUTE_TWOD_ONLY is accepted as a reserved knob in this generation but
@@ -16647,6 +16700,8 @@ void testSharedViaStackReplacesOvercountedPairwiseChains() {
     if (t.nodes[i].x == 5 && t.nodes[i].y == 0)
       branchNode = static_cast<int>(i);
   check(branchNode >= 0, "found the branch point (5,0) (sanity)");
+  if (branchNode < 0)
+    return; // Part 215 (review F5): indexing with -1 below would be undefined; the check above has failed already
   check(nodeStackRange[branchNode] == std::make_pair(0, 5),
         "the branch point's own resolved via-stack range is exactly "
         "[0,5] -- one shared stack spanning every layer actually used "
@@ -16951,6 +17006,8 @@ void testNegotiationReducesViaOverflowASinglePassCannotFix() {
     if (t.nodes[i].x == 1 && t.nodes[i].y == 0)
       branchNode = static_cast<int>(i);
   check(branchNode >= 0, "found the branch node (1,0) (sanity)");
+  if (branchNode < 0)
+    return; // Part 215 (review F5): nodeStackRange[-1] below would be undefined; the check above has failed
   size_t viaIdx = viaIndex(d.grid, 1, 0, 0);
 
   RealViaUsage rvu(d.grid);
@@ -20583,7 +20640,7 @@ NetCharge p3dCharge(const RoutingGrid &g, RealUsage &ru, RealViaUsage &rvu, cons
     } else {
       for (int l = std::min(sg.l1, sg.l2); l < std::max(sg.l1, sg.l2); ++l) {
         rvu.usage[viaIndex(g, sg.x1, sg.y1, l)] += 1;
-        c.rvuIdx.push_back(viaIndex(g, sg.x1, sg.y1, l));
+        c.rvuIdx.push_back(static_cast<uint32_t>(viaIndex(g, sg.x1, sg.y1, l)));
       }
     }
   }
@@ -22551,16 +22608,16 @@ void testSlowDagSameAtAnyThreadCount() {
       const bool savedPot = gSearchBidirPotentials;
       gSearchBidir = true;
       gSearchBidirPotentials = true; // Part 199
-      long long c1 = 0, c4 = 0;
+      long long c1p = 0, c4p = 0;
       int ec1 = 0, ec4 = 0;
       std::vector<SlowRoundRecord> hp1_, hp4_;
-      auto v1 = run(1, c1, ec1, 16, &hp1_);
-      auto v4 = run(4, c4, ec4, 16, &hp4_);
+      auto v1 = run(1, c1p, ec1, 16, &hp1_);
+      auto v4 = run(4, c4p, ec4, 16, &hp4_);
       gSearchBidir = savedBidir;
       gSearchBidirPotentials = savedPot;
-      check(sameRoutes(v1, v4) && c1 == c4 && hp1_ == hp4_,
+      check(sameRoutes(v1, v4) && c1p == c4p && hp1_ == hp4_,
             "two-ended search with potentials in the batched slow tier: 4 threads = 1 thread, round for round (2D "
-            "overflow " + std::to_string(c1) + ")");
+            "overflow " + std::to_string(c1p) + ")");
     }
     check(searches > 1000 && sameRoutes(t1, t4) && b1 == b4 && hb1 == hb4,
           "two-ended search in the batched slow tier: 4 threads = 1 thread, round for round (" +
@@ -22598,12 +22655,12 @@ void testSlowDagSameAtAnyThreadCount() {
     gSlowBatchSearchesBelow = 0;
     auto q0 = run(1, g0, eg0, 4, &hg0);
     gSlowBatchSearchesBelow = 1000000000;
-    auto q1 = run(1, g1, eg1, 4, &hg1);
+    auto q1g = run(1, g1, eg1, 4, &hg1);
     gSlowBatchSearches = 0;
     gSlowBatchSearchesBelow = std::numeric_limits<long long>::max();
     check(sameRoutes(q0, r0) && g0 == k0 && hg0 == hk0,
           "search quota gated below 0 (never open): the slow rounds without a quota");
-    check(sameRoutes(q1, r1) && g1 == k1 && hg1 == hk1,
+    check(sameRoutes(q1g, r1) && g1 == k1 && hg1 == hk1,
           "search quota gated above every overflow (open from round 0): the ungated quota");
   }
   check(carriedSpread < carried1, "batched slow tier: spread batches collide less (" + std::to_string(carriedSpread) +
@@ -22751,23 +22808,23 @@ void testTimingLayerBiasPicksUpperMetal() {
   tLayerBiasMax = 0;
   gTiming.gate = false;
   { // Part 205: the benefit weight -- per classed net, the timing term only, bounded, median net unchanged
-    TimingLayerModel t;
-    t.on = true;
-    t.slack = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 0.5f};
-    t.relR = {1.0, 0.01};
-    t.relC = {1.0, 0.5};
-    t.k[1] = 1, t.k[2] = 5, t.k[3] = 10;
-    t.kp = 2;
-    t.classify();
-    t.hpwl = {0, 4, 10, 40, 4000, 1000};
-    t.sinks = {1, 1, 1, 4, 60, 30};
-    t.benefitG = 1, t.benefitM = 8, t.benefitP = 6, t.benefitQ = 0.5;
-    t.setBenefit(); // W = 6, 10, 16, 256, 261600 (the unclassed net has none); median (of five) 16
-    check(t.mult.size() == 6 && t.benefitRef == 16 && t.mult[2] == 1.0f && std::fabs(t.mult[0] - 0.375f) < 1e-6 &&
-              t.mult[3] == 8.0f && t.mult[4] == 8.0f && t.mult[5] == 1.0f && t.benefitHi == 2 && t.benefitLo == 0,
+    TimingLayerModel tb;
+    tb.on = true;
+    tb.slack = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 0.5f};
+    tb.relR = {1.0, 0.01};
+    tb.relC = {1.0, 0.5};
+    tb.k[1] = 1, tb.k[2] = 5, tb.k[3] = 10;
+    tb.kp = 2;
+    tb.classify();
+    tb.hpwl = {0, 4, 10, 40, 4000, 1000};
+    tb.sinks = {1, 1, 1, 4, 60, 30};
+    tb.benefitG = 1, tb.benefitM = 8, tb.benefitP = 6, tb.benefitQ = 0.5;
+    tb.setBenefit(); // W = 6, 10, 16, 256, 261600 (the unclassed net has none); median (of five) 16
+    check(tb.mult.size() == 6 && tb.benefitRef == 16 && tb.mult[2] == 1.0f && std::fabs(tb.mult[0] - 0.375f) < 1e-6 &&
+              tb.mult[3] == 8.0f && tb.mult[4] == 8.0f && tb.mult[5] == 1.0f && tb.benefitHi == 2 && tb.benefitLo == 0,
           "benefit weight: (W / median)^g within [1/M, M] for classed nets, 1 for the rest");
     {
-      TimingLayerModel u = t;
+      TimingLayerModel u = tb;
       u.benefitQ = -1;
       u.setBenefit();
       double sum = 0, len = 0;
@@ -22780,7 +22837,7 @@ void testTimingLayerBiasPicksUpperMetal() {
                 std::to_string(sum / len) + "), short nets below 1");
     }
     TimingLayerModel keep = gTiming;
-    gTiming = t;
+    gTiming = tb;
     Net a, b;
     a.id = 0;
     b.id = 3;
@@ -23583,8 +23640,65 @@ void testG24StreamingMatchesInMemory() {
     std::remove(f.c_str());
 }
 
+// Part 215 (2026-11-24): the settings table and the checks on it (pd39_settings.h).
+void testSettingsRegistry() {
+  bool sorted = true;
+  for (size_t i = 1; i < settings::kCount; ++i)
+    sorted &= std::strcmp(settings::kTable[i - 1].name, settings::kTable[i].name) < 0;
+  check(sorted, "settings: the table is sorted by name with no repeats (find() depends on it)");
+  bool found = true;
+  for (const settings::Info &i : settings::kTable)
+    found &= settings::find(i.name) == &i;
+  check(found && !settings::find("PD39ROUTE_SKIP_GAINT") && !settings::find("PD39ROUTE_SKIP") &&
+            !settings::find("PD39ROUTE_SKIP_GIANTS") && settings::find("PD39ROUTE_SKIP_GIANT=1", 20) &&
+            !settings::find(""),
+        "settings: find() finds every name and no prefix, extension or misspelling of one");
+  long long x = 0;
+  double r = 0;
+  check(settings::parseInt("12", x) && x == 12 && settings::parseInt(" -3\t", x) && x == -3 &&
+            !settings::parseInt("", x) && !settings::parseInt(" ", x) && !settings::parseInt("12x", x) &&
+            !settings::parseInt("1.5", x) && !settings::parseInt("abc", x) && !settings::parseInt("0,1", x) &&
+            !settings::parseInt("99999999999999999999", x) && !settings::parseInt(nullptr, x),
+        "settings: parseInt takes a whole number and nothing else");
+  check(settings::parseReal("0.05", r) && r == 0.05 && settings::parseReal("1e-3", r) && r == 1e-3 &&
+            settings::parseReal("7", r) && r == 7 && !settings::parseReal("abc", r) && !settings::parseReal("0,1", r) &&
+            !settings::parseReal("nan", r) && !settings::parseReal("inf", r) && !settings::parseReal("1e999", r) &&
+            !settings::parseReal("", r),
+        "settings: parseReal takes a finite number and nothing else");
+  // every valid value parses exactly as atof / atoi did (so routes cannot change)
+  bool same = true;
+  for (const char *v : {"0", "1", "-1", "6", "30", "0.05", "1.5", "1e-3", "2.5e2", "0.1"}) {
+    same &= settings::parseReal(v, r) && r == std::strtod(v, nullptr);
+    if (settings::parseInt(v, x))
+      same &= x == std::strtol(v, nullptr, 10);
+  }
+  check(same, "settings: valid values parse to exactly what atof / atoi gave");
+  char e1[] = "PD39ROUTE_SKIP_GIANT=1", e2[] = "PD39ROUTE_SKIP_GAINT=1", e3[] = "PATH=/bin", e4[] = "PD40ROUTE_X=1",
+       e5[] = "GR_SIGNPOST=1", e6[] = "VROUTE_EPS=abc", e7[] = "VROUTE_FAST_ROUNDS=12", e8[] = "VROUTE_EPS=0.1",
+       e9[] = "NV2ROUTE_VIA_ROUNDS=1.5", e10[] = "PD39ROUTE_PORTFOLIO=over=0;over=0.075", e11[] = "VROUTE_POWER=";
+  char *env[] = {e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, nullptr};
+  const std::vector<std::string> p = settings::problems(env);
+  const std::vector<std::string> want = {
+      "unknown setting PD39ROUTE_SKIP_GAINT (did you mean PD39ROUTE_SKIP_GIANT?)",
+      "unknown setting GR_SIGNPOST (did you mean GR_SIGNPOSTS?)", "VROUTE_EPS must be a number (got 'abc')",
+      "NV2ROUTE_VIA_ROUNDS must be a whole number (got '1.5')", "VROUTE_POWER must be a number (got '')"};
+  check(p == want, "settings: an environment's problems are its misspelled names and its unparsable numbers, "
+                   "and nothing else (other prefixes, PATH, valid values and lists pass)");
+  if (p != want)
+    for (const std::string &s : p)
+      std::cout << "    got: " << s << "\n";
+  char *clean[] = {e1, e3, e7, e8, e10, nullptr};
+  check(settings::problems(clean).empty(), "settings: a clean environment has no problems");
+  check(settings::nearest("VROUTE_FAST_ROUND") == "VROUTE_FAST_ROUNDS" && settings::nearest("PD99ROUTE_NOTHING_LIKE_IT").empty(),
+        "settings: the nearest known name is offered only when it is close");
+  check(settings::prefixOf("PD39ROUTE_X", 11) == "PD39ROUTE_" && settings::prefixOf("GR_GPU", 6) == "GR_" &&
+            settings::prefixOf("HOME", 4).empty() && settings::knownPrefix("NV2ROUTE_") && !settings::knownPrefix("PD40ROUTE_"),
+        "settings: prefixes are grouped and recognised");
+}
+
 int run() {
   std::cout << "self test\n";
+  testSettingsRegistry();
   testBasicShapesStayOnFastTier();
   testMultiSourceDijkstraUsesCheapestSourceNotFirstInList();
   testMultiSourceDijkstraStopsAtCheapestSink();
@@ -23785,79 +23899,86 @@ int main(int argc, char **argv) {
 
   if (argc == 2 && std::string(argv[1]) == "--selftest")
     return selftest::run();
+  if (argc == 2 && std::string(argv[1]) == "--settings") { // Part 215 (2026-11-24): every setting, and what is set
+    settings::print(std::cout);
+    return 0;
+  }
+  // Part 215 (2026-11-24): a variable named like a setting that is not one (a misspelling), or an Int / Real setting
+  // whose value is not a number, stops the run here, before anything is read (pd39_settings.h)
+  settings::checkEnvironment();
 
   // pd33route: three arguments -> ISPD 2024 (.cap, .net, solution).
   const bool g24Mode = argc == 4;
   gStages.begin(g24Mode ? "score (router's own)" : "real overflow"); // pd36route
-  if (const char *v = std::getenv("PD37ROUTE_THREADS"); v) {
+  if (const char *v = settings::get("PD37ROUTE_THREADS"); v) {
     char *end = nullptr;
     long t = std::strtol(v, &end, 10);
     if (!*v || *end || t < 1 || t > 256)
       fail(std::string("PD37ROUTE_THREADS must be 1..256 (got '") + v + "')");
     gThreads = static_cast<int>(t);
   }
-  if (const char *v = std::getenv("PD38ROUTE_SLOW_DAG"); v) {
+  if (const char *v = settings::get("PD38ROUTE_SLOW_DAG"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_SLOW_DAG must be 0 or 1 (got '" + sv + "')");
     gSlowDag = sv == "1";
   }
-  if (const char *v = std::getenv("PD38ROUTE_FRAMES"); v && *v) {
+  if (const char *v = settings::get("PD38ROUTE_FRAMES"); v && *v) {
     gFrames.on = true;
     gRecordCarried = true;
     gFrames.dir = v;
     gFrames.t0 = std::chrono::steady_clock::now();
-    if (const char *w = std::getenv("PD38ROUTE_FRAME_SIDE"); w)
-      gFrames.side = std::max(16, std::atoi(w));
-    if (const char *w = std::getenv("PD38ROUTE_FRAME_SPLIT"); w)
-      gFrames.split = std::max(1, std::atoi(w));
+    if (const char *w = settings::get("PD38ROUTE_FRAME_SIDE"); w)
+      gFrames.side = std::max(16, settings::intValue("PD38ROUTE_FRAME_SIDE", w));
+    if (const char *w = settings::get("PD38ROUTE_FRAME_SPLIT"); w)
+      gFrames.split = std::max(1, settings::intValue("PD38ROUTE_FRAME_SPLIT", w));
   }
-  if (const char *v = std::getenv("PD38ROUTE_P3D_REUSE"); v) {
+  if (const char *v = settings::get("PD38ROUTE_P3D_REUSE"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_P3D_REUSE must be 0 or 1 (got '" + sv + "')");
     gP3dReuse = sv == "1";
   }
-  if (const char *v = std::getenv("PD38ROUTE_P3D_SKIP"); v) {
+  if (const char *v = settings::get("PD38ROUTE_P3D_SKIP"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_P3D_SKIP must be 0 or 1 (got '" + sv + "')");
     gP3dSkip = sv == "1";
   }
-  if (const char *v = std::getenv("PD38ROUTE_PATTERN_DAG"); v) {
+  if (const char *v = settings::get("PD38ROUTE_PATTERN_DAG"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_PATTERN_DAG must be 0 or 1 (got '" + sv + "')");
     gPatternDag = sv == "1";
   }
-  if (const char *v = std::getenv("PD38ROUTE_SLOW_BATCH"); v) {
+  if (const char *v = settings::get("PD38ROUTE_SLOW_BATCH"); v) {
     char *end = nullptr;
     long b = std::strtol(v, &end, 10);
     if (!*v || *end || b < 0 || b > 1000000)
       fail(std::string("PD38ROUTE_SLOW_BATCH must be 0..1000000 (got '") + v + "')");
     gSlowBatch = static_cast<int>(b);
   }
-  if (const char *v = std::getenv("PD38ROUTE_SLOW_SPREAD"); v) {
+  if (const char *v = settings::get("PD38ROUTE_SLOW_SPREAD"); v) {
     char *end = nullptr;
     long t = std::strtol(v, &end, 10);
     if (!*v || *end || t < 0 || t > 100000)
       fail(std::string("PD38ROUTE_SLOW_SPREAD must be 0..100000 GCells (got '") + v + "')");
     gSlowSpread = static_cast<int>(t);
   }
-  if (const char *v = std::getenv("PD38ROUTE_SLOW_CONFLICT"); v) {
+  if (const char *v = settings::get("PD38ROUTE_SLOW_CONFLICT"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_SLOW_CONFLICT must be 0 or 1 (got '" + sv + "')");
     gSlowConflict = sv == "1";
   }
-  if (const char *v = std::getenv("PD39ROUTE_SEARCH_BIDIR"); v) { // Part 197: read before route()
+  if (const char *v = settings::get("PD39ROUTE_SEARCH_BIDIR"); v) { // Part 197: read before route()
     const std::string sv(v);
     if (sv != "0" && sv != "1" && sv != "2")
       fail("PD39ROUTE_SEARCH_BIDIR must be 0, 1 or 2 (got '" + sv + "')");
     gSearchBidir = sv != "0";
     gSearchBidirPotentials = sv == "2"; // Part 199
   }
-  if (const char *v = std::getenv("PD39ROUTE_SLOW_SEARCHES"); v) { // Part 193: K; Part 195: K,below
+  if (const char *v = settings::get("PD39ROUTE_SLOW_SEARCHES"); v) { // Part 193: K; Part 195: K,below
     char *end = nullptr;
     const long k = std::strtol(v, &end, 10);
     long long below = std::numeric_limits<long long>::max();
@@ -23874,7 +23995,7 @@ int main(int argc, char **argv) {
     gSlowBatchSearches = static_cast<int>(k);
     gSlowBatchSearchesBelow = below;
   }
-  if (const char *v = std::getenv("PD39ROUTE_SLOW_TASKS"); v && *v) { // Part 192 (trace only): file[,every]
+  if (const char *v = settings::get("PD39ROUTE_SLOW_TASKS"); v && *v) { // Part 192 (trace only): file[,every]
     std::string sv(v), file = sv;
     const size_t c = sv.rfind(',');
     if (c != std::string::npos) {
@@ -23889,27 +24010,27 @@ int main(int argc, char **argv) {
     if (!gSlowTaskDump)
       fail("PD39ROUTE_SLOW_TASKS: cannot write " + file);
   }
-  if (const char *v = std::getenv("PD38ROUTE_SLOW_LPT"); v) {
+  if (const char *v = settings::get("PD38ROUTE_SLOW_LPT"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD38ROUTE_SLOW_LPT must be 0 or 1 (got '" + sv + "')");
     gSlowBatchLpt = sv == "1";
   }
-  if (const char *v = std::getenv("PD37ROUTE_CELL"); v) {
+  if (const char *v = settings::get("PD37ROUTE_CELL"); v) {
     char *end = nullptr;
     long c = std::strtol(v, &end, 10);
     if (!*v || *end || c < 1 || c > 1024)
       fail(std::string("PD37ROUTE_CELL must be 1..1024 (got '") + v + "')");
     gCommuteCell = static_cast<int>(c);
   }
-  if (const char *v = std::getenv("PD39ROUTE_LA_CELL"); v) { // Part 129
+  if (const char *v = settings::get("PD39ROUTE_LA_CELL"); v) { // Part 129
     char *end = nullptr;
     long c = std::strtol(v, &end, 10);
     if (!*v || *end || c < 0 || c > 1024)
       fail(std::string("PD39ROUTE_LA_CELL must be 0..1024 (got '") + v + "')");
     gLaCell = static_cast<int>(c);
   }
-  if (const char *v = std::getenv("PD39ROUTE_LA_CRIT"); v) { // Part 132
+  if (const char *v = settings::get("PD39ROUTE_LA_CRIT"); v) { // Part 132
     if (std::strcmp(v, "0") && std::strcmp(v, "1"))
       fail(std::string("PD39ROUTE_LA_CRIT must be 0 or 1 (got '") + v + "')");
     gLaCrit = v[0] == '1';
@@ -23928,58 +24049,58 @@ int main(int argc, char **argv) {
   HistMode histMode = HistMode::kAdditive;
   int streakThreshold = 1;
   bool scaleByOverflow = false;
-  if (const char *e = std::getenv("VROUTE_EPS"); e)
-    epsilon = std::atof(e);
-  if (const char *r = std::getenv("VROUTE_FAST_ROUNDS"); r)
-    maxFastRounds = std::atoi(r);
-  if (const char *r = std::getenv("VROUTE_SLOW_ROUNDS"); r)
-    maxSlowRounds = std::atoi(r);
-  if (const char *s = std::getenv("VROUTE_HIST_STEP"); s)
-    histStep = std::atof(s);
-  if (const char *f = std::getenv("VROUTE_HIST_FACTOR"); f)
-    histFactor = std::atof(f);
-  if (const char *m = std::getenv("VROUTE_HIST_MODE"); m && std::string(m) == "mult")
+  if (const char *e = settings::get("VROUTE_EPS"); e)
+    epsilon = settings::realValue("VROUTE_EPS", e);
+  if (const char *r = settings::get("VROUTE_FAST_ROUNDS"); r)
+    maxFastRounds = settings::intValue("VROUTE_FAST_ROUNDS", r);
+  if (const char *r = settings::get("VROUTE_SLOW_ROUNDS"); r)
+    maxSlowRounds = settings::intValue("VROUTE_SLOW_ROUNDS", r);
+  if (const char *s = settings::get("VROUTE_HIST_STEP"); s)
+    histStep = settings::realValue("VROUTE_HIST_STEP", s);
+  if (const char *f = settings::get("VROUTE_HIST_FACTOR"); f)
+    histFactor = settings::realValue("VROUTE_HIST_FACTOR", f);
+  if (const char *m = settings::get("VROUTE_HIST_MODE"); m && std::string(m) == "mult")
     histMode = HistMode::kMultiplicative;
-  else if (const char *m = std::getenv("VROUTE_HIST_MODE"); m && std::string(m) == "ratio")
+  else if (m && std::string(m) == "ratio") // m: the if's own (Part 215, review F5)
     histMode = HistMode::kRatio;
-  if (const char *s = std::getenv("VROUTE_HIST_STREAK"); s)
-    streakThreshold = std::max(1, std::atoi(s));
-  if (const char *s = std::getenv("VROUTE_HIST_SCALE"); s && std::string(s) == "overflow")
+  if (const char *s = settings::get("VROUTE_HIST_STREAK"); s)
+    streakThreshold = std::max(1, settings::intValue("VROUTE_HIST_STREAK", s));
+  if (const char *s = settings::get("VROUTE_HIST_SCALE"); s && std::string(s) == "overflow")
     scaleByOverflow = true;
   bool relaxEnabled = true;
-  if (const char *r = std::getenv("VROUTE_HIST_RELAX"); r)
+  if (const char *r = settings::get("VROUTE_HIST_RELAX"); r)
     relaxEnabled = std::string(r) != "0";
   double ratioExponent = 1.0;
-  if (const char *r = std::getenv("VROUTE_HIST_RATIO_EXPONENT"); r)
-    ratioExponent = std::atof(r);
+  if (const char *r = settings::get("VROUTE_HIST_RATIO_EXPONENT"); r)
+    ratioExponent = settings::realValue("VROUTE_HIST_RATIO_EXPONENT", r);
   double exponentEscalation = 0.0;
-  if (const char *r = std::getenv("VROUTE_HIST_EXPONENT_ESCALATION"); r)
-    exponentEscalation = std::atof(r);
+  if (const char *r = settings::get("VROUTE_HIST_EXPONENT_ESCALATION"); r)
+    exponentEscalation = settings::realValue("VROUTE_HIST_EXPONENT_ESCALATION", r);
   bool useMSMV = true;
-  if (const char *r = std::getenv("VROUTE_MSMV"); r)
+  if (const char *r = settings::get("VROUTE_MSMV"); r)
     useMSMV = std::string(r) != "0";
   // fr3route's own mechanism: FR3ROUTE_STEINERIZE=0 reproduces fr1route's
   // exact plain-MST topology for direct comparison. Still governs the
   // fallback path below this file's own exact solve (either the nets it
   // skips by degree cap, or all nets if the exact solve itself is off).
   bool useSteinerize = true;
-  if (const char *r = std::getenv("FR3ROUTE_STEINERIZE"); r)
+  if (const char *r = settings::get("FR3ROUTE_STEINERIZE"); r)
     useSteinerize = std::string(r) != "0";
   // This file's own new mechanism: FR4ROUTE_EXACT_STEINER=0 disables the
   // exact Dreyfus-Wagner solve entirely, reproducing fr3route's own exact
   // behavior for direct comparison.
   bool useExactSteiner = true;
-  if (const char *r = std::getenv("FR4ROUTE_EXACT_STEINER"); r)
+  if (const char *r = settings::get("FR4ROUTE_EXACT_STEINER"); r)
     useExactSteiner = std::string(r) != "0";
   int maxExactPins = 8;
-  if (const char *r = std::getenv("FR4ROUTE_EXACT_MAX_PINS"); r)
-    maxExactPins = std::atoi(r);
+  if (const char *r = settings::get("FR4ROUTE_EXACT_MAX_PINS"); r)
+    maxExactPins = settings::intValue("FR4ROUTE_EXACT_MAX_PINS", r);
   // This file's own mechanism: slow-tier search-box growth.
   BoxGrowth box;
   {
     std::string err;
-    if (!parseBoxGrowth(std::getenv("NV11ROUTE_BOX_MODE"), std::getenv("NV11ROUTE_BOX_INIT"),
-                        std::getenv("NV11ROUTE_BOX_GROW"), std::getenv("NV11ROUTE_BOX_CAP"), box,
+    if (!parseBoxGrowth(settings::get("NV11ROUTE_BOX_MODE"), settings::get("NV11ROUTE_BOX_INIT"),
+                        settings::get("NV11ROUTE_BOX_GROW"), settings::get("NV11ROUTE_BOX_CAP"), box,
                         err))
       fail(err);
   }
@@ -23987,7 +24108,7 @@ int main(int argc, char **argv) {
   CostSettings cost;
   {
     std::string err;
-    if (!parseCostSettings(std::getenv("PD1ROUTE_COST"), std::getenv("PD1ROUTE_WL_FLOOR"), cost, err))
+    if (!parseCostSettings(settings::get("PD1ROUTE_COST"), settings::get("PD1ROUTE_WL_FLOOR"), cost, err))
       fail(err);
   }
   // pd3route's own mechanism: layer-assignment mode, and the
@@ -23995,29 +24116,29 @@ int main(int argc, char **argv) {
   LaMode laMode;
   {
     std::string err;
-    if (!parseLaMode(std::getenv("PD3ROUTE_LA"), laMode, err))
+    if (!parseLaMode(settings::get("PD3ROUTE_LA"), laMode, err))
       fail(err);
   }
-  const char *laFrom = std::getenv("PD3ROUTE_LA_FROM");
+  const char *laFrom = settings::get("PD3ROUTE_LA_FROM");
   // pd5route's own mechanism 2: hotspot rip-up.
   RegionSettings region;
   {
     std::string err;
-    if (!parseRegionSettings(std::getenv("PD5ROUTE_REGION"), std::getenv("PD5ROUTE_REGION_EXPAND"),
-                             std::getenv("PD5ROUTE_REGION_ROUNDS"), std::getenv("PD5ROUTE_REGION_BOX_INIT"),
-                             std::getenv("PD5ROUTE_REGION_BOX_GROW"), region, err))
+    if (!parseRegionSettings(settings::get("PD5ROUTE_REGION"), settings::get("PD5ROUTE_REGION_EXPAND"),
+                             settings::get("PD5ROUTE_REGION_ROUNDS"), settings::get("PD5ROUTE_REGION_BOX_INIT"),
+                             settings::get("PD5ROUTE_REGION_BOX_GROW"), region, err))
       fail(err);
   }
   // pd4route's own mechanism: the refinement stage.
   RefineSettings refine;
   {
     std::string err;
-    if (!parseRefineSettings(std::getenv("PD4ROUTE_REFINE"), std::getenv("PD4ROUTE_REFINE_ITERS"),
-                             std::getenv("PD4ROUTE_REFINE_BOX_INIT"), std::getenv("PD4ROUTE_REFINE_BOX_INC"),
-                             std::getenv("PD4ROUTE_REFINE_ACCEPT"), refine, err) ||
-        !parseRefineOrder(std::getenv("PD5ROUTE_REFINE_ORDER"), std::getenv("PD5ROUTE_SEED"), refine, err))
+    if (!parseRefineSettings(settings::get("PD4ROUTE_REFINE"), settings::get("PD4ROUTE_REFINE_ITERS"),
+                             settings::get("PD4ROUTE_REFINE_BOX_INIT"), settings::get("PD4ROUTE_REFINE_BOX_INC"),
+                             settings::get("PD4ROUTE_REFINE_ACCEPT"), refine, err) ||
+        !parseRefineOrder(settings::get("PD5ROUTE_REFINE_ORDER"), settings::get("PD5ROUTE_SEED"), refine, err))
       fail(err);
-    if (const char *v = std::getenv("PD39ROUTE_REFINE_SHIFT"); v) { // Part 152: k[,radius]
+    if (const char *v = settings::get("PD39ROUTE_REFINE_SHIFT"); v) { // Part 152: k[,radius]
       int k = -1, r = 2;
       char tail = 0;
       const int n = std::sscanf(v, "%d,%d%c", &k, &r, &tail);
@@ -24026,7 +24147,7 @@ int main(int argc, char **argv) {
       refine.shiftK = k;
       refine.shiftRadius = r;
     }
-    if (const char *v = std::getenv("PD39ROUTE_REFINE_EVICT"); v) { // Part 191: nets[,margin[,blockers[,passes]]]
+    if (const char *v = settings::get("PD39ROUTE_REFINE_EVICT"); v) { // Part 191: nets[,margin[,blockers[,passes]]]
       int n = -1, m = 10, b = 8, p = 3;
       char tail = 0;
       const int got = std::sscanf(v, "%d,%d,%d,%d%c", &n, &m, &b, &p, &tail);
@@ -24039,14 +24160,14 @@ int main(int argc, char **argv) {
       refine.evictBlockers = b;
       refine.evictPasses = p;
     }
-    if (const char *v = std::getenv("PD39ROUTE_REFINE_KEEP_ABOVE"); v) { // Part 213: N
+    if (const char *v = settings::get("PD39ROUTE_REFINE_KEEP_ABOVE"); v) { // Part 213: N
       char *end = nullptr;
       const long long x = std::strtoll(v, &end, 10);
       if (!*v || *end || x < 0)
         fail(std::string("PD39ROUTE_REFINE_KEEP_ABOVE must be an integer >= 0 (got '") + v + "')");
       refine.keepAbove = x;
     }
-    if (const char *v = std::getenv("PD39ROUTE_REFINE_STOP"); v) { // Part 168: W
+    if (const char *v = settings::get("PD39ROUTE_REFINE_STOP"); v) { // Part 168: W
       char *end = nullptr;
       const long x = std::strtol(v, &end, 10);
       if (!*v || *end || x < 0 || x > 1000000)
@@ -24056,7 +24177,7 @@ int main(int argc, char **argv) {
         std::cerr << "refinement: below PD12ROUTE_PLATEAU_MIN, stop after " << x
                   << " iterations in a row without gain (PD39ROUTE_REFINE_STOP)\n";
     }
-    if (const char *v = std::getenv("PD39ROUTE_REFINE_ANNEAL"); v) { // Part 147: T0,alpha
+    if (const char *v = settings::get("PD39ROUTE_REFINE_ANNEAL"); v) { // Part 147: T0,alpha
       double t0 = -1, alpha = -1;
       char tail = 0;
       if (std::sscanf(v, "%lf,%lf%c", &t0, &alpha, &tail) != 2 || !(t0 >= 0) || !(alpha > 0 && alpha <= 1))
@@ -24074,17 +24195,17 @@ int main(int argc, char **argv) {
     std::string err;
     double gain = 0.01;
     long long minOverflow = 0;
-    if (!parsePlateauSettings(std::getenv("PD12ROUTE_REGION_PLATEAU"), std::getenv("PD12ROUTE_REFINE_PLATEAU"),
-                              std::getenv("PD12ROUTE_PLATEAU_GAIN"), std::getenv("PD12ROUTE_PLATEAU_MIN"),
+    if (!parsePlateauSettings(settings::get("PD12ROUTE_REGION_PLATEAU"), settings::get("PD12ROUTE_REFINE_PLATEAU"),
+                              settings::get("PD12ROUTE_PLATEAU_GAIN"), settings::get("PD12ROUTE_PLATEAU_MIN"),
                               region.plateau, refine.plateau, gain, minOverflow, err))
       fail(err);
     region.plateauGain = refine.plateauGain = gain;
     region.plateauMin = refine.plateauMin = minOverflow;
     // pd13route's own mechanism: the stage margin caps.
-    if (!parseBoxCaps(std::getenv("PD13ROUTE_REGION_BOX_CAP"), std::getenv("PD13ROUTE_REFINE_BOX_CAP"), region.boxCap,
+    if (!parseBoxCaps(settings::get("PD13ROUTE_REGION_BOX_CAP"), settings::get("PD13ROUTE_REFINE_BOX_CAP"), region.boxCap,
                       refine.boxCap, err))
       fail(err);
-    if (const char *v = std::getenv("PD39ROUTE_REGION_BOX_CAP_B"); v) { // Part 141
+    if (const char *v = settings::get("PD39ROUTE_REGION_BOX_CAP_B"); v) { // Part 141
       char *end = nullptr;
       const long x = std::strtol(v, &end, 10);
       if (!*v || *end || x < 0 || x > 1000000)
@@ -24092,10 +24213,10 @@ int main(int argc, char **argv) {
       region.boxCapB = static_cast<int>(x);
     }
     // pd14route's own mechanism: the work-gated region plateau stop.
-    if (!parseCostPlateau(std::getenv("PD14ROUTE_REGION_COST_WINDOW"), std::getenv("PD14ROUTE_REGION_COST_POPS"),
+    if (!parseCostPlateau(settings::get("PD14ROUTE_REGION_COST_WINDOW"), settings::get("PD14ROUTE_REGION_COST_POPS"),
                           region.costWindow, region.costPops, err))
       fail(err);
-    if (const char *v = std::getenv("PD39ROUTE_REGION_COST_REROUTES"); v) { // Part 199
+    if (const char *v = settings::get("PD39ROUTE_REGION_COST_REROUTES"); v) { // Part 199
       char *end = nullptr;
       const long long n = std::strtoll(v, &end, 10);
       if (!*v || *end || n < 0)
@@ -24109,13 +24230,13 @@ int main(int argc, char **argv) {
   AcceptMode accept;
   {
     std::string err;
-    if (!parseAcceptMode(std::getenv("PD2ROUTE_ACCEPT"), accept, err))
+    if (!parseAcceptMode(settings::get("PD2ROUTE_ACCEPT"), accept, err))
       fail(err);
   }
   // This file's own new mechanism, finally making this long-reserved flag
   // functional: FR1ROUTE_TWOD_ONLY=1 skips negotiateViaAssignment() entirely,
   // reproducing fr4route's exact single-layer, zero-via output.
-  bool twoDOnly = std::getenv("FR1ROUTE_TWOD_ONLY") != nullptr;
+  bool twoDOnly = settings::get("FR1ROUTE_TWOD_ONLY") != nullptr;
 
   // This file's own new mechanism: the via-negotiation loop's own knobs,
   // independent of the 2D stage's VROUTE_HIST_* above (separate ViaPrices
@@ -24123,55 +24244,55 @@ int main(int argc, char **argv) {
   // from nv1route's own NV1ROUTE_* vars, renamed NV2ROUTE_* for this
   // file's own functional reads.
   double viaWeight = 1.0;
-  if (const char *r = std::getenv("NV2ROUTE_VIA_WEIGHT"); r)
-    viaWeight = std::atof(r);
+  if (const char *r = settings::get("NV2ROUTE_VIA_WEIGHT"); r)
+    viaWeight = settings::realValue("NV2ROUTE_VIA_WEIGHT", r);
   HistKnobs viaKnobs;
-  if (const char *s = std::getenv("NV2ROUTE_HIST_STEP"); s)
-    viaKnobs.step = std::atof(s);
-  if (const char *f = std::getenv("NV2ROUTE_HIST_FACTOR"); f)
-    viaKnobs.factor = std::atof(f);
-  if (const char *m = std::getenv("NV2ROUTE_HIST_MODE"); m && std::string(m) == "mult")
+  if (const char *s = settings::get("NV2ROUTE_HIST_STEP"); s)
+    viaKnobs.step = settings::realValue("NV2ROUTE_HIST_STEP", s);
+  if (const char *f = settings::get("NV2ROUTE_HIST_FACTOR"); f)
+    viaKnobs.factor = settings::realValue("NV2ROUTE_HIST_FACTOR", f);
+  if (const char *m = settings::get("NV2ROUTE_HIST_MODE"); m && std::string(m) == "mult")
     viaKnobs.mode = HistMode::kMultiplicative;
-  else if (const char *m = std::getenv("NV2ROUTE_HIST_MODE"); m && std::string(m) == "ratio")
+  else if (m && std::string(m) == "ratio") // m: the if's own (Part 215, review F5)
     viaKnobs.mode = HistMode::kRatio;
-  if (const char *s = std::getenv("NV2ROUTE_HIST_STREAK"); s)
-    viaKnobs.streakThreshold = std::max(1, std::atoi(s));
-  if (const char *s = std::getenv("NV2ROUTE_HIST_SCALE"); s && std::string(s) == "overflow")
+  if (const char *s = settings::get("NV2ROUTE_HIST_STREAK"); s)
+    viaKnobs.streakThreshold = std::max(1, settings::intValue("NV2ROUTE_HIST_STREAK", s));
+  if (const char *s = settings::get("NV2ROUTE_HIST_SCALE"); s && std::string(s) == "overflow")
     viaKnobs.scaleByOverflow = true;
-  if (const char *r = std::getenv("NV2ROUTE_HIST_RELAX"); r)
+  if (const char *r = settings::get("NV2ROUTE_HIST_RELAX"); r)
     viaKnobs.relaxEnabled = std::string(r) != "0";
-  if (const char *r = std::getenv("NV2ROUTE_HIST_RATIO_EXPONENT"); r)
-    viaKnobs.ratioExponent = std::atof(r);
-  if (const char *r = std::getenv("NV2ROUTE_HIST_EXPONENT_ESCALATION"); r)
-    viaKnobs.exponentEscalation = std::atof(r);
+  if (const char *r = settings::get("NV2ROUTE_HIST_RATIO_EXPONENT"); r)
+    viaKnobs.ratioExponent = settings::realValue("NV2ROUTE_HIST_RATIO_EXPONENT", r);
+  if (const char *r = settings::get("NV2ROUTE_HIST_EXPONENT_ESCALATION"); r)
+    viaKnobs.exponentEscalation = settings::realValue("NV2ROUTE_HIST_EXPONENT_ESCALATION", r);
   int viaRounds = 60;
-  if (const char *r = std::getenv("NV2ROUTE_VIA_ROUNDS"); r)
-    viaRounds = std::atoi(r);
+  if (const char *r = settings::get("NV2ROUTE_VIA_ROUNDS"); r)
+    viaRounds = settings::intValue("NV2ROUTE_VIA_ROUNDS", r);
   int viaPatience = 20;
-  if (const char *r = std::getenv("NV2ROUTE_VIA_PATIENCE"); r)
-    viaPatience = std::atoi(r);
+  if (const char *r = settings::get("NV2ROUTE_VIA_PATIENCE"); r)
+    viaPatience = settings::intValue("NV2ROUTE_VIA_PATIENCE", r);
 
   // This file's own new mechanism: the wire-history knobs, same roles as
   // the via ones above, independent WirePrices instance.
   HistKnobs wireKnobs;
-  if (const char *s = std::getenv("NV2ROUTE_WIRE_HIST_STEP"); s)
-    wireKnobs.step = std::atof(s);
-  if (const char *f = std::getenv("NV2ROUTE_WIRE_HIST_FACTOR"); f)
-    wireKnobs.factor = std::atof(f);
-  if (const char *m = std::getenv("NV2ROUTE_WIRE_HIST_MODE"); m && std::string(m) == "mult")
+  if (const char *s = settings::get("NV2ROUTE_WIRE_HIST_STEP"); s)
+    wireKnobs.step = settings::realValue("NV2ROUTE_WIRE_HIST_STEP", s);
+  if (const char *f = settings::get("NV2ROUTE_WIRE_HIST_FACTOR"); f)
+    wireKnobs.factor = settings::realValue("NV2ROUTE_WIRE_HIST_FACTOR", f);
+  if (const char *m = settings::get("NV2ROUTE_WIRE_HIST_MODE"); m && std::string(m) == "mult")
     wireKnobs.mode = HistMode::kMultiplicative;
-  else if (const char *m = std::getenv("NV2ROUTE_WIRE_HIST_MODE"); m && std::string(m) == "ratio")
+  else if (m && std::string(m) == "ratio") // m: the if's own (Part 215, review F5)
     wireKnobs.mode = HistMode::kRatio;
-  if (const char *s = std::getenv("NV2ROUTE_WIRE_HIST_STREAK"); s)
-    wireKnobs.streakThreshold = std::max(1, std::atoi(s));
-  if (const char *s = std::getenv("NV2ROUTE_WIRE_HIST_SCALE"); s && std::string(s) == "overflow")
+  if (const char *s = settings::get("NV2ROUTE_WIRE_HIST_STREAK"); s)
+    wireKnobs.streakThreshold = std::max(1, settings::intValue("NV2ROUTE_WIRE_HIST_STREAK", s));
+  if (const char *s = settings::get("NV2ROUTE_WIRE_HIST_SCALE"); s && std::string(s) == "overflow")
     wireKnobs.scaleByOverflow = true;
-  if (const char *r = std::getenv("NV2ROUTE_WIRE_HIST_RELAX"); r)
+  if (const char *r = settings::get("NV2ROUTE_WIRE_HIST_RELAX"); r)
     wireKnobs.relaxEnabled = std::string(r) != "0";
-  if (const char *r = std::getenv("NV2ROUTE_WIRE_HIST_RATIO_EXPONENT"); r)
-    wireKnobs.ratioExponent = std::atof(r);
-  if (const char *r = std::getenv("NV2ROUTE_WIRE_HIST_EXPONENT_ESCALATION"); r)
-    wireKnobs.exponentEscalation = std::atof(r);
+  if (const char *r = settings::get("NV2ROUTE_WIRE_HIST_RATIO_EXPONENT"); r)
+    wireKnobs.ratioExponent = settings::realValue("NV2ROUTE_WIRE_HIST_RATIO_EXPONENT", r);
+  if (const char *r = settings::get("NV2ROUTE_WIRE_HIST_EXPONENT_ESCALATION"); r)
+    wireKnobs.exponentEscalation = settings::realValue("NV2ROUTE_WIRE_HIST_EXPONENT_ESCALATION", r);
 
   auto t0 = std::chrono::steady_clock::now();
   G24Input g24In;
@@ -24181,7 +24302,7 @@ int main(int argc, char **argv) {
     // InstantGR's rule picks (g24::chooseAccessPoints); first (default) is
     // the file's first access point, as before.
     bool align = false;
-    if (const char *v = std::getenv("PD33ROUTE_AP"); v) {
+    if (const char *v = settings::get("PD33ROUTE_AP"); v) {
       std::string sv(v);
       if (sv != "first" && sv != "align")
         fail("PD33ROUTE_AP must be first or align (got '" + sv + "')");
@@ -24192,17 +24313,17 @@ int main(int argc, char **argv) {
     // PD39ROUTE_LAYER_R=r1,...,rL (each layer's resistance, any unit).
     std::vector<double> timingK, layerR, layerC;
     double powerK = 0;
-    if (const char *v = std::getenv("PD39ROUTE_POWER_LAYERS"); v) { // Part 133
+    if (const char *v = settings::get("PD39ROUTE_POWER_LAYERS"); v) { // Part 133
       std::vector<double> pk;
       if (!parseDoubleList(v, pk) || pk.size() != 1 || pk[0] < 0)
         fail(std::string("PD39ROUTE_POWER_LAYERS must be one number kp >= 0 (got '") + v + "')");
       powerK = pk[0];
-      const char *c = std::getenv("PD39ROUTE_LAYER_C");
+      const char *c = settings::get("PD39ROUTE_LAYER_C");
       if (!c || !parseDoubleList(c, layerC) || layerC.empty())
         fail("PD39ROUTE_POWER_LAYERS needs PD39ROUTE_LAYER_C=c1,...,cL (one capacitance per layer)");
       gTiming.on = true;
     }
-    if (const char *v = std::getenv("PD39ROUTE_TIMING_REF"); v) { // Part 133
+    if (const char *v = settings::get("PD39ROUTE_TIMING_REF"); v) { // Part 133
       std::string sv(v);
       std::vector<double> q;
       if (sv == "worst")
@@ -24212,14 +24333,14 @@ int main(int argc, char **argv) {
       else
         fail("PD39ROUTE_TIMING_REF must be worst or a fraction 0 <= q < 1 (got '" + sv + "')");
     }
-    if (const char *v = std::getenv("PD39ROUTE_TIMING_LAYERS"); v) {
+    if (const char *v = settings::get("PD39ROUTE_TIMING_LAYERS"); v) {
       if (!parseDoubleList(v, timingK) || timingK.size() != 3)
         fail(std::string("PD39ROUTE_TIMING_LAYERS must be three numbers k1,k2,k3 (got '") + v + "')");
-      const char *r = std::getenv("PD39ROUTE_LAYER_R");
+      const char *r = settings::get("PD39ROUTE_LAYER_R");
       if (!r || !parseDoubleList(r, layerR) || layerR.empty())
         fail("PD39ROUTE_TIMING_LAYERS needs PD39ROUTE_LAYER_R=r1,...,rL (one resistance per layer)");
       gTiming.on = true;
-      if (const char *gv = std::getenv("PD39ROUTE_TIMING_GATE"); gv) {
+      if (const char *gv = settings::get("PD39ROUTE_TIMING_GATE"); gv) {
         if (std::strcmp(gv, "0") && std::strcmp(gv, "1"))
           fail(std::string("PD39ROUTE_TIMING_GATE must be 0 or 1 (got '") + gv + "')");
         gTiming.gate = gv[0] == '1';
@@ -24240,10 +24361,10 @@ int main(int argc, char **argv) {
         for (double x : vals)
           out.push_back(x / mx);
       };
-      if (const char *sf = std::getenv("PD39ROUTE_TIMING_SLACK"); sf) { // Part 134: routed slack
+      if (const char *sf = settings::get("PD39ROUTE_TIMING_SLACK"); sf) { // Part 134: routed slack
         // PD39ROUTE_TIMING_SLACK_MODE: replace (default) -- the file's slack only, unlisted nets
         // unclassed; min -- each net keeps its input slack, lowered to the file's where that is worse
-        const char *mv = std::getenv("PD39ROUTE_TIMING_SLACK_MODE");
+        const char *mv = settings::get("PD39ROUTE_TIMING_SLACK_MODE");
         const std::string mode = mv ? mv : "replace";
         if (mode != "replace" && mode != "min")
           fail("PD39ROUTE_TIMING_SLACK_MODE must be replace or min (got '" + mode + "')");
@@ -24272,13 +24393,13 @@ int main(int argc, char **argv) {
       // values timing against overflow -- |w_TNS| / w_overflow x |worst
       // slack| (ns) -- relative to ariane's (100 / 3e-7 x 0.4687), where
       // 40, 80, 160 was tuned (Part 133). 1 (default): k as given.
-      if (const char *km = std::getenv("PD39ROUTE_TIMING_KMIN"); km) { // Part 133 calibration
+      if (const char *km = settings::get("PD39ROUTE_TIMING_KMIN"); km) { // Part 133 calibration
         std::vector<double> v;
         if (!parseDoubleList(km, v) || v.size() != 1 || v[0] < 0)
           fail(std::string("PD39ROUTE_TIMING_KMIN must be one number >= 0 (got '") + km + "')");
         gTiming.kMin = v[0];
       }
-      const char *sc = std::getenv("PD39ROUTE_TIMING_SCALE");
+      const char *sc = settings::get("PD39ROUTE_TIMING_SCALE");
       std::string scale = sc ? sc : "1";
       if (scale != "1" && scale != "weights")
         fail("PD39ROUTE_TIMING_SCALE must be 1 or weights (got '" + scale + "')");
@@ -24307,7 +24428,7 @@ int main(int argc, char **argv) {
       std::cerr << "ISPD 2025 timing layers: " << (gTiming.refQ < 0 ? "worst" : "reference") << " slack " << worst
                 << " s; classes 1/2/3: " << gTiming.counts[1] << " / " << gTiming.counts[2] << " / " << gTiming.counts[3]
                 << " nets, k " << gTiming.k[1] << " / " << gTiming.k[2] << " / " << gTiming.k[3] << ", kp " << gTiming.kp << (gTiming.gate ? ", gated (no bias on a full edge)" : "") << "\n";
-      if (const char *bv = std::getenv("PD39ROUTE_TIMING_BENEFIT"); bv && *bv) { // Part 205: g[,M[,P]]
+      if (const char *bv = settings::get("PD39ROUTE_TIMING_BENEFIT"); bv && *bv) { // Part 205: g[,M[,P]]
         std::vector<double> v;
         if (!parseDoubleList(bv, v) || v.empty() || v.size() > 4 || v[0] < 0 || v[0] > 4 ||
             (v.size() > 1 && !(v[1] >= 1 && v[1] <= 1e6)) || (v.size() > 2 && !(v[2] >= 0 && v[2] <= 1e6)) ||
@@ -24334,7 +24455,7 @@ int main(int argc, char **argv) {
                     << " classed nets at the upper bound, " << gTiming.benefitLo << " at the lower\n";
         }
       }
-      if (const char *mf = std::getenv("PD39ROUTE_TIMING_MULT"); mf && *mf) { // Part 207: a multiplier per net
+      if (const char *mf = settings::get("PD39ROUTE_TIMING_MULT"); mf && *mf) { // Part 207: a multiplier per net
         if (!gTiming.mult.empty())
           fail("PD39ROUTE_TIMING_MULT cannot be combined with PD39ROUTE_TIMING_BENEFIT (both set the timing term's "
                "per-net multiplier)");
@@ -24355,7 +24476,7 @@ int main(int argc, char **argv) {
         std::cerr << "ISPD 2025 timing layers: per-net multipliers from " << mf << ": " << listed << " nets listed, "
                   << acting << " classed nets with a multiplier other than 1 (" << lo << " to " << hi << ")\n";
       }
-      if (const char *rf = std::getenv("PD39ROUTE_TIMING_ROWS"); rf && *rf) { // Part 215: a whole row per net
+      if (const char *rf = settings::get("PD39ROUTE_TIMING_ROWS"); rf && *rf) { // Part 215: a whole row per net
         std::string err;
         const size_t L = static_cast<size_t>(g24In.res.nLayers);
         if (!loadTimingRows(rf, gTiming.cls.size(), L, gTiming.rowOf, gTiming.rowVals, err))
@@ -24371,7 +24492,7 @@ int main(int argc, char **argv) {
                   << " to " << hi << " (their class rows and multipliers replaced)\n";
       }
     }
-    if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v) {
+    if (const char *v = settings::get("PD33ROUTE_VIA_DEMAND"); v) {
       std::string sv(v);
       if (sv != "0" && sv != "1")
         fail("PD33ROUTE_VIA_DEMAND must be 0 or 1 (got '" + sv + "')");
@@ -24381,7 +24502,7 @@ int main(int argc, char **argv) {
     for (int z = 1; z < g24In.res.nLayers; ++z)
       gViaDemand.dir[z] = g24In.res.layers[z].dir;
     std::cerr << "ISPD 2024 via demand in layer assignment: " << (gViaDemand.on ? "on" : "off") << "\n";
-    if (const char *v = std::getenv("PD33ROUTE_LA_COST"); v) {
+    if (const char *v = settings::get("PD33ROUTE_LA_COST"); v) {
       std::string sv(v);
       if (sv != "nthu" && sv != "score")
         fail("PD33ROUTE_LA_COST must be nthu or score (got '" + sv + "')");
@@ -24433,13 +24554,13 @@ int main(int argc, char **argv) {
       }
     }
     std::cerr << "ISPD 2024 layer assignment cost: " << (gScore.on ? "score" : "nthu") << "\n";
-    if (const char *v = std::getenv("PD34ROUTE_2D_COST"); v) {
+    if (const char *v = settings::get("PD34ROUTE_2D_COST"); v) {
       std::string sv(v);
       if (sv != "pd" && sv != "score")
         fail("PD34ROUTE_2D_COST must be pd or score (got '" + sv + "')");
       gScore2D.on = sv == "score";
     }
-    if (const char *v = std::getenv("PD34ROUTE_2D_HIST"); v) {
+    if (const char *v = settings::get("PD34ROUTE_2D_HIST"); v) {
       std::string sv(v);
       if (sv != "0" && sv != "1")
         fail("PD34ROUTE_2D_HIST must be 0 or 1 (got '" + sv + "')");
@@ -24447,7 +24568,7 @@ int main(int argc, char **argv) {
     }
     if (gScore2D.on)
       buildScore2D(g24In.res, d.grid);
-    if (const char *v = std::getenv("PD35ROUTE_PATTERN3D"); v) {
+    if (const char *v = settings::get("PD35ROUTE_PATTERN3D"); v) {
       char *end = nullptr;
       long k = std::strtol(v, &end, 10);
       if (!*v || *end || k < 0 || k > 100)
@@ -24469,16 +24590,16 @@ int main(int argc, char **argv) {
     gStages.mark("read input", nullptr, -1, std::numeric_limits<double>::quiet_NaN(),
                  std::to_string(d.nets.size()) + " nets");
   } else {
-    if (const char *v = std::getenv("PD33ROUTE_VIA_DEMAND"); v && std::string(v) != "0")
+    if (const char *v = settings::get("PD33ROUTE_VIA_DEMAND"); v && std::string(v) != "0")
       fail("PD33ROUTE_VIA_DEMAND needs an ISPD 2024 design (.cap .net solution)");
-    if (const char *v = std::getenv("PD33ROUTE_LA_COST"); v && std::string(v) != "nthu")
+    if (const char *v = settings::get("PD33ROUTE_LA_COST"); v && std::string(v) != "nthu")
       fail("PD33ROUTE_LA_COST=score needs an ISPD 2024 design (.cap .net solution)");
-    if (const char *v = std::getenv("PD33ROUTE_AP"); v && std::string(v) != "first")
+    if (const char *v = settings::get("PD33ROUTE_AP"); v && std::string(v) != "first")
       fail("PD33ROUTE_AP=align needs an ISPD 2024 design (.cap .net solution)");
-    if (const char *v = std::getenv("PD34ROUTE_2D_COST"); v && std::string(v) != "pd")
+    if (const char *v = settings::get("PD34ROUTE_2D_COST"); v && std::string(v) != "pd")
       fail("PD34ROUTE_2D_COST=score needs an ISPD 2024 design (.cap .net solution)");
     // pd35route: on the 2008 path the pattern pass runs under the 2008 cost.
-    if (const char *v = std::getenv("PD35ROUTE_PATTERN3D"); v) {
+    if (const char *v = settings::get("PD35ROUTE_PATTERN3D"); v) {
       char *end = nullptr;
       long k = std::strtol(v, &end, 10);
       if (!*v || *end || k < 0 || k > 100)
@@ -24489,7 +24610,7 @@ int main(int argc, char **argv) {
         std::cerr << "3D pattern reroute passes (ISPD 2008 cost): " << k << "\n";
     }
     d = readGr(argv[1]);
-    if (const char *v = std::getenv("PD39ROUTE_SKIP_GIANT"); v) { // Part 212
+    if (const char *v = settings::get("PD39ROUTE_SKIP_GIANT"); v) { // Part 212
       std::string sv(v);
       if (sv != "0" && sv != "1")
         fail("PD39ROUTE_SKIP_GIANT must be 0 or 1 (got '" + sv + "')");
@@ -24505,14 +24626,14 @@ int main(int argc, char **argv) {
   // pd11route's own mechanism: the batched pattern stage.
   PatternStageSettings pattern;
   {
-    if (const char *v = std::getenv("PD11ROUTE_PATTERN"); v) {
+    if (const char *v = settings::get("PD11ROUTE_PATTERN"); v) {
       std::string sv(v);
       if (sv != "0" && sv != "1")
         fail("PD11ROUTE_PATTERN must be 0 or 1 (got '" + sv + "')");
       pattern.enabled = sv == "1";
     }
     auto num = [&](const char *name, int lo, int &dst) {
-      if (const char *v = std::getenv(name); v) {
+      if (const char *v = settings::get(name); v) {
         char *end = nullptr;
         long x = std::strtol(v, &end, 10);
         if (end == v || *end != '\0' || x < lo || x > 1000000)
@@ -24525,7 +24646,7 @@ int main(int argc, char **argv) {
   }
   // pd10route's own mechanism: pattern-first piece reroutes (default on).
   patternFirst = true;
-  if (const char *v = std::getenv("PD10ROUTE_PATTERN_FIRST"); v) {
+  if (const char *v = settings::get("PD10ROUTE_PATTERN_FIRST"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD10ROUTE_PATTERN_FIRST must be 0 or 1 (got '" + sv + "')");
@@ -24534,13 +24655,13 @@ int main(int argc, char **argv) {
   // pd9route's own mechanisms: search-stage piece reroutes and a threshold stop.
   bool slowPieces = false;
   long long stopAt = -1;
-  if (const char *v = std::getenv("PD9ROUTE_SLOW_PIECES"); v) {
+  if (const char *v = settings::get("PD9ROUTE_SLOW_PIECES"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD9ROUTE_SLOW_PIECES must be 0 or 1 (got '" + sv + "')");
     slowPieces = sv == "1";
   }
-  if (const char *v = std::getenv("PD39ROUTE_SEARCH_DUMP"); v && *v) { // Part 153 (trace only): prefix,every,minpops; Part 197: read before route(), so `all` covers the slow tier
+  if (const char *v = settings::get("PD39ROUTE_SEARCH_DUMP"); v && *v) { // Part 153 (trace only): prefix,every,minpops; Part 197: read before route(), so `all` covers the slow tier
     std::string sv(v);
     if (sv.size() > 4 && sv.compare(sv.size() - 4, 4, ",all") == 0) { // Part 197: every search of the run
       gSearchDump.all = true;
@@ -24550,12 +24671,12 @@ int main(int argc, char **argv) {
     if (c0 == std::string::npos)
       fail("PD39ROUTE_SEARCH_DUMP must be prefix,every,minpops (got '" + sv + "')");
     gSearchDump.prefix = sv.substr(0, c0);
-    gSearchDump.every = std::atoll(sv.substr(c0 + 1, c1 - c0 - 1).c_str());
-    gSearchDump.minPops = std::atoll(sv.substr(c1 + 1).c_str());
+    gSearchDump.every = settings::longValue("PD39ROUTE_SEARCH_DUMP (every)", sv.substr(c0 + 1, c1 - c0 - 1).c_str());
+    gSearchDump.minPops = settings::longValue("PD39ROUTE_SEARCH_DUMP (minpops)", sv.substr(c1 + 1).c_str());
     if (gSearchDump.every <= 0 || gSearchDump.minPops < 0)
       fail("PD39ROUTE_SEARCH_DUMP: every must be >= 1 and minpops >= 0 (got '" + sv + "')");
   }
-  if (const char *v = std::getenv("PD39ROUTE_SLOW_PLATEAU"); v) { // Part 148: window,gain%,floor -- read before route() runs the slow tier
+  if (const char *v = settings::get("PD39ROUTE_SLOW_PLATEAU"); v) { // Part 148: window,gain%,floor -- read before route() runs the slow tier
     int w = -1;
     double gp = -1;
     long long fl = -1;
@@ -24569,7 +24690,7 @@ int main(int argc, char **argv) {
     if (w > 0)
       std::cerr << "slow tier plateau stop: best down < " << gp << "% over " << w << " rounds while >= " << fl << "\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_SLOW_CUT"); v) { // Part 173: tracks,radius,below,every,full
+  if (const char *v = settings::get("PD39ROUTE_SLOW_CUT"); v) { // Part 173: tracks,radius,below,every,full
     SlowCutSettings c;
     int full = -1;
     char tail = 0;
@@ -24582,7 +24703,7 @@ int main(int argc, char **argv) {
     c.full = full == 1;
     gSlowCut = c;
   }
-  if (const char *v = std::getenv("PD39ROUTE_SLOW_OVER"); v) { // Part 186: slack[,below]
+  if (const char *v = settings::get("PD39ROUTE_SLOW_OVER"); v) { // Part 186: slack[,below]
     SlowOverSettings o;
     long long below = -1;
     char tail = 0;
@@ -24596,7 +24717,7 @@ int main(int argc, char **argv) {
     std::cerr << "slow tier over-capacity cost set: slack " << o.slack << ", from the first slow round at or below "
               << (n == 2 ? std::to_string(below) : std::string("any")) << " units of 2D overflow\n";
   }
-  if (const char *v = std::getenv("PD9ROUTE_STOP_AT"); v) {
+  if (const char *v = settings::get("PD9ROUTE_STOP_AT"); v) {
     char *end = nullptr;
     long long x = std::strtoll(v, &end, 10);
     if (end == v || *end != '\0' || x < 0)
@@ -24607,11 +24728,11 @@ int main(int argc, char **argv) {
   {
     std::string err;
     ReclaimSettings rs;
-    if (!parseReclaimSettings(nullptr, std::getenv("PD16ROUTE_RECLAIM_RATIO"), std::getenv("PD16ROUTE_RECLAIM_MIN_EXCESS"),
-                              std::getenv("PD16ROUTE_RECLAIM_MU"), std::getenv("PD16ROUTE_RECLAIM_MARGIN"),
-                              std::getenv("PD16ROUTE_RECLAIM_PASSES"), rs, err) ||
-        !parseReclaimAvoid(std::getenv("PD17ROUTE_RECLAIM_AVOID"), rs, err) ||
-        !parseSlowReclaim(std::getenv("PD18ROUTE_RECLAIM_AT_STOP"), std::getenv("PD18ROUTE_RECLAIM_EVERY"), gSlowReclaim,
+    if (!parseReclaimSettings(nullptr, settings::get("PD16ROUTE_RECLAIM_RATIO"), settings::get("PD16ROUTE_RECLAIM_MIN_EXCESS"),
+                              settings::get("PD16ROUTE_RECLAIM_MU"), settings::get("PD16ROUTE_RECLAIM_MARGIN"),
+                              settings::get("PD16ROUTE_RECLAIM_PASSES"), rs, err) ||
+        !parseReclaimAvoid(settings::get("PD17ROUTE_RECLAIM_AVOID"), rs, err) ||
+        !parseSlowReclaim(settings::get("PD18ROUTE_RECLAIM_AT_STOP"), settings::get("PD18ROUTE_RECLAIM_EVERY"), gSlowReclaim,
                           err))
       fail(err);
     rs.enabled = true;
@@ -24620,14 +24741,14 @@ int main(int argc, char **argv) {
   checkSegRange(d); // pd35route: 16-bit route records
   // pd35route (memory): low-memory mode (see gLowMem).
   {
-    std::string lm = std::getenv("PD35ROUTE_LOWMEM") ? std::getenv("PD35ROUTE_LOWMEM") : "auto";
+    std::string lm = settings::get("PD35ROUTE_LOWMEM") ? settings::get("PD35ROUTE_LOWMEM") : "auto";
     if (lm != "auto" && lm != "0" && lm != "1")
       fail("PD35ROUTE_LOWMEM must be auto, 0 or 1 (got '" + lm + "')");
     gLowMem = lm == "1" || (lm == "auto" && d.nets.size() > kLowMemNets);
     if (gLowMem)
       std::cerr << "low-memory mode: on (" << d.nets.size() << " nets)\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_ROUND0"); v && *v) { // Part 210
+  if (const char *v = settings::get("PD39ROUTE_REGION_ROUND0"); v && *v) { // Part 210
     const std::string sv(v);
     if (sv != "all" && sv != "over")
       fail("PD39ROUTE_REGION_ROUND0 must be all or over (got '" + sv + "')");
@@ -24635,9 +24756,9 @@ int main(int argc, char **argv) {
     if (gRegionRound0Over)
       std::cerr << "region stage: round 0 reroutes only nets on over-capacity edges (PD39ROUTE_REGION_ROUND0=over)\n";
   }
-  if (g24Mode && std::getenv("PD39ROUTE_SKIP_GIANT")) // Part 212: the 2024 / 2025 contests route every net
+  if (g24Mode && settings::get("PD39ROUTE_SKIP_GIANT")) // Part 212: the 2024 / 2025 contests route every net
     fail("PD39ROUTE_SKIP_GIANT is for ISPD 2008 designs (that contest exempts nets above 1000 pins)");
-  if (const char *v = std::getenv("PD39ROUTE_PRICE_SEED"); v && *v) { // Part 210: file[,scale]
+  if (const char *v = settings::get("PD39ROUTE_PRICE_SEED"); v && *v) { // Part 210: file[,scale]
     std::string sv(v), path = sv;
     const size_t comma = sv.rfind(',');
     if (comma != std::string::npos) {
@@ -24672,7 +24793,7 @@ int main(int argc, char **argv) {
     rep.nets = readRouteAs2D(d, laFrom);
     prepareFor2DRefine(d, rep.nets);
   } else {
-    if (std::getenv("PD39ROUTE_NET_TIMES")) { // Part 131: per-net time, by the input's net order
+    if (settings::get("PD39ROUTE_NET_TIMES")) { // Part 131: per-net time, by the input's net order
       gNetBase = d.nets.data();
       gNetTime.assign(d.nets.size(), std::array<float, 4>{0, 0, 0, 0});
     }
@@ -24698,7 +24819,7 @@ int main(int argc, char **argv) {
   // pd7route's own mechanism: pin-aware layer assignment (PD7ROUTE_LA_PINS,
   // default 1; 0 reproduces pd6route's layer assignment).
   bool laPins = true;
-  if (const char *v = std::getenv("PD7ROUTE_LA_PINS"); v) {
+  if (const char *v = settings::get("PD7ROUTE_LA_PINS"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD7ROUTE_LA_PINS must be 0 or 1 (got '" + sv + "')");
@@ -24708,7 +24829,7 @@ int main(int argc, char **argv) {
   RebuildSettings rebuild;
   {
     auto flag = [&](const char *name, bool &dst) {
-      if (const char *v = std::getenv(name); v) {
+      if (const char *v = settings::get(name); v) {
         std::string sv(v);
         if (sv != "0" && sv != "1")
           fail(std::string(name) + " must be 0 or 1 (got '" + sv + "')");
@@ -24716,7 +24837,7 @@ int main(int argc, char **argv) {
       }
     };
     auto num = [&](const char *name, int lo, int &dst) {
-      if (const char *v = std::getenv(name); v) {
+      if (const char *v = settings::get(name); v) {
         char *end = nullptr;
         long x = std::strtol(v, &end, 10);
         if (end == v || *end != '\0' || x < lo || x > 1000000)
@@ -24732,12 +24853,12 @@ int main(int argc, char **argv) {
   WlSettings wl;
   {
     std::string err;
-    if (!parseWlSettings(std::getenv("PD7ROUTE_WL"), std::getenv("PD7ROUTE_WL_PASSES"), std::getenv("PD7ROUTE_WL_BEND"),
-                         std::getenv("PD7ROUTE_WL_MARGIN"), wl, err))
+    if (!parseWlSettings(settings::get("PD7ROUTE_WL"), settings::get("PD7ROUTE_WL_PASSES"), settings::get("PD7ROUTE_WL_BEND"),
+                         settings::get("PD7ROUTE_WL_MARGIN"), wl, err))
       fail(err);
   }
   // pd6route: PD6ROUTE_PIECES=1 switches both stages to 2-pin-piece reroutes.
-  if (const char *pv = std::getenv("PD6ROUTE_PIECES"); pv) {
+  if (const char *pv = settings::get("PD6ROUTE_PIECES"); pv) {
     std::string v(pv);
     if (v != "0" && v != "1")
       fail("PD6ROUTE_PIECES must be 0 or 1 (got '" + v + "')");
@@ -24747,12 +24868,12 @@ int main(int argc, char **argv) {
   // the fallback's paths on two threads.
   {
     std::string err;
-    if (!parseVirtualCap(std::getenv("PD22ROUTE_VCAP"), std::getenv("PD22ROUTE_VCAP_RADIUS"), region, err))
+    if (!parseVirtualCap(settings::get("PD22ROUTE_VCAP"), settings::get("PD22ROUTE_VCAP_RADIUS"), region, err))
       fail(err);
   }
   // pd39route (Part 135): PD39ROUTE_REGION_LAGRANGE (the region stage's Lagrangian step, >= 0; 0 = off)
   // and PD39ROUTE_PORTFOLIO (path A's variants, ';'-separated; see applyRegionVariant).
-  if (const char *v = std::getenv("PD39ROUTE_REGION_ABORT"); v) { // Part 146: above,rounds
+  if (const char *v = settings::get("PD39ROUTE_REGION_ABORT"); v) { // Part 146: above,rounds
     long long above = -1;
     int rounds = -1;
     char tail = 0;
@@ -24764,7 +24885,7 @@ int main(int argc, char **argv) {
       std::cerr << "region abort: above " << above << " units of entering overflow, no gain by round " << rounds
                 << " -> stop\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_WALL_H"); v) { // Part 150: B[,from]
+  if (const char *v = settings::get("PD39ROUTE_REGION_WALL_H"); v) { // Part 150: B[,from]
     int B = -1, from = 0;
     char tail = 0;
     const int n = std::sscanf(v, "%d,%d%c", &B, &from, &tail);
@@ -24773,21 +24894,21 @@ int main(int argc, char **argv) {
     region.wallB = B;
     region.wallFrom = from;
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_DAMP"); v) { // Part 144
+  if (const char *v = settings::get("PD39ROUTE_REGION_DAMP"); v) { // Part 144
     char *end = nullptr;
     const double x = std::strtod(v, &end);
     if (!*v || *end || !(x >= 0 && x <= 1))
       fail(std::string("PD39ROUTE_REGION_DAMP must be a number 0-1 (got '") + v + "')");
     region.damp = x;
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_COOLDOWN"); v) { // Part 144
+  if (const char *v = settings::get("PD39ROUTE_REGION_COOLDOWN"); v) { // Part 144
     char *end = nullptr;
     const long x = std::strtol(v, &end, 10);
     if (!*v || *end || x < 0 || x > 1000)
       fail(std::string("PD39ROUTE_REGION_COOLDOWN must be an integer 0-1000 (got '") + v + "')");
     region.cooldown = static_cast<int>(x);
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_BATCH"); v && *v) { // Part 159: B[,spread]
+  if (const char *v = settings::get("PD39ROUTE_REGION_BATCH"); v && *v) { // Part 159: B[,spread]
     int B = -1, sp = 0, bx = 0;
     char tail = 0;
     const int n = std::sscanf(v, "%d,%d,%d%c", &B, &sp, &bx, &tail);
@@ -24797,35 +24918,35 @@ int main(int argc, char **argv) {
     region.batch = B;
     region.batchSpread = sp;
     region.batchBox = bx == 1;
-    if (const char *u = std::getenv("PD39ROUTE_REGION_BATCH_UNTIL"); u && *u) { // Part 160
+    if (const char *u = settings::get("PD39ROUTE_REGION_BATCH_UNTIL"); u && *u) { // Part 160
       char *end = nullptr;
       const long k = std::strtol(u, &end, 10);
       if (*end || k < 0 || k > 1000000)
         fail(std::string("PD39ROUTE_REGION_BATCH_UNTIL must be a round number 0-1000000 (got '") + u + "')");
       region.batchUntil = static_cast<int>(k);
     }
-    if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_MAX"); a && *a) { // Part 165
+    if (const char *a = settings::get("PD39ROUTE_REGION_BATCH_MAX"); a && *a) { // Part 165
       char *end = nullptr;
       const long long m = std::strtoll(a, &end, 10);
       if (*end || m < 0)
         fail(std::string("PD39ROUTE_REGION_BATCH_MAX must be a number of overflow units >= 0 (got '") + a + "')");
       region.batchMax = m;
     }
-    if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_ROUNDS"); a && *a) { // Part 163
+    if (const char *a = settings::get("PD39ROUTE_REGION_BATCH_ROUNDS"); a && *a) { // Part 163
       char *end = nullptr;
       const long f = std::strtol(a, &end, 10);
       if (*end || f < 0 || f > 100)
         fail(std::string("PD39ROUTE_REGION_BATCH_ROUNDS must be a round-budget factor 0-100 (got '") + a + "')");
       region.batchRounds = static_cast<int>(f);
     }
-    if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_ADAPT"); a && *a) { // Part 161
+    if (const char *a = settings::get("PD39ROUTE_REGION_BATCH_ADAPT"); a && *a) { // Part 161
       char *end = nullptr;
       const long f = std::strtol(a, &end, 10);
       if (*end || f < 0 || f > 100)
         fail(std::string("PD39ROUTE_REGION_BATCH_ADAPT must be a round-budget factor 0-100 (got '") + a + "')");
       region.batchAdapt = static_cast<int>(f);
     }
-    if (const char *a = std::getenv("PD39ROUTE_REGION_BATCH_FALLBACK"); a && *a) { // Part 167
+    if (const char *a = settings::get("PD39ROUTE_REGION_BATCH_FALLBACK"); a && *a) { // Part 167
       char *end = nullptr;
       const long long gmin = std::strtoll(a, &end, 10);
       if (*end || gmin < 0)
@@ -24852,7 +24973,7 @@ int main(int argc, char **argv) {
                                              : std::string())
                 << "\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_A1"); v && *v) { // Part 157 (trace only): rounds r1,r2,...
+  if (const char *v = settings::get("PD39ROUTE_REGION_A1"); v && *v) { // Part 157 (trace only): rounds r1,r2,...
     std::stringstream ss(v);
     std::string t;
     while (std::getline(ss, t, ',')) {
@@ -24864,13 +24985,13 @@ int main(int argc, char **argv) {
     }
     std::cerr << "region A1 replay (trace only) at rounds " << v << "\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_DUMP"); v && *v) { // Part 140 (trace only)
+  if (const char *v = settings::get("PD39ROUTE_REGION_DUMP"); v && *v) { // Part 140 (trace only)
     gRegionDumpPrefix = v;
     std::cerr << "region dump: " << gRegionDumpPrefix << ".<A|A<variant>|B>.txt\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_SEARCH_TRACE"); v && std::string(v) == "1") // Part 138
+  if (const char *v = settings::get("PD39ROUTE_SEARCH_TRACE"); v && std::string(v) == "1") // Part 138
     gSearchTraceOn = true;
-  if (const char *v = std::getenv("PD39ROUTE_REGION_WL_FLOOR"); v) { // Part 138
+  if (const char *v = settings::get("PD39ROUTE_REGION_WL_FLOOR"); v) { // Part 138
     char *end = nullptr;
     const double x = std::strtod(v, &end);
     if (!*v || *end || !std::isfinite(x) || x < 0)
@@ -24879,7 +25000,7 @@ int main(int argc, char **argv) {
     if (x > 0)
       std::cerr << "region WL floor: the region stage's WL term is max(NTHU's factor, " << x << ")\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_BOX_EVIDENCE"); v) { // Part 138
+  if (const char *v = settings::get("PD39ROUTE_REGION_BOX_EVIDENCE"); v) { // Part 138
     char *end = nullptr;
     const long x = std::strtol(v, &end, 10);
     if (!*v || *end || x < 0 || x > 100000)
@@ -24889,14 +25010,14 @@ int main(int argc, char **argv) {
       std::cerr << "region box evidence: each net's margin from " << region.boxInit << ", +" << region.evidenceStep
                 << " after a box-limited reroute that left it overflowed (to the region box cap)\n";
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_LAGRANGE"); v) {
+  if (const char *v = settings::get("PD39ROUTE_REGION_LAGRANGE"); v) {
     char *end = nullptr;
     const double x = std::strtod(v, &end);
     if (!*v || *end || !std::isfinite(x) || x < 0)
       fail(std::string("PD39ROUTE_REGION_LAGRANGE must be a number >= 0 (got '") + v + "')");
     region.lagrange = x;
   }
-  if (const char *v = std::getenv("PD39ROUTE_REGION_OVER"); v) { // Part 179: the over-capacity cost's slack
+  if (const char *v = settings::get("PD39ROUTE_REGION_OVER"); v) { // Part 179: the over-capacity cost's slack
     char *end = nullptr;
     const double x = std::strtod(v, &end);
     if (!*v || *end || !std::isfinite(x) || x < 0 || x > 1000)
@@ -24932,7 +25053,7 @@ int main(int argc, char **argv) {
   if (region.damp > 0 || region.cooldown > 0)
     std::cerr << "region damping: route-change discount " << region.damp << ", cooldown " << region.cooldown
               << " rounds\n";
-  if (const char *v = std::getenv("PD39ROUTE_PORTFOLIO"); v && *v) {
+  if (const char *v = settings::get("PD39ROUTE_PORTFOLIO"); v && *v) {
     std::stringstream ss(v);
     std::string spec;
     while (std::getline(ss, spec, ';')) {
@@ -24942,14 +25063,14 @@ int main(int argc, char **argv) {
         fail("PD39ROUTE_PORTFOLIO: " + err);
       gPortfolio.push_back(spec);
     }
-    if (const char *w = std::getenv("PD39ROUTE_PORTFOLIO_WHEN"); w) {
+    if (const char *w = settings::get("PD39ROUTE_PORTFOLIO_WHEN"); w) {
       const std::string sw(w);
       if (sw != "after" && sw != "always" && sw != "speculative")
         fail("PD39ROUTE_PORTFOLIO_WHEN must be after, always or speculative (got '" + sw + "')");
       gPortfolioAfter = sw != "always";
       gPortfolioSpec = sw == "speculative";
     }
-    if (const char *w = std::getenv("PD39ROUTE_PORTFOLIO_DELAY"); w) { // Part 170
+    if (const char *w = settings::get("PD39ROUTE_PORTFOLIO_DELAY"); w) { // Part 170
       char *end = nullptr;
       const double x = std::strtod(w, &end);
       if (end == w || *end != '\0' || !(x >= 0.0) || x > 1e9)
@@ -24973,14 +25094,14 @@ int main(int argc, char **argv) {
   }
   // pd23route: PD23ROUTE_VCAP_B (0 | 1; unset = 1).
   bool vcapB = true;
-  if (const char *v = std::getenv("PD23ROUTE_VCAP_B"); v) {
+  if (const char *v = settings::get("PD23ROUTE_VCAP_B"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD23ROUTE_VCAP_B must be 0 or 1 (got '" + sv + "')");
     vcapB = sv == "1";
   }
   bool fallbackParallel = false;
-  if (const char *v = std::getenv("PD22ROUTE_FALLBACK_PARALLEL"); v) {
+  if (const char *v = settings::get("PD22ROUTE_FALLBACK_PARALLEL"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD22ROUTE_FALLBACK_PARALLEL must be 0 or 1 (got '" + sv + "')");
@@ -24988,7 +25109,7 @@ int main(int argc, char **argv) {
   }
   // pd19route's own mechanism: the reclaim with a fallback.
   bool reclaimFallback = false;
-  if (const char *v = std::getenv("PD19ROUTE_RECLAIM_FALLBACK"); v) {
+  if (const char *v = settings::get("PD19ROUTE_RECLAIM_FALLBACK"); v) {
     std::string sv(v);
     if (sv != "0" && sv != "1")
       fail("PD19ROUTE_RECLAIM_FALLBACK must be 0 or 1 (got '" + sv + "')");
@@ -24998,7 +25119,7 @@ int main(int argc, char **argv) {
   {
     double rel = 0.0;
     std::string err;
-    if (!parseCostRel(std::getenv("PD38ROUTE_REGION_COST_REL"), rel, err))
+    if (!parseCostRel(settings::get("PD38ROUTE_REGION_COST_REL"), rel, err))
       fail(err);
     if (rel > 0.0 && region.enabled && region.costWindow > 0) {
       long long before = gSearchPops; // this thread's count: every search so far
@@ -25013,20 +25134,20 @@ int main(int argc, char **argv) {
   if (reclaimFallback) {
     ReclaimSettings reclaim;
     std::string err;
-    if (!parseReclaimSettings(nullptr, std::getenv("PD16ROUTE_RECLAIM_RATIO"), std::getenv("PD16ROUTE_RECLAIM_MIN_EXCESS"),
-                              std::getenv("PD16ROUTE_RECLAIM_MU"), std::getenv("PD16ROUTE_RECLAIM_MARGIN"),
-                              std::getenv("PD16ROUTE_RECLAIM_PASSES"), reclaim, err) ||
-        !parseReclaimAvoid(std::getenv("PD17ROUTE_RECLAIM_AVOID"), reclaim, err))
+    if (!parseReclaimSettings(nullptr, settings::get("PD16ROUTE_RECLAIM_RATIO"), settings::get("PD16ROUTE_RECLAIM_MIN_EXCESS"),
+                              settings::get("PD16ROUTE_RECLAIM_MU"), settings::get("PD16ROUTE_RECLAIM_MARGIN"),
+                              settings::get("PD16ROUTE_RECLAIM_PASSES"), reclaim, err) ||
+        !parseReclaimAvoid(settings::get("PD17ROUTE_RECLAIM_AVOID"), reclaim, err))
       fail(err);
     bool bFirst = false;
-    if (const char *v = std::getenv("PD20ROUTE_FALLBACK_ORDER"); v) {
+    if (const char *v = settings::get("PD20ROUTE_FALLBACK_ORDER"); v) {
       std::string sv(v);
       if (sv != "both" && sv != "bfirst")
         fail("PD20ROUTE_FALLBACK_ORDER must be both or bfirst (got '" + sv + "')");
       bFirst = sv == "bfirst";
     }
     long long aMax = -1;
-    if (const char *v = std::getenv("PD21ROUTE_FALLBACK_A_MAX"); v) {
+    if (const char *v = settings::get("PD21ROUTE_FALLBACK_A_MAX"); v) {
       char *end = nullptr;
       long long x = std::strtoll(v, &end, 10);
       if (end == v || *end != '\0' || x < -1)
@@ -25035,7 +25156,7 @@ int main(int argc, char **argv) {
     }
     if (fallbackParallel && aMax < 0)
       fail("PD22ROUTE_FALLBACK_PARALLEL=1 needs PD21ROUTE_FALLBACK_A_MAX >= 0");
-    FallbackReport fr = reclaimWithFallback(d, rep.nets, reclaim, region, refine, std::getenv("VROUTE_TRACE") != nullptr,
+    FallbackReport fr = reclaimWithFallback(d, rep.nets, reclaim, region, refine, settings::get("VROUTE_TRACE") != nullptr,
                                             bFirst, aMax, fallbackParallel, vcapB);
     if (fr.parallel)
       std::cerr << "reclaim fallback: path B ran on a second thread (its per-round trace suppressed)\n";
@@ -25118,11 +25239,11 @@ int main(int argc, char **argv) {
   if (!reclaimFallback) {
     ReclaimSettings reclaim;
     std::string err;
-    if (!parseReclaimSettings(std::getenv("PD16ROUTE_RECLAIM"), std::getenv("PD16ROUTE_RECLAIM_RATIO"),
-                              std::getenv("PD16ROUTE_RECLAIM_MIN_EXCESS"), std::getenv("PD16ROUTE_RECLAIM_MU"),
-                              std::getenv("PD16ROUTE_RECLAIM_MARGIN"), std::getenv("PD16ROUTE_RECLAIM_PASSES"), reclaim,
+    if (!parseReclaimSettings(settings::get("PD16ROUTE_RECLAIM"), settings::get("PD16ROUTE_RECLAIM_RATIO"),
+                              settings::get("PD16ROUTE_RECLAIM_MIN_EXCESS"), settings::get("PD16ROUTE_RECLAIM_MU"),
+                              settings::get("PD16ROUTE_RECLAIM_MARGIN"), settings::get("PD16ROUTE_RECLAIM_PASSES"), reclaim,
                               err) ||
-        !parseReclaimAvoid(std::getenv("PD17ROUTE_RECLAIM_AVOID"), reclaim, err))
+        !parseReclaimAvoid(settings::get("PD17ROUTE_RECLAIM_AVOID"), reclaim, err))
       fail(err);
     if (reclaim.enabled) {
       ReclaimReport rr = reclaimDetours(d, rep.nets, reclaim);
@@ -25137,7 +25258,7 @@ int main(int argc, char **argv) {
   }
   // pd5route: hotspot rip-up first (if on), then refinement polishes.
   if (region.enabled && !reclaimFallback) {
-    regRep = regionNegotiate(d, rep.nets, region, std::getenv("VROUTE_TRACE") != nullptr);
+    regRep = regionNegotiate(d, rep.nets, region, settings::get("VROUTE_TRACE") != nullptr);
     detourTrace("region stage", rep.nets);
     gStages.mark("region stage", &rep.nets, regRep.after, std::numeric_limits<double>::quiet_NaN(),
                  std::to_string(regRep.roundsRun) + " rounds, " + std::to_string(regRep.pops) + " expansions");
@@ -25150,7 +25271,7 @@ int main(int argc, char **argv) {
               << ")\n";
   }
   if (refine.enabled && !reclaimFallback)
-    refRep = refine2D(d, rep.nets, refine, std::getenv("VROUTE_TRACE") != nullptr);
+    refRep = refine2D(d, rep.nets, refine, settings::get("VROUTE_TRACE") != nullptr);
   if (refine.enabled && !reclaimFallback) {
     detourTrace("refinement", rep.nets);
     gStages.mark("refinement", &rep.nets, refRep.after, std::numeric_limits<double>::quiet_NaN(),
@@ -25158,7 +25279,7 @@ int main(int argc, char **argv) {
   }
   // pd8route: whole-net tree rebuild, before piece recovery polishes.
   if (rebuild.enabled) {
-    RebuildReport rb = rebuild2D(d, rep.nets, wl.bend, rebuild, std::getenv("VROUTE_TRACE") != nullptr);
+    RebuildReport rb = rebuild2D(d, rep.nets, wl.bend, rebuild, settings::get("VROUTE_TRACE") != nullptr);
     detourTrace("tree rebuild", rep.nets);
     gStages.mark("tree rebuild", &rep.nets, -1, std::numeric_limits<double>::quiet_NaN(),
                  std::to_string(rb.rebuilt) + " nets rebuilt");
@@ -25168,7 +25289,7 @@ int main(int argc, char **argv) {
   // pd7route: overflow-safe wirelength and bend recovery, last 2D stage.
   WlReport wlRep;
   if (wl.enabled) {
-    wlRep = wlRecover2D(d, rep.nets, wl, std::getenv("VROUTE_TRACE") != nullptr);
+    wlRep = wlRecover2D(d, rep.nets, wl, settings::get("VROUTE_TRACE") != nullptr);
     detourTrace("WL recovery", rep.nets);
     gStages.mark("wirelength recovery", &rep.nets, -1, std::numeric_limits<double>::quiet_NaN(),
                  std::to_string(wlRep.piecesImproved) + " pieces improved");
@@ -25177,13 +25298,13 @@ int main(int argc, char **argv) {
   }
   // Part 162: the forced-overflow report, on the final 2D routes (layer assignment frees them below)
   if (!g24Mode && !laFrom) {
-    const char *fr = std::getenv("PD39ROUTE_FORCED_REPORT");
+    const char *fr = settings::get("PD39ROUTE_FORCED_REPORT");
     if (!(fr && std::string(fr) == "0")) {
       int side = 16, spots = 8;
-      if (const char *v = std::getenv("PD39ROUTE_FORCED_REPORT_SIDE"); v && *v)
-        side = std::atoi(v);
-      if (const char *v = std::getenv("PD39ROUTE_FORCED_REPORT_HOTSPOTS"); v && *v)
-        spots = std::atoi(v);
+      if (const char *v = settings::get("PD39ROUTE_FORCED_REPORT_SIDE"); v && *v)
+        side = settings::intValue("PD39ROUTE_FORCED_REPORT_SIDE", v);
+      if (const char *v = settings::get("PD39ROUTE_FORCED_REPORT_HOTSPOTS"); v && *v)
+        spots = settings::intValue("PD39ROUTE_FORCED_REPORT_HOTSPOTS", v);
       if (side < 1 || side > 64 || spots < 0 || spots > 1000)
         fail("PD39ROUTE_FORCED_REPORT_SIDE must be 1-64 and PD39ROUTE_FORCED_REPORT_HOTSPOTS 0-1000");
       if (forcedOverflowReport(d, rep.nets, side, spots, fr && *fr && std::string(fr) != "1" ? fr : ""))
@@ -25222,7 +25343,7 @@ int main(int argc, char **argv) {
     writeSolution(argv[2], d.grid, rep.nets);
   }
   gStages.mark("write solution", nullptr);
-  if (const char *path = std::getenv("PD39ROUTE_NET_TIMES"); path && !gNetTime.empty()) { // Part 131
+  if (const char *path = settings::get("PD39ROUTE_NET_TIMES"); path && !gNetTime.empty()) { // Part 131
     std::FILE *f = std::fopen(path, "wb");
     if (!f)
       fail(std::string("PD39ROUTE_NET_TIMES: cannot write ") + path);

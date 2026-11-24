@@ -18,7 +18,6 @@ written on the first layer with horizontal capacity, V edges on the first with v
 it is not a legal 3D file and is not meant to be scored as one. The 2D overflow of the result is printed.
 Standard library only.
 """
-import gzip
 import os
 import sys
 from collections import defaultdict, deque

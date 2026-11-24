@@ -879,6 +879,12 @@ agent knew from scratch just to keep going. Two rules follow from that:
   A self-test that sets the variable directly cannot catch a setting `main()` reads after its stage has run
   (Part 148's slow-tier stop). Run `python3 gr/e2e_settings.py <router>` (about a minute) before committing a
   router change that adds a setting; CI runs it on every push.
+- **Every setting pd39route reads is listed in `gr/pd39_settings.h`** (2026-11-24, Part 215: name, kind, one-line
+  meaning). A new setting goes into that table in the same change: the router stops on reading a name the table lacks,
+  stops at start-up on a variable named like a setting but not in it (naming the nearest one: a misspelling no longer
+  runs the default silently) and on an Int / Real setting whose value is not a number, and `gr/settings_check.py`
+  (CI) checks the table against the source and every `gr/*.env`. `./pd39route --settings` lists them all, with what
+  the environment sets.
 - Load settings files line by line (as `gr/run_batch.sh` does), never by sourcing them with `.`:
   `fast08.env`'s `PD39ROUTE_PORTFOLIO` value contains `;`, which a shell treats as a command separator.
 - Write a new router binary to a fresh file (`rm` it first, or build to a new name): copying over an
