@@ -16208,3 +16208,8 @@ the record's stages 0-2 and m1-m2 (`--reuse`, Elmore rows left out), m2 rebuilt 
 recorded overflow cost 64168240.0334 and 0 opens before the loop starts; the re-measure check then compares TNS / WNS /
 power), and continues from m3 with `--patience 3 --refine 22` (cap 24 counted from m1). The trace shows where the patience-0
 standard would have stopped; if that is not the final best, the standard's own Elmore result is measured separately.
+Progress (to 22:56): m3 -1.4463, m4 -1.4548, m5 -1.4697, m6 -1.4698, m7 -1.4922, **m8 -1.4909 no gain -- where the patience-0
+standard stops** -- m9 -1.4994 (patience paid), m10 -1.5001, m11 -1.5095, m12 -1.5100, m13 -1.5173, m14 -1.5202, m15 -1.5159
+no gain, m16 -1.5263, m17 -1.5271, m18 -1.5292, m19 -1.5299, m20 -1.5361 (contest count; rounds about 40 min, sessions
+peak about 30 GB). The standard's own result (Elmore K 35 / 70 / 140 from m7's classes, `merged7.slack`) is queued to run
+after the patience run ends (`std_elm.sh` / `std_elm.py`, timing_loop's own `elmore()`; dry run reproduced m7 -1.4922).
