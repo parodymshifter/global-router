@@ -16463,3 +16463,18 @@ New open item: **pd39route's own printed score reads 0.31% below the official ev
 (13656961 against 13699409). Part 102 had them equal, on a different design and an older generation. The cause is
 unverified; until it is found, compare 2024 / 2025 runs by the evaluator, as the loop already does.
 
+### Method 2 (warm-started refinement rounds): measured before building -- no case
+
+The review's method 2 rests on two premises: that a full reroute each round churns many nets whose class did not
+change, and that routing is a large part of a round. Both were measured on the running loops (`gr/churn.py`:
+consecutive round routes compared net by net):
+- **Churn is already low.** visible mempool_tile_wrap (cap-48 run, standard decay 1), rounds 1-7: 0.3-1.9% of the
+  136120 nets change their 3D route per round (0.2-1.5% their 2D footprint), in step with the 78-262 nets whose merged
+  slack changed. The router is deterministic, so a full reroute reproduces the unchanged nets' routes almost exactly.
+  visible ariane under decay 0.8 churns 4.5-6.5%, because every net's merged slack changes.
+- **Routing is a small part of a round.** mempool_tile_wrap: 3.9-5.9 s per route against ~55 s per OpenROAD session.
+  Blind mempool_group (Part 215's log): ~2 min between sessions (a route plus the congestion evaluator) against ~17 min
+  per session.
+So a warm start could save at most ~10% of a round, and has no churn to remove. It was not built (the review costed it
+at days).
+
