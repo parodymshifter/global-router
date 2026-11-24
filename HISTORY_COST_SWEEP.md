@@ -16213,3 +16213,14 @@ standard stops** -- m9 -1.4994 (patience paid), m10 -1.5001, m11 -1.5095, m12 -1
 no gain, m16 -1.5263, m17 -1.5271, m18 -1.5292, m19 -1.5299, m20 -1.5361 (contest count; rounds about 40 min, sessions
 peak about 30 GB). The standard's own result (Elmore K 35 / 70 / 140 from m7's classes, `merged7.slack`) is queued to run
 after the patience run ends (`std_elm.sh` / `std_elm.py`, timing_loop's own `elmore()`; dry run reproduced m7 -1.4922).
+Rest of the run (to 02:42): m21 -1.5336 no gain, m22 -1.5419, m23 -1.5428, **m24 -1.5466 (the cap; still gaining)**.
+Elmore from m24's classes: K 35 -1.5113, K 70 -1.7426, **K 140 -1.8074** (k180rm24e140; WNS -0.4340, TNS -28683.7, power
+8.2046, congestion 55.11M, 0 opens). Loop 59507 s (16.5 h, from m3; sessions peak about 30 GB, rounds about 40 min).
+**Blind mempool_group contest score 1.0946 -> 0.8855** (computed from the contest's weights, N_endpoint 347869 and
+references; the same formula gives the recorded 0.9442 and 1.0946 from their rows exactly) -- also below the 0.9442 found
+off the flow by refining after the Elmore stage (1st place 1.3327, 2nd 1.2335). Blind six on record 5.7682 -> **5.7095**.
+Patience acted three times (m8, m15, m21: each followed by a new best), and the cap of 24 bound, as on visible
+mempool_tile_wrap. Best route kept as `p215/patience/blind.mempool_group.best.route.xz` (decompressed and compared).
+The standard's own result (Elmore from m7) runs next (02:42-, `std_elm.sh`; a first start at 23:13 was stopped at 23:19
+because its wait matched no process -- `pgrep -f patience/grp.sh` against a process started as `./grp.sh` -- and it ran
+beside the patience run's round 21 route for 6 min; routes are deterministic, so only that round's time was affected).
