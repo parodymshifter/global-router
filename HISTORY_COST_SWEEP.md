@@ -16279,4 +16279,14 @@ can fall, randomized rounding of the hotspot program, a stabilized lower bound f
    archived in `~/Code/GlobalRouterRuns/p215/patience/` (checked against the folder's listing before deleting).
 4. *Tools installed*: `brew install llvm cppcheck shellcheck ruff` -- LLVM 23.1.6 (clang-tidy), cppcheck 2.22.0,
    ShellCheck 0.11.0, ruff 0.17.6. Their findings are below.
+   Run 07:46-07:51 on `pd39route.cpp` (clang-tidy and cppcheck with the CI's check sets) and on the Python and shell
+   scripts; raw output in `~/Code/GlobalRouterRuns/review-2026-11-24/`. clang-tidy 222 (100 signed bitwise, 46 unchecked
+   number parses, 48 performance, 28 other); cppcheck 74; ruff 259 (36 in `timing_loop.py`, all style); ShellCheck 2 (both
+   false alarms: `run_batch.sh` exports `NAME=value` on purpose). Read by hand: one new finding, F9 -- about 45 settings are
+   parsed with `atoi` / `atof` / `atoll` / `sscanf` and never checked, so a mistyped value becomes 0 or a truncated number
+   (e.g. `epsilon = std::atof(e)`, line 23932), the strongest case for the settings registry (R2). One real bug in a
+   diagnostic script (`region_dump_analysis.py:84`, `cur` used before it is set if a dump starts with an `O` line); 19
+   loop-variable closures in diagnostics to check. Every other router finding read as safe on its code (cppcheck's
+   `log(0)` and `log(-1)` are intentional tests of detmath; its two empty-container hits cannot be empty by their callers
+   -- by reading, not by a test). Added to `recaps/review-2026-11-24.html` as an update section.
 

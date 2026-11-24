@@ -204,6 +204,45 @@ img.px { image-rendering: pixelated; }
   (a download: yours to approve). Valgrind does not work well on current Macs (<code>QUALITY_CHECKS.md</code>); the CI job covers it.</p>
 </section>
 
+<section id="update">
+  <h2>Update, 24 November 07:44&ndash;07:52 EST: your four decisions, and the new tools</h2>
+  <p>You approved all four. <strong>Done:</strong> patience 3 / 24 rounds is the 2025 standard; CI checks
+  <code>pd39route</code> again (F1, R1; CodeQL has already passed on it); each refinement round takes one OpenROAD session
+  instead of two (F7, method 1; self-tested, not yet run on a design); <code>p215p</code> is deleted (19 GB). The tools below
+  are installed with Homebrew and were run on <code>pd39route.cpp</code> and the Python and shell scripts. Raw output:
+  <code>~/Code/GlobalRouterRuns/review-2026-11-24/</code> (<code>clang_tidy.txt</code>, <code>cppcheck.txt</code>,
+  <code>ruff.txt</code>, <code>shellcheck.txt</code>).</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>tool</th><th>findings</th><th>read by hand</th></tr></thead>
+    <tbody>
+      <tr><td>clang-tidy (LLVM 23.1.6), the CI's check set</td><td>222: 100 signed bitwise, 46 unchecked number parses, 48 performance
+      (moves, vector reserves, string joins), 28 other</td><td>The parses are real (F9 below). The rest read as safe: a bit-exact
+      <code>memcmp</code> of doubles on purpose, correct <code>strcmp</code> tests, small-number casts, rounding in a message, and
+      destructors that only print. The two analyzer items match F5 (<code>getenv</code> read twice, <code>rewind</code>).</td></tr>
+      <tr><td>cppcheck 2.22</td><td>74: 38 object index, 21 uninitialised members, 3 index -1, 2 empty container, 2
+      <code>log(0)</code>, 8 other</td><td>No live bug found. <code>log(0)</code> and <code>log(-1)</code> are intentional tests of the
+      router's own math library. The index -1 cases are unreachable (a pick loop that always finds a node) or in a self-test after a failed
+      check (F5). The two empty-container cases can't happen on reading their callers: the list always holds at least one
+      entry. No test pins this down (unverified by a run).</td></tr>
+      <tr><td>ruff 0.17.6 (Python)</td><td>259 across <code>gr/</code> and <code>perf/</code>; 36 in <code>timing_loop.py</code>, all style
+      (files opened without <code>with</code>)</td><td>One real bug, in a diagnostic: <code>region_dump_analysis.py:84</code> uses
+      <code>cur</code> before it is set if a dump starts with an <code>O</code> line. 19 functions defined inside a loop pick up the loop
+      variable's final value (<code>hotspot_cg.py</code>, <code>atlas_spectrum_eval.py</code>, <code>region_dump_analysis.py</code>), so
+      these need a check that each is called inside its own iteration. 3 unused imports, 1 value never read. Nothing in the routing flow's
+      scripts beyond style.</td></tr>
+      <tr><td>ShellCheck 0.11</td><td>2</td><td>Both false alarms: <code>run_batch.sh</code> exports <code>NAME=value</code> lines on
+      purpose.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="finding"><h3><span class="pill warn">medium</span> F9. About 45 settings parse their value without checking it</h3>
+  <p>clang-tidy's 46 unchecked conversions are <code>atoi</code> / <code>atof</code> / <code>atoll</code> / <code>sscanf</code> on
+  setting values, mostly in <code>main()</code> (e.g. <code>epsilon = std::atof(e)</code>, line 23932). A mistyped value
+  (<code>abc</code>, <code>0,1</code>) becomes 0 or a truncated number and the run goes on. Together with F4 (a misspelled
+  <em>name</em> is ignored) this is the strongest case for R2: one table of settings that parses every value with
+  <code>strtod</code> / <code>strtoll</code>, rejects text left over, and stops on an unknown <code>PD*ROUTE_</code> name. Some
+  settings already check (<code>PD39ROUTE_LA_CRIT</code> must be 0 or 1); the registry would make that the rule.</p></div>
+</section>
+
 <section id="findings">
   <h2>Findings, most important first</h2>
   <div class="findings">
