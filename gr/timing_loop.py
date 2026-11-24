@@ -9,7 +9,7 @@ evaluator, and keep the best by the contest score's change against the unbiased 
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
       [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...|0]
-      [--endpoints N|measured] [--patience P] | --selftest
+      [--endpoints N|measured] [--patience P] [--two-sessions] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -22,9 +22,11 @@ everywhere (routed: visible ariane -3.31 vs -2.27; input: blind mempool_tile_wra
 unbiased route seemed to fail on only 665 nets -- Part 215: a slack-script bug dropped 81% of its failing paths;
 fixed, 9263 nets, and routed classes win there too). `--classes routed|input` runs one. Stage 2: at the best, the power
 term at KP_LADDER with the same classes. Stage 3 (Part 188, default since 2026-11-06; `--refine N`, 0 = off,
-default 2, 12 since 2026-11-20, Part 215): sticky re-classification -- the best route's own failing-path slack merged with every slack
-measured before (per net, the worst), and a re-route at the best's setting, while it gains (ten designs
--23.97 -> -25.11, none worse). Every candidate is logged to WORK_DIR/loop.tsv.
+default 2, 12 since 2026-11-20, 24 since 2026-11-24, Part 215): sticky re-classification -- the best route's own failing-path
+slack merged with every slack measured before (per net, the worst), and a re-route at the best's setting, while it gains (ten
+designs -23.97 -> -25.11, none worse). Since 2026-11-24 (`--patience P`, default 3; 0 = the old rule) a round without gain
+does not stop it until P + 1 rounds in a row have none, and each round's route is scored by the session that measures its
+slack (`--two-sessions`: a scoring session, then a slack session, as before). Every candidate is logged to WORK_DIR/loop.tsv.
 `--lean` (Part 189, for designs whose routes are ~11 GB each, mempool_cluster): every route that can no
 longer be the best is compressed (xz) once scored, and stage 1 is scored one class source at a time, so at
 most four routes sit uncompressed (the scores are the same: each route is scored on its own in a session).
@@ -72,10 +74,17 @@ ELMORE_LADDER = [35, 70, 140]
 # designs at 180 or below do not (blind mempool_group: K 140 1.0946, K 280 1.2214; blind bsg_chip indifferent)
 ELMORE_HIGH, ELMORE_HIGH_K3 = [280, 560], 540
 ELMORE_GIVEN = False  # --elmore K1,K2,... given: exactly those
-# Part 215 (the user, 2026-11-23: test, not standard): refinement's rounds without a new best before it stops (0: the first
-# such round stops it, the standard). Visible mempool_tile_wrap's classic refinement stopped at m8 after m7 -1.1423; three
-# more rounds were needed for a new best (m11 -1.1897), and it was still gaining at m20 (-1.2697)
-PATIENCE = 0
+# Part 215 (the user, 2026-11-23: test; 2026-11-24: standard): refinement's rounds without a new best before it stops
+# (--patience P; 0: the first such round stops it, the standard until 2026-11-24). Visible mempool_tile_wrap's classic
+# refinement stopped at m8 after m7 -1.1423; three more rounds were needed for a new best (m11 -1.1897). Nine designs at
+# patience 3, cap 24: never worse; visible mempool_tile_wrap -1.4049 -> -1.6469, blind mempool_group 0.9689 -> 0.8855
+PATIENCE = 3
+REFINE_ROUNDS = 24  # --refine N (Part 188: 2; 2026-11-20: 12; 2026-11-24, with patience 3: 24 -- it bound on both gainers)
+# Part 215 (the user, 2026-11-24: standard): a refinement round's route is scored by the OpenROAD session that measures
+# its slack (that session reads timing and power too), not by a scoring session first and a slack session in the next
+# round -- the same measurements, one session per round instead of two (blind mempool_group: ~17 of every ~40 min).
+# --two-sessions gives the old way back
+ONE_SESSION = True
 # Part 215 (the user, 2026-11-21: standard): the contest's N_endpoint for its blind designs (github.com/liangrj2014/
 # ISPD25_contest index.md, read 2026-11-20). OpenROAD's registers + outputs agree on ariane and NVDLA and not on the
 # mempool designs (19000 / 438269 / 1443997) or bsg_chip (214955). The visible designs' contest counts are not
@@ -347,34 +356,44 @@ def tag_of(best, it):
     return f"k{best['k3']}{best['src']}" + (f"p{best['kp']}" if best['kp'] else '') + f'm{it}'
 
 
+def remeasured(d, name, c, work, idx):
+    """The slack of a candidate scored in an earlier session (refinement's first round, or every round with
+    --two-sessions): the slack session's timing and power must agree with that session's, whose are kept."""
+    keep = {k: c[k] for k in SCORED}
+    out = sta_slack(d, name, c, work, idx)
+    for k, v in keep.items():  # the same route: OpenROAD's numbers must agree with the scoring session
+        # Part 215 (2026-11-23): power to 1e-4 relative -- visible mempool_tile_wrap's k180rp1m4 read 0.141794011 in
+        # its slack session against 0.141788095 when scored, with TNS and WNS exact; the same route re-measured alone
+        # gave 0.141788095 in two slack sessions and a scoring one. The scoring session's numbers are kept
+        tol = 1e-4 * abs(v) if k == 'power' else 1e-6 * max(1.0, abs(v))
+        if abs(c[k] - v) > tol:
+            raise SystemExit(f"timing_loop.py: {c['tag']} {k} {v} re-measured as {c[k]}")
+        if c[k] != v:
+            print(f"{name}: {c['tag']} {k} {v} re-measured as {c[k]} (within {tol:.1e}; scored value kept)",
+                  flush=True)
+            c[k] = v
+            save(c)  # sta_slack saved the re-measured value; --resume must read the scored one
+    return out
+
+
 def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
     """Part 188, sticky re-classification: measure the best route's own failing-path slack, merge it
     with every slack measured so far (per net, the worst), and re-route at the best's strength and power
     term with those classes (routed source: replace; input source: the input slack lowered by them).
     Repeat while the new route beats the best, up to `rounds` times (numbered from `start`). Returns the
-    new candidates. With PATIENCE > 0 (--patience, Part 215) a round that does not beat the best does not stop it:
-    the next round goes on from that round's route (its slack merged in), until PATIENCE rounds in a row have not
-    beaten the best; the best is still the candidate with the lowest change."""
+    new candidates. With PATIENCE > 0 (--patience, Part 215; 3 since 2026-11-24) a round that does not beat the best
+    does not stop it: the next round goes on from that round's route (its slack merged in), until PATIENCE + 1 rounds
+    in a row have not beaten the best; the best is still the candidate with the lowest change. With ONE_SESSION (since
+    2026-11-24; --two-sessions turns it off) each new route is scored by the session that measures its slack."""
     idx = net_index(os.path.join(d, name + '.net'))
     measured, out, cur = list(measured), [], best
     top, misses = best, 0  # the best so far, and rounds since it (--patience)
+    slack = None  # cur's slack file, when the session that scored cur measured it (ONE_SESSION)
     for it in range(start, start + rounds):
         if cur is b:
             break
-        keep = {k: cur[k] for k in ('tns', 'wns', 'power')}
-        measured.append(sta_slack(d, name, cur, work, idx))
-        for k, v in keep.items():  # the same route: OpenROAD's numbers must agree with the scoring session
-            # Part 215 (2026-11-23): power to 1e-4 relative -- visible mempool_tile_wrap's k180rp1m4 read 0.141794011 in
-            # its slack session against 0.141788095 when scored, with TNS and WNS exact; the same route re-measured alone
-            # gave 0.141788095 in two slack sessions and a scoring one. The scoring session's numbers are kept
-            tol = 1e-4 * abs(v) if k == 'power' else 1e-6 * max(1.0, abs(v))
-            if abs(cur[k] - v) > tol:
-                raise SystemExit(f"timing_loop.py: {cur['tag']} {k} {v} re-measured as {cur[k]}")
-            if cur[k] != v:
-                print(f"{name}: {cur['tag']} {k} {v} re-measured as {cur[k]} (within {tol:.1e}; scored value kept)",
-                      flush=True)
-                cur[k] = v
-                save(cur)  # sta_slack saved the re-measured value; --resume must read the scored one
+        measured.append(slack if slack is not None else remeasured(d, name, cur, work, idx))
+        slack = None
         merged = merge_slack(measured, os.path.join(work, f'merged{it}.slack'))
         prev = os.path.join(work, f'merged{it - 1}.slack')
         if os.path.exists(prev) and open(merged).read().split('\n', 1)[1] == \
@@ -383,7 +402,12 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
             break
         c = dict(route(d, name, work, tag_of(best, it), best['k3'], best['kp'], merged,
                        'replace' if best['src'] == 'r' else 'min'), src=best['src'])
-        sta(d, name, [c])
+        if ONE_SESSION:  # 2026-11-24: one session scores c and measures its slack for the next round
+            slack = sta_slack(d, name, c, work, idx)
+            if not all(k in c for k in SCORED):  # --resume: its slack was written before its scores were saved
+                sta(d, name, [c])
+        else:
+            sta(d, name, [c])
         c['delta'] = delta(c, b, w, n)
         c['classed'] = sum(1 for _ in open(merged)) - 1  # nets in its classes (its own slack_nets is set if measured)
         save(c)
@@ -536,33 +560,44 @@ def reuse(d, name, work, src, rounds, t0, ks=()):
 
 
 def selftest_patience(t):
-    """Part 215, --patience: refinement on scripted round scores (routing and OpenROAD stubbed)."""
-    # Part 215, --patience: scripted round scores; refinement stops after PATIENCE rounds in a row without a new best
-    global sta_slack, route, sta, delta, net_index, PATIENCE
+    """Part 215, --patience and the one-session rounds: refinement on scripted round scores (routing and OpenROAD
+    stubbed). Each case runs in both session modes; the decisions must agree, and the session counts must be the
+    ones each mode promises."""
+    global sta_slack, route, sta, delta, net_index, PATIENCE, ONE_SESSION
     ok = True
-    saved = (sta_slack, route, sta, delta, net_index, PATIENCE)
+    saved = (sta_slack, route, sta, delta, net_index, PATIENCE, ONE_SESSION)
     pw = os.path.join(t, 'pat')
     os.makedirs(pw)
+    calls = {}
 
-    def run(scores, pat, rounds=12, power=0.0, wobble=None):
-        global PATIENCE
-        PATIENCE, cnt = pat, [0]
+    def run(scores, pat, rounds=12, power=0.0, wobble=None, one=False, drop=False):
+        global PATIENCE, ONE_SESSION
+        PATIENCE, ONE_SESSION, cnt = pat, one, [0]
+        calls.update(slack=0, sta=0)
 
-        def fake_slack(d_, nm, c, wk_, idx_):
-            c['power'] *= 1 + (wobble or 0.0)  # the slack session's own reading, saved as sta_slack saves it
+        def fake_slack(d_, nm, c, wk_, idx_):  # like sta_slack: reads c's timing and power, and writes its slack
+            if not (drop and c['tag'] != 'k180r'):  # drop: as a resumed slack file whose scores were never saved
+                c.update(tns=0.0, wns=0.0, power=power * (1 + (wobble or 0.0)))
             save(c)
             cnt[0] += 1
+            calls['slack'] += 1
             f = os.path.join(pw, f"s{cnt[0]}.slack")
             open(f, 'w').write(f'# s\n{cnt[0]} -1e-10\n')  # a new net each round, so the classes keep changing
             return f
 
-        def fake_route(d_, nm, wk_, tag, *a, **k):
+        def fake_sta(d_, nm, cands):
+            calls['sta'] += 1
+            for c in cands:
+                c.update(tns=0.0, wns=0.0, power=power)
+                save(c)
+
+        def fake_route(d_, nm, wk_, tag, *a, **k):  # like route: no timing or power until a session scores it
             r = os.path.join(pw, tag + '.route')
             open(r, 'w').write(tag)
-            return {'tag': tag, 'route': r, 'k3': 180, 'kp': 0, 'tns': 0.0, 'wns': 0.0, 'power': power}
+            return {'tag': tag, 'route': r, 'k3': 180, 'kp': 0}
         global sta_slack, route, sta, delta, net_index
-        sta_slack, route, net_index = fake_slack, fake_route, (lambda f: {})
-        sta, delta = (lambda *a: None), (lambda c, *a: scores[int(re.search(r'm(\d+)$', c['tag']).group(1)) - 1])
+        sta_slack, route, sta, net_index = fake_slack, fake_route, fake_sta, (lambda f: {})
+        delta = (lambda c, *a: scores[int(re.search(r'm(\d+)$', c['tag']).group(1)) - 1])
         b_ = {'tag': 'base', 'route': os.path.join(pw, 'base.route')}
         best_ = {'tag': 'k180r', 'k3': 180, 'kp': 0, 'src': 'r', 'delta': -1.0, 'route': os.path.join(pw, 'k180r.route'),
                  'tns': 0.0, 'wns': 0.0, 'power': power}
@@ -580,19 +615,34 @@ def selftest_patience(t):
     DONE.clear()
     load(CKPT)
     ok &= DONE['k180r']['power'] == 0.14 and DONE['k180rm1']['power'] == 0.14
+    # 2026-11-24, one session: the incoming best is still re-measured (scored value kept); a new route's own session
+    # is its score
+    DONE.clear()
+    os.remove(CKPT)
+    p1 = 0.14 * (1 + 4e-5)
+    ok &= run([-1.1, -1.05], 0, power=0.14, wobble=4e-5, one=True) == (['k180rm1', 'k180rm2'], 'k180rm1', [0.14, p1, p1])
+    DONE.clear()
+    load(CKPT)
+    ok &= DONE['k180r']['power'] == 0.14 and DONE['k180rm1']['power'] == p1
     DONE.clear()
     CKPT = None
-    try:
-        run([-1.1, -1.05], 0, power=0.14, wobble=1e-3)
-        ok = False
-    except SystemExit:
-        pass
+    for one in (False, True):
+        try:
+            run([-1.1, -1.05], 0, power=0.14, wobble=1e-3, one=one)
+            ok = False
+        except SystemExit:
+            pass
     sc = [-1.1, -1.05, -1.08, -1.09, -1.2, -1.15, -1.1, -1.0, -0.9]  # m1 gains, m2-m4 do not, m5 gains, then none
-    ok &= run(sc, 0) == (['k180rm1', 'k180rm2'], 'k180rm1')  # the standard: the first round without gain stops it
-    ok &= run(sc, 2) == (['k180rm1', 'k180rm2', 'k180rm3', 'k180rm4'], 'k180rm1')
-    ok &= run(sc, 3) == ([f'k180rm{i}' for i in range(1, 10)], 'k180rm5')  # m6-m8 go on, m9 stops it
-    ok &= run(sc, 3, rounds=6) == ([f'k180rm{i}' for i in range(1, 7)], 'k180rm5')  # the round cap still binds
-    sta_slack, route, sta, delta, net_index, PATIENCE = saved
+    cases = [((sc, 0), (['k180rm1', 'k180rm2'], 'k180rm1')),  # patience 0: the first round without gain stops it
+             ((sc, 2), (['k180rm1', 'k180rm2', 'k180rm3', 'k180rm4'], 'k180rm1')),
+             ((sc, 3), ([f'k180rm{i}' for i in range(1, 10)], 'k180rm5')),  # m6-m8 go on, m9 stops it
+             ((sc, 3, 6), ([f'k180rm{i}' for i in range(1, 7)], 'k180rm5'))]  # the round cap still binds
+    for args, want in cases:
+        r = len(want[0])  # rounds run
+        ok &= run(*args) == want and calls == {'slack': r, 'sta': r}  # two sessions: the last route's slack unmeasured
+        ok &= run(*args, one=True) == want and calls == {'slack': r + 1, 'sta': 0}  # one per round, plus the best's
+        ok &= run(*args, one=True, drop=True) == want and calls == {'slack': r + 1, 'sta': r}  # --resume: scored anyway
+    sta_slack, route, sta, delta, net_index, PATIENCE, ONE_SESSION = saved
     return ok
 
 
@@ -719,10 +769,11 @@ def main():
         ROUTER = os.path.abspath(sys.argv[sys.argv.index('--router') + 1])
     # Part 188 (the user, 2026-11-06): sticky re-classification by default; --refine 0 turns it off. Part 215 (the
     # user, 2026-11-20): up to 12 rounds (was 2) -- it stops by itself once a round gains nothing or the classes stop
-    # changing; blind mempool_tile_wrap gained in every round to 8 (0.9238 at 2 -> 0.4879, contest score)
-    rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else 12
-    global PATIENCE
-    if '--patience' in sys.argv:  # Part 215 (test): rounds without a new best before refinement stops
+    # changing; blind mempool_tile_wrap gained in every round to 8 (0.9238 at 2 -> 0.4879, contest score); 2026-11-24: 24
+    rounds = int(sys.argv[sys.argv.index('--refine') + 1]) if '--refine' in sys.argv else REFINE_ROUNDS
+    global PATIENCE, ONE_SESSION
+    ONE_SESSION = '--two-sessions' not in sys.argv
+    if '--patience' in sys.argv:  # Part 215: rounds without a new best before refinement stops (default PATIENCE)
         PATIENCE = int(sys.argv[sys.argv.index('--patience') + 1])
         if PATIENCE < 0:
             raise SystemExit('timing_loop.py: --patience takes a count >= 0')

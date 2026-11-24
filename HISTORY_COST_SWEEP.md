@@ -16258,3 +16258,25 @@ review: 2008 overflow at or near certified floors except newblue3 (fractional op
 the 2025 loop -- classes that only tighten (half a Lagrangian update), full reroutes every round. Untried by the record's
 text (unverified beyond the search): one session per refinement route, warm-started rounds, per-net timing multipliers that
 can fall, randomized rounding of the hotspot program, a stabilized lower bound for newblue3. Nothing changed or adopted.
+
+**2026-11-24 07:44-: the four decisions (the user: "Do all 4").**
+1. *Patience is the standard.* `gr/timing_loop.py` now defaults to `PATIENCE = 3` and `REFINE_ROUNDS = 24` (were 0 and 12);
+   `--patience 0 --refine 12` gives the old rule. The results it rests on are the nine-design table above.
+2. *CI checks pd39route; one OpenROAD session per refinement round.* `quality-checks.yml` (`ROUTER`), `codeql.yml` and
+   `perf/run_perf.py` (its default) build `pd39route`, every build line with `-ffp-contract=off -pthread` as
+   `build-and-validate.yml` has (commit 7a8b793; the timing canary run locally on pd39route: legal, 8.4 s wall);
+   `QUALITY_CHECKS.md` updated. In `refine()` (`ONE_SESSION = True`, `--two-sessions` for the old way) a new route is no
+   longer scored in a scoring session and then measured again in the next round's slack session: its slack session
+   (which reads TNS, WNS and power as well) is its score. Only the incoming best is still re-measured, with the
+   tolerance check of 2026-11-23. If `--resume` finds a slack file whose scores were never saved, the route is scored in
+   a scoring session as before. Sessions per refinement of R rounds: 2R before (R scoring + R slack), R + 1 now. The
+   choices are unchanged in principle (same routes, same measurements); the power reading's ~4e-5 relative wobble
+   between sessions (above) means a rerun's last digits can differ. Self-test (`selftest_patience`): every scripted case
+   in both modes, the same tags and best, the session counts (two sessions: R slack + R scoring; one: R + 1 slack, 0
+   scoring; resumed without scores: R + 1 slack, R scoring), the power tolerance in both; three deliberate breaks (always
+   score, never score on resume, re-measure every round) each fail it. Not yet run on a design.
+3. *`GlobalRouterTemp/p215p` deleted* (19 GB; free disk 54 -> 67 GB). Its results and the three best routes had been
+   archived in `~/Code/GlobalRouterRuns/p215/patience/` (checked against the folder's listing before deleting).
+4. *Tools installed*: `brew install llvm cppcheck shellcheck ruff` -- LLVM 23.1.6 (clang-tidy), cppcheck 2.22.0,
+   ShellCheck 0.11.0, ruff 0.17.6. Their findings are below.
+
