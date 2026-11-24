@@ -31,7 +31,7 @@ jobs:
       - name: Build the current router and the verifier
         working-directory: gr
         run: |
-          g++ -std=c++17 -O0 -o /tmp/pd38route pd38route.cpp
+          g++ -std=c++17 -O0 -ffp-contract=off -pthread -o /tmp/pd39route pd39route.cpp
           g++ -std=c++17 -O0 -o /tmp/gr_verify gr_verify.cpp
       - uses: github/codeql-action/analyze@v3
         with:

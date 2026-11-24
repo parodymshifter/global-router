@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a router, route the synthetic design, verify it, write results.json.
 
-usage: perf/run_perf.py [--router pd38route] [--out perf/out] [--repeat 3]
+usage: perf/run_perf.py [--router pd39route] [--out perf/out] [--repeat 3]
                         [--cxx g++] [--env-file gr/standard.env]
 
 Records, per run: wall seconds, CPU seconds (user + system, all threads),
@@ -86,7 +86,7 @@ def parse_verify(text):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--router", default="pd38route")
+    ap.add_argument("--router", default="pd39route")
     ap.add_argument("--out", default=os.path.join(ROOT, "perf", "out"))
     ap.add_argument("--repeat", type=int, default=3)
     ap.add_argument("--cxx", default=os.environ.get("CXX", "g++"))
@@ -100,7 +100,7 @@ def main():
     design = os.path.join(a.out, "synth.gr")
 
     if not a.skip_build:
-        flags = ["-std=c++17", "-O2", "-Wall", "-Wextra"]
+        flags = ["-std=c++17", "-O2", "-Wall", "-Wextra", "-ffp-contract=off", "-pthread"]
         sh([a.cxx, *flags, "-o", router, os.path.join(ROOT, "gr", a.router + ".cpp")])
         sh([a.cxx, *flags, "-o", verify, os.path.join(ROOT, "gr", "gr_verify.cpp")])
     with open(design, "w") as f:

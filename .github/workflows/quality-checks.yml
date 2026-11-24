@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 env:
-  ROUTER: pd38route
+  ROUTER: pd39route
   # The router whose results must be the same on Linux and macOS (pd39route
   # and later; HISTORY_COST_SWEEP.md Part 123). The "same on every platform"
   # jobs below build it on both and compare.
@@ -108,7 +108,7 @@ jobs:
       - name: Build with sanitizers
         working-directory: gr
         run: |
-          flags="-std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+          flags="-std=c++17 -O1 -g -ffp-contract=off -pthread -fsanitize=address,undefined -fno-omit-frame-pointer"
           g++ $flags -o "$ROUTER.san" "$ROUTER.cpp"
           g++ $flags -o gr_verify.san gr_verify.cpp
 
@@ -259,7 +259,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y valgrind
       - name: Build
         working-directory: gr
-        run: g++ -std=c++17 -O1 -g -o "$ROUTER.vg" "$ROUTER.cpp"
+        run: g++ -std=c++17 -O1 -g -ffp-contract=off -pthread -o "$ROUTER.vg" "$ROUTER.cpp"
       - name: Self-test under Valgrind
         working-directory: gr
         shell: bash

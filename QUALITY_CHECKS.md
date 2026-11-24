@@ -5,17 +5,22 @@ They run on GitHub, and you can run the same checks on your own Mac.
 
 ## What runs on GitHub
 
-The file `.github/workflows/quality-checks.yml` runs four jobs.
+The file `.github/workflows/quality-checks.yml` checks the current router, `pd39route` (the `ROUTER`
+setting at its top; since 2026-11-24 -- from 2026-10-14 to then it still checked `pd38route` by mistake).
 
 | Job | What it does | When it runs |
 |---|---|---|
 | Static analysis | clang-tidy and cppcheck read the code and list likely mistakes | every push, every pull request, nightly |
 | Sanitizers | Builds the router so it stops on memory errors and bad math, then runs the self-tests and a routed test design | every push, every pull request, nightly |
+| Same routes on every platform | Builds `PORTABLE_ROUTER` on Linux and macOS, routes a test design on each, and compares the routes | every push, every pull request, nightly |
+| New settings take effect | `gr/e2e_settings.py`: runs the router with each recent setting given through the environment and looks for evidence the mechanism acted | every push, every pull request, nightly |
 | Valgrind | A slower and deeper memory check | nightly and on request |
 | Timing | Routes a fixed test design three times and compares time, memory, overflow and wirelength with the last good run on main | every push, every pull request, nightly |
 
-The file `.github/workflows/codeql.yml` adds GitHub's CodeQL scanner.
-CodeQL is free for public repositories, so it skips itself until you make this one public.
+The file `.github/workflows/codeql.yml` adds GitHub's CodeQL scanner (the repository is public, so it runs).
+
+Every build of `pd39route` uses `-ffp-contract=off -pthread`. Without the first, newer g++ versions fuse
+`a*b + c` into one instruction, which changes routes, and the router's self-test fails on purpose.
 
 Each job writes a short summary on the run page.
 Longer reports are saved as downloads on the same page.
@@ -29,13 +34,14 @@ At the top of `quality-checks.yml` you will find two settings.
 
 ## Moving to a newer router
 
-Change `ROUTER: pd38route` at the top of `quality-checks.yml`.
-Also change the two file names in `codeql.yml`.
+Change `ROUTER: pd39route` at the top of `quality-checks.yml` (and `PORTABLE_ROUTER` if the new one
+must also give the same routes on every platform).
+Also change the two file names in `codeql.yml`, and the `--router` default in `perf/run_perf.py`.
+Keep `-ffp-contract=off -pthread` on every build line.
 
 ## About "[skip ci]"
 
 A commit message with `[skip ci]` stops the checks for that commit.
-Many recent commits use it.
 The nightly run ignores the tag, so those commits still get checked within a day.
 For changes to routing code, it is better to leave the tag off.
 
@@ -55,14 +61,17 @@ Run it again after a change, then compare the two results:
 Sanitizers:
 
     cd gr
-    g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -o pd38route.san pd38route.cpp
-    ./pd38route.san --selftest
+    rm -f pd39route.san
+    g++ -std=c++17 -O1 -g -ffp-contract=off -pthread -fsanitize=address,undefined -fno-omit-frame-pointer -o pd39route.san pd39route.cpp
+    ./pd39route.san --selftest
 
-Static analysis (first run `brew install llvm cppcheck`):
+Static analysis (installed on the Mac since 2026-11-24 with `brew install llvm cppcheck shellcheck ruff`):
 
     cd gr
-    $(brew --prefix llvm)/bin/clang-tidy pd38route.cpp -quiet -checks='-*,bugprone-*,clang-analyzer-*,performance-*' -- -std=c++17
-    cppcheck --enable=warning,performance,portability --std=c++17 --max-configs=1 pd38route.cpp
+    $(brew --prefix llvm)/bin/clang-tidy pd39route.cpp -quiet -checks='-*,bugprone-*,-bugprone-easily-swappable-parameters,-bugprone-narrowing-conversions,clang-analyzer-*,performance-*,-performance-avoid-endl' -- -std=c++17
+    cppcheck --enable=warning,performance,portability --std=c++17 --max-configs=1 --inline-suppr --suppress=missingIncludeSystem pd39route.cpp
+    shellcheck *.sh
+    ruff check *.py
 
 Valgrind does not work well on current Macs.
 Use the GitHub job for that one.
