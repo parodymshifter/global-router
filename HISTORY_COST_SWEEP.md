@@ -16241,3 +16241,20 @@ nine measured designs **-31.31** (visible mempool_group and both mempool_cluster
 (contest score): 5.9186 recorded standard, 5.7929 with today's standard measured on mempool_group, **5.7095** with
 patience on the five blind designs measured (blind mempool_cluster not run under it). Not adopted: the standard flow is
 unchanged until the user decides.
+
+**2026-11-24: Recap 9 and a code and model review (the user, 2026-11-23 23:42: after the runs, a recap, a code-quality
+analysis with every installed tool, and a re-evaluation of the models).** `recaps/recap-2026-11-24.html`,
+`recaps/review-2026-11-24.html`; raw outputs in `~/Code/GlobalRouterRuns/review-2026-11-24/`. Installed and run: Apple clang
+21 (`-Wall -Wextra`: 0 warnings; 15 stricter flags surveyed), its static analyzer (2 low warnings: `getenv` read twice at line
+9415, `rewind` at 7261), address + undefined-behaviour sanitizers (self-test and the synthetic design: 0 reports),
+`llvm-cov` (lines 84.9% self-test, 88.4% with two routed runs; branches 66.4%), `gh` (the CI reports), Python `py_compile`
+and a syntax-tree check, `bash -n`. Not installed (checked in `PATH`, `brew list`, `pip list`, the toolchain folders):
+clang-tidy, cppcheck, Valgrind, shellcheck, Python linters. Main findings: the CI static-analysis, sanitizer, Valgrind and
+timing jobs build `pd38route` (`ROUTER: pd38route`, `codeql.yml` too), so `pd39route` has not had them since 2026-10-14;
+`testFixedTopologySlowTierStillWorksAfterTheCollapse` passes with `routeNetSlow` / `routeSegment` / `boundedDijkstra` at 0%
+coverage (line 9918 run 0 times); 180 settings, 62 set by the standard files, no check for an unknown name; the 2025
+refinement scores each route in two OpenROAD sessions (scoring 17-18 min, slack 22-23 min on blind mempool_group). Model
+review: 2008 overflow at or near certified floors except newblue3 (fractional optimum 26264-32141 unpinned); the room is in
+the 2025 loop -- classes that only tighten (half a Lagrangian update), full reroutes every round. Untried by the record's
+text (unverified beyond the search): one session per refinement route, warm-started rounds, per-net timing multipliers that
+can fall, randomized rounding of the hotspot program, a stabilized lower bound for newblue3. Nothing changed or adopted.

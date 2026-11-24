@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Router Recap 9</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+a { color: var(--trace); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+figure.shot { margin: 10px 0 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+figure.shot figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 5px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.shots > * { min-width: 0; }
+img.px { image-rendering: pixelated; }
+/* Recap 7 additions: an options ledger. */
+.opt { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 18px; }
+.opt h3 { margin: 0 0 6px; }
+.opt p { margin: 0 0 8px; }
+.opt .why { font-size: 14px; color: var(--ink-soft); }
+.opts { display: grid; gap: 12px; }
+.src { font-size: 13px; color: var(--ink-soft); }
+.callout { background: var(--trace-soft); border-left: 3px solid var(--trace); padding: 12px 16px; margin: 10px 0 14px; }
+.callout p:last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Recap 9 · 24 November 2026 · Part 215, since Recap 8 (20 November)</div>
+  <h1>Global Router Recap</h1>
+  <p class="lede">Four days, all on ISPD 2025. A delay model replaced the resistance-only timing bias, and the loop's
+  ladder grew upward where the timing strength tops out. Then one rule mattered more than either: refinement stopped at its
+  first round without a gain. Letting it go on past such rounds, up to a cap of 24, moved two designs a long way and none
+  backwards. Our blind six now sum 5.71 against first place's 8.06 (lower is better). ISPD 2008 did not change.</p>
+  <div class="meta">
+    <span><b>2025 standard:</b> <code>python3 gr/timing_loop.py &lt;design&gt; &lt;work&gt; --out &lt;route&gt;</code> (Elmore stage on, K 280 / 560 at timing strength 540)</span>
+    <span><b>On test, not adopted:</b> <code>--patience 3 --refine 24</code></span>
+    <span><b>Checks:</b> the contest's evaluator and OpenROAD for every 2025 score; blind scores recomputed from the contest's weights and references, which reproduce the recorded ones exactly</span>
+  </div>
+</header>
+<nav class="toc" aria-label="Sections">
+  <a href="#glance">At a glance</a><a href="#elmore">The Elmore stage</a><a href="#ladder">Higher strengths</a>
+  <a href="#patience">Refinement's stop rule</a><a href="#blind">Blind six</a><a href="#measure">Measurement</a>
+  <a href="#review">Code and model review</a><a href="#process">Process</a><a href="#next">Next</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">5.71</div><div class="lab">blind six on record, contest score (Recap 8: 6.71; 1st place 8.06); the standard flow alone 5.79</div></div>
+    <div class="tile"><div class="fig">−31.31</div><div class="lab">twelve designs on record, change against our unbiased routes (Recap 8: −28.39; standard −30.88)</div></div>
+    <div class="tile"><div class="fig">0.8855</div><div class="lab">blind mempool_group with patience (standard measured 0.9689; 1st place 1.3327)</div></div>
+    <div class="tile"><div class="fig">0 of 9</div><div class="lab">designs made worse by the patience stop; two gained, by 0.24 and 0.08</div></div>
+  </div>
+</section>
+
+<section id="elmore">
+  <h2>The Elmore stage (21 November, standard)</h2>
+  <p>The timing bias had pulled critical nets toward low-resistance layers. A delay model says otherwise: a micron of wire on
+  layer l adds about R<sub>drv</sub>·C<sub>l</sub> + R<sub>l</sub>·C<sub>down</sub> to the net's delay, and with NanGate45's values the driver
+  term dominates, so metal4-8 (the highest capacitance) are the slow layers, not metal2. <code>gr/elmore_rows.py</code> turns
+  that into a per-net, per-layer cost; after refinement the loop reroutes its best at K 35 / 70 / 140 and keeps the best.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>design</th><th class="num">before</th><th class="num">with the Elmore stage</th><th>K</th></tr></thead>
+    <tbody>
+      <tr><td>blind mempool_tile_wrap (contest score)</td><td class="num">0.4879</td><td class="num"><b>0.1768</b></td><td>70</td></tr>
+      <tr><td>blind mempool_group</td><td class="num">1.2959</td><td class="num"><b>1.0946</b></td><td>140</td></tr>
+      <tr><td>blind mempool_cluster</td><td class="num">1.6533</td><td class="num"><b>1.4509</b></td><td>35</td></tr>
+      <tr><td>blind ariane</td><td class="num">1.4605</td><td class="num"><b>1.4368</b></td><td>35</td></tr>
+      <tr><td>visible mempool_group (change vs unbiased)</td><td class="num">−7.5202</td><td class="num"><b>−9.1049</b></td><td>70</td></tr>
+      <tr><td>visible mempool_tile_wrap</td><td class="num">−1.1423</td><td class="num"><b>−1.4049</b></td><td>35</td></tr>
+      <tr><td>visible mempool_cluster</td><td class="num">−0.6993</td><td class="num"><b>−0.7967</b></td><td>70</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">The mempool gains are congestion, not timing: the Elmore rows move critical nets off metal4-8 at lower
+  total pull, and the overflow cost falls (visible mempool_group −28%). Blind designs are now ranked by the contest's
+  published endpoint count (OpenROAD's is 42% high on blind mempool_tile_wrap).</p>
+</section>
+
+<section id="ladder">
+  <h2>Higher strengths at timing strength 540 (22 November, standard)</h2>
+  <p>On the two designs whose best timing strength is the ladder's top, the Elmore results kept improving with K up to 140.
+  Bracketed above:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>visible design</th><th class="num">K 140</th><th class="num">K 280</th><th class="num">K 560</th><th class="num">K 1120</th><th class="num">K 2240</th></tr></thead>
+    <tbody>
+      <tr><td>ariane</td><td class="num">−4.0411</td><td class="num">−4.2525</td><td class="num"><b>−4.2695</b></td><td class="num">−4.2055</td><td class="num">−4.1122</td></tr>
+      <tr><td>bsg_chip</td><td class="num">−1.9509</td><td class="num">−2.1790</td><td class="num"><b>−2.2218</b></td><td class="num">−2.1847</td><td class="num">−2.1335</td></tr>
+    </tbody>
+  </table></div>
+  <p>Adopted: at timing strength 540 the Elmore stage also tries K 280 and 560. Designs at 180 or below do not gain there
+  (blind mempool_group: K 140 1.0946, K 280 1.2214).</p>
+</section>
+
+<section id="patience">
+  <h2>Refinement's stop rule (22-24 November, on test)</h2>
+  <p>Refining again from the Elmore routes gained on the two designs whose classic refinement had stopped at one bad round
+  (visible mempool_tile_wrap −1.4049 → −1.6478, blind mempool_group 1.0946 → 0.9442), and almost nothing elsewhere. A
+  control run showed why: continuing classic refinement past its stop gave mempool_tile_wrap the same. So the lever was the
+  stop rule. <code>timing_loop.py --patience 3</code> lets refinement go on until four rounds in a row bring no new best, and
+  keeps the best; it was tested with a cap of 24 rounds on nine designs, full loops from scratch:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>design</th><th class="num">standard</th><th class="num">patience 3, cap 24</th><th>where patience acted</th></tr></thead>
+    <tbody>
+      <tr><td>visible mempool_tile_wrap</td><td class="num">−1.4049</td><td class="num"><b>−1.6469</b></td><td>past m8-m10, new bests to m23 (the cap bound)</td></tr>
+      <tr><td>blind mempool_group (contest score)</td><td class="num">0.9689*</td><td class="num"><b>0.8855</b></td><td>past m8, m15, m21, each followed by a new best; still gaining at m24</td></tr>
+      <tr><td>visible bsg_chip</td><td class="num">−2.2218</td><td class="num">−2.2297</td><td>m8-m10, steps inside the noise</td></tr>
+      <tr><td>visible ariane, NVDLA; blind ariane, bsg_chip, NVDLA, mempool_tile_wrap</td><td class="num">—</td><td class="num">unchanged</td><td>never, or refinement stopped on an identical route or unchanged classes</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">*Measured for this test: the Elmore stage from m7, where today's standard stops. The recorded 1.0946 came
+  from a loop that ranked refinement by OpenROAD's endpoint count and stopped at m1; by the contest's count, which the loop
+  uses for blind designs since 21 November, that m2 was the better. Patience never makes a design worse: the best is still
+  the minimum, and its rounds come after the standard's stop. Its cost is time: blind mempool_group ran 16.5 h of refinement.
+  Not adopted -- your decision.</p>
+</section>
+
+<section id="blind">
+  <h2>Blind six, as the contest scored them</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>design</th><th class="num">ours (on record)</th><th class="num">1st place</th><th class="num">2nd place</th></tr></thead>
+    <tbody>
+      <tr><td>ariane</td><td class="num"><b>1.4368</b></td><td class="num">1.7802</td><td class="num">1.6464</td></tr>
+      <tr><td>bsg_chip</td><td class="num">0.4389</td><td class="num">0.8604</td><td class="num"><b>0.4258</b></td></tr>
+      <tr><td>NV_NVDLA_partition_c</td><td class="num"><b>1.3206</b></td><td class="num">1.4024</td><td class="num">1.6326</td></tr>
+      <tr><td>mempool_tile_wrap</td><td class="num"><b>0.1768</b></td><td class="num">0.3576</td><td class="num">2.0881</td></tr>
+      <tr><td>mempool_group</td><td class="num"><b>0.8855</b></td><td class="num">1.3327</td><td class="num">1.2335</td></tr>
+      <tr><td>mempool_cluster</td><td class="num"><b>1.4509</b></td><td class="num">2.3273</td><td class="num">2.3707</td></tr>
+      <tr><td><b>sum</b></td><td class="num"><b>5.7095</b></td><td class="num">8.0604</td><td class="num"></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Lower is better. mempool_group is the patience result; the other five are the standard flow's (patience left
+  four of them unchanged; blind mempool_cluster was not run under it). Recap 8: 6.71.</p>
+</section>
+
+<section id="measure">
+  <h2>Measurement</h2>
+  <p>OpenROAD's power reading is not quite repeatable. On mempool_tile_wrap, 5 of 35 slack sessions read a route's power
+  4e-5 above its scoring session (TNS and WNS exact; the same route re-measured alone gave the scored value three times; the
+  cause is not found). The loop's re-measure check, there to catch a different route, stopped two runs on it; it now allows
+  1e-4 relative on power, logs the difference and keeps the scored value, also in <code>scores.jsonl</code> for
+  <code>--resume</code>. The noise is worth 0.0018 of score change on that design: gains smaller than that are not gains.</p>
+</section>
+
+<section id="review">
+  <h2>Code and model review</h2>
+  <p>Full page: <a href="review-2026-11-24.html">review-2026-11-24.html</a>. The headlines:</p>
+  <div class="findings">
+    <div class="finding"><h3><span class="pill bad">fix first</span> CI checks the previous router</h3><p>The static
+      analysis, sanitizer, Valgrind and timing jobs build <code>pd38route</code>; nothing has checked <code>pd39route</code> that
+      way since 14 October. Locally it is clean: 0 warnings, 0 sanitizer reports, 2 low analyzer warnings, 88% line coverage.</p></div>
+    <div class="finding"><h3><span class="pill warn">worth doing</span> A self-test that never reaches its code; 180 settings with no typo guard</h3>
+      <p>The fixed-topology slow-tier test passes with its target at 0% coverage. A misspelled setting name runs the default
+      silently. A settings registry would fix the second and make 118 settings no standard file sets easy to retire.</p></div>
+    <div class="finding"><h3><span class="pill good">the room</span> The 2025 loop</h3><p>Each refinement round is a full
+      reroute plus two OpenROAD sessions on the same route; one session would save about 18 of every ~40 OpenROAD minutes.
+      Its classes only ever tighten -- half a Lagrangian update, the half the congestion side of this project dropped long
+      ago. Timing multipliers that fall as well as rise, and warm-started rounds, are untried.</p></div>
+  </div>
+</section>
+
+<section id="process">
+  <h2>Process</h2>
+  <p>Mistakes this period, each corrected on the record: a claim that blind mempool_group had never been tried above K 140
+  (it had, on 21 November); a count of "5 of 17" slack sessions with a power difference (5 of 35); a wait in the baseline
+  job that matched no process, so it started beside the patience run for six minutes (routes are deterministic, only that
+  round's time was affected), and the <code>pkill</code> that stopped it also stopped a watcher; a watcher whose last
+  <code>cut</code> buffered its output, so sessions went unreported for half an hour; a guess of "20 minutes in" for an
+  analyzer that had finished in four.</p>
+</section>
+
+<section id="next">
+  <h2>Next, for your decision</h2>
+  <div class="opts">
+    <div class="opt"><h3>Adopt patience 3, cap 24?</h3><p>Never worse on nine designs; long runs on the large ones. A higher
+      cap may pay where it bound (unverified).</p></div>
+    <div class="opt"><h3>Point CI at pd39route</h3><p>Minutes. Then one OpenROAD session per refinement route (exact).</p></div>
+    <div class="opt"><h3>Delete <code>GlobalRouterTemp/p215p</code></h3><p>19 GB; best routes and every table are already in
+      <code>p215/patience</code>. Free disk is 52 GB.</p></div>
+  </div>
+</section>
+</div>
+</body>
+</html>

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Router Code and Model Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with wide tables in their own scroll boxes;
+   a snapshot header, then sections in the order a later recap repeats. */
+:root {
+  --paper: #f6f7f5;
+  --sheet: #ffffff;
+  --ink: #1b2124;
+  --ink-soft: #4d585c;
+  --rule: #d9dedc;
+  --trace: #0b6e72;        /* routing-trace teal: the accent */
+  --trace-soft: #d7ecec;
+  --good: #23743e;
+  --good-bg: #e2f2e6;
+  --warn: #8a5a00;
+  --warn-bg: #f8edd6;
+  --bad: #9b2c2c;
+  --bad-bg: #f7e1e1;
+  --bar: #0b6e72;
+  --bar-neg: #7c8b8f;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+    --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+    --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121617; --sheet: #191e20; --ink: #e5eae9; --ink-soft: #a3aeb0; --rule: #2e3739;
+  --trace: #5cc3c5; --trace-soft: #173638; --good: #79d394; --good-bg: #17301f; --warn: #e2b55a;
+  --warn-bg: #352a13; --bad: #f08c8c; --bad-bg: #3a1c1c; --bar: #5cc3c5; --bar-neg: #6c7a7e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+header.snap { padding-block: 40px 28px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--trace); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0 0 14px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 22px 0 8px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.lede { color: var(--ink-soft); font-size: 17px; max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px; font-size: 14px; color: var(--ink-soft); }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { padding-block: 34px 6px; border-bottom: 1px solid var(--rule); }
+section:last-of-type { border-bottom: 0; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 14px; font-size: 14px; border-bottom: 1px solid var(--rule); }
+a { color: var(--trace); }
+nav.toc a { color: var(--trace); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 18px; }
+.tile .fig { font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lab { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+
+.tablebox { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); margin: 8px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--font-body); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; color: var(--ink-soft); background: var(--paper); white-space: nowrap; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.note { font-size: 13.5px; color: var(--ink-soft); max-width: 90ch; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 3px; white-space: nowrap; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--trace); background: var(--trace-soft); }
+
+.findings { display: grid; gap: 14px; }
+.finding { background: var(--sheet); border: 1px solid var(--rule); padding: 16px 20px; }
+.finding h3 { margin-top: 0; }
+
+.bars td { vertical-align: middle; }
+.barcell { min-width: 120px; }
+.bar { position: relative; height: 14px; background: var(--paper); border: 1px solid var(--rule); }
+.bar span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--bar); }
+.bar span.neg { background: var(--bar-neg); }
+.barval { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pending { font-size: 12.5px; color: var(--ink-soft); font-style: italic; }
+
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.twocol > div { min-width: 0; }
+details { background: var(--sheet); border: 1px solid var(--rule); padding: 10px 16px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; }
+pre { overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--paper); border: 1px solid var(--rule); padding: 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* Additions for the comparison with the 1 October recap. */
+.delta { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--good); }
+.delta.same { color: var(--ink-soft); }
+td.was { color: var(--ink-soft); }
+.dumb { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 16px 8px; margin: 8px 0 10px; overflow-x: auto; }
+.dumb-inner { min-width: 520px; }
+.drow { display: grid; grid-template-columns: 84px 1fr 118px; align-items: center; gap: 10px; height: 24px; font-size: 13px; }
+.drow .nm { font-family: var(--font-mono); font-size: 12.5px; }
+.drow .vals { font-family: var(--font-mono); font-size: 12px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track { position: relative; height: 24px; }
+.track .zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-soft); opacity: .6; }
+.track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.track .link { position: absolute; top: 11px; height: 2px; background: var(--bar); opacity: .45; }
+.track .dot { position: absolute; top: 7px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.track .dot.was { background: var(--sheet); border: 2px solid var(--bar-neg); }
+.track .dot.now { background: var(--bar); border: 2px solid var(--bar); }
+.axis { display: grid; grid-template-columns: 84px 1fr 118px; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft); }
+.axis .ticks { position: relative; height: 18px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-soft); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend i.was { border: 2px solid var(--bar-neg); background: var(--sheet); }
+.legend i.now { border: 2px solid var(--bar); background: var(--bar); }
+figure.shot { margin: 10px 0 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+figure.shot figcaption { font-size: 13px; color: var(--ink-soft); margin-top: 5px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.shots > * { min-width: 0; }
+img.px { image-rendering: pixelated; }
+/* Recap 7 additions: an options ledger. */
+.opt { background: var(--sheet); border: 1px solid var(--rule); padding: 14px 18px; }
+.opt h3 { margin: 0 0 6px; }
+.opt p { margin: 0 0 8px; }
+.opt .why { font-size: 14px; color: var(--ink-soft); }
+.opts { display: grid; gap: 12px; }
+.src { font-size: 13px; color: var(--ink-soft); }
+.callout { background: var(--trace-soft); border-left: 3px solid var(--trace); padding: 12px 16px; margin: 10px 0 14px; }
+.callout p:last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="snap">
+  <div class="eyebrow">Review · 24 November 2026 · current router <code>pd39route</code>, ISPD 2025 loop <code>timing_loop.py</code></div>
+  <h1>Code and Model Review</h1>
+  <p class="lede">The router is clean where it is checked: no warnings under the project's flags, no reports from the
+  address and undefined-behaviour sanitizers, 88% of its lines covered by its own self-test and two routed runs. The
+  largest risks are around it, not in it: the continuous-integration quality jobs still check last month's router, one
+  self-test passes without reaching the code it names, and 180 settings are read with no guard against a misspelled one.
+  On the models, the ISPD 2008 overflow is at or near what can be certified on four of five residues; the room is in the
+  ISPD 2025 timing loop, whose refinement was still improving when its round cap stopped it, and which pays for two
+  OpenROAD sessions per route.</p>
+  <div class="meta">
+    <span><b>Scope:</b> <code>gr/pd39route.cpp</code> (25,289 lines), its headers, the Python flow scripts, the shell scripts, the CI workflows</span>
+    <span><b>Raw outputs:</b> <code>~/Code/GlobalRouterRuns/review-2026-11-24/</code> (analyzer, warnings, sanitizer, coverage, structure, method counts)</span>
+    <span><b>Claims:</b> each names the check behind it; anything not checked is marked unverified</span>
+  </div>
+</header>
+<nav class="toc" aria-label="Sections">
+  <a href="#glance">At a glance</a><a href="#tools">Tools run</a><a href="#findings">Findings</a>
+  <a href="#refactor">Refactoring options</a><a href="#models">The models</a><a href="#untried">Untried methods</a><a href="#order">Suggested order</a>
+</nav>
+
+<section id="glance">
+  <h2>At a glance</h2>
+  <div class="tiles">
+    <div class="tile"><div class="fig">0</div><div class="lab">warnings building <code>pd39route</code> with <code>-Wall -Wextra</code> (Apple clang 21)</div></div>
+    <div class="tile"><div class="fig">0</div><div class="lab">sanitizer reports: self-test and a routed synthetic design, address + undefined-behaviour sanitizers</div></div>
+    <div class="tile"><div class="fig">88%</div><div class="lab">of lines covered (95% of functions, 66% of branches) by the self-test plus two routed runs</div></div>
+    <div class="tile"><div class="fig">pd38</div><div class="lab">the router the CI static analysis, sanitizer, Valgrind and timing jobs build; current is pd39route since 14 October</div></div>
+  </div>
+</section>
+
+<section id="tools">
+  <h2>Tools run, and tools not installed</h2>
+  <p>Installed, found by <code>command -v</code>, Homebrew's list and the Command Line Tools' <code>bin</code> folder:</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>tool</th><th>used for</th><th>result</th></tr></thead>
+    <tbody>
+      <tr><td>Apple clang 21, <code>-Wall -Wextra</code></td><td>the project's warning rule</td><td>0 warnings</td></tr>
+      <tr><td>clang, 15 stricter warning flags</td><td>survey (shadowing, conversions, comma, loops)</td><td>1093 sign conversions, 31 comma, 26 float promotion, 9 integer-to-float, 8 shadowed names, 4 64-to-32-bit, 1 int-to-short</td></tr>
+      <tr><td>clang static analyzer (<code>clang --analyze</code>)</td><td>path-sensitive bug search</td><td>2 warnings, both low (finding F5)</td></tr>
+      <tr><td>AddressSanitizer + UndefinedBehaviorSanitizer</td><td>memory and arithmetic errors at run time</td><td>0 reports: self-test (pass) and the synthetic design (legal; 26 overflow is that design's residue)</td></tr>
+      <tr><td><code>llvm-cov</code> / <code>llvm-profdata</code></td><td>which code the tests reach</td><td>lines 84.9% (self-test) → 88.4% (+ two routed runs); 51 functions never run</td></tr>
+      <tr><td><code>gh</code></td><td>the CI's own clang-tidy, cppcheck and sanitizer reports (last successful run, 24 Nov 07:46 UTC)</td><td>clang-tidy 31 findings, cppcheck 18 -- on <code>pd38route</code> (F1)</td></tr>
+      <tr><td>Python <code>py_compile</code> + a syntax-tree checker written for this review</td><td>syntax, unused imports, values never read, bare <code>except</code></td><td>25 files compile; 3 unused imports, 23 values never read, 0 bare <code>except</code></td></tr>
+      <tr><td><code>bash -n</code></td><td>shell syntax</td><td>7 scripts, 0 errors; no bash-4 features (the 3.2 rule holds)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Not installed anywhere checked (<code>PATH</code>, <code>brew list</code>, <code>pip list</code>, the toolchain folders):
+  clang-tidy, cppcheck, Valgrind, include-what-you-use, shellcheck, and every Python linter (ruff, pylint, flake8, mypy,
+  bandit). clang-tidy and cppcheck run in CI; <code>brew install llvm cppcheck shellcheck ruff</code> would bring them here
+  (a download: yours to approve). Valgrind does not work well on current Macs (<code>QUALITY_CHECKS.md</code>); the CI job covers it.</p>
+</section>
+
+<section id="findings">
+  <h2>Findings, most important first</h2>
+  <div class="findings">
+    <div class="finding"><h3><span class="pill bad">high · minutes to fix</span> F1. The CI quality jobs check the previous router</h3>
+      <p><code>quality-checks.yml</code> sets <code>ROUTER: pd38route</code> (line 20); the static-analysis, sanitizer, Valgrind
+      and timing jobs build <code>$ROUTER</code> (lines 56-301). Only the cross-platform and end-to-end jobs use
+      <code>PORTABLE_ROUTER: pd39route</code>. <code>codeql.yml</code> builds <code>pd38route</code> too (line 34). So every
+      change to <code>pd39route</code> since 14 October -- the two-ended search, the batched region stage, the exempt nets,
+      the timing rows -- has had none of those checks in CI. <code>CLAUDE.md</code> asks for this switch at each new
+      generation. <code>QUALITY_CHECKS.md</code> is stale with it: it names <code>pd38route</code> in its commands and says
+      CodeQL "skips itself until you make this one public", but <code>gh repo view</code> reports the repository PUBLIC.
+      The local runs above stand in for the missing CI ones on <code>pd39route</code>: no sanitizer reports, two analyzer warnings.</p></div>
+    <div class="finding"><h3><span class="pill warn">medium</span> F2. A self-test that passes without reaching its code</h3>
+      <p><code>testFixedTopologySlowTierStillWorksAfterTheCollapse</code> (around line 15489) exists to exercise the
+      fixed-topology slow tier (<code>useMSMV=false</code> → <code>routeNetSlow</code> → <code>routeSegment</code> →
+      <code>boundedDijkstra</code>). Coverage shows all three functions at 0%, and line 9918 (the call) run 0 times: the test's
+      design never congests, so no net escalates. It is the failure mode <code>CLAUDE.md</code> warns about -- a test
+      indistinguishable from one that always passes. Either give it a design that forces escalation, or, if the
+      fixed-topology tier is retired, delete it and the test.</p></div>
+    <div class="finding"><h3><span class="pill warn">medium · structural</span> F3. One 25,289-line file per generation</h3>
+      <p><code>main()</code> alone is 1,507 lines; at least five other functions run 245-600 lines
+      (<code>negotiateViaAssignment</code> 598, <code>pattern3DNet</code> 494, <code>regionNegotiateOnce</code> 397,
+      <code>layerAssignDP</code> 390, <code>patternStage2D</code> 385; a brace-scan estimate). Each generation is a copy:
+      71% of <code>pd39route</code>'s lines match <code>pd38route</code> in order, 46% still match <code>pd21route</code>,
+      and <code>gr/</code> holds 108 router <code>.cpp</code> files. A fix made in one copy does not reach the others, and a
+      reviewer cannot see a generation's change except by diffing two 20,000-line files.</p></div>
+    <div class="finding"><h3><span class="pill warn">medium</span> F4. 180 settings, no guard against a misspelled one</h3>
+      <p><code>pd39route</code> reads 180 distinct environment settings under 35 generation prefixes (<code>PD39ROUTE_</code>
+      56, <code>NV2ROUTE_</code> 22, <code>VROUTE_</code> 18, ...). The six standard settings files set 62 of them; 118 are
+      set by none. 53 are named in <code>e2e_settings.py</code> (its rule covers settings added since Part 149, so older
+      ones are not expected there). The router never reads its environment as a whole (no <code>environ</code> in the
+      file), so <code>PD39ROUTE_SLOW_BACH=64</code> -- one letter off -- would run the default without a word. The
+      settings loaders are line-by-line, so the same typo in a settings file is equally silent.</p></div>
+    <div class="finding"><h3><span class="pill warn">medium · runtime</span> F7. The 2025 loop scores every refinement route twice</h3>
+      <p>In <code>refine()</code> each new route gets a scoring session (<code>sta</code>), and the next round opens a slack
+      session on the same route (<code>sta_slack</code>), which measures its timing and power again (that second reading is
+      what the re-measure check compares). On blind mempool_group a round was a scoring session of 17-19 min and a slack
+      session of 21-23 min on the same file (<code>p215/patience/openroad.time</code>, e.g. round 3: 10:34-10:51 and
+      10:51-11:13 on <code>k180rm3.route</code>). One session that scores and measures slack would save the scoring session,
+      about 18 of each round's ~40 OpenROAD minutes -- roughly 6.5 of last night's 16.5 hours over 22 rounds (estimate).
+      The two readings also disagree now and then: 5 of 35 slack sessions on mempool_tile_wrap read power 4e-5 above the
+      scoring session (Part 215), worth 0.0018 of score change there.</p></div>
+    <div class="finding"><h3><span class="pill info">low</span> F8. The routed tests never reach the 2024 / 2025 input path</h3>
+      <p>CI routes one synthetic ISPD 2008 design. The uncovered functions include the 2024 score cost
+      (<code>buildScore2D</code>) and branches of <code>negotiateViaAssignment</code>; the 2024 / 2025 readers are covered only
+      by self-tests. A small synthetic <code>.cap</code> / <code>.net</code> design in the sanitizer and coverage jobs would
+      close it. The other uncovered code is diagnostic (<code>FrameDumper</code>, <code>regionA1Replay</code>, <code>NetDelta</code>).</p></div>
+    <div class="finding"><h3><span class="pill info">low</span> F5. Small code items</h3>
+      <p>Line 9415 calls <code>getenv("NV3ROUTE_GIANT_FAST_TIER")</code> twice and builds a <code>std::string</code> from the
+      second (the analyzer's null warning; read it once). Line 7261 uses <code>rewind</code>, which cannot report failure
+      (the next <code>fread</code> check catches it; <code>fseek</code> is cleaner). <code>FastText::open</code>
+      (<code>g24_io.h</code>) leaks its old handle if called twice. A self-test indexes with a value its
+      <code>check()</code> just found to be −1 (cppcheck, <code>pd38route</code> 12796), undefined only on that failure path.
+      Via indices are pushed into 32-bit lists (4 sites, lines 11733-20586): safe below 4.3 billion vias. 8 shadowed names.
+      cppcheck's other "index −1" (Prim's tree, line 2240) is a false positive.</p></div>
+    <div class="finding"><h3><span class="pill info">low</span> F6. Python and shell</h3>
+      <p>Three unused imports (<code>cg_merge.py</code>, <code>search_bound_sim.py</code>, <code>search_parallel_sim.py</code>)
+      and 23 values assigned and never read, all in one-off analysis scripts; the flow scripts (<code>timing_loop.py</code>,
+      <code>elmore_rows.py</code>, <code>reorder_portfolio.py</code>, <code>run_batch.sh</code>) are clean by these checks.
+      No Python linter is installed, so nothing checks types or style there.</p></div>
+  </div>
+</section>
+
+<section id="refactor">
+  <h2>Refactoring options</h2>
+  <p>Each one changes no route: the acceptance test is the one the project already uses for exact changes -- byte-identical
+  routes on the sixteen ISPD 2008 designs, the 2024 smoke designs and a 2025 design, plus the self-tests and
+  <code>e2e_settings.py</code>. They are listed cheapest first; the larger ones are yours to decide.</p>
+  <div class="opts">
+    <div class="opt"><h3>R1. Point CI at <code>pd39route</code> (minutes)</h3><p>Change <code>ROUTER</code> and the two
+      <code>codeql.yml</code> names; refresh <code>QUALITY_CHECKS.md</code>. Expect new clang-tidy findings on the code added
+      since October (locally the analyzer found two).</p><p class="why">Closes F1.</p></div>
+    <div class="opt"><h3>R2. A settings registry (a day)</h3><p>One table -- name, type, default, stage, one-line meaning,
+      the Part that introduced it -- read once at start-up into a settings struct. The router then lists its settings
+      (<code>--settings</code>), fails on any <code>PD*ROUTE_*</code> / <code>NV*ROUTE_*</code> / <code>VROUTE_*</code> variable it does not
+      know, and <code>e2e_settings.py</code> can check that every registered setting has a test. Old names stay as
+      aliases so every recorded command still runs.</p><p class="why">Closes F4; makes the 118 unset settings visible for retiring.</p></div>
+    <div class="opt"><h3>R3. Split the router into modules, stop copying files (days)</h3><p>Readers, pricing, search,
+      pattern stage, slow tier, region stage, refinement, layer assignment, 3D passes, timing, self-tests, main -- one file
+      each, still built by one compiler line (<code>g++ gr/pd/*.cpp</code>) so the build rule holds. A new generation becomes a
+      git tag plus its settings instead of a 25,000-line copy; old generations stay buildable from their tags.</p><p class="why">Closes F3. The largest change here; do it only between experiments.</p></div>
+    <div class="opt"><h3>R4. Break up <code>main()</code></h3><p>Its 1,507 lines read settings, run stages and print reports.
+      With R2's struct, the stage sequence becomes a short list of calls, each stage a function taking the struct.</p><p class="why">Easier review of flow changes; follows R2.</p></div>
+    <div class="opt"><h3>R5. Fix the self-test and the small items</h3><p>F2's test on a congesting design; F5's five items.</p><p class="why">Hours; no route changes.</p></div>
+  </div>
+</section>
+
+<section id="models">
+  <h2>The models, as implemented, and where the room is</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>model</th><th>what the code does</th><th>standing</th><th>room</th></tr></thead>
+    <tbody>
+      <tr><td>2D congestion price (2008, 2024)</td><td>NTHU-Route 2.0's present-demand cost: wire term + history × (demand / shrunk capacity)<sup>5</sup>; history +1 per round an edge ends over capacity; over-capacity clamp (Part 179); virtual capacity (Part 89); region-stage edge multipliers (Part 135)</td><td>eleven 2008 designs at 0; newblue1 0, newblue7 56 (certified ≥ 54), bigblue4 90 (published 160), newblue4 112 (pin-bound)</td><td><span class="pill good">little</span> except newblue3</td></tr>
+      <tr><td>newblue3's floor</td><td>cut bound (Part 91) and column-generation bound (Part 213)</td><td>ours 31402; best published ~31024; fractional optimum somewhere in 26264-32141; certificate reached 21131</td><td><span class="pill warn">unknown</span>: the lower bound is not tight enough to say</td></tr>
+      <tr><td>wirelength (2008)</td><td>post-route recovery, tree rebuild, pin-aware layer assignment</td><td>−0.4% to +1.8% vs NTHU-Route 2.0 on the zero designs (Recap 8); a 2D post-pass ceiling of ~0.65% (Part 214)</td><td><span class="pill good">little</span></td></tr>
+      <tr><td>2025 timing classes</td><td>three buckets by slack ratio (≥ 0.7, 0.4, 0.1; weights 1, ½, ¼); refinement merges every measured slack by its worst, so a net's class only ever tightens</td><td>refinement still gaining at round 24 on both designs that gained most (Part 215)</td><td><span class="pill bad">large</span></td></tr>
+      <tr><td>2025 delay cost</td><td>per net and layer, a cost per unit length K · w(class) · (R<sub>drv</sub>·C<sub>l</sub> + R<sub>l</sub>·C<sub>down</sub>) on every segment of the net; one K per design from a ladder</td><td>blind six 5.7095 on record (1st place 8.0604)</td><td><span class="pill warn">some</span>: one K for all nets, the same cost on non-critical branches</td></tr>
+      <tr><td>2025 loop</td><td>each round a full route from scratch, then two OpenROAD sessions</td><td>blind mempool_group: 16.5 h of refinement</td><td><span class="pill bad">large</span> (runtime)</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Why the 2025 loop is where the room is</h3>
+  <p>Refinement is a fixed-point iteration: measure slack on the best route, tighten classes, reroute, repeat. It has the
+  shape of a Lagrangian method -- the classes are coarse multipliers on each net's timing constraint -- but with only half
+  the update: a multiplier rises when a net fails timing and never falls when a net passes with room to spare. The
+  congestion side of this project learned the same lesson twice: the ever-rising lambda price gave way to present-demand
+  pricing, which falls back as demand leaves an edge (Parts 59-60, together with keeping every reroute), and the user's
+  own LIFO-relaxed history beat the permanent one (<code>kroute</code>, <code>CLAUDE.md</code>'s 2026-09-07 update). The timing side has not had that change. Evidence that it matters:
+  classed nets only grow (blind mempool_group 337803 at round 3 → 373381 at round 24 of the patience run), every classed
+  net pays congestion, and the loop was still improving 0.001-0.004 per round in its last rounds.</p>
+  <p>The other half is cost. A round reroutes all nets though only the newly classed ones changed, and scores each route
+  twice (F7). Cheaper rounds are what make a longer, properly relaxing iteration affordable on the large designs.</p>
+</section>
+
+<section id="untried">
+  <h2>Methods that look promising and are not yet tried</h2>
+  <p>"Not tried" here means: no mention in <code>HISTORY_COST_SWEEP.md</code> by the search terms shown (counts in
+  <code>method_mentions.txt</code>), and no setting for it in <code>pd39route</code>. A text search can miss a differently
+  named attempt, so each is unverified beyond that.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>method</th><th>why it may pay</th><th>check behind "not tried"</th><th>cost to test</th></tr></thead>
+    <tbody>
+      <tr><td><b>1. One OpenROAD session per refinement route</b> (score and slack together)</td><td>~18 of ~40 OpenROAD minutes per round on mempool_group; removes the double reading</td><td>reading <code>refine()</code>; the session log</td><td>a day; exact (same numbers, one session)</td></tr>
+      <tr><td><b>2. Warm-started refinement rounds</b>: start from the previous route, reroute only the nets whose class or row changed and the nets on the edges they crowd</td><td>a round on mempool_group is a full reroute; most nets keep their class from round to round (net counts grow 0.2-1% per round)</td><td>no starting-route setting among the router's 180 (only <code>PD39ROUTE_PRICE_SEED</code>, prices)</td><td>days; not exact, so scored like any flow change</td></tr>
+      <tr><td><b>3. Timing multipliers that fall as well as rise</b>: per net, μ ← max(0, μ + α · (−slack / clock)), bucketed into the three classes as <code>CLAUDE.md</code> asks, so a net that has gained room returns its congestion</td><td>the half-update above; the congestion side's two biggest wins were exactly this change</td><td>Parts 134-215: no per-net multiplier, decay or declassing (search: multiplier, lagrang, subgradient, declass, relax class, decay)</td><td>days; on the small designs first</td></tr>
+      <tr><td><b>4. A higher round cap</b> where the cap bound</td><td>visible mempool_tile_wrap and blind mempool_group were still gaining at round 24</td><td>Part 215 (patience test, cap 24)</td><td>hours on mempool_tile_wrap; cheap after 1 and 2</td></tr>
+      <tr><td><b>5. A tighter lower bound for newblue3</b> (stabilized column generation, or a Lagrangian dual of the hotspot program)</td><td>says whether the 31402 → 31024 gap is reachable before anyone tunes for it</td><td>Part 213's certificate (21131) is below the cut bound; no stabilization mentioned</td><td>days; a diagnostic, no router change</td></tr>
+      <tr><td><b>6. Randomized rounding of the hotspot program's fractional routing</b>, then repair</td><td>Part 209's rounding loss was 3x the base; many rounded samples, best kept, is the classic fix</td><td>0 mentions of randomized rounding</td><td>a day on <code>hotspot_cg.py</code></td></tr>
+      <tr><td>7. Per-class strength instead of one K</td><td>the ladder's best K differs by design (35-560); classes may want different K too</td><td>Part 215 scored per-design K only</td><td>hours (3 classes × 2-3 values)</td></tr>
+      <tr><td>8. Fair-share objective (<code>CLAUDE.md</code>)</td><td>low: contest scores are sums, which a fair-share utility does not minimize</td><td>its 4 mentions are an overflow-attribution report, not an objective</td><td>not recommended now</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Already tried, so not listed: nested long-net budgets (Part 100, negative), edge shifting (Part 152 probe),
+  column generation and integer programs (Parts 206-213), annealing (Part 147), ant colonies (Parts 48-49), edge
+  Lagrangian multipliers (Part 135), virtual capacity (Part 89), delay-aware trees (Parts 204-205: the gain is across nets,
+  not along a tree), a 2D wirelength post-pass (Part 214, ceiling ~0.65%).</p>
+</section>
+
+<section id="order">
+  <h2>Suggested order</h2>
+  <p>R1 first (minutes, and it turns the CI checks back on for the code that matters). Then method 1, which is exact and
+  pays on every later 2025 experiment. Then method 2 or 3 on the small designs, judged against today's standard and the
+  patience results, with blind mempool_group last. R2 and R5 fit between runs; R3 is worth scheduling only for a quiet
+  week. Nothing here has been changed or adopted: each item waits for your decision.</p>
+</section>
+</div>
+</body>
+</html>
