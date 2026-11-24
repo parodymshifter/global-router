@@ -16426,7 +16426,7 @@ faster without link-time optimization, it would end the one-line build, and it w
 (stop copying files) is the practice since Part 123 (pd39route edited in place); CLAUDE.md now says so.
 `gr/settings_check.py` reads the three files.
 Checks of the split build: warning-free; self-test passes; `e2e_settings.py` 59 of 59; routes byte-identical on the
-synthetic design and visible ariane (newblue1 and adaptec1 queued behind the pd38route comparison).
+synthetic design, visible ariane, newblue1 and adaptec1 (the last two checked 14:30-14:43).
 
 ### pd38route and pd39route: why two were in play, and the merge (the user, 2026-11-24: "are the questions between them resolved and merged or dropped as appropriate?")
 
