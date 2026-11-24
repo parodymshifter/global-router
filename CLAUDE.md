@@ -220,7 +220,10 @@ objective and its change, work): read it before tuning anything. The
 2008 standard is unchanged.
 
 **2026-10-09: the ISPD 2024 standard is `./pd38route @standard.env
-@standard24.env @fast24.env PD37ROUTE_THREADS=8`** (Part 118). The slow
+@standard24.env @fast24.env PD37ROUTE_THREADS=8`** (Part 118; **since 2026-11-24 `./pd39route` with the same files**,
+Part 216: Part 123 measured the two equal on all 13 designs within +-0.003% by the official evaluator, and the same
+evaluator reproduced Part 123's numbers exactly today on mempool_tile_rank, ariane133_68 and nvdla; the 2025 flow has
+run pd39route with these files since 2026-10-14). The slow
 tier now runs in batches of 64 searched in parallel against snapshots and
 committed in net order (`PD38ROUTE_SLOW_BATCH=64`, in `fast24.env`): a
 better score on all 13 designs, the same at any thread count.

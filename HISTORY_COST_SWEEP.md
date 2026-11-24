@@ -16428,3 +16428,38 @@ faster without link-time optimization, it would end the one-line build, and it w
 Checks of the split build: warning-free; self-test passes; `e2e_settings.py` 59 of 59; routes byte-identical on the
 synthetic design and visible ariane (newblue1 and adaptec1 queued behind the pd38route comparison).
 
+### pd38route and pd39route: why two were in play, and the merge (the user, 2026-11-24: "are the questions between them resolved and merged or dropped as appropriate?")
+
+The two paths, from git:
+- `quality-checks.yml` was written on 2026-10-11 (4021e3d) with `ROUTER: pd38route`, then the current router.
+- `pd39route` (2026-10-12, c3a2e66) made the routes the same on every platform. The new platform job got its own
+  `PORTABLE_ROUTER: pd39route`, because only pd39route had that guarantee.
+- When pd39route became the 2008 and 2025 standard (2026-10-14, Parts 124 / 133), `ROUTER` should have moved (CLAUDE.md
+  says so) and did not. The deep checks stayed on the retired pd38route until this morning (7a8b793).
+That was an oversight, not two live paths.
+
+One real loose end: CLAUDE.md's ISPD 2024 standard still named pd38route (2026-10-09, Part 118), never moved, although
+- Part 123 had measured pd39route equal on all 13 designs (+-0.003%, official evaluator), and
+- the 2025 flow has run pd39route with the 2024 settings files since 2026-10-14.
+
+Checked today. The 13 designs on both, with today's settings files (`~/Code/GlobalRouterRuns/p216/g24*/`): the router's
+own printed score is not comparable across the two. Wire and vias agree (mempool_tile_rank 1768686 / 795049 against
+1768694 / 795049), while the printed scores differ by ~2.5M.
+
+The official evaluator on three designs reproduces Part 123's numbers exactly:
+
+| design | pd38route | pd39route |
+|---|---|---|
+| mempool_tile_rank | 13699356 | 13699409 |
+| ariane133_68 | 19682122 | 19682336 |
+| nvdla | 48026876 | 48027559 |
+
+Merged:
+- CLAUDE.md: the ISPD 2024 standard is pd39route with the same files;
+- CI: `PORTABLE_ROUTER` dropped, every job uses `ROUTER` (pd39route);
+- pd38route stays in `build-and-validate.yml`'s matrix like every older generation (built and self-tested only).
+
+New open item: **pd39route's own printed score reads 0.31% below the official evaluator** on mempool_tile_rank
+(13656961 against 13699409). Part 102 had them equal, on a different design and an older generation. The cause is
+unverified; until it is found, compare 2024 / 2025 runs by the evaluator, as the loop already does.
+

@@ -17,11 +17,11 @@ on:
   workflow_dispatch:
 
 env:
+  # The current router, checked by every job here: static analysis, sanitizers, Valgrind, timing, and the "same on
+  # every platform" jobs (built on Linux and macOS, routes compared; pd39route and later, Part 123). Until 2026-11-24
+  # the platform and settings jobs had their own variable while ROUTER still named pd38route (an oversight from
+  # 2026-10-14, Part 216); one router, one variable.
   ROUTER: pd39route
-  # The router whose results must be the same on Linux and macOS (pd39route
-  # and later; HISTORY_COST_SWEEP.md Part 123). The "same on every platform"
-  # jobs below build it on both and compare.
-  PORTABLE_ROUTER: pd39route
   # Set to "true" once the static-analysis findings are cleaned up, to make
   # cppcheck errors fail the job. Until then the job reports and never fails.
   STATIC_GATE: "false"
@@ -188,7 +188,7 @@ jobs:
           mkdir -p fp
           c++ --version | head -1
           # The router's own build line (its header): no contraction.
-          c++ -std=c++17 -O2 -Wall -Wextra -ffp-contract=off -pthread -o fp/router "gr/$PORTABLE_ROUTER.cpp"
+          c++ -std=c++17 -O2 -Wall -Wextra -ffp-contract=off -pthread -o fp/router "gr/$ROUTER.cpp"
           set +e
           fp/router --selftest > fp/selftest.txt 2>&1
           echo "self-test exited $?"
@@ -216,11 +216,11 @@ jobs:
       - name: The settings table matches the source
         # gr/settings_check.py (Part 215, 2026-11-24): every setting the router reads is in gr/pd39_settings.h and
         # nothing else is, the table is sorted, no read bypasses it, and every gr/*.env name is in it.
-        run: python3 gr/settings_check.py "$PORTABLE_ROUTER"
+        run: python3 gr/settings_check.py "$ROUTER"
       - name: Build and check
         shell: bash
         run: |
-          c++ -std=c++17 -O2 -Wall -Wextra -ffp-contract=off -pthread -o e2e-router "gr/$PORTABLE_ROUTER.cpp"
+          c++ -std=c++17 -O2 -Wall -Wextra -ffp-contract=off -pthread -o e2e-router "gr/$ROUTER.cpp"
           python3 gr/e2e_settings.py e2e-router e2e-work
 
   portable-compare:
@@ -244,7 +244,7 @@ jobs:
             fi
           done
           {
-            echo "### Same routes on every platform ($PORTABLE_ROUTER)"
+            echo "### Same routes on every platform ($ROUTER)"
             [ $status = 0 ] && echo "Linux and macOS: identical self-test output and synthetic-design routes." \
                             || echo "Linux and macOS differ -- see the job log."
           } >> "$GITHUB_STEP_SUMMARY"
