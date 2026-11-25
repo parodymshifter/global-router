@@ -16588,6 +16588,7 @@ pass), started 01:41-01:42, at most three processes (CLAUDE.md).
 0.396, steeper 0.857, no design better either way; both variants also stopped refining earlier or lower than the
 standard (visible mempool_tile_wrap: flat's best round 20, steep's 31, the standard's 32 at a better score). Only one
 direction through the standard's ratio was tried (w = r^2, r, 1 at r = 1, 1/2, 1/4), not three free strengths; a
-finer step around r = 1/2 is the only untested neighbour that could still pay. `--class-weights` stays in the flow
-(the default reproduces the standard exactly) unless the user drops it. Blind mempool_group: m3 -1.4463, m4 -1.4548,
+finer step around r = 1/2 is the only untested neighbour that could still pay. `--class-weights` was dropped
+(the user, 2026-11-25 17:38): `timing_loop.py` and `elmore_rows.py` are back to 63f72b1, both self-tests pass and
+`--class-weights` / `--weights` are refused as unknown options; the frozen copy `p217/frozen` and commit 6573c00 keep it. Blind mempool_group: m3 -1.4463, m4 -1.4548,
 m5 -1.4697 -- each the patience run's to four decimals; sessions ~24 min, peak footprint 30.4 GB.

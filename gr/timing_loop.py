@@ -9,7 +9,7 @@ evaluator, and keep the best by the contest score's change against the unbiased 
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
       [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...|0]
-      [--endpoints N|measured] [--patience P] [--two-sessions] [--class-weights w1,w2,w3] | --selftest
+      [--endpoints N|measured] [--patience P] [--two-sessions] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -89,11 +89,6 @@ REFINE_ROUNDS = 48  # --refine N (Part 188: 2; 2026-11-20: 12; 2026-11-24, with 
 # round -- the same measurements, one session per round instead of two (blind mempool_group: ~17 of every ~40 min).
 # --two-sessions gives the old way back
 ONE_SESSION = True
-# Part 217 (the user, 2026-11-25: test method 7 of the 2026-11-24 review, per-class strength): the strength of timing
-# classes 1, 2, 3 as fractions of the top class's (k3 x w, and the Elmore rows' K x w). --class-weights w1,w2,w3; the
-# default is the standard's 1/4, 1/2, 1, whose candidates are routed exactly as before (the same settings strings)
-CLASS_W_DEFAULT = (0.25, 0.5, 1.0)
-CLASS_W = CLASS_W_DEFAULT
 # Part 215 (the user, 2026-11-21: standard): the contest's N_endpoint for its blind designs (github.com/liangrj2014/
 # ISPD25_contest index.md, read 2026-11-20). OpenROAD's registers + outputs agree on ariane and NVDLA and not on the
 # mempool designs (19000 / 438269 / 1443997) or bsg_chip (214955). The visible designs' contest counts are not
@@ -157,13 +152,6 @@ def wait_slot():
         time.sleep(5)
 
 
-def timing_layers(k3):
-    """PD39ROUTE_TIMING_LAYERS for top-class strength k3: k3/4, k3/2, k3 as before, or k3 x CLASS_W (Part 217)."""
-    if CLASS_W == CLASS_W_DEFAULT:
-        return f'{k3 / 4},{k3 / 2},{k3}'
-    return ','.join(repr(k3 * w) for w in CLASS_W)
-
-
 def route(d, name, work, tag, k3, kp, slack_file=None, slack_mode='replace', extra=None):
     """One candidate: the 2024 standard plus the timing bias at top-class strength k3 and the power
     term kp; slack_file (the routed-slack file) replaces the input slack as the classes' source
@@ -174,7 +162,7 @@ def route(d, name, work, tag, k3, kp, slack_file=None, slack_mode='replace', ext
     s25 = env_file(os.path.join(GR, 'standard25.env'))
     base['PD37ROUTE_THREADS'] = '8'
     if k3 > 0 or kp > 0:
-        base['PD39ROUTE_TIMING_LAYERS'] = timing_layers(k3)
+        base['PD39ROUTE_TIMING_LAYERS'] = f'{k3 / 4},{k3 / 2},{k3}'
         base['PD39ROUTE_POWER_LAYERS'] = str(kp)
         base['PD39ROUTE_LAYER_R'] = s25['PD39ROUTE_LAYER_R']
         base['PD39ROUTE_LAYER_C'] = s25['PD39ROUTE_LAYER_C']
@@ -478,8 +466,7 @@ def elmore(d, name, work, b, best, w, n, ks):
             # 24 GB of footprint, which this process would otherwise keep through the route and the OpenROAD session;
             # written to .tmp first, so a stopped build is not taken as done by --resume
             info = subprocess.run([sys.executable, os.path.join(GR, 'elmore_rows.py'), d, sf or 'none',
-                                   'min' if not sf else smode, rows + '.tmp', repr(float(K)), repr(float(best['kp']))]
-                                  + ([] if CLASS_W == CLASS_W_DEFAULT else ['--weights', ','.join(map(repr, CLASS_W))]),
+                                   'min' if not sf else smode, rows + '.tmp', repr(float(K)), repr(float(best['kp']))],
                                   capture_output=True, text=True, check=True).stdout.strip()
             os.replace(rows + '.tmp', rows)
             print(f"{name}: elmore K {K:g}: {info}", flush=True)
@@ -749,20 +736,6 @@ def selftest():
     ok &= elmore_ks({'k3': 540}, [280, 1000]) == [280, 1000, 560]
     ELMORE_GIVEN = True
     ok &= elmore_ks({'k3': 540}, [35.0]) == [35.0]
-    # Part 217: --class-weights -- the default keeps the old settings string; others scale k3; bad values refused
-    global CLASS_W
-    ok &= timing_layers(180) == '45.0,90.0,180' and timing_layers(20) == '5.0,10.0,20'
-    CLASS_W = class_weights('1,1,1')
-    ok &= timing_layers(180) == '180.0,180.0,180.0'
-    CLASS_W = class_weights('0.0625,0.25,1')
-    ok &= timing_layers(540) == '33.75,135.0,540.0'
-    CLASS_W = CLASS_W_DEFAULT
-    for bad in ('1,1', '1,1,0', '-1,1,1', 'a,1,1', 'nan,1,1', '1,1,inf'):
-        try:
-            class_weights(bad)
-            ok = False
-        except ValueError:
-            pass
     ELMORE_GIVEN = was
     ok &= selftest_patience(t)
     print('timing_loop selftest:', 'pass' if ok else f'FAIL {got} {seen}')
@@ -775,15 +748,7 @@ def selftest():
 # router's own settings check under the flow's settings files, and stops with every problem before anything runs.
 OPTIONS = {'--out': 'value', '--classes': 'value', '--refine': 'value', '--reuse': 'value', '--router': 'value',
            '--lean': None, '--resume': None, '--k3': 'value', '--elmore': 'value', '--endpoints': 'value',
-           '--patience': 'value', '--two-sessions': None, '--class-weights': 'value'}
-
-
-def class_weights(v):
-    """--class-weights w1,w2,w3 (Part 217): three finite numbers >= 0, w3 > 0; ValueError otherwise."""
-    w = tuple(float(x) for x in v.split(','))
-    if len(w) != 3 or any(not (x == x and abs(x) != float('inf')) or x < 0 for x in w) or not w[2] > 0:
-        raise ValueError(v)
-    return w
+           '--patience': 'value', '--two-sessions': None}
 
 
 def check_run(argv):
@@ -810,7 +775,6 @@ def check_run(argv):
         'positive strengths, e.g. 35,70,140, or 0 (off)')
     val('--endpoints', lambda v: v if v == 'measured' else int(v), lambda v: v == 'measured' or v > 0,
         'a positive count or measured')
-    val('--class-weights', class_weights, lambda v: True, 'three numbers w1,w2,w3 >= 0 with w3 > 0, e.g. 0.25,0.5,1')
     d = work = None
     if len(args) == 2:
         d, work = os.path.abspath(args[0]), os.path.abspath(args[1])
@@ -880,9 +844,6 @@ def main():
     ONE_SESSION = '--two-sessions' not in opts
     if '--patience' in opts:  # Part 215: rounds without a new best before refinement stops (default PATIENCE)
         PATIENCE = int(opts['--patience'])
-    global CLASS_W
-    if '--class-weights' in opts:  # Part 217: per-class strengths (method 7)
-        CLASS_W = class_weights(opts['--class-weights'])
     global K3_LADDER
     if '--k3' in opts:  # Part 215: the timing strengths to try, e.g. --k3 2,5,10,20 (default 20,180,540)
         K3_LADDER = [int(v) for v in opts['--k3'].split(',')]
