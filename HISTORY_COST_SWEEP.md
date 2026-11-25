@@ -16575,6 +16575,19 @@ pass), started 01:41-01:42, at most three processes (CLAUDE.md).
 | visible mempool_tile_wrap | -1.6738 | -1.5889 (+0.085) | k540rp1m31e70 |
 | visible bsg_chip | -2.2297 | -1.9478 (+0.282) | k540ip1m1e560 (refinement flat at -1.4997, m1-m3) |
 
-Flat so far: visible ariane -4.2160 (+0.054, k540rm2e140), blind mempool_tile_wrap -3.0674 (+0.137, k180rp1m7e70),
-visible mempool_tile_wrap -1.5269 (+0.147, k180rp1m20e35); bsg_chip running. Blind mempool_group: m3 -1.4463, m4 -1.4548,
+**Flat, all four (01:41-04:23, `p217/logs/cwflat.*`):** worse than the standard on every design, 0.396 in total.
+
+| design | standard | flat 1,1,1 | best candidate |
+|---|---|---|---|
+| visible ariane | -4.2695 | -4.2160 (+0.054) | k540rm2e140 |
+| blind mempool_tile_wrap | -3.2048 | -3.0674 (+0.137) | k180rp1m7e70 |
+| visible mempool_tile_wrap | -1.6738 | -1.5269 (+0.147) | k180rp1m20e35 |
+| visible bsg_chip | -2.2297 | -2.1717 (+0.058) | k540rm11e280 |
+
+**Method 7, measured: the standard's 1 : 2 : 4 is the best of the three ratios on all four designs** -- flatter loses
+0.396, steeper 0.857, no design better either way; both variants also stopped refining earlier or lower than the
+standard (visible mempool_tile_wrap: flat's best round 20, steep's 31, the standard's 32 at a better score). Only one
+direction through the standard's ratio was tried (w = r^2, r, 1 at r = 1, 1/2, 1/4), not three free strengths; a
+finer step around r = 1/2 is the only untested neighbour that could still pay. `--class-weights` stays in the flow
+(the default reproduces the standard exactly) unless the user drops it. Blind mempool_group: m3 -1.4463, m4 -1.4548,
 m5 -1.4697 -- each the patience run's to four decimals; sessions ~24 min, peak footprint 30.4 GB.
