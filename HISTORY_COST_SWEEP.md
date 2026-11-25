@@ -16544,3 +16544,24 @@ at 0.8 is one design against three losses, so it was not pursued.
 
 Two laptop sleeps (09:20-14:08, ~17:25-17:37) paused runs without harm; wall times spanning them are not comparable.
 
+
+## Part 217 -- per-class timing strength (method 7) and the round cap of 48 on blind mempool_group (in progress)
+
+**2026-11-25 01:37 (the user: "Do both of those" -- the two runs offered at 01:09).** Both run on a frozen flow
+(`GlobalRouterRuns/p217/frozen`: 63f72b1's flow plus `--class-weights`, the pd39route built from 0699068; self-tests
+pass), started 01:41-01:42, at most three processes (CLAUDE.md).
+
+- **Method 7 of the 2026-11-24 review: per-class strength.** Since Part 133 the three timing classes have had strengths
+  k3/4, k3/2, k3 (and the Elmore rows K/4, K/2, K): one strength per design, a fixed 1 : 2 : 4 between classes.
+  `timing_loop.py --class-weights w1,w2,w3` (new; default 0.25,0.5,1 gives the old settings strings, so standard runs
+  are routed exactly as before; `elmore_rows.py --weights`, the same for the rows) sets the classes to k3 x w. Two
+  variants, the whole standard flow (cap 48, patience 3, one session a round), on the four small designs where
+  refinement acts, against their standard results (visible ariane -4.2695, blind mempool_tile_wrap -3.2048, visible
+  mempool_tile_wrap -1.6738, visible bsg_chip -2.2297): **flat** 1,1,1 and **steep** 1/16,1/4,1 (`p217/cw.sh`, one queue
+  each). A 1-D family through the standard's ratio -- whether the ratio matters at all -- not three free strengths.
+- **The cap of 48 on blind mempool_group** (`p217/grp.sh`): Part 215's patience run reached m24 still gaining
+  (-1.5466 by the contest's count, Elmore K 140 -> contest score 0.8855). Its work folder (`p215p`, with m3-m24's slack)
+  was deleted on 2026-11-24, so this run restarts where that one did: the record's stages 0-2 and m1-m2, m2 rebuilt from
+  `merged2.slack` (checked against the recorded overflow cost), refinement m3-m48 at patience 3 with one session a round
+  (Part 216: the same measurements as two), then the Elmore stage. m3-m24 should reproduce the patience run's trace to
+  about four decimals (the power reading moves ~4e-5 between sessions, Part 215). Estimate: ~19 h if every round runs.

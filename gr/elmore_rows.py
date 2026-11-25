@@ -2,7 +2,7 @@
 """elmore_rows.py -- per-net layer-bias rows from an Elmore delay model, for pd39route's PD39ROUTE_TIMING_ROWS
 (HISTORY_COST_SWEEP.md Part 215). Standard library only.
 
-  python3 gr/elmore_rows.py DESIGN_DIR SLACK_FILE|none MODE OUT.rows K KP [LIBERTY]  |  --selftest
+  python3 gr/elmore_rows.py DESIGN_DIR SLACK_FILE|none MODE OUT.rows K KP [LIBERTY] [--weights w1,w2,w3]  |  --selftest
 
 The timing bias of the 2025 loop (Part 133) pulls a classed net's wire toward low-resistance layers, per step:
 k[class] x R_l / max R. A delay model says otherwise: one micron of wire on layer l adds about
@@ -139,7 +139,7 @@ def classes(slack):
     return out
 
 
-def build(design_dir, slack_file, mode, out, K, kp, lib=LIBERTY, rc=None):
+def build(design_dir, slack_file, mode, out, K, kp, lib=LIBERTY, rc=None, weights=None):
     """Write OUT (one '<net index> <row>' line per classed net); return a one-line summary."""
     d = design_dir.rstrip('/')
     name = os.path.basename(d)
@@ -186,11 +186,12 @@ def build(design_dir, slack_file, mode, out, K, kp, lib=LIBERTY, rc=None):
     known = [v for v in rdrv.values() if v is not None]
     rmed = statistics.median(known) if known else 2.0
     cmax = max(C)
+    wt = WEIGHT if weights is None else {1: weights[0], 2: weights[1], 3: weights[2]}  # Part 217: --weights
     with open(out, 'w') as f:
         f.write(f'# elmore_rows.py: K {K}, kp {kp}, slack {slack_file} ({mode}); {len(cdown)} classed nets\n')
         for i in sorted(cdown):
             rd = rdrv[i] if rdrv[i] is not None else rmed
-            row = [K * WEIGHT[cls[i]] * (rd * C[l] + R[l] * cdown[i]) + kp * C[l] / cmax for l in range(len(R))]
+            row = [K * wt[cls[i]] * (rd * C[l] + R[l] * cdown[i]) + kp * C[l] / cmax for l in range(len(R))]
             f.write(f'{i} ' + ' '.join(f'{v:.6g}' for v in row) + '\n')
     return (f'{len(cdown)} classed nets (1/2/3: ' + '/'.join(str(sum(1 for c in cls.values() if c == k)) for k in (1, 2, 3))
             + f'), {sum(1 for v in rdrv.values() if v is None)} without a library driver (median {rmed:.3f} kOhm used)')
@@ -221,6 +222,11 @@ def selftest():
     want = [10.0 * 1.0 * (rd * C[l] + R[l] * cdown) + 1.0 * C[l] / 0.2 for l in range(3)]
     ok = len(rows) == 1 and rows[0][0] == '0' and all(abs(float(rows[0][1 + l]) - want[l]) < 1e-3 * want[l] for l in range(3))
     ok &= classes({0: -1.0, 1: -0.5, 2: -0.2, 3: -0.05, 4: 0.3}) == {0: 3, 1: 2, 2: 1}
+    # Part 217: --weights scales the timing term by class (class 3 here): weight 0.5 halves it, the power term stays
+    build(d, 'none', 'min', out, 10.0, 1.0, lib, (R, C), (0.1, 0.2, 0.5))
+    rows2 = [l.split() for l in open(out) if not l.startswith('#')]
+    want2 = [10.0 * 0.5 * (rd * C[l] + R[l] * cdown) + 1.0 * C[l] / 0.2 for l in range(3)]
+    ok &= len(rows2) == 1 and all(abs(float(rows2[0][1 + l]) - want2[l]) < 1e-3 * want2[l] for l in range(3))
     print('elmore_rows selftest:', 'pass' if ok else f'FAIL {rows} vs {want}')
     return ok
 
@@ -230,7 +236,15 @@ if __name__ == '__main__':
         sys.exit(0 if selftest() else 1)
     # Part 216 (the user, 2026-11-24): every argument and input checked first, every problem reported
     import flowcheck
-    _, a, p = flowcheck.parse_options(sys.argv[1:], {}, None, 'elmore_rows.py')
+    o, a, p = flowcheck.parse_options(sys.argv[1:], {'--weights': 'value'}, None, 'elmore_rows.py')
+    wts = None
+    if '--weights' in o:  # Part 217: class 1, 2, 3 weights (default 0.25, 0.5, 1)
+        try:
+            wts = tuple(float(x) for x in o['--weights'].split(','))
+            if len(wts) != 3 or any(not (x == x and abs(x) != float('inf')) or x < 0 for x in wts) or not wts[2] > 0:
+                raise ValueError
+        except ValueError:
+            p.add(f"--weights takes three numbers w1,w2,w3 >= 0 with w3 > 0 (got '{o['--weights']}')")
     if len(a) not in (6, 7):
         p.add(f'{len(a)} arguments given; 6 or 7 expected')
     else:
@@ -252,5 +266,6 @@ if __name__ == '__main__':
                 p.add(f"{what} must be a number {'> 0' if lo is not None else '>= 0'} (got '{v}')")
         p.need_file(a[6] if len(a) > 6 else LIBERTY, 'LIBERTY')
         p.need_file(os.path.join(HERE, 'standard25.env'), 'standard25.env (the layer R and C)')
-    p.stop_if_any('usage:\n  python3 gr/elmore_rows.py DESIGN_DIR SLACK_FILE|none MODE OUT.rows K KP [LIBERTY]  |  --selftest')
-    print(build(a[0], a[1], a[2], a[3], float(a[4]), float(a[5]), a[6] if len(a) > 6 else LIBERTY))
+    p.stop_if_any('usage:\n  python3 gr/elmore_rows.py DESIGN_DIR SLACK_FILE|none MODE OUT.rows K KP [LIBERTY] [--weights w1,w2,w3]  |  '
+                    '--selftest')
+    print(build(a[0], a[1], a[2], a[3], float(a[4]), float(a[5]), a[6] if len(a) > 6 else LIBERTY, None, wts))
