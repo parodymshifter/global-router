@@ -16511,3 +16511,36 @@ warm start and after the test if the fade fails to help drop the decay."**
   blind mempool_tile_wrap, visible bsg_chip, the four small designs where refinement acts (`p216/run95.sh`). If it
   does not help, `--decay` is removed.
 
+### Method 3 (timing classes that fade): measured, dropped (the user's rule: "if the fade fails to help drop the decay")
+
+Merged slack m_k = min(s_k, decay x m_(k-1)); decay 1 is the standard sticky merge. The full results, contest score
+change, lower is better:
+
+| design | standard | decay 0.95 (cap 48) | decay 0.8 |
+|---|---|---|---|
+| visible ariane | -4.2695 | -4.2782 | -4.2391 |
+| visible mempool_tile_wrap | -1.6738 (cap 48) | -1.6272 | -1.4391 (cap 24; standard at 24: -1.6469) |
+| blind mempool_tile_wrap | -3.2048 | -3.2197 | -3.2692 |
+| visible bsg_chip | -2.2297 | -2.2117 | -2.0954 |
+| blind ariane, both NV_NVDLA | -0.2788 / -6.2887 / -1.4391 | not run (refinement does not act) | unchanged |
+
+Notes on the table:
+- Decay 0.95: two designs better (0.009, 0.015), two worse (0.047, 0.018); summed, 0.041 worse.
+- Decay 0.8: three worse (0.21, 0.13, 0.030), one better (blind mempool_tile_wrap 0.064); summed, about 0.31 worse.
+- The standard's refinement stopped before round 24 on ariane, blind mempool_tile_wrap and bsg_chip, so cap 24 and
+  cap 48 are the same there.
+
+Where it loses, refinement peaks earlier (visible mempool_tile_wrap m24 instead of m32 at 0.95, m11 at 0.8; bsg_chip
+m3 instead of m10 at 0.8). The sticky classes are what lets later rounds keep gaining. Blind mempool_tile_wrap's gain
+at 0.8 is one design against three losses, so it was not pursued.
+
+`--decay` and `merge_decay` were removed from `timing_loop.py` (now refused as an unknown option). Runs and logs:
+`~/Code/GlobalRouterRuns/p216/m3/`; the frozen flow that ran them: `p216/frozen/`.
+
+**Part 216's 2025 methods, in sum:**
+- 1 (one session a round) and 4 (cap 48) adopted;
+- 2 (warm start) measured and dropped;
+- 3 (fading classes) measured and dropped.
+
+Two laptop sleeps (09:20-14:08, ~17:25-17:37) paused runs without harm; wall times spanning them are not comparable.
+

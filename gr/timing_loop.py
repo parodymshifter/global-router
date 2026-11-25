@@ -9,7 +9,7 @@ evaluator, and keep the best by the contest score's change against the unbiased 
 
   python3 gr/timing_loop.py DESIGN_DIR WORK_DIR [--out OUT.route] [--classes both|routed|input]
       [--refine N] [--reuse EARLIER_WORK_DIR] [--router PATH] [--lean] [--resume] [--k3 a,b,c] [--elmore K1,K2,...|0]
-      [--endpoints N|measured] [--patience P] [--two-sessions] [--decay G] | --selftest
+      [--endpoints N|measured] [--patience P] [--two-sessions] | --selftest
 
 The ISPD 2025 standard flow (2026-10-16). Without OpenROAD, `@standard25.env` is the one-route fallback.
 
@@ -89,14 +89,6 @@ REFINE_ROUNDS = 48  # --refine N (Part 188: 2; 2026-11-20: 12; 2026-11-24, with 
 # round -- the same measurements, one session per round instead of two (blind mempool_group: ~17 of every ~40 min).
 # --two-sessions gives the old way back
 ONE_SESSION = True
-# Part 216 (the user, 2026-11-24: test the review's method 3, "timing multipliers that fall as well as rise"): refinement's
-# class memory fades. Per net, with the slack files measured so far s_0, s_1, ... (oldest first), the merged slack is
-# m_0 = s_0, m_k = min(s_k, DECAY x m_{k-1}) -- a net not measured in round k (its failing path fixed) has s_k = +inf, so
-# its merged slack moves toward 0 by the factor DECAY each round and the net leaves the classes once it is under 10% of the
-# worst (the router's class thresholds are 0.7 / 0.4 / 0.1 of the worst slack). DECAY 1 is the sticky merge (the
-# standard: the worst slack ever measured, Part 188); DECAY 0 re-classifies from the latest route alone (Part 134: worse).
-# --decay G sets it; test only, not standard
-DECAY = 1.0
 # Part 215 (the user, 2026-11-21: standard): the contest's N_endpoint for its blind designs (github.com/liangrj2014/
 # ISPD25_contest index.md, read 2026-11-20). OpenROAD's registers + outputs agree on ariane and NVDLA and not on the
 # mempool designs (19000 / 438269 / 1443997) or bsg_chip (214955). The visible designs' contest counts are not
@@ -364,28 +356,6 @@ def merge_slack(files, out):
     return out
 
 
-def merge_decay(files, out, g):
-    """Part 216: merge_slack with a fading memory (DECAY above); g == 1 is merge_slack exactly."""
-    if g >= 1.0:
-        return merge_slack(files, out)
-    m = {}
-    for fn in files:
-        cur = {}
-        for line in open(fn):
-            if line.startswith('#') or not line.strip():
-                continue
-            i, v = line.split()
-            cur[int(i)] = min(float(v), cur.get(int(i), float('inf')))
-        m = {i: min(cur.get(i, float('inf')), g * m[i] if i in m else float('inf')) for i in set(m) | set(cur)}
-    with open(out, 'w') as f:
-        f.write(f'# merged routed slack (seconds), memory fading by {g:g} per file, over '
-                + ' '.join(os.path.basename(x) for x in files) + '\n')
-        for i in sorted(m):
-            if m[i] < 0:  # a net whose memory has faded to 0 (or that never failed) is unclassed
-                f.write(f'{i} {m[i]:.6e}\n')
-    return out
-
-
 def tag_of(best, it):
     return f"k{best['k3']}{best['src']}" + (f"p{best['kp']}" if best['kp'] else '') + f'm{it}'
 
@@ -428,7 +398,7 @@ def refine(d, name, work, b, best, measured, w, n, rounds, start=1):
             break
         measured.append(slack if slack is not None else remeasured(d, name, cur, work, idx))
         slack = None
-        merged = merge_decay(measured, os.path.join(work, f'merged{it}.slack'), DECAY)  # DECAY 1: merge_slack
+        merged = merge_slack(measured, os.path.join(work, f'merged{it}.slack'))
         prev = os.path.join(work, f'merged{it - 1}.slack')
         if os.path.exists(prev) and open(merged).read().split('\n', 1)[1] == \
                 open(prev).read().split('\n', 1)[1]:
@@ -691,12 +661,6 @@ def selftest():
     got = {int(l.split()[0]): float(l.split()[1]) for l in open(merge_slack([a, b], os.path.join(t, 'm')))
            if not l.startswith('#')}
     ok = got == {3: -1.0e-10, 7: -5.0e-10, 9: -3.0e-10}
-    # Part 216: the fading merge -- g 1 is the sticky merge byte for byte; g 0.5 halves what a later file does not
-    # renew (3: -1e-10 -> -5e-11; 7: min(-2e-10, -2.5e-10) = -2.5e-10; 9 new: -3e-10); g 0 keeps only the last file
-    ok &= open(merge_decay([a, b], os.path.join(t, 'd1'), 1.0)).read() == open(os.path.join(t, 'm')).read()
-    dec = lambda g: {int(l.split()[0]): float(l.split()[1]) for l in open(merge_decay([a, b], os.path.join(t, 'd'), g))
-                     if not l.startswith('#')}
-    ok &= dec(0.5) == {3: -5.0e-11, 7: -2.5e-10, 9: -3.0e-10} and dec(0.0) == {7: -2.0e-10, 9: -3.0e-10}
     ok &= tag_of({'k3': 540, 'src': 'r', 'kp': 0}, 1) == 'k540rm1'
     ok &= tag_of({'k3': 180, 'src': 'i', 'kp': 4}, 2) == 'k180ip4m2'
     global LEAN  # --lean: a pruned route is compressed, the kept one is not, and unpack restores it exactly
@@ -784,7 +748,7 @@ def selftest():
 # router's own settings check under the flow's settings files, and stops with every problem before anything runs.
 OPTIONS = {'--out': 'value', '--classes': 'value', '--refine': 'value', '--reuse': 'value', '--router': 'value',
            '--lean': None, '--resume': None, '--k3': 'value', '--elmore': 'value', '--endpoints': 'value',
-           '--patience': 'value', '--two-sessions': None, '--decay': 'value'}
+           '--patience': 'value', '--two-sessions': None}
 
 
 def check_run(argv):
@@ -806,7 +770,6 @@ def check_run(argv):
     val('--classes', str, lambda v: v in ('both', 'routed', 'input'), 'both, routed or input')
     val('--refine', int, lambda v: v >= 0, 'a round count >= 0')
     val('--patience', int, lambda v: v >= 0, 'a round count >= 0')
-    val('--decay', float, lambda v: 0.0 <= v <= 1.0, 'a factor in [0, 1]')
     val('--k3', lambda v: [int(x) for x in v.split(',')], lambda v: v and min(v) > 0, 'positive integers, e.g. 20,180,540')
     val('--elmore', lambda v: [float(x) for x in v.split(',')], lambda v: v == [0.0] or (v and min(v) > 0),
         'positive strengths, e.g. 35,70,140, or 0 (off)')
@@ -877,10 +840,8 @@ def main():
     # user, 2026-11-20): up to 12 rounds (was 2) -- it stops by itself once a round gains nothing or the classes stop
     # changing; blind mempool_tile_wrap gained in every round to 8 (0.9238 at 2 -> 0.4879, contest score); 2026-11-24: 24
     rounds = int(opts['--refine']) if '--refine' in opts else REFINE_ROUNDS
-    global PATIENCE, ONE_SESSION, DECAY
+    global PATIENCE, ONE_SESSION
     ONE_SESSION = '--two-sessions' not in opts
-    if '--decay' in opts:  # Part 216 (test): the class memory's fade per round (1: sticky, the standard)
-        DECAY = float(opts['--decay'])
     if '--patience' in opts:  # Part 215: rounds without a new best before refinement stops (default PATIENCE)
         PATIENCE = int(opts['--patience'])
     global K3_LADDER
