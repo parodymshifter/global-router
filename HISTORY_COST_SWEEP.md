@@ -16565,3 +16565,16 @@ pass), started 01:41-01:42, at most three processes (CLAUDE.md).
   `merged2.slack` (checked against the recorded overflow cost), refinement m3-m48 at patience 3 with one session a round
   (Part 216: the same measurements as two), then the Elmore stage. m3-m24 should reproduce the patience run's trace to
   about four decimals (the power reading moves ~4e-5 between sessions, Part 215). Estimate: ~19 h if every round runs.
+
+**Steep, all four (01:41-03:46, `p217/logs/cwsteep.*`):** worse than the standard on every design, 0.857 in total.
+
+| design | standard | steep 1/16,1/4,1 | best candidate |
+|---|---|---|---|
+| visible ariane | -4.2695 | -3.9693 (+0.300) | k540rp1m5e560 |
+| blind mempool_tile_wrap | -3.2048 | -3.0146 (+0.190) | k180ie70 (refinement never gained) |
+| visible mempool_tile_wrap | -1.6738 | -1.5889 (+0.085) | k540rp1m31e70 |
+| visible bsg_chip | -2.2297 | -1.9478 (+0.282) | k540ip1m1e560 (refinement flat at -1.4997, m1-m3) |
+
+Flat so far: visible ariane -4.2160 (+0.054, k540rm2e140), blind mempool_tile_wrap -3.0674 (+0.137, k180rp1m7e70),
+visible mempool_tile_wrap -1.5269 (+0.147, k180rp1m20e35); bsg_chip running. Blind mempool_group: m3 -1.4463, m4 -1.4548,
+m5 -1.4697 -- each the patience run's to four decimals; sessions ~24 min, peak footprint 30.4 GB.
