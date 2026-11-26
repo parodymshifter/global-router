@@ -12,6 +12,16 @@ gr/*route.p[0-9]*
 gr/*.new
 gr/*.san
 gr/*.vg
+# Frozen tool builds named for a Part (routability.p189, the build Part 189's results used)
+gr/*.p[0-9]*
+# Experimental router builds (debug, profile-guided, -O3 ... -- PROFILING.md) and run-time leftovers
+gr/*.dbg*
+gr/*.pgo*
+gr/*.o3
+gr/*.ni
+gr/*.nt*
+gr/Highs.log
+__pycache__/
 *.dSYM/
 # Files the self-tests write into the working folder
 *_selftest_stream*
