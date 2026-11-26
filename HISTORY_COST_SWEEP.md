@@ -16645,3 +16645,5 @@ CLAUDE.md updated with Part 217's results the same night.
 - So of the two designs cap 24 could have bound, only blind mempool_group was bound by it; visible mempool_group needs
   ~5.3 h under the standard (stages 0-2 2.6 h, refinement 1.6 h, Elmore 1.0 h). Still not run under today's standard:
   both mempool_cluster designs.
+Cleanup (2026-11-26 08:25, the user): `GlobalRouterTemp/p217v` (7.8 GB) deleted after its best route, loop table, score
+file and log were confirmed in `GlobalRouterRuns/p217`; free disk 37 -> 44 GB.
