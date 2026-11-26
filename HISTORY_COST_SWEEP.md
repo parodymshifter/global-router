@@ -16592,3 +16592,28 @@ finer step around r = 1/2 is the only untested neighbour that could still pay. `
 (the user, 2026-11-25 17:38): `timing_loop.py` and `elmore_rows.py` are back to 63f72b1, both self-tests pass and
 `--class-weights` / `--weights` are refused as unknown options; the frozen copy `p217/frozen` and commit 6573c00 keep it. Blind mempool_group: m3 -1.4463, m4 -1.4548,
 m5 -1.4697 -- each the patience run's to four decimals; sessions ~24 min, peak footprint 30.4 GB.
+
+**The cap of 48 on blind mempool_group (01:41-20:26, `p217/grp.sh`, log `p217/logs/blind.mempool_group.*`):**
+- m3-m24 reproduced the patience run (Part 215) to four decimals in every round but m11: the same route (overflow
+  cost, WNS, TNS, slack file identical), power read 8.13796 against 8.13855 (7e-5 relative; Part 215 saw ~4e-5 between
+  sessions), -1.5112 vs -1.5095. It moved patience's count (m12 a miss here, a gain there) but not the routes.
+- Beyond the old cap: m25 -1.5477, m26 -1.5476, m27 -1.5532, m28 -1.5579, m29 -1.5573, m30 -1.5607, m31 -1.5616,
+  m32 -1.5624, m33 -1.5646, m34 -1.5759, m35 -1.5780, m36 -1.5805, m37 -1.5814, m38 -1.5850, m39 -1.5894, m40 -1.5899,
+  **m41 -1.5906**, then m42-m45 without gain (-1.5903, -1.5897, -1.5900, -1.5899): patience stopped it at m45, three
+  rounds short of the cap. Refinement's best m24 -1.5466 -> m41 -1.5906.
+- Elmore from m41's classes: K 35 -1.5427, K 70 -1.7793, **K 140 -1.8462** (k180rm41e140: WNS -0.3761, TNS -27492.4,
+  power 8.2049, congestion 55.27M, 0 opens by the contest's evaluator). Cap 24: K 140 -1.8074.
+- **Blind mempool_group contest score 0.8855 -> 0.8467** (p215/contest25.py's formula and references; the same formula
+  gives 0.8856 from cap 24's rounded row; 1st place 1.3327). By OpenROAD's endpoint count -1.7185 -> -1.7537.
+  **Blind six on record 5.7095 -> 5.6707; twelve designs -31.31 -> -31.35** (OpenROAD's count).
+- Cost: 67363 s (18.7 h) for 46 routes and 46 OpenROAD sessions (~22 min each, peak footprint ~30 GB); the cap-24 run
+  took 59507 s from m3 to m24 with two sessions a round, this one 1 session a round to m45. Best route kept as
+  `p217/blind.mempool_group.best.route.xz` (decompressed and compared).
+- Disk: free space fell to 13 GB at one session's peak -- a Time Machine local snapshot (10:35) pinned ~8 GB of routes
+  `--lean` had compressed and deleted; deleted at 14:15 (the user), 18 -> 26 GB. The run's 10 GB session guard never
+  acted. Watcher note: a liveness check by `pgrep -f p217/grp.sh` misses a script started as `./grp.sh` (Part 215's
+  mistake again); the watcher used the process id.
+
+**Part 217's conclusion.** Cap 48 pays on the design it was meant for: blind mempool_group gained in 15 of the 21
+rounds past 24, -0.039 (contest score) after the Elmore stage, and stopped by itself at 45. Method 7 (per-class
+strength) lost on all four small designs in both directions and was dropped.
