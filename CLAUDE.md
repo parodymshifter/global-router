@@ -396,6 +396,15 @@ until 15:33 that day; Part 216: visible mempool_tile_wrap kept gaining to round 
 measures its slack -- one session per round instead of two, the same measurements (blind mempool_group: ~17 of every ~40
 min; `--two-sessions` gives the old way back). The power reading moves ~4e-5 relative between sessions on the same route
 (Part 215), so a rerun may differ from a two-session run in the last digits.
+**2026-11-25 (Part 217): cap 48 measured on blind mempool_group, the other design cap 24 bound** -- m3-m24 repeated the
+cap-24 run (one round's power reading moved 7e-5, which shifted patience's count, not the routes), refinement kept
+gaining to m41 (-1.5466 -> -1.5906) and patience stopped it at m45; Elmore K 140 -1.8074 -> -1.8462: **contest score
+0.8855 -> 0.8467** (18.7 h). **Blind six 5.7095 -> 5.6707, twelve designs -31.31 -> -31.35** (OpenROAD's count). Two
+refinement variants were measured on the four small designs where refinement acts and dropped (their options removed):
+classes that fade back (`--decay`, Part 216: 0.95 net 0.041 worse, 0.8 ~0.31 worse) and per-class strength (Part 217:
+classes at 1:1:1 0.396 worse, 1/16:1/4:1 0.857 worse, never better on any design -- the standard's k3/4, k3/2, k3 stays).
+During long `--lean` runs a Time Machine local snapshot pins the routes `--lean` compresses (Part 217: ~8 GB, free disk
+down to 13 GB at a session's peak); watch `tmutil listlocalsnapshots /`.
 Since 2026-11-09 (Part 189) all twelve 2025 designs are scored: mempool_cluster visible -0.6993, blind -1.3643,
 **twelve designs -27.17**. On a 24 GB Mac its OpenROAD sessions peak at 80-113 GB of footprint on swap, so it runs
 with `--lean` (compress every route that can no longer win), `SLACK_BANDS=16` (walk the failing paths in slack

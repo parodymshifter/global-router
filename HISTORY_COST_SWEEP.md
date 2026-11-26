@@ -16623,3 +16623,10 @@ to `GlobalRouterRuns/p217/best_routes/` (compared byte for byte; 120 MB) -- the 
 already archived, which was true only of blind mempool_group's -- then `GlobalRouterTemp/p217` (18 GB) was deleted:
 free disk 30 -> 49 GB. Kept in `GlobalRouterRuns/p217`: the frozen flow, every log, loop table and score file, and the
 nine best routes.
+
+**Visible mempool_group under today's standard (from 2026-11-26 00:50, the user: "run cap 48 on visible mempool_group";
+`p217/vgrp.sh`).** No record of this design has per-round slack from the current slack script (fixed 2026-11-20): its
+record (-9.1049, Elmore K 70 from k180ip4m2) reused the 11-06 loop's m1-m2. So the whole standard flow runs from scratch
+-- unbiased route, the k3 ladder, the power term, refinement to m48 at patience 3 with one session a round, the Elmore
+stage -- on a frozen copy of f213c98 (`p217/frozen_std`; the router byte-identical to the 11-25 runs'). Estimate ~20 h.
+CLAUDE.md updated with Part 217's results the same night.
