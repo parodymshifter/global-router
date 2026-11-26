@@ -16630,3 +16630,18 @@ record (-9.1049, Elmore K 70 from k180ip4m2) reused the 11-06 loop's m1-m2. So t
 -- unbiased route, the k3 ladder, the power term, refinement to m48 at patience 3 with one session a round, the Elmore
 stage -- on a frozen copy of f213c98 (`p217/frozen_std`; the router byte-identical to the 11-25 runs'). Estimate ~20 h.
 CLAUDE.md updated with Part 217's results the same night.
+
+**Visible mempool_group under today's standard: the same result, -9.1049 (00:48-06:03, 18897 s).**
+- Stages 0-2: the input-slack candidates repeat the 11-06 loop exactly (k20i -3.4620, k180i -4.5913, k540i -4.1358,
+  k180ip1 -6.1616, k180ip4 -7.4778); the routed-slack ones are 1.0-1.4 better than then (k20r -1.4794, k180r -2.7783,
+  k540r -3.0250, against -0.49 / -1.51 / -1.63 -- the 11-20 slack-script fix: 63803 unnamed points skipped on the
+  unbiased route instead of their whole paths) but still lose to input-slack classes, so the loop starts from the same
+  k180ip4.
+- Refinement: m1 -7.5169, m2 -7.5202 (both the 11-06 values), then m3's route byte-identical to m2's, so it stopped
+  there -- this design reaches its fixed point at m2; neither patience 3 nor cap 48 acts on it.
+- Elmore from m2: K 35 -9.0670, **K 70 -9.1049**, K 140 -8.8945 -- every value the record's (WNS -0.2651, TNS -18283.1,
+  power 7.3063, congestion 136.90M identical to the record row, 0 opens). Best route kept as
+  `p217/best_routes/visible.mempool_group.k180ip4m2e70.route.xz` (decompressed and compared). Totals unchanged.
+- So of the two designs cap 24 could have bound, only blind mempool_group was bound by it; visible mempool_group needs
+  ~5.3 h under the standard (stages 0-2 2.6 h, refinement 1.6 h, Elmore 1.0 h). Still not run under today's standard:
+  both mempool_cluster designs.

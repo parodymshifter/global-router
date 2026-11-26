@@ -399,7 +399,9 @@ min; `--two-sessions` gives the old way back). The power reading moves ~4e-5 rel
 **2026-11-25 (Part 217): cap 48 measured on blind mempool_group, the other design cap 24 bound** -- m3-m24 repeated the
 cap-24 run (one round's power reading moved 7e-5, which shifted patience's count, not the routes), refinement kept
 gaining to m41 (-1.5466 -> -1.5906) and patience stopped it at m45; Elmore K 140 -1.8074 -> -1.8462: **contest score
-0.8855 -> 0.8467** (18.7 h). **Blind six 5.7095 -> 5.6707, twelve designs -31.31 -> -31.35** (OpenROAD's count). Two
+0.8855 -> 0.8467** (18.7 h). **Blind six 5.7095 -> 5.6707, twelve designs -31.31 -> -31.35** (OpenROAD's count). Visible mempool_group under
+the same standard (2026-11-26) gives exactly its record (-9.1049): its refinement reaches a fixed point at m2, so cap
+and patience never act there; both mempool_cluster designs are still unmeasured under it. Two
 refinement variants were measured on the four small designs where refinement acts and dropped (their options removed):
 classes that fade back (`--decay`, Part 216: 0.95 net 0.041 worse, 0.8 ~0.31 worse) and per-class strength (Part 217:
 classes at 1:1:1 0.396 worse, 1/16:1/4:1 0.857 worse, never better on any design -- the standard's k3/4, k3/2, k3 stays).
