@@ -16617,3 +16617,9 @@ m5 -1.4697 -- each the patience run's to four decimals; sessions ~24 min, peak f
 **Part 217's conclusion.** Cap 48 pays on the design it was meant for: blind mempool_group gained in 15 of the 21
 rounds past 24, -0.039 (contest score) after the Elmore stage, and stopped by itself at 45. Method 7 (per-class
 strength) lost on all four small designs in both directions and was dropped.
+
+**Cleanup (2026-11-26 00:46, the user: "ok cleanup").** The eight method-7 best routes and their loop tables were copied
+to `GlobalRouterRuns/p217/best_routes/` (compared byte for byte; 120 MB) -- the 20:31 report had said every best route was
+already archived, which was true only of blind mempool_group's -- then `GlobalRouterTemp/p217` (18 GB) was deleted:
+free disk 30 -> 49 GB. Kept in `GlobalRouterRuns/p217`: the frozen flow, every log, loop table and score file, and the
+nine best routes.
