@@ -56,6 +56,15 @@ def main():
                 n = line.split('=', 1)[0]
                 if n not in names:
                     bad.append(f'{os.path.basename(f)}:{i}: {n} is not a setting {stem} knows')
+    # 2026-11-26: every setting's default (kDefaults, same names in the same order) and SETTINGS.md generated from both
+    dnames = re.findall(r'^\s*\{"([A-Z][A-Z0-9_]*)", "(?:[^"\\]|\\.)*"\},\s*$', head, re.M)
+    if dnames != names:
+        bad.append('kDefaults does not list the same names as kTable in the same order')
+    sys.path.insert(0, HERE)
+    import settings_doc
+    cur = open(settings_doc.OUT).read() if os.path.exists(settings_doc.OUT) else ''
+    if cur != settings_doc.render():
+        bad.append('SETTINGS.md is out of date (python3 gr/settings_doc.py rewrites it)')
     for b in bad:
         print('FAIL', b)
     kinds = {}

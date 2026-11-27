@@ -214,14 +214,16 @@ def main():
         def error(self, message):  # collected below, with every other problem, instead of ending at the first
             raise ValueError(message)
     ap = Parser(description=__doc__.split('\n\n')[0], allow_abbrev=False)  # an abbreviation is not an option
-    ap.add_argument('design')
-    ap.add_argument('work')
-    ap.add_argument('--out')
-    ap.add_argument('--spreads', default=DEFAULT_SPREADS)
-    ap.add_argument('--jobs', type=int, default=2)
-    ap.add_argument('--router', default='./pd39route')
-    ap.add_argument('--settings', nargs='+', default=DEFAULT_SETTINGS)
-    ap.add_argument('--set', nargs='+', default=[], dest='sets')
+    ap.add_argument('design', help='the ISPD 2008 design (.gr)')
+    ap.add_argument('work', help='folder for the runs, their checks and portfolio.tsv (no spaces)')
+    ap.add_argument('--out', help='write the kept route here (.gz: compressed)')
+    ap.add_argument('--spreads', default=DEFAULT_SPREADS,
+                    help='slow-tier spreads to try, first one alone (default %(default)s)')
+    ap.add_argument('--jobs', type=int, default=2, help='runs at once after the first, 1-3 (default %(default)s)')
+    ap.add_argument('--router', default='./pd39route', help='router binary (default %(default)s)')
+    ap.add_argument('--settings', nargs='+', default=DEFAULT_SETTINGS,
+                    help='settings files as @name.env (default: %(default)s)')
+    ap.add_argument('--set', nargs='+', default=[], dest='sets', help='extra VAR=value pairs, applied last')
     p = flowcheck.Problems('reorder_portfolio.py')
     try:
         a, unknown = ap.parse_known_args()

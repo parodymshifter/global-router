@@ -44,7 +44,7 @@ test pays off, weighed against what it would gain and cost. Written after Parts 
 - **A narrower critical set alone lost.** Routed-slack classes, a few hundred to a few thousand nets, lost to
   input-slack classes. That held even after the 11-20 slack-script fix, although the fix made them 1.0-1.4 better on
   visible mempool_group (Part 217).
-- **2008:** eleven of sixteen designs are at zero overflow. The residues sit close to proven bounds: newblue7 56
+- **2008:** twelve of sixteen designs are at zero overflow (newblue1 since Part 212; this line first said eleven). The residues sit close to proven bounds: newblue7 56
   against at least 54 forced; newblue4 is limited by pin placement. Only newblue3 (31434; at least 26264 forced; best
   published 31024) leaves room.
 
