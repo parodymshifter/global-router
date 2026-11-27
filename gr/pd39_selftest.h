@@ -8824,6 +8824,12 @@ void testSettingsRegistry() {
   for (size_t i = 1; i < settings::kCount; ++i)
     sorted &= std::strcmp(settings::kTable[i - 1].name, settings::kTable[i].name) < 0;
   check(sorted, "settings: the table is sorted by name with no repeats (find() depends on it)");
+  bool sameNames = true, filled = true; // 2026-11-26: every setting's default, in kTable's order
+  for (size_t i = 0; i < settings::kCount; ++i) {
+    sameNames &= std::strcmp(settings::kDefaults[i].name, settings::kTable[i].name) == 0;
+    filled &= settings::kDefaults[i].value && *settings::kDefaults[i].value;
+  }
+  check(sameNames && filled, "settings: kDefaults names every setting of kTable, in order, each with a default");
   bool found = true;
   for (const settings::Info &i : settings::kTable)
     found &= settings::find(i.name) == &i;
