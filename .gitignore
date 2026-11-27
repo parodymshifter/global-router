@@ -167,3 +167,6 @@ pd38route.p122
 gr/eval2008/
 perf/relax_microbench
 gr/input_check
+
+# Exported conversation transcripts (tools/export_conversations.py): personal details, keep local
+conversations/

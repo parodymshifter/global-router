@@ -1,0 +1,124 @@
+<title>Congestion Maps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column of benchmark sections; each is a header, the band distribution, the 3D renders large, then the flat maps small. */
+:root {
+  --paper: #f3f4f5; --sheet: #ffffff; --ink: #1c2124; --ink-soft: #545e63; --rule: #d8dcde;
+  --hot: #b3261e; --hot-bg: #f8e3e1; --cool: #23743e; --cool-bg: #e2f2e6;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #131719; --sheet: #1b2023; --ink: #e6eaeb; --ink-soft: #a2adb1; --rule: #30393c;
+  --hot: #f19089; --hot-bg: #3b1d1b; --cool: #7fd49a; --cool-bg: #17301f; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --paper: #131719; --sheet: #1b2023; --ink: #e6eaeb; --ink-soft: #a2adb1; --rule: #30393c;
+  --hot: #f19089; --hot-bg: #3b1d1b; --cool: #7fd49a; --cool-bg: #17301f; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; padding-inline: 16px; padding-block: 0 56px; }
+.wrap { max-width: 1120px; margin: 0 auto; }
+header { padding-block: 34px 18px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+h1 { font-family: var(--font-display); font-size: clamp(28px, 4.6vw, 40px); line-height: 1.1; margin: 6px 0 10px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-size: 24px; margin: 0; }
+p { max-width: 72ch; margin: 0 0 10px; }
+.lede { color: var(--ink-soft); }
+.legend, .counts { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; }
+.legend i, .counts i { display: inline-block; width: 14px; height: 14px; border-radius: 2px; margin-right: 7px; vertical-align: -2px; flex: none; }
+.counts { margin: 8px 0 0; font-size: 13px; color: var(--ink-soft); }
+.counts li { display: flex; align-items: center; }
+.counts b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.howto { margin-top: 16px; background: var(--sheet); border: 1px solid var(--rule); padding: 12px 16px; font-size: 14px; }
+.howto pre { overflow-x: auto; margin: 8px 0; background: var(--paper); border: 1px solid var(--rule); padding: 10px; font-family: var(--font-mono); font-size: 12px; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-block: 12px; border-bottom: 1px solid var(--rule); font-size: 14px; }
+nav.toc a { color: var(--ink); }
+section { padding-block: 30px 10px; border-bottom: 1px solid var(--rule); }
+.sechead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; margin-bottom: 6px; }
+.ov { font-size: 13px; font-weight: 600; padding: 2px 9px; border-radius: 3px; font-variant-numeric: tabular-nums; }
+.ov.hot { color: var(--hot); background: var(--hot-bg); }
+.ov.zero { color: var(--cool); background: var(--cool-bg); }
+.grid { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-soft); }
+.note { color: var(--ink-soft); }
+.dist { display: flex; height: 14px; border: 1px solid var(--rule); background: var(--sheet); overflow: hidden; margin-top: 8px; }
+.dist span { display: block; height: 100%; }
+.views { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 16px; }
+.flats { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; align-items: flex-start; }
+figure { margin: 0; min-width: 0; }
+figure img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: var(--sheet); }
+.flat { width: min(100%, 300px); }
+img.px { image-rendering: pixelated; }
+figcaption { font-size: 12.5px; color: var(--ink-soft); margin-top: 5px; }
+a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+</style>
+<div class="wrap">
+<header>
+  <div class="eyebrow">ISPD 2008 · standard configuration (pd23route) · routed results</div>
+  <h1>Congestion Maps</h1>
+  <p class="lede">How full each part of the chip is after routing. Every tile is colored by its fullest routing edge, using usage summed over all metal layers against their total capacity, the same 2D measure the router negotiates. In the 3D views each tile is a bar whose height is that usage, so full regions rise as plateaus and overflow pokes above them.</p>
+  <ul class="legend"><li><i style="background:#8040c8"></i>≤ 50%</li><li><i style="background:#2864e6"></i>50–75%</li><li><i style="background:#28aa46"></i>75–90%</li><li><i style="background:#f0d228"></i>90–99%</li><li><i style="background:#f5821e"></i>exactly 100%</li><li><i style="background:#d71e1e"></i>over capacity</li></ul>
+  <div class="howto"><b>Turn it in 3D yourself.</b> The views below are snapshots from a Metal viewer on the Mac. To open one and rotate it (drag), zoom (scroll), pan (Shift-drag), change bar height (+/−), hide the cool tiles (H) or toggle the red lift (B):
+<pre>cd ~/Code/"Global Router"/gr
+./grview ~/Code/GlobalRouterRuns/maps/vc8_newblue1.grid newblue1</pre>
+  Red bars are drawn half a full bar taller than their true height so they stand out. Overflow is usually 1–2 units on edges that hold 60–200, so true red bars barely clear the orange.</div>
+</header>
+<nav class="toc" aria-label="Benchmarks"><a href="#newblue1">newblue1</a><a href="#newblue4">newblue4</a><a href="#bigblue4">bigblue4</a><a href="#newblue7">newblue7</a><a href="#newblue3">newblue3</a><a href="#adaptec1">adaptec1</a><a href="#bigblue2">bigblue2</a></nav>
+<section id="newblue1">
+  <div class="sechead"><h2>newblue1</h2><span class="ov hot">38 overflow</span><span class="grid">399 × 399 tiles</span></div>
+  <p class="note">One main hotspot, through-traffic; virtual capacity took it from 48 to 38.</p>
+  <div class="dist" role="img" aria-label="share of tiles in each band"><span style="width:68.30%;background:#8040c8" title="≤ 50%: 108,805 tiles (68.3%)"></span><span style="width:11.10%;background:#2864e6" title="50–75%: 17,635 tiles (11.1%)"></span><span style="width:6.20%;background:#28aa46" title="75–90%: 9,796 tiles (6.2%)"></span><span style="width:5.40%;background:#f0d228" title="90–99%: 8,633 tiles (5.4%)"></span><span style="width:9.00%;background:#f5821e" title="exactly 100%: 14,295 tiles (9.0%)"></span><span style="width:0.15%;background:#d71e1e" title="over capacity: 37 tiles (0.0%)"></span></div>
+  <ul class="counts"><li><i style="background:#8040c8"></i><span>≤ 50%</span><b>108,805</b></li><li><i style="background:#2864e6"></i><span>50–75%</span><b>17,635</b></li><li><i style="background:#28aa46"></i><span>75–90%</span><b>9,796</b></li><li><i style="background:#f0d228"></i><span>90–99%</span><b>8,633</b></li><li><i style="background:#f5821e"></i><span>exactly 100%</span><b>14,295</b></li><li><i style="background:#d71e1e"></i><span>over capacity</span><b>37</b></li></ul>
+  <div class="views"><figure class="wide"><img src="img/3d_vc8_newblue1_full.png" alt="3D view of newblue1" loading="lazy"><figcaption>Whole chip, 3D</figcaption></figure><figure class="wide"><img src="img/3d_vc8_newblue1_zoom.png" alt="3D close-up of the newblue1 hotspot" loading="lazy"><figcaption>Hotspot close-up, 3D, around tile (180, 60)</figcaption></figure></div>
+  <div class="flats"><figure class="flat"><img class="px" src="img/2d_vc8_newblue1.png" alt="2D map of newblue1" loading="lazy"><figcaption>Whole chip, top view (1 pixel per tile)</figcaption></figure><figure class="flat"><img class="px" src="img/2dz_vc8_newblue1.png" alt="2D close-up of the newblue1 hotspot" loading="lazy"><figcaption>Hotspot, top view</figcaption></figure></div>
+</section>
+<section id="newblue4">
+  <div class="sechead"><h2>newblue4</h2><span class="ov hot">144 overflow</span><span class="grid">455 × 458 tiles</span></div>
+  <p class="note">One pin-bound hotspot; ties the best published result.</p>
+  <div class="dist" role="img" aria-label="share of tiles in each band"><span style="width:35.30%;background:#8040c8" title="≤ 50%: 73,581 tiles (35.3%)"></span><span style="width:21.80%;background:#2864e6" title="50–75%: 45,383 tiles (21.8%)"></span><span style="width:13.80%;background:#28aa46" title="75–90%: 28,861 tiles (13.8%)"></span><span style="width:11.80%;background:#f0d228" title="90–99%: 24,665 tiles (11.8%)"></span><span style="width:17.20%;background:#f5821e" title="exactly 100%: 35,781 tiles (17.2%)"></span><span style="width:0.15%;background:#d71e1e" title="over capacity: 119 tiles (0.1%)"></span></div>
+  <ul class="counts"><li><i style="background:#8040c8"></i><span>≤ 50%</span><b>73,581</b></li><li><i style="background:#2864e6"></i><span>50–75%</span><b>45,383</b></li><li><i style="background:#28aa46"></i><span>75–90%</span><b>28,861</b></li><li><i style="background:#f0d228"></i><span>90–99%</span><b>24,665</b></li><li><i style="background:#f5821e"></i><span>exactly 100%</span><b>35,781</b></li><li><i style="background:#d71e1e"></i><span>over capacity</span><b>119</b></li></ul>
+  <div class="views"><figure class="wide"><img src="img/3d_vp_newblue4_full.png" alt="3D view of newblue4" loading="lazy"><figcaption>Whole chip, 3D</figcaption></figure><figure class="wide"><img src="img/3d_vp_newblue4_zoom.png" alt="3D close-up of the newblue4 hotspot" loading="lazy"><figcaption>Hotspot close-up, 3D, around tile (67, 75)</figcaption></figure></div>
+  <div class="flats"><figure class="flat"><img class="px" src="img/2d_vp_newblue4.png" alt="2D map of newblue4" loading="lazy"><figcaption>Whole chip, top view (1 pixel per tile)</figcaption></figure><figure class="flat"><img class="px" src="img/2dz_vp_newblue4.png" alt="2D close-up of the newblue4 hotspot" loading="lazy"><figcaption>Hotspot, top view</figcaption></figure></div>
+</section>
+<section id="bigblue4">
+  <div class="sechead"><h2>bigblue4</h2><span class="ov hot">356 overflow</span><span class="grid">403 × 405 tiles</span></div>
+  <p class="note">One hotspot; best published is 166.</p>
+  <div class="dist" role="img" aria-label="share of tiles in each band"><span style="width:51.50%;background:#8040c8" title="≤ 50%: 84,049 tiles (51.5%)"></span><span style="width:18.90%;background:#2864e6" title="50–75%: 30,826 tiles (18.9%)"></span><span style="width:10.10%;background:#28aa46" title="75–90%: 16,490 tiles (10.1%)"></span><span style="width:8.20%;background:#f0d228" title="90–99%: 13,440 tiles (8.2%)"></span><span style="width:11.20%;background:#f5821e" title="exactly 100%: 18,283 tiles (11.2%)"></span><span style="width:0.15%;background:#d71e1e" title="over capacity: 127 tiles (0.1%)"></span></div>
+  <ul class="counts"><li><i style="background:#8040c8"></i><span>≤ 50%</span><b>84,049</b></li><li><i style="background:#2864e6"></i><span>50–75%</span><b>30,826</b></li><li><i style="background:#28aa46"></i><span>75–90%</span><b>16,490</b></li><li><i style="background:#f0d228"></i><span>90–99%</span><b>13,440</b></li><li><i style="background:#f5821e"></i><span>exactly 100%</span><b>18,283</b></li><li><i style="background:#d71e1e"></i><span>over capacity</span><b>127</b></li></ul>
+  <div class="views"><figure class="wide"><img src="img/3d_s23_bigblue4_full.png" alt="3D view of bigblue4" loading="lazy"><figcaption>Whole chip, 3D</figcaption></figure><figure class="wide"><img src="img/3d_s23_bigblue4_zoom.png" alt="3D close-up of the bigblue4 hotspot" loading="lazy"><figcaption>Hotspot close-up, 3D, around tile (208, 140)</figcaption></figure></div>
+  <div class="flats"><figure class="flat"><img class="px" src="img/2d_s23_bigblue4.png" alt="2D map of bigblue4" loading="lazy"><figcaption>Whole chip, top view (1 pixel per tile)</figcaption></figure><figure class="flat"><img class="px" src="img/2dz_s23_bigblue4.png" alt="2D close-up of the bigblue4 hotspot" loading="lazy"><figcaption>Hotspot, top view</figcaption></figure></div>
+</section>
+<section id="newblue7">
+  <div class="sechead"><h2>newblue7</h2><span class="ov hot">108 overflow</span><span class="grid">488 × 490 tiles</span></div>
+  <p class="note">13 hotspots; at least 54 is provably forced.</p>
+  <div class="dist" role="img" aria-label="share of tiles in each band"><span style="width:51.00%;background:#8040c8" title="≤ 50%: 121,861 tiles (51.0%)"></span><span style="width:15.10%;background:#2864e6" title="50–75%: 36,181 tiles (15.1%)"></span><span style="width:11.40%;background:#28aa46" title="75–90%: 27,212 tiles (11.4%)"></span><span style="width:9.80%;background:#f0d228" title="90–99%: 23,407 tiles (9.8%)"></span><span style="width:12.70%;background:#f5821e" title="exactly 100%: 30,378 tiles (12.7%)"></span><span style="width:0.15%;background:#d71e1e" title="over capacity: 81 tiles (0.0%)"></span></div>
+  <ul class="counts"><li><i style="background:#8040c8"></i><span>≤ 50%</span><b>121,861</b></li><li><i style="background:#2864e6"></i><span>50–75%</span><b>36,181</b></li><li><i style="background:#28aa46"></i><span>75–90%</span><b>27,212</b></li><li><i style="background:#f0d228"></i><span>90–99%</span><b>23,407</b></li><li><i style="background:#f5821e"></i><span>exactly 100%</span><b>30,378</b></li><li><i style="background:#d71e1e"></i><span>over capacity</span><b>81</b></li></ul>
+  <div class="views"><figure class="wide"><img src="img/3d_c200_newblue7_full.png" alt="3D view of newblue7" loading="lazy"><figcaption>Whole chip, 3D</figcaption></figure><figure class="wide"><img src="img/3d_c200_newblue7_zoom.png" alt="3D close-up of the newblue7 hotspot" loading="lazy"><figcaption>Hotspot close-up, 3D, around tile (225, 248)</figcaption></figure></div>
+  <div class="flats"><figure class="flat"><img class="px" src="img/2d_c200_newblue7.png" alt="2D map of newblue7" loading="lazy"><figcaption>Whole chip, top view (1 pixel per tile)</figcaption></figure><figure class="flat"><img class="px" src="img/2dz_c200_newblue7.png" alt="2D close-up of the newblue7 hotspot" loading="lazy"><figcaption>Hotspot, top view</figcaption></figure></div>
+</section>
+<section id="newblue3">
+  <div class="sechead"><h2>newblue3</h2><span class="ov hot">38,916 overflow</span><span class="grid">973 × 1256 tiles</span></div>
+  <p class="note">Pin-bound; at least 26,264 is provably forced.</p>
+  <div class="dist" role="img" aria-label="share of tiles in each band"><span style="width:87.40%;background:#8040c8" title="≤ 50%: 1,068,661 tiles (87.4%)"></span><span style="width:5.60%;background:#2864e6" title="50–75%: 68,142 tiles (5.6%)"></span><span style="width:2.90%;background:#28aa46" title="75–90%: 36,013 tiles (2.9%)"></span><span style="width:1.90%;background:#f0d228" title="90–99%: 22,705 tiles (1.9%)"></span><span style="width:2.10%;background:#f5821e" title="exactly 100%: 25,805 tiles (2.1%)"></span><span style="width:0.15%;background:#d71e1e" title="over capacity: 762 tiles (0.1%)"></span></div>
+  <ul class="counts"><li><i style="background:#8040c8"></i><span>≤ 50%</span><b>1,068,661</b></li><li><i style="background:#2864e6"></i><span>50–75%</span><b>68,142</b></li><li><i style="background:#28aa46"></i><span>75–90%</span><b>36,013</b></li><li><i style="background:#f0d228"></i><span>90–99%</span><b>22,705</b></li><li><i style="background:#f5821e"></i><span>exactly 100%</span><b>25,805</b></li><li><i style="background:#d71e1e"></i><span>over capacity</span><b>762</b></li></ul>
+  <div class="views"><figure class="wide"><img src="img/3d_s23_newblue3_full.png" alt="3D view of newblue3" loading="lazy"><figcaption>Whole chip, 3D</figcaption></figure><figure class="wide"><img src="img/3d_s23_newblue3_zoom.png" alt="3D close-up of the newblue3 hotspot" loading="lazy"><figcaption>Hotspot close-up, 3D, around tile (487, 668)</figcaption></figure></div>
+  <div class="flats"><figure class="flat"><img class="px" src="img/2d_s23_newblue3.png" alt="2D map of newblue3" loading="lazy"><figcaption>Whole chip, top view (1 pixel per tile)</figcaption></figure><figure class="flat"><img class="px" src="img/2dz_s23_newblue3.png" alt="2D close-up of the newblue3 hotspot" loading="lazy"><figcaption>Hotspot, top view</figcaption></figure></div>
+</section>
+<section id="adaptec1">
+  <div class="sechead"><h2>adaptec1</h2><span class="ov zero">0 overflow</span><span class="grid">324 × 324 tiles</span></div>
+  <p class="note">Zero overflow.</p>
+  <div class="dist" role="img" aria-label="share of tiles in each band"><span style="width:30.70%;background:#8040c8" title="≤ 50%: 32,257 tiles (30.7%)"></span><span style="width:19.90%;background:#2864e6" title="50–75%: 20,906 tiles (19.9%)"></span><span style="width:14.50%;background:#28aa46" title="75–90%: 15,228 tiles (14.5%)"></span><span style="width:12.60%;background:#f0d228" title="90–99%: 13,223 tiles (12.6%)"></span><span style="width:22.30%;background:#f5821e" title="exactly 100%: 23,362 tiles (22.3%)"></span><span style="width:0.00%;background:#d71e1e" title="over capacity: 0 tiles (0.0%)"></span></div>
+  <ul class="counts"><li><i style="background:#8040c8"></i><span>≤ 50%</span><b>32,257</b></li><li><i style="background:#2864e6"></i><span>50–75%</span><b>20,906</b></li><li><i style="background:#28aa46"></i><span>75–90%</span><b>15,228</b></li><li><i style="background:#f0d228"></i><span>90–99%</span><b>13,223</b></li><li><i style="background:#f5821e"></i><span>exactly 100%</span><b>23,362</b></li><li><i style="background:#d71e1e"></i><span>over capacity</span><b>0</b></li></ul>
+  <div class="views"><figure class="wide"><img src="img/3d_va_adaptec1_full.png" alt="3D view of adaptec1" loading="lazy"><figcaption>Whole chip, 3D</figcaption></figure></div>
+  <div class="flats"><figure class="flat"><img class="px" src="img/2d_va_adaptec1.png" alt="2D map of adaptec1" loading="lazy"><figcaption>Whole chip, top view (1 pixel per tile)</figcaption></figure></div>
+</section>
+<section id="bigblue2">
+  <div class="sechead"><h2>bigblue2</h2><span class="ov zero">0 overflow</span><span class="grid">468 × 471 tiles</span></div>
+  <p class="note">Zero overflow.</p>
+  <div class="dist" role="img" aria-label="share of tiles in each band"><span style="width:39.00%;background:#8040c8" title="≤ 50%: 85,942 tiles (39.0%)"></span><span style="width:15.10%;background:#2864e6" title="50–75%: 33,189 tiles (15.1%)"></span><span style="width:12.90%;background:#28aa46" title="75–90%: 28,356 tiles (12.9%)"></span><span style="width:7.80%;background:#f0d228" title="90–99%: 17,250 tiles (7.8%)"></span><span style="width:25.30%;background:#f5821e" title="exactly 100%: 55,691 tiles (25.3%)"></span><span style="width:0.00%;background:#d71e1e" title="over capacity: 0 tiles (0.0%)"></span></div>
+  <ul class="counts"><li><i style="background:#8040c8"></i><span>≤ 50%</span><b>85,942</b></li><li><i style="background:#2864e6"></i><span>50–75%</span><b>33,189</b></li><li><i style="background:#28aa46"></i><span>75–90%</span><b>28,356</b></li><li><i style="background:#f0d228"></i><span>90–99%</span><b>17,250</b></li><li><i style="background:#f5821e"></i><span>exactly 100%</span><b>55,691</b></li><li><i style="background:#d71e1e"></i><span>over capacity</span><b>0</b></li></ul>
+  <div class="views"><figure class="wide"><img src="img/3d_va_bigblue2_full.png" alt="3D view of bigblue2" loading="lazy"><figcaption>Whole chip, 3D</figcaption></figure></div>
+  <div class="flats"><figure class="flat"><img class="px" src="img/2d_va_bigblue2.png" alt="2D map of bigblue2" loading="lazy"><figcaption>Whole chip, top view (1 pixel per tile)</figcaption></figure></div>
+</section>
+</div>
