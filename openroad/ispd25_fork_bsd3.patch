@@ -1,0 +1,750 @@
+diff --git a/src/Exception-py.i b/src/Exception-py.i
+index 30686ee..9aa772a 100644
+--- a/src/Exception-py.i
++++ b/src/Exception-py.i
+@@ -35,7 +35,7 @@
+ %}
+ 
+ %exception {
+-  try { $function }
++  try { $action }
+   catch (std::bad_alloc &) {
+     fprintf(stderr, "Error: out of memory.");
+     exit(0);
+diff --git a/src/Exception.i b/src/Exception.i
+index 9189954..17ef979 100644
+--- a/src/Exception.i
++++ b/src/Exception.i
+@@ -19,7 +19,7 @@
+ %}
+ 
+ %exception {
+-  try { $function }
++  try { $action }
+   catch (std::bad_alloc &) {
+     fprintf(stderr, "Error: out of memory.");
+     exit(1);
+diff --git a/src/Main.cc b/src/Main.cc
+index 6231e55..6482d65 100644
+--- a/src/Main.cc
++++ b/src/Main.cc
+@@ -355,6 +355,10 @@ static int tclReadlineInit(Tcl_Interp* interp)
+ }
+ #endif
+ 
++#ifndef TCLRL_VERSION_STR
++// local patch: built without tclreadline (no Homebrew tclreadline.h); the lookup below is then unused
++#define TCLRL_VERSION_STR ""
++#endif
+ namespace {
+ // A stopgap fallback from the hardcoded TCLRL_LIBRARY path for OpenROAD,
+ // not essential for OpenSTA
+diff --git a/src/dst/src/BalancerConnection.cc b/src/dst/src/BalancerConnection.cc
+index 89393e8..fa269b3 100644
+--- a/src/dst/src/BalancerConnection.cc
++++ b/src/dst/src/BalancerConnection.cc
+@@ -50,10 +50,10 @@ using namespace dst;
+ BOOST_CLASS_EXPORT(dst::BalancerJobDescription)
+ BOOST_CLASS_EXPORT(dst::BroadcastJobDescription)
+ 
+-BalancerConnection::BalancerConnection(asio::io_service& io_service,
++BalancerConnection::BalancerConnection(asio::io_context& io_context,
+                                        LoadBalancer* owner,
+                                        utl::Logger* logger)
+-    : sock_(io_service), logger_(logger), owner_(owner)
++    : sock_(io_context), logger_(logger), owner_(owner)
+ {
+ }
+ // socket creation
+@@ -112,8 +112,8 @@ void BalancerConnection::handle_read(boost::system::error_code const& err,
+             owner_->dist_->sendResult(reply, sock_);
+             sock_.close();
+           } else {
+-            asio::io_service io_service;
+-            tcp::socket socket(io_service);
++            asio::io_context io_context;
++            tcp::socket socket(io_context);
+             int failed_workers_trials = 0;
+             asio::streambuf receive_buffer;
+             bool failure = true;
+@@ -181,8 +181,8 @@ void BalancerConnection::handle_read(boost::system::error_code const& err,
+               pool,
+               [worker, data, &failed_workers, &broadcast_failure_mutex]() {
+                 try {
+-                  asio::io_service io_service;
+-                  tcp::socket socket(io_service);
++                  asio::io_context io_context;
++                  tcp::socket socket(io_context);
+                   socket.connect(tcp::endpoint(worker.ip, worker.port));
+                   asio::write(socket, asio::buffer(data));
+                   asio::streambuf receive_buffer;
+diff --git a/src/dst/src/BalancerConnection.h b/src/dst/src/BalancerConnection.h
+index edb5099..4b446c2 100644
+--- a/src/dst/src/BalancerConnection.h
++++ b/src/dst/src/BalancerConnection.h
+@@ -46,14 +46,14 @@ class BalancerConnection
+ {
+  public:
+   typedef boost::shared_ptr<BalancerConnection> pointer;
+-  BalancerConnection(asio::io_service& io_service,
++  BalancerConnection(asio::io_context& io_context,
+                      LoadBalancer* owner,
+                      utl::Logger* logger);
+-  static pointer create(asio::io_service& io_service,
++  static pointer create(asio::io_context& io_context,
+                         LoadBalancer* owner,
+                         utl::Logger* logger)
+   {
+-    return boost::make_shared<BalancerConnection>(io_service, owner, logger);
++    return boost::make_shared<BalancerConnection>(io_context, owner, logger);
+   }
+   tcp::socket& socket();
+   void start();
+diff --git a/src/dst/src/Distributed.cc b/src/dst/src/Distributed.cc
+index ca3b22c..303fd74 100644
+--- a/src/dst/src/Distributed.cc
++++ b/src/dst/src/Distributed.cc
+@@ -98,14 +98,14 @@ void Distributed::runLoadBalancer(const char* ip,
+                                   const char* workers_domain)
+ {
+   try {
+-    asio::io_service io_service;
+-    LoadBalancer balancer(this, io_service, logger_, ip, workers_domain, port);
++    asio::io_context io_context;
++    LoadBalancer balancer(this, io_context, logger_, ip, workers_domain, port);
+     if (std::strcmp(workers_domain, "") == 0) {
+       for (const auto& worker : end_points_) {
+         balancer.addWorker(worker.ip, worker.port);
+       }
+     }
+-    io_service.run();
++    io_context.run();
+   } catch (std::exception& e) {
+     logger_->error(utl::DST, 9, "LoadBalancer error: {}", e.what());
+   }
+@@ -167,10 +167,10 @@ bool Distributed::sendJob(JobMessage& msg,
+   }
+   std::string resultStr;
+   while (tries++ < MAX_TRIES) {
+-    asio::io_service io_service;
+-    dst::socket sock(io_service);
++    asio::io_context io_context;
++    dst::socket sock(io_context);
+     try {
+-      sock.connect(tcp::endpoint(ip::address::from_string(ip), port));
++      sock.connect(tcp::endpoint(ip::make_address(ip), port));
+     } catch (const boost::system::system_error& ex) {
+       logger_->warn(utl::DST,
+                     113,
+@@ -228,10 +228,10 @@ bool Distributed::sendJobMultiResult(JobMessage& msg,
+   }
+   std::string resultStr;
+   while (tries++ < MAX_TRIES) {
+-    asio::io_service io_service;
+-    dst::socket sock(io_service);
++    asio::io_context io_context;
++    dst::socket sock(io_context);
+     try {
+-      sock.connect(tcp::endpoint(ip::address::from_string(ip), port));
++      sock.connect(tcp::endpoint(ip::make_address(ip), port));
+     } catch (const boost::system::system_error& ex) {
+       logger_->warn(utl::DST,
+                     13,
+diff --git a/src/dst/src/LoadBalancer.cc b/src/dst/src/LoadBalancer.cc
+index e48e066..fa8403a 100644
+--- a/src/dst/src/LoadBalancer.cc
++++ b/src/dst/src/LoadBalancer.cc
+@@ -62,18 +62,18 @@ void LoadBalancer::start_accept()
+ }
+ 
+ LoadBalancer::LoadBalancer(Distributed* dist,
+-                           asio::io_service& io_service,
++                           asio::io_context& io_context,
+                            utl::Logger* logger,
+                            const char* ip,
+                            const char* workers_domain,
+                            unsigned short port)
+     : dist_(dist),
+-      acceptor_(io_service, tcp::endpoint(ip::address::from_string(ip), port)),
++      acceptor_(io_context, tcp::endpoint(ip::make_address(ip), port)),
+       logger_(logger),
+       jobs_(0)
+ {
+   // pool_ = std::make_unique<asio::thread_pool>();
+-  service = &io_service;
++  service = &io_context;
+   start_accept();
+   if (std::strcmp(workers_domain, "") != 0) {
+     workers_lookup_thread = boost::thread(
+@@ -96,9 +96,9 @@ bool LoadBalancer::addWorker(const std::string& ip, unsigned short port)
+   if (!broadcastData.empty()) {
+     for (auto data : broadcastData) {
+       try {
+-        asio::io_service io_service;
+-        tcp::socket socket(io_service);
+-        socket.connect(tcp::endpoint(ip::address::from_string(ip), port));
++        asio::io_context io_context;
++        tcp::socket socket(io_context);
++        socket.connect(tcp::endpoint(ip::make_address(ip), port));
+         asio::write(socket, asio::buffer(data));
+         asio::streambuf receive_buffer;
+         asio::read(socket, receive_buffer, asio::transfer_all());
+@@ -114,7 +114,7 @@ bool LoadBalancer::addWorker(const std::string& ip, unsigned short port)
+     }
+   }
+   if (validWorkerState) {
+-    workers_.push(worker(ip::address::from_string(ip), port, 0));
++    workers_.push(worker(ip::make_address(ip), port, 0));
+   }
+   return validWorkerState;
+ }
+@@ -186,15 +186,16 @@ void LoadBalancer::removeWorker(const ip::address& ip,
+ 
+ void LoadBalancer::lookUpWorkers(const char* domain, unsigned short port)
+ {
+-  asio::io_service ios;
++  asio::io_context ios;
+   std::vector<worker> workers_set;
+-  udp::resolver::query resolver_query(
+-      domain, std::to_string(port), udp::resolver::query::numeric_service);
+   udp::resolver resolver(ios);
+   while (alive) {
+     std::vector<worker> new_workers;
+     boost::system::error_code ec;
+-    auto it = resolver.resolve(resolver_query, ec);
++    // local patch: Boost 1.87+ removed resolver::query and resolver::iterator
++    auto results = resolver.resolve(
++        domain, std::to_string(port), udp::resolver::numeric_service, ec);
++    auto it = results.begin();
+     if (ec) {
+       logger_->warn(utl::DST,
+                     203,
+@@ -204,8 +205,7 @@ void LoadBalancer::lookUpWorkers(const char* domain, unsigned short port)
+                     ec.message());
+     }
+     int new_workers_count = 0;
+-    udp::resolver::iterator it_end;
+-    for (; it != it_end; ++it) {
++    for (; it != results.end(); ++it) {
+       auto discovered_worker = worker(it->endpoint().address(), port, 0);
+       if (std::find(workers_set.begin(), workers_set.end(), discovered_worker)
+           == workers_set.end()) {
+diff --git a/src/dst/src/LoadBalancer.h b/src/dst/src/LoadBalancer.h
+index b4d9101..2d02788 100644
+--- a/src/dst/src/LoadBalancer.h
++++ b/src/dst/src/LoadBalancer.h
+@@ -51,7 +51,7 @@ class LoadBalancer
+  public:
+   // constructor for accepting connection from client
+   LoadBalancer(Distributed* dist,
+-               asio::io_service& io_service,
++               asio::io_context& io_context,
+                utl::Logger* logger,
+                const char* ip,
+                const char* workers_domain,
+@@ -90,7 +90,7 @@ class LoadBalancer
+ 
+   Distributed* dist_;
+   tcp::acceptor acceptor_;
+-  asio::io_service* service;
++  asio::io_context* service;
+   utl::Logger* logger_;
+   std::priority_queue<worker, std::vector<worker>, CompareWorker> workers_;
+   std::mutex workers_mutex_;
+diff --git a/src/dst/src/Worker.cc b/src/dst/src/Worker.cc
+index 604941c..c720281 100644
+--- a/src/dst/src/Worker.cc
++++ b/src/dst/src/Worker.cc
+@@ -51,7 +51,7 @@ Worker::Worker(Distributed* dist,
+                utl::Logger* logger,
+                const char* ip,
+                unsigned short port)
+-    : acceptor_(service_, tcp::endpoint(ip::address::from_string(ip), port)),
++    : acceptor_(service_, tcp::endpoint(ip::make_address(ip), port)),
+       dist_(dist),
+       logger_(logger)
+ {
+diff --git a/src/dst/src/Worker.h b/src/dst/src/Worker.h
+index a3f9e59..95cc5f2 100644
+--- a/src/dst/src/Worker.h
++++ b/src/dst/src/Worker.h
+@@ -50,7 +50,7 @@ class Worker
+   ~Worker();
+ 
+  private:
+-  asio::io_service service_;
++  asio::io_context service_;
+   tcp::acceptor acceptor_;
+   Distributed* dist_;
+   utl::Logger* logger_;
+diff --git a/src/dst/src/WorkerConnection.cc b/src/dst/src/WorkerConnection.cc
+index ca68ff5..f983164 100644
+--- a/src/dst/src/WorkerConnection.cc
++++ b/src/dst/src/WorkerConnection.cc
+@@ -38,11 +38,11 @@
+ #include "utl/Logger.h"
+ namespace dst {
+ 
+-WorkerConnection::WorkerConnection(asio::io_service& io_service,
++WorkerConnection::WorkerConnection(asio::io_context& io_context,
+                                    Distributed* dist,
+                                    utl::Logger* logger,
+                                    Worker* worker)
+-    : sock_(io_service),
++    : sock_(io_context),
+       dist_(dist),
+       logger_(logger),
+       msg_(JobMessage::NONE),
+diff --git a/src/dst/src/WorkerConnection.h b/src/dst/src/WorkerConnection.h
+index 07e4639..ce99847 100644
+--- a/src/dst/src/WorkerConnection.h
++++ b/src/dst/src/WorkerConnection.h
+@@ -43,7 +43,7 @@ class Worker;
+ class WorkerConnection : public boost::enable_shared_from_this<WorkerConnection>
+ {
+  public:
+-  WorkerConnection(asio::io_service& io_service,
++  WorkerConnection(asio::io_context& io_context,
+                    Distributed* dist,
+                    utl::Logger* logger,
+                    Worker* worker);
+diff --git a/src/dst/test/cpp/TestBalancer.cc b/src/dst/test/cpp/TestBalancer.cc
+index f60fd26..ef38e7d 100644
+--- a/src/dst/test/cpp/TestBalancer.cc
++++ b/src/dst/test/cpp/TestBalancer.cc
+@@ -26,9 +26,9 @@ BOOST_AUTO_TEST_CASE(test_default)
+   unsigned short worker_port_2 = 5557;
+   unsigned short worker_port_3 = 5558;
+   unsigned short worker_port_4 = 5559;
+-  asio::io_service io_service;
++  asio::io_context io_context;
+   LoadBalancer* balancer = new LoadBalancer(
+-      dist, io_service, logger, local_ip.c_str(), "", balancer_port);
++      dist, io_context, logger, local_ip.c_str(), "", balancer_port);
+ 
+   // Checking simple interface functions
+   balancer->addWorker(local_ip, worker_port_1);
+@@ -42,14 +42,14 @@ BOOST_AUTO_TEST_CASE(test_default)
+   balancer->getNextWorker(address, port);
+   BOOST_TEST(address.to_string() == local_ip);
+   BOOST_TEST(port == worker_port_2);
+-  balancer->updateWorker(asio::ip::address::from_string(local_ip),
++  balancer->updateWorker(asio::ip::make_address(local_ip),
+                          worker_port_2);
+   balancer->getNextWorker(address, port);
+   BOOST_TEST(address.to_string() == local_ip);
+   BOOST_TEST(port == worker_port_2);
+ 
+   // Checking if balancer is up and responding
+-  boost::thread t(boost::bind(&asio::io_service::run, &io_service));
++  boost::thread t(boost::bind(&asio::io_context::run, &io_context));
+   JobMessage msg(JobMessage::JobType::BALANCER);
+   JobMessage result;
+   BOOST_TEST(dist->sendJob(msg, local_ip.c_str(), balancer_port, result));
+@@ -58,7 +58,7 @@ BOOST_AUTO_TEST_CASE(test_default)
+   // Checking if a balancer can relay a message to a worker and send the result
+   // correctly. note we make worker 2, which is not running, the next
+   // worker. That should be handled correctly by balancer.
+-  balancer->updateWorker(asio::ip::address::from_string(local_ip),
++  balancer->updateWorker(asio::ip::make_address(local_ip),
+                          worker_port_2);
+   dist->addCallBack(new HelperCallBack(dist));
+   dist->runWorker(local_ip.c_str(), worker_port_1, true);
+diff --git a/src/gpl/src/mbff.cpp b/src/gpl/src/mbff.cpp
+index bf113eb..5309ea0 100644
+--- a/src/gpl/src/mbff.cpp
++++ b/src/gpl/src/mbff.cpp
+@@ -33,6 +33,8 @@
+ 
+ #include "mbff.h"
+ 
++#include <fmt/ranges.h> // local patch: fmt::join lives here in fmt 11+
++
+ #include <lemon/list_graph.h>
+ #include <lemon/network_simplex.h>
+ #include <omp.h>
+diff --git a/src/grt/messages.txt b/src/grt/messages.txt
+index 8e128a3..41c814c 100644
+--- a/src/grt/messages.txt
++++ b/src/grt/messages.txt
+@@ -1,179 +1,179 @@
+-GRT 0001 GlobalRouter.cpp:1170     Minimum degree: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L1170
+-GRT 0002 GlobalRouter.cpp:1171     Maximum degree: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L1171
+-GRT 0003 GlobalRouter.cpp:4051     Macros: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4051
+-GRT 0004 GlobalRouter.cpp:3767     Blockages: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3767
+-GRT 0005 GlobalRouter.tcl:527      Layer $layer_name not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L527
+-GRT 0006 GlobalRouter.cpp:498      Repairing antennas, iteration {}. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L498
+-GRT 0007 GlobalRouter.cpp:285      Design does not have any routable net  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L285
+-GRT 0008 GlobalRouter.cpp:2114     The read_guides command does not allow parasitics estimation  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2114
+-GRT 0009 GlobalRouter.cpp:4839     rerouting {} nets. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4839
+-GRT 0010 GlobalRouter.cpp:3614     Instance {} is not placed. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3614
+-GRT 0011 GlobalRouter.cpp:3687     Pin {} is not placed. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3687
+-GRT 0012 RepairAntennas.cpp:119    Found {} antenna violations. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/RepairAntennas.cpp#L119
+-GRT 0014 GlobalRouter.cpp:421      Routed nets: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L421
+-GRT 0015 GlobalRouter.cpp:510      Inserted {} diodes. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L510
+-GRT 0018 GlobalRouter.cpp:3007     Total wirelength: {} um INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3007
+-GRT 0019 GlobalRouter.cpp:3554     Found {} clock nets. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3554
+-GRT 0020 GlobalRouter.cpp:4418     Min routing layer: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4418
+-GRT 0021 GlobalRouter.cpp:4419     Max routing layer: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4419
+-GRT 0022 GlobalRouter.cpp:4420     Global adjustment: {}% INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4420
+-GRT 0023 GlobalRouter.cpp:4421     Grid origin: ({}, {}) INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4421
+-GRT 0025 MakeWireParasitics.cpp:250 Non wire or via route found on net {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/MakeWireParasitics.cpp#L250
+-GRT 0026 MakeWireParasitics.cpp:350 Missing route to pin {} in net {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/MakeWireParasitics.cpp#L350
+-GRT 0027 RepairAntennas.cpp:469    Design has rows with different site widths. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/RepairAntennas.cpp#L469
+-GRT 0028 GlobalRouter.cpp:4046     Found {} pins outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4046
+-GRT 0029 GlobalRouter.cpp:3652     Pin {} does not have geometries below the max routing layer ({}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3652
+-GRT 0030 GlobalRouter.cpp:1903     Specified layer {} for adjustment is greater than max  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L1903
+-GRT 0031 GlobalRouter.cpp:2961     At least 2 pins in position ({}, {}), layer {}, port {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2961
+-GRT 0034 GlobalRouter.cpp:3603     Net connected to instance of class COVER added for routing. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3603
+-GRT 0035 GlobalRouter.cpp:3635     Pin {} is outside die area. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3635
+-GRT 0036 GlobalRouter.cpp:3698     Pin {} is outside die area. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3698
+-GRT 0037 GlobalRouter.cpp:3834     Found blockage outside die area. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3834
+-GRT 0038 GlobalRouter.cpp:3992     Found blockage outside die area in instance {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3992
+-GRT 0039 GlobalRouter.cpp:4029     Found pin {} outside die area in instance {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4029
+-GRT 0041 GlobalRouter.cpp:4134     Net {} has wires/vias outside die area. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4134
+-GRT 0042 GlobalRouter.cpp:3723     Pin {} does not have geometries in a valid routing layer. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3723
+-GRT 0043 GlobalRouter.cpp:4346     No OR_DEFAULT vias defined. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4346
+-GRT 0044 GlobalRouter.tcl:66       set_global_routing_layer_adjustment requires layer and adj arguments. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L66
+-GRT 0045 GlobalRouter.tcl:334      Run global_route before repair_antennas. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L334
+-GRT 0047 GlobalRouter.tcl:80       Missing dbTech. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L80
+-GRT 0048 GlobalRouter.tcl:88       Command set_global_routing_region_adjustment is missing -layer argument. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L88
+-GRT 0051 GlobalRouter.tcl:200      Missing dbTech. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L200
+-GRT 0052 GlobalRouter.tcl:204      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L204
+-GRT 0053 GlobalRouter.cpp:4433     Routing resources analysis: INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4433
+-GRT 0055 GlobalRouter.tcl:215      Wrong number of arguments for origin. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L215
+-GRT 0059 GlobalRouter.tcl:499      Missing technology file. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L499
+-GRT 0060 GlobalRouter.tcl:511      Layer [$tech_layer getConstName] is greater than\      the max routing layer ([$max_tech_layer getConstName]). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L511
+-GRT 0061 GlobalRouter.tcl:515      Layer [$tech_layer getConstName] is less than the\      min routing layer ([$min_tech_layer getConstName]). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L515
+-GRT 0062 GlobalRouter.tcl:542      Input format to define layer range for $cmd is min-max. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L542
+-GRT 0063 GlobalRouter.tcl:549      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L549
+-GRT 0064 GlobalRouter.tcl:555      Lower left x is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L555
+-GRT 0065 GlobalRouter.tcl:559      Lower left y is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L559
+-GRT 0066 GlobalRouter.tcl:563      Upper right x is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L563
+-GRT 0067 GlobalRouter.tcl:567      Upper right y is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L567
+-GRT 0068 RepairAntennas.cpp:194    Global route segment for net {} not  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/RepairAntennas.cpp#L194
+-GRT 0069 GlobalRouter.tcl:299      Diode cell $diode_cell not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L299
+-GRT 0070 GlobalRouter.cpp:659      Layer {} does not have track grid. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L659
+-GRT 0071 GlobalRouter.cpp:1476     Layer spacing not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L1476
+-GRT 0072 GlobalRouter.cpp:1635     Informed region is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L1635
+-GRT 0073 GlobalRouter.tcl:312      Diode cell has more than one non power/ground port. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L312
+-GRT 0074 GlobalRouter.cpp:2491     Routing with guides in blocked metal for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2491
+-GRT 0075 GlobalRouter.cpp:2463     Connection between non-adjacent layers in net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2463
+-GRT 0076 GlobalRouter.cpp:2808     Net {} does not have route guides. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2808
+-GRT 0079 GlobalRouter.cpp:2948     Pin {} does not have layer assignment. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2948
+-GRT 0080 GlobalRouter.cpp:2977     Invalid pin placement. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2977
+-GRT 0084 GlobalRouter.cpp:650      Layer {} does not have a valid direction. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L650
+-GRT 0085 GlobalRouter.cpp:645      Routing layer {} not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L645
+-GRT 0086 GlobalRouter.cpp:3379     Track for layer {} not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3379
+-GRT 0088 GlobalRouter.cpp:3394     Layer {:7s} Track-Pitch = {:.4f}  line-2-Via Pitch: {:.4f} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3394
+-GRT 0090 GlobalRouter.cpp:3454     Track for layer {} not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3454
+-GRT 0094 GlobalRouter.cpp:4060     Design with no nets. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4060
+-GRT 0096 GlobalRouter.cpp:4485     Final congestion report: INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4485
+-GRT 0097 GlobalRouter.cpp:243      No global routing found for nets. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L243
+-GRT 0101 FastRoute.cpp:1099        Running extra iterations to remove overflow. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L1099
+-GRT 0103 FastRoute.cpp:1227        Extra Run for hard benchmark. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L1227
+-GRT 0104 GlobalRouter.tcl:286      No design block found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L286
+-GRT 0111 FastRoute.cpp:1396        Final number of vias: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L1396
+-GRT 0112 FastRoute.cpp:1397        Final usage 3D: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L1397
+-GRT 0113 FastRoute.cpp:439         Underflow in reduce: cap, reducedCap: {}, {} WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L439
+-GRT 0114 FastRoute.cpp:477         Underflow in reduce: cap, reducedCap: {}, {} WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L477
+-GRT 0120 heatMapRudy.cpp:122       Instance {} is not placed. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/heatMapRudy.cpp#L122
+-GRT 0121 GlobalRouter.cpp:491      repair_antennas should perform only one iteration when the  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L491
+-GRT 0122 RipUp.cpp:410             Maze ripup wrong for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/RipUp.cpp#L410
+-GRT 0123 RipUp.cpp:532             Maze ripup wrong in newRipupNet for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/RipUp.cpp#L532
+-GRT 0125 maze.cpp:639              Setup heap: not maze routing. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze.cpp#L639
+-GRT 0126 GlobalRouter.cpp:679      Layers {} and {} have the same preferred routing direction ({}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L679
+-GRT 0149 utility.cpp:2058          Invalid access to nbrCnt vector ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L2058
+-GRT 0150 maze.cpp:1511             Net {} has errors during updateRouteType1. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze.cpp#L1511
+-GRT 0164 utility.cpp:1762          Initial grid wrong y1 x1 [{} {}], net start [{} {}] routelen  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1762
+-GRT 0165 utility.cpp:1776          End grid wrong y2 x2 [{} {}], net start [{} {}] routelen {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1776
+-GRT 0166 utility.cpp:1792          Net {} edge[{}] maze route wrong, distance {}, i {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1792
+-GRT 0167 utility.cpp:1806          Invalid 2D tree for net {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1806
+-GRT 0169 maze.cpp:839              Net {}: Invalid index for position ({}, {}). Net degree: {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze.cpp#L839
+-GRT 0170 GlobalRouter.cpp:2028     Load a design before running the global router commands. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2028
+-GRT 0171 maze3D.cpp:407            Invalid index for position ({}, {}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L407
+-GRT 0172 maze3D.cpp:731            Invalid index for position ({}, {}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L731
+-GRT 0179 route.cpp:329             Wrong node status {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/route.cpp#L329
+-GRT 0181 route.cpp:936             Wrong node status {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/route.cpp#L936
+-GRT 0183 maze3D.cpp:1148           Net {}: heap underflow during 3D maze routing. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L1148
+-GRT 0187 maze3D.cpp:393            In 3D maze routing, type 1 node shift, cnt_n1A1 is 1. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L393
+-GRT 0188 RSMT.cpp:139              Invalid number of node neighbors. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/RSMT.cpp#L139
+-GRT 0189 RSMT.cpp:147              Failure in copy tree. Number of edges: {}. Number of nodes: {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/RSMT.cpp#L147
+-GRT 0197 utility.cpp:361           Via related to pin nodes: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L361
+-GRT 0198 utility.cpp:362           Via related Steiner nodes: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L362
+-GRT 0199 utility.cpp:363           Via filling finished. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L363
+-GRT 0200 utility.cpp:601           Start point not assigned. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L601
+-GRT 0201 maze.cpp:710              Setup heap: not maze routing. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze.cpp#L710
+-GRT 0202 utility.cpp:707           Target ending layer ({}) out of range. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L707
+-GRT 0203 utility.cpp:1113          Caused floating pin node. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1113
+-GRT 0204 utility.cpp:1196          Invalid layer value in gridsL, {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1196
+-GRT 0206 utility.cpp:1332          Trying to recover a 0-length edge. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1332
+-GRT 0207 utility.cpp:1743          Ripped up edge without edge length reassignment. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1743
+-GRT 0208 utility.cpp:1751          Route length {}, tree length {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1751
+-GRT 0209 GlobalRouter.cpp:3703     Pin {} is completely outside the die area and  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L3703
+-GRT 0213 FastRoute.cpp:616         Cannot get available resources: edge is not vertical or horizontal. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L616
+-GRT 0214 FastRoute.cpp:633         Cannot get edge capacity: edge is not vertical or horizontal. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L633
+-GRT 0215 GlobalRouter.tcl:328      -ratio_margin must be between 0 and 100 percent. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L328
+-GRT 0219 GlobalRouter.tcl:137      Command set_macro_extension needs one argument: extension. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L137
+-GRT 0221 RepairAntennas.cpp:276    Cannot create wire for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/RepairAntennas.cpp#L276
+-GRT 0222 GlobalRouter.tcl:522      No technology has been read. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L522
+-GRT 0223 GlobalRouter.tcl:381      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L381
+-GRT 0224 GlobalRouter.tcl:462      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L462
+-GRT 0225 RipUp.cpp:132             Maze ripup wrong in newRipup. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/RipUp.cpp#L132
+-GRT 0226 RipUp.cpp:223             Net {} ripup type is {}. Expected LRoute. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/RipUp.cpp#L223
+-GRT 0228 utility.cpp:1639          Horizontal edge usage exceeds the maximum allowed.  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1639
+-GRT 0229 utility.cpp:1653          Vertical edge usage exceeds the maximum allowed.  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1653
+-GRT 0230 FastRoute.cpp:1367        Congestion iterations cannot increase overflow, reached the  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/FastRoute.cpp#L1367
+-GRT 0231 GlobalRouter.tcl:444      Net name not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L444
+-GRT 0232 GlobalRouter.cpp:4902     Routing congestion too high. Check the congestion  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4902
+-GRT 0233 GlobalRouter.cpp:2133     Failed to open guide file {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2133
+-GRT 0234 GlobalRouter.cpp:2156     Cannot find net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2156
+-GRT 0235 GlobalRouter.cpp:2176     Cannot find layer {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2176
+-GRT 0236 GlobalRouter.cpp:2185     Error reading guide file {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2185
+-GRT 0237 GlobalRouter.cpp:4625     Net {} global route wire length: {:.2f}um INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4625
+-GRT 0238 GlobalRouter.tcl:492      -net is required. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L492
+-GRT 0239 GlobalRouter.cpp:4649     Net {} does not have detailed route. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4649
+-GRT 0240 GlobalRouter.cpp:4655     Net {} detailed route wire length: {:.2f}um INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4655
+-GRT 0241 GlobalRouter.cpp:4620     Net {} does not have global route. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4620
+-GRT 0242 GlobalRouter.tcl:157      -seed argument is required. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L157
+-GRT 0243 RepairAntennas.cpp:518    Unable to repair antennas on net with diodes. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/RepairAntennas.cpp#L518
+-GRT 0244 GlobalRouter.cpp:476      Diode {}/{} ANTENNADIFFAREA is zero. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L476
+-GRT 0245 GlobalRouter.tcl:315      Too arguments to repair_antennas. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L315
+-GRT 0246 GlobalRouter.cpp:470      No diode with LEF class CORE ANTENNACELL found. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L470
+-GRT 0247 utility.cpp:1531          v_edge mismatch {} vs {} ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1531
+-GRT 0248 utility.cpp:1542          h_edge mismatch {} vs {} ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1542
+-GRT 0249 GlobalRouter.cpp:2120     Load design before reading guides ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2120
+-GRT 0250 GlobalRouter.cpp:2165     Net {} has guides but is not routed by the global  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2165
+-GRT 0251 GlobalRouter.cpp:292      The start_incremental and end_incremental flags cannot be  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L292
+-GRT 0252 GlobalRouter.tcl:348      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.tcl#L348
+-GRT 0253 GlobalRouter.cpp:2347     Detected invalid guide dimensions: ({}, {}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2347
+-GRT 0254 utility.cpp:248           Edge has no previous routing. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L248
+-GRT 0255 GlobalRouter.cpp:2513     Global route segments file could not be opened. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2513
+-GRT 0256 GlobalRouter.cpp:2547     Load design before reading guides ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2547
+-GRT 0257 GlobalRouter.cpp:2560     Failed to open global route segments file {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2560
+-GRT 0258 GlobalRouter.cpp:2581     Cannot find net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2581
+-GRT 0259 GlobalRouter.cpp:2587     Cannot find layer {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2587
+-GRT 0260 GlobalRouter.cpp:2590     Cannot find layer {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2590
+-GRT 0261 GlobalRouter.cpp:2600     Error reading global route segments file {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2600
+-GRT 0262 GlobalRouter.cpp:2606     Net {} has disconnected segments. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2606
+-GRT 0263 GlobalRouter.cpp:2611     Pin(s) {}not covered in net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2611
+-GRT 0264 GlobalRouter.cpp:2701     Segment {} of net {} is not a horizontal/vertical line or via. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2701
+-GRT 0265 GlobalRouter.cpp:2730     Segment {} of net {} is not a horizontal/vertical line or via. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2730
+-GRT 0266 GlobalRouter.cpp:766      Net {} does not cover all its pins. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L766
+-GRT 0267 GlobalRouter.cpp:742      Net {} has disconnected segments. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L742
+-GRT 0268 GlobalRouter.cpp:788      Net {} has no driver pin. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L788
+-GRT 0300 GlobalRouter.cpp:2093     Timing is not available, setting critical nets percentage to 0. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L2093
+-GRT 0301 GlobalRouter.cpp:1887     Timing is not available, setting critical nets percentage to 0. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L1887
+-GRT 0302 RepairAntennas.cpp:1503   Inserted {} jumpers for {} nets. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/RepairAntennas.cpp#L1503
+-GRT 0350 MakeWireParasitics.cpp:452 Missing route to pin {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/MakeWireParasitics.cpp#L452
+-GRT 0500 RipUp.cpp:297             Route type is not maze, netID {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/RipUp.cpp#L297
+-GRT 0601 maze3D.cpp:923            Unable to update: position not found in 3D  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L923
+-GRT 0602 maze3D.cpp:968            Unable to update: position not found in 3D  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L968
+-GRT 0603 maze3D.cpp:1013           Unable to update: position not found in 3D  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L1013
+-GRT 0604 maze3D.cpp:1056           Unable to update: position not found in 3D  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L1056
+-GRT 0605 maze3D.cpp:1098           Unable to update: position not found in 3D heap for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L1098
+-GRT 0606 maze3D.cpp:1138           Unable to update: position not found in 3D heap for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze3D.cpp#L1138
+-GRT 0607 maze.cpp:1208             Unable to update: position not found in 2D heap for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/maze.cpp#L1208
+-GRT 0701 GlobalRouter.cpp:4160     Missing track structure for routing layers. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/GlobalRouter.cpp#L4160
+-GRT 1247 utility.cpp:1606          v_edge mismatch {} vs {} ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1606
+-GRT 1248 utility.cpp:1619          h_edge mismatch {} vs {} ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/raid/rliang/OpenROAD/OpenROAD-flow-scripts/OpenROAD/src/grt/src/fastroute/src/utility.cpp#L1619
++GRT 0001 GlobalRouter.cpp:1177     Minimum degree: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L1177
++GRT 0002 GlobalRouter.cpp:1178     Maximum degree: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L1178
++GRT 0003 GlobalRouter.cpp:4058     Macros: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4058
++GRT 0004 GlobalRouter.cpp:3774     Blockages: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3774
++GRT 0005 GlobalRouter.tcl:527      Layer $layer_name not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L527
++GRT 0006 GlobalRouter.cpp:505      Repairing antennas, iteration {}. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L505
++GRT 0007 GlobalRouter.cpp:285      Design does not have any routable net  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L285
++GRT 0008 GlobalRouter.cpp:2121     The read_guides command does not allow parasitics estimation  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2121
++GRT 0009 GlobalRouter.cpp:4846     rerouting {} nets. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4846
++GRT 0010 GlobalRouter.cpp:3621     Instance {} is not placed. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3621
++GRT 0011 GlobalRouter.cpp:3694     Pin {} is not placed. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3694
++GRT 0012 RepairAntennas.cpp:119    Found {} antenna violations. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/RepairAntennas.cpp#L119
++GRT 0014 GlobalRouter.cpp:428      Routed nets: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L428
++GRT 0015 GlobalRouter.cpp:517      Inserted {} diodes. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L517
++GRT 0018 GlobalRouter.cpp:3014     Total wirelength: {} um INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3014
++GRT 0019 GlobalRouter.cpp:3561     Found {} clock nets. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3561
++GRT 0020 GlobalRouter.cpp:4425     Min routing layer: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4425
++GRT 0021 GlobalRouter.cpp:4426     Max routing layer: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4426
++GRT 0022 GlobalRouter.cpp:4427     Global adjustment: {}% INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4427
++GRT 0023 GlobalRouter.cpp:4428     Grid origin: ({}, {}) INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4428
++GRT 0025 MakeWireParasitics.cpp:250 Non wire or via route found on net {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/MakeWireParasitics.cpp#L250
++GRT 0026 MakeWireParasitics.cpp:350 Missing route to pin {} in net {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/MakeWireParasitics.cpp#L350
++GRT 0027 RepairAntennas.cpp:469    Design has rows with different site widths. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/RepairAntennas.cpp#L469
++GRT 0028 GlobalRouter.cpp:4053     Found {} pins outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4053
++GRT 0029 GlobalRouter.cpp:3659     Pin {} does not have geometries below the max routing layer ({}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3659
++GRT 0030 GlobalRouter.cpp:1910     Specified layer {} for adjustment is greater than max  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L1910
++GRT 0031 GlobalRouter.cpp:2968     At least 2 pins in position ({}, {}), layer {}, port {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2968
++GRT 0034 GlobalRouter.cpp:3610     Net connected to instance of class COVER added for routing. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3610
++GRT 0035 GlobalRouter.cpp:3642     Pin {} is outside die area. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3642
++GRT 0036 GlobalRouter.cpp:3705     Pin {} is outside die area. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3705
++GRT 0037 GlobalRouter.cpp:3841     Found blockage outside die area. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3841
++GRT 0038 GlobalRouter.cpp:3999     Found blockage outside die area in instance {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3999
++GRT 0039 GlobalRouter.cpp:4036     Found pin {} outside die area in instance {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4036
++GRT 0041 GlobalRouter.cpp:4141     Net {} has wires/vias outside die area. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4141
++GRT 0042 GlobalRouter.cpp:3730     Pin {} does not have geometries in a valid routing layer. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3730
++GRT 0043 GlobalRouter.cpp:4353     No OR_DEFAULT vias defined. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4353
++GRT 0044 GlobalRouter.tcl:66       set_global_routing_layer_adjustment requires layer and adj arguments. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L66
++GRT 0045 GlobalRouter.tcl:334      Run global_route before repair_antennas. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L334
++GRT 0047 GlobalRouter.tcl:80       Missing dbTech. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L80
++GRT 0048 GlobalRouter.tcl:88       Command set_global_routing_region_adjustment is missing -layer argument. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L88
++GRT 0051 GlobalRouter.tcl:200      Missing dbTech. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L200
++GRT 0052 GlobalRouter.tcl:204      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L204
++GRT 0053 GlobalRouter.cpp:4440     Routing resources analysis: INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4440
++GRT 0055 GlobalRouter.tcl:215      Wrong number of arguments for origin. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L215
++GRT 0059 GlobalRouter.tcl:499      Missing technology file. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L499
++GRT 0060 GlobalRouter.tcl:511      Layer [$tech_layer getConstName] is greater than\      the max routing layer ([$max_tech_layer getConstName]). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L511
++GRT 0061 GlobalRouter.tcl:515      Layer [$tech_layer getConstName] is less than the\      min routing layer ([$min_tech_layer getConstName]). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L515
++GRT 0062 GlobalRouter.tcl:542      Input format to define layer range for $cmd is min-max. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L542
++GRT 0063 GlobalRouter.tcl:549      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L549
++GRT 0064 GlobalRouter.tcl:555      Lower left x is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L555
++GRT 0065 GlobalRouter.tcl:559      Lower left y is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L559
++GRT 0066 GlobalRouter.tcl:563      Upper right x is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L563
++GRT 0067 GlobalRouter.tcl:567      Upper right y is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L567
++GRT 0068 RepairAntennas.cpp:194    Global route segment for net {} not  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/RepairAntennas.cpp#L194
++GRT 0069 GlobalRouter.tcl:299      Diode cell $diode_cell not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L299
++GRT 0070 GlobalRouter.cpp:666      Layer {} does not have track grid. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L666
++GRT 0071 GlobalRouter.cpp:1483     Layer spacing not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L1483
++GRT 0072 GlobalRouter.cpp:1642     Informed region is outside die area. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L1642
++GRT 0073 GlobalRouter.tcl:312      Diode cell has more than one non power/ground port. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L312
++GRT 0074 GlobalRouter.cpp:2498     Routing with guides in blocked metal for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2498
++GRT 0075 GlobalRouter.cpp:2470     Connection between non-adjacent layers in net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2470
++GRT 0076 GlobalRouter.cpp:2815     Net {} does not have route guides. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2815
++GRT 0079 GlobalRouter.cpp:2955     Pin {} does not have layer assignment. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2955
++GRT 0080 GlobalRouter.cpp:2984     Invalid pin placement. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2984
++GRT 0084 GlobalRouter.cpp:657      Layer {} does not have a valid direction. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L657
++GRT 0085 GlobalRouter.cpp:652      Routing layer {} not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L652
++GRT 0086 GlobalRouter.cpp:3386     Track for layer {} not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3386
++GRT 0088 GlobalRouter.cpp:3401     Layer {:7s} Track-Pitch = {:.4f}  line-2-Via Pitch: {:.4f} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3401
++GRT 0090 GlobalRouter.cpp:3461     Track for layer {} not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3461
++GRT 0094 GlobalRouter.cpp:4067     Design with no nets. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4067
++GRT 0096 GlobalRouter.cpp:4492     Final congestion report: INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4492
++GRT 0097 GlobalRouter.cpp:243      No global routing found for nets. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L243
++GRT 0101 FastRoute.cpp:1099        Running extra iterations to remove overflow. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L1099
++GRT 0103 FastRoute.cpp:1227        Extra Run for hard benchmark. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L1227
++GRT 0104 GlobalRouter.tcl:286      No design block found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L286
++GRT 0111 FastRoute.cpp:1396        Final number of vias: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L1396
++GRT 0112 FastRoute.cpp:1397        Final usage 3D: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L1397
++GRT 0113 FastRoute.cpp:439         Underflow in reduce: cap, reducedCap: {}, {} WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L439
++GRT 0114 FastRoute.cpp:477         Underflow in reduce: cap, reducedCap: {}, {} WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L477
++GRT 0120 heatMapRudy.cpp:122       Instance {} is not placed. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/heatMapRudy.cpp#L122
++GRT 0121 GlobalRouter.cpp:498      repair_antennas should perform only one iteration when the  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L498
++GRT 0122 RipUp.cpp:410             Maze ripup wrong for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/RipUp.cpp#L410
++GRT 0123 RipUp.cpp:532             Maze ripup wrong in newRipupNet for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/RipUp.cpp#L532
++GRT 0125 maze.cpp:639              Setup heap: not maze routing. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze.cpp#L639
++GRT 0126 GlobalRouter.cpp:686      Layers {} and {} have the same preferred routing direction ({}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L686
++GRT 0149 utility.cpp:2058          Invalid access to nbrCnt vector ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L2058
++GRT 0150 maze.cpp:1511             Net {} has errors during updateRouteType1. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze.cpp#L1511
++GRT 0164 utility.cpp:1762          Initial grid wrong y1 x1 [{} {}], net start [{} {}] routelen  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1762
++GRT 0165 utility.cpp:1776          End grid wrong y2 x2 [{} {}], net start [{} {}] routelen {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1776
++GRT 0166 utility.cpp:1792          Net {} edge[{}] maze route wrong, distance {}, i {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1792
++GRT 0167 utility.cpp:1806          Invalid 2D tree for net {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1806
++GRT 0169 maze.cpp:839              Net {}: Invalid index for position ({}, {}). Net degree: {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze.cpp#L839
++GRT 0170 GlobalRouter.cpp:2035     Load a design before running the global router commands. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2035
++GRT 0171 maze3D.cpp:407            Invalid index for position ({}, {}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L407
++GRT 0172 maze3D.cpp:731            Invalid index for position ({}, {}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L731
++GRT 0179 route.cpp:329             Wrong node status {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/route.cpp#L329
++GRT 0181 route.cpp:936             Wrong node status {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/route.cpp#L936
++GRT 0183 maze3D.cpp:1148           Net {}: heap underflow during 3D maze routing. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L1148
++GRT 0187 maze3D.cpp:393            In 3D maze routing, type 1 node shift, cnt_n1A1 is 1. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L393
++GRT 0188 RSMT.cpp:139              Invalid number of node neighbors. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/RSMT.cpp#L139
++GRT 0189 RSMT.cpp:147              Failure in copy tree. Number of edges: {}. Number of nodes: {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/RSMT.cpp#L147
++GRT 0197 utility.cpp:361           Via related to pin nodes: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L361
++GRT 0198 utility.cpp:362           Via related Steiner nodes: {} INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L362
++GRT 0199 utility.cpp:363           Via filling finished. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L363
++GRT 0200 utility.cpp:601           Start point not assigned. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L601
++GRT 0201 maze.cpp:710              Setup heap: not maze routing. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze.cpp#L710
++GRT 0202 utility.cpp:707           Target ending layer ({}) out of range. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L707
++GRT 0203 utility.cpp:1113          Caused floating pin node. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1113
++GRT 0204 utility.cpp:1196          Invalid layer value in gridsL, {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1196
++GRT 0206 utility.cpp:1332          Trying to recover a 0-length edge. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1332
++GRT 0207 utility.cpp:1743          Ripped up edge without edge length reassignment. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1743
++GRT 0208 utility.cpp:1751          Route length {}, tree length {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1751
++GRT 0209 GlobalRouter.cpp:3710     Pin {} is completely outside the die area and  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L3710
++GRT 0213 FastRoute.cpp:616         Cannot get available resources: edge is not vertical or horizontal. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L616
++GRT 0214 FastRoute.cpp:633         Cannot get edge capacity: edge is not vertical or horizontal. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L633
++GRT 0215 GlobalRouter.tcl:328      -ratio_margin must be between 0 and 100 percent. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L328
++GRT 0219 GlobalRouter.tcl:137      Command set_macro_extension needs one argument: extension. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L137
++GRT 0221 RepairAntennas.cpp:276    Cannot create wire for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/RepairAntennas.cpp#L276
++GRT 0222 GlobalRouter.tcl:522      No technology has been read. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L522
++GRT 0223 GlobalRouter.tcl:381      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L381
++GRT 0224 GlobalRouter.tcl:462      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L462
++GRT 0225 RipUp.cpp:132             Maze ripup wrong in newRipup. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/RipUp.cpp#L132
++GRT 0226 RipUp.cpp:223             Net {} ripup type is {}. Expected LRoute. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/RipUp.cpp#L223
++GRT 0228 utility.cpp:1639          Horizontal edge usage exceeds the maximum allowed.  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1639
++GRT 0229 utility.cpp:1653          Vertical edge usage exceeds the maximum allowed.  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1653
++GRT 0230 FastRoute.cpp:1367        Congestion iterations cannot increase overflow, reached the  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/FastRoute.cpp#L1367
++GRT 0231 GlobalRouter.tcl:444      Net name not found. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L444
++GRT 0232 GlobalRouter.cpp:4909     Routing congestion too high. Check the congestion  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4909
++GRT 0233 GlobalRouter.cpp:2140     Failed to open guide file {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2140
++GRT 0234 GlobalRouter.cpp:2163     Cannot find net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2163
++GRT 0235 GlobalRouter.cpp:2183     Cannot find layer {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2183
++GRT 0236 GlobalRouter.cpp:2192     Error reading guide file {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2192
++GRT 0237 GlobalRouter.cpp:4632     Net {} global route wire length: {:.2f}um INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4632
++GRT 0238 GlobalRouter.tcl:492      -net is required. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L492
++GRT 0239 GlobalRouter.cpp:4656     Net {} does not have detailed route. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4656
++GRT 0240 GlobalRouter.cpp:4662     Net {} detailed route wire length: {:.2f}um INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4662
++GRT 0241 GlobalRouter.cpp:4627     Net {} does not have global route. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4627
++GRT 0242 GlobalRouter.tcl:157      -seed argument is required. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L157
++GRT 0243 RepairAntennas.cpp:518    Unable to repair antennas on net with diodes. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/RepairAntennas.cpp#L518
++GRT 0244 GlobalRouter.cpp:483      Diode {}/{} ANTENNADIFFAREA is zero. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L483
++GRT 0245 GlobalRouter.tcl:315      Too arguments to repair_antennas. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L315
++GRT 0246 GlobalRouter.cpp:477      No diode with LEF class CORE ANTENNACELL found. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L477
++GRT 0247 utility.cpp:1531          v_edge mismatch {} vs {} ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1531
++GRT 0248 utility.cpp:1542          h_edge mismatch {} vs {} ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1542
++GRT 0249 GlobalRouter.cpp:2127     Load design before reading guides ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2127
++GRT 0250 GlobalRouter.cpp:2172     Net {} has guides but is not routed by the global  WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2172
++GRT 0251 GlobalRouter.cpp:292      The start_incremental and end_incremental flags cannot be  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L292
++GRT 0252 GlobalRouter.tcl:348      Missing dbBlock. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.tcl#L348
++GRT 0253 GlobalRouter.cpp:2354     Detected invalid guide dimensions: ({}, {}). ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2354
++GRT 0254 utility.cpp:248           Edge has no previous routing. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L248
++GRT 0255 GlobalRouter.cpp:2520     Global route segments file could not be opened. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2520
++GRT 0256 GlobalRouter.cpp:2554     Load design before reading guides ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2554
++GRT 0257 GlobalRouter.cpp:2567     Failed to open global route segments file {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2567
++GRT 0258 GlobalRouter.cpp:2588     Cannot find net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2588
++GRT 0259 GlobalRouter.cpp:2594     Cannot find layer {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2594
++GRT 0260 GlobalRouter.cpp:2597     Cannot find layer {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2597
++GRT 0261 GlobalRouter.cpp:2607     Error reading global route segments file {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2607
++GRT 0262 GlobalRouter.cpp:2613     Net {} has disconnected segments. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2613
++GRT 0263 GlobalRouter.cpp:2618     Pin(s) {}not covered in net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2618
++GRT 0264 GlobalRouter.cpp:2708     Segment {} of net {} is not a horizontal/vertical line or via. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2708
++GRT 0265 GlobalRouter.cpp:2737     Segment {} of net {} is not a horizontal/vertical line or via. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2737
++GRT 0266 GlobalRouter.cpp:773      Net {} does not cover all its pins. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L773
++GRT 0267 GlobalRouter.cpp:749      Net {} has disconnected segments. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L749
++GRT 0268 GlobalRouter.cpp:795      Net {} has no driver pin. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L795
++GRT 0300 GlobalRouter.cpp:2100     Timing is not available, setting critical nets percentage to 0. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L2100
++GRT 0301 GlobalRouter.cpp:1894     Timing is not available, setting critical nets percentage to 0. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L1894
++GRT 0302 RepairAntennas.cpp:1503   Inserted {} jumpers for {} nets. INFO https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/RepairAntennas.cpp#L1503
++GRT 0350 MakeWireParasitics.cpp:452 Missing route to pin {}. WARN https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/MakeWireParasitics.cpp#L452
++GRT 0500 RipUp.cpp:297             Route type is not maze, netID {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/RipUp.cpp#L297
++GRT 0601 maze3D.cpp:923            Unable to update: position not found in 3D  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L923
++GRT 0602 maze3D.cpp:968            Unable to update: position not found in 3D  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L968
++GRT 0603 maze3D.cpp:1013           Unable to update: position not found in 3D  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L1013
++GRT 0604 maze3D.cpp:1056           Unable to update: position not found in 3D  ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L1056
++GRT 0605 maze3D.cpp:1098           Unable to update: position not found in 3D heap for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L1098
++GRT 0606 maze3D.cpp:1138           Unable to update: position not found in 3D heap for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze3D.cpp#L1138
++GRT 0607 maze.cpp:1208             Unable to update: position not found in 2D heap for net {}. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/maze.cpp#L1208
++GRT 0701 GlobalRouter.cpp:4167     Missing track structure for routing layers. ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/GlobalRouter.cpp#L4167
++GRT 1247 utility.cpp:1606          v_edge mismatch {} vs {} ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1606
++GRT 1248 utility.cpp:1619          h_edge mismatch {} vs {} ERROR https://github.com/The-OpenROAD-Project/OpenROAD/tree/master/Users/bobboyd/Code/OpenROAD_ISPD25/src/grt/src/fastroute/src/utility.cpp#L1619
+diff --git a/src/odb/src/db/dbMarker.cpp b/src/odb/src/db/dbMarker.cpp
+index f3e1fc9..8ebf70f 100644
+--- a/src/odb/src/db/dbMarker.cpp
++++ b/src/odb/src/db/dbMarker.cpp
+@@ -507,7 +507,7 @@ void _dbMarker::fromPTree(const _dbMarkerCategory::PropertyTree& tree)
+         shapes_.emplace_back(Polygon(pts));
+       } else {
+         getLogger()->warn(
+-            utl::ODB, 256, "Unable to find shape of violation: {}", shape_type);
++            utl::ODB, 256, "Unable to find shape of violation: {}", shape_type.value_or("")); // local patch: fmt 12 cannot format boost::optional
+       }
+     }
+   }
+@@ -561,7 +561,7 @@ void _dbMarker::fromPTree(const _dbMarkerCategory::PropertyTree& tree)
+           src_found = true;
+         } else {
+           getLogger()->warn(
+-              utl::ODB, 262, "Unable to find bterm: {}", src_name);
++              utl::ODB, 262, "Unable to find bterm: {}", src_name.value_or("")); // local patch: fmt 12
+         }
+       } else if (src_type.value() == "obstruction") {
+         src_found = marker->addObstructionFromBlock(block);

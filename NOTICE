@@ -19,3 +19,8 @@ contest evaluator (eval2008.pl) are third-party files. They are not in this
 repository; gr/bench/ispd24/download.sh, the CI workflow and
 gr/fetch_eval2008.sh download them from their sources, and they keep their
 own terms.
+
+Third-party code under its own license: openroad/ispd25_fork_bsd3.patch is a
+change to files of OpenROAD (the ISPD 2025 contest's fork), which are under
+OpenROAD's BSD 3-Clause license (openroad/LICENSE.OpenROAD). OpenSTA, which is
+GPL v3, is not included: openroad/setup.sh makes its one-line edit at setup time.

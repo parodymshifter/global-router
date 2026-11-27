@@ -1,0 +1,8 @@
+Local patches (2026-10-12) so the 2024-era fork builds against current Homebrew (SWIG 4.5, fmt 12):
+- src/Exception.i, src/Exception-py.i, src/sta/tcl/Exception.i: %exception "try { $function }" -> "try { $action }" (newer SWIG).
+- src/odb/src/db/dbMarker.cpp: log shape_type.value_or("") instead of the boost::optional itself (fmt 12).
+Build: logs/build.sh (cmake + ninja, no GUI, no Python, CUDD from ~/.local, LIBRARY_PATH=/opt/homebrew/lib).
+- src/dst: boost::asio io_service -> io_context, address::from_string -> make_address (Boost 1.87+).
+- src/dst/src/LoadBalancer.cc: resolver.resolve(host, service, flags) and results.begin()/end() (Boost 1.87 removed resolver::query/iterator); src/odb/src/db/dbMarker.cpp line ~563: src_name.value_or("") (fmt 12).
+- src/gpl/src/mbff.cpp: #include <fmt/ranges.h> (fmt::join, fmt 11+). Build without tclreadline (TCL_READLINE_LIBRARY/H set NOTFOUND: Main.cc needs a TCLRL_VERSION_STR the Homebrew tclreadline lacks).
+- src/Main.cc: define TCLRL_VERSION_STR as "" when tclreadline is absent (its lookup script is compiled unconditionally).
