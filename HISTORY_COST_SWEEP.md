@@ -16647,3 +16647,42 @@ CLAUDE.md updated with Part 217's results the same night.
   both mempool_cluster designs.
 Cleanup (2026-11-26 08:25, the user): `GlobalRouterTemp/p217v` (7.8 GB) deleted after its best route, loop table, score
 file and log were confirmed in `GlobalRouterRuns/p217`; free disk 37 -> 44 GB.
+
+## Part 218 -- screening 2025 candidates with our own Elmore model (idea #3 of recaps/unexplored-2026-11-26.md)
+
+**2026-11-27 (the user: "go ahead with option #3").** Question: could a model run without OpenROAD rank a stage's
+candidates well enough to score only the top two? Data: Part 134's saved loops (`GlobalRouterRuns/p134/bt.*`), the only
+archived loops that kept every candidate's route beside its OpenROAD measurement -- per design the unbiased route,
+six ladder routes and two power-term routes. Script and results: `GlobalRouterRuns/p218/screen_proxy.py`,
+`results.tsv`, `run8.out`.
+
+Model, per candidate: each net with negative measured slack on the unbiased route (`base.slack`) gets an Elmore delay
+from the route, `sum over its wires of length x (R_drv x C_layer + R_layer x C_down)` -- `elmore_rows.py`'s model,
+the same driver resistances (Liberty) and loads -- and a predicted slack `s_n - (d_n(candidate) - d_n(base))`; WNS moves
+by the change in the minimum, TNS scales with the sum of negative slacks; power by the relative change in total wire
+capacitance times a factor fitted on the other designs; overflow is the evaluator's measured cost (cheap). Score
+change with the design's contest weights; the test: is the measured best of the 8 candidates in the predicted top 2?
+
+- **As built (no fitted path factor): no.** The per-net delay changes are a few picoseconds; the predicted WNS of
+  visible ariane moved 0.0003 ns where OpenROAD measured 0.10 ns. A failing path strings dozens of nets, and slack
+  files give each net's worst path slack but not the path, so a net's own delay change cannot stand for its path's.
+- **With a path factor fitted on the other designs (leave one design out, k ~ 2): still no.** Top-2 hits **1 of 8**
+  designs (blind NV_NVDLA_partition_c, which has 2 failing nets); measured best's predicted rank 3-6 elsewhere;
+  Spearman -0.45 to 0.62.
+
+| design | measured best | its predicted rank of 8 | Spearman |
+|---|---|---|---|
+| visible ariane | k540r -3.3085 | 4 | 0.62 |
+| blind ariane | k180i -0.2541 | 5 | 0.26 |
+| visible mempool_tile_wrap | k180rp1 -0.8717 | 3 | 0.55 |
+| blind mempool_tile_wrap | k20ip1 -1.1491 | 5 | -0.14 |
+| visible NV_NVDLA_partition_c | k540r -6.2887 | 6 | -0.45 |
+| blind NV_NVDLA_partition_c | k20r -1.4391 | 1 | 1.00 |
+| visible bsg_chip | k540r -1.6886 | 4 | 0.33 |
+| blind bsg_chip | k180i -0.2351 | 4 | -0.02 |
+
+**Conclusion: a net-local Elmore proxy cannot screen the 2025 loop's candidates; OpenROAD's sessions stay.** Scope: the
+ladder and power stages of Part 134's loops (eight designs, mempool_group not run); the Elmore and refinement stages
+were not tested (their candidate routes were not kept). What it does not show: that a *path-aware* model fails -- that
+needs each failing path's nets, which `gr/timing_slack.tcl` walks but does not write (a possible follow-up; it is also
+what idea #1, a path-aware delay in layer assignment, would need).
